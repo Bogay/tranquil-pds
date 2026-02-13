@@ -7,7 +7,6 @@ use crate::auth::{
 use crate::rate_limit::{LoginLimit, RateLimited, RefreshSessionLimit};
 use crate::state::AppState;
 use crate::types::{AccountState, Did, Handle, PlainPassword};
-use crate::util::{pds_hostname, pds_hostname_without_port};
 use axum::{
     Json,
     extract::State,
@@ -66,10 +65,10 @@ pub async fn create_session(
         "create_session called with identifier: {}",
         input.identifier
     );
-    let pds_host = pds_hostname();
-    let hostname_for_handles = pds_hostname_without_port();
+    let pds_host = &tranquil_config::get().server.hostname;
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_identifier =
-        NormalizedLoginIdentifier::normalize(&input.identifier, hostname_for_handles);
+        NormalizedLoginIdentifier::normalize(&input.identifier, &hostname_for_handles);
     info!(
         "Normalized identifier: {} -> {}",
         input.identifier, normalized_identifier
@@ -182,7 +181,7 @@ pub async fn create_session(
             return ApiError::LegacyLoginBlocked.into_response();
         }
         Ok(crate::auth::legacy_2fa::Legacy2faOutcome::ChallengeSent(code)) => {
-            let hostname = pds_hostname();
+            let hostname = &tranquil_config::get().server.hostname;
             if let Err(e) = crate::comms::comms_repo::enqueue_2fa_code(
                 state.user_repo.as_ref(),
                 state.infra_repo.as_ref(),
@@ -286,7 +285,7 @@ pub async fn create_session(
             ip = %client_ip,
             "Legacy login on TOTP-enabled account - sending notification"
         );
-        let hostname = pds_hostname();
+        let hostname = &tranquil_config::get().server.hostname;
         if let Err(e) = crate::comms::comms_repo::enqueue_legacy_login(
             state.user_repo.as_ref(),
             state.infra_repo.as_ref(),
@@ -341,7 +340,7 @@ pub async fn get_session(
             let preferred_channel_verified = row
                 .channel_verification
                 .is_verified(row.preferred_comms_channel);
-            let pds_hostname = pds_hostname();
+            let pds_hostname = &tranquil_config::get().server.hostname;
             let handle = full_handle(&row.handle, pds_hostname);
             let account_state = AccountState::from_db_fields(
                 row.deactivated_at,
@@ -545,7 +544,7 @@ pub async fn refresh_session(
             let preferred_channel_verified = u
                 .channel_verification
                 .is_verified(u.preferred_comms_channel);
-            let pds_hostname = pds_hostname();
+            let pds_hostname = &tranquil_config::get().server.hostname;
             let handle = full_handle(&u.handle, pds_hostname);
             let account_state =
                 AccountState::from_db_fields(u.deactivated_at, u.takedown_ref.clone(), None, None);
@@ -707,7 +706,7 @@ pub async fn confirm_signup(
         return ApiError::InternalError(None).into_response();
     }
 
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = crate::comms::comms_repo::enqueue_welcome(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
@@ -777,7 +776,7 @@ pub async fn resend_verification(
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
 
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),

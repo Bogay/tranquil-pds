@@ -69,8 +69,9 @@ struct ReportServiceConfig {
 }
 
 fn get_report_service_config() -> Option<ReportServiceConfig> {
-    let url = std::env::var("REPORT_SERVICE_URL").ok()?;
-    let did = std::env::var("REPORT_SERVICE_DID").ok()?;
+    let cfg = tranquil_config::get();
+    let url = cfg.moderation.report_service_url.clone()?;
+    let did = cfg.moderation.report_service_did.clone()?;
     if url.is_empty() || did.is_empty() {
         return None;
     }

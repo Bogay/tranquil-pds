@@ -45,16 +45,14 @@ pub trait BackupStorage: Send + Sync {
 }
 
 pub fn backup_retention_count() -> u32 {
-    std::env::var("BACKUP_RETENTION_COUNT")
-        .ok()
-        .and_then(|v| v.parse().ok())
+    tranquil_config::try_get()
+        .map(|c| c.backup.retention_count)
         .unwrap_or(7)
 }
 
 pub fn backup_interval_secs() -> u64 {
-    std::env::var("BACKUP_INTERVAL_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
+    tranquil_config::try_get()
+        .map(|c| c.backup.interval_secs)
         .unwrap_or(86400)
 }
 

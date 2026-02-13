@@ -17,6 +17,7 @@ services:
       MASTER_KEY: "${MASTER_KEY:?MASTER_KEY is required (min 32 chars)}"
       CRAWLERS: "${CRAWLERS:-https://bsky.network}"
     volumes:
+      - ./config.toml:/etc/tranquil-pds/config.toml:ro
       - blob_data:/var/lib/tranquil/blobs
       - backup_data:/var/lib/tranquil/backups
     depends_on:

@@ -9,24 +9,11 @@ use std::str::FromStr;
 use std::sync::OnceLock;
 
 const BASE32_ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz234567";
-const DEFAULT_MAX_BLOB_SIZE: usize = 10 * 1024 * 1024 * 1024;
 
-static MAX_BLOB_SIZE: OnceLock<usize> = OnceLock::new();
-static PDS_HOSTNAME: OnceLock<String> = OnceLock::new();
-static PDS_HOSTNAME_WITHOUT_PORT: OnceLock<String> = OnceLock::new();
 static DISCORD_BOT_USERNAME: OnceLock<String> = OnceLock::new();
 static DISCORD_PUBLIC_KEY: OnceLock<ed25519_dalek::VerifyingKey> = OnceLock::new();
 static DISCORD_APP_ID: OnceLock<String> = OnceLock::new();
 static TELEGRAM_BOT_USERNAME: OnceLock<String> = OnceLock::new();
-
-pub fn get_max_blob_size() -> usize {
-    *MAX_BLOB_SIZE.get_or_init(|| {
-        std::env::var("MAX_BLOB_SIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(DEFAULT_MAX_BLOB_SIZE)
-    })
-}
 
 pub fn generate_token_code() -> String {
     generate_token_code_parts(2, 5)
@@ -109,18 +96,6 @@ pub fn extract_client_ip(headers: &HeaderMap, addr: Option<SocketAddr>) -> Strin
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-pub fn pds_hostname() -> &'static str {
-    PDS_HOSTNAME
-        .get_or_init(|| std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()))
-}
-
-pub fn pds_hostname_without_port() -> &'static str {
-    PDS_HOSTNAME_WITHOUT_PORT.get_or_init(|| {
-        let hostname = pds_hostname();
-        hostname.split(':').next().unwrap_or(hostname).to_string()
-    })
-}
-
 pub fn set_discord_bot_username(username: String) {
     DISCORD_BOT_USERNAME.set(username).ok();
 }
@@ -154,26 +129,25 @@ pub fn telegram_bot_username() -> Option<&'static str> {
 }
 
 pub fn parse_env_bool(key: &str) -> bool {
+    // Check the config system first, then fall back to env var for dynamic
+    // SSO keys that are not in the static config struct.
     std::env::var(key)
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false)
 }
 
-pub fn pds_public_url() -> String {
-    format!("https://{}", pds_hostname())
-}
-
 pub fn build_full_url(path: &str) -> String {
+    let cfg = tranquil_config::get();
     let normalized_path = if !path.starts_with("/xrpc/")
         && (path.starts_with("/com.atproto.")
             || path.starts_with("/app.bsky.")
             || path.starts_with("/_"))
     {
-        format!("/xrpc{}", path)
+        format!("/xrpc{path}")
     } else {
         path.to_string()
     };
-    format!("{}{}", pds_public_url(), normalized_path)
+    format!("{}{normalized_path}", cfg.server.public_url())
 }
 
 pub fn json_to_ipld(value: &JsonValue) -> Ipld {

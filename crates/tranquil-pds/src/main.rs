@@ -1,4 +1,6 @@
+use clap::{Parser, Subcommand};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -18,10 +20,82 @@ use tranquil_pds::scheduled::{
 };
 use tranquil_pds::state::AppState;
 
+#[derive(Parser)]
+#[command(name = "tranquil-pds", version = BUILD_VERSION, about = "Tranquil AT Protocol PDS")]
+struct Cli {
+    /// Path to a TOML configuration file (also settable via TRANQUIL_PDS_CONFIG env var)
+    #[arg(short, long, value_name = "FILE", env = "TRANQUIL_PDS_CONFIG")]
+    config: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Validate the configuration and exit
+    Validate {
+        /// Skip validation of secrets and database URL (useful when secrets
+        /// are provided at runtime via environment variables / secret files)
+        #[arg(long)]
+        ignore_secrets: bool,
+    },
+    /// Print a TOML configuration template to stdout
+    ConfigTemplate,
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     dotenvy::dotenv().ok();
+
+    let cli = Cli::parse();
+
+    // Handle subcommands that don't need full startup
+    if let Some(command) = &cli.command {
+        return match command {
+            Command::ConfigTemplate => {
+                print!("{}", tranquil_config::template());
+                ExitCode::SUCCESS
+            }
+            Command::Validate { ignore_secrets } => {
+                let config = match tranquil_config::load(cli.config.as_ref()) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Failed to load configuration: {e:#}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+                match config.validate(*ignore_secrets) {
+                    Ok(()) => {
+                        println!("Configuration is valid.");
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprint!("{e}");
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+        };
+    }
+
     tracing_subscriber::fmt::init();
+
+    let config = match tranquil_config::load(cli.config.as_ref()) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to load configuration: {e:#}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if let Err(e) = config.validate(false) {
+        error!("{e}");
+        return ExitCode::FAILURE;
+    }
+
+    tranquil_config::init(config);
+
     tranquil_pds::metrics::init_metrics();
 
     match run().await {
@@ -66,14 +140,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut comms_service = CommsService::new(state.infra_repo.clone());
     let mut deferred_discord_endpoint: Option<(DiscordSender, String, String)> = None;
 
-    if let Some(email_sender) = EmailSender::from_env() {
+    let cfg = tranquil_config::get();
+
+    if let Some(email_sender) = EmailSender::from_config(cfg) {
         info!("Email comms enabled");
         comms_service = comms_service.register_sender(email_sender);
     } else {
         warn!("Email comms disabled (MAIL_FROM_ADDRESS not set)");
     }
 
-    if let Some(discord_sender) = DiscordSender::from_env() {
+    if let Some(discord_sender) = DiscordSender::from_config(cfg) {
         info!("Discord comms enabled");
         match discord_sender.resolve_bot_username().await {
             Ok(username) => {
@@ -96,8 +172,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Some(public_key) => {
                         tranquil_pds::util::set_discord_public_key(public_key);
                         info!("Discord Ed25519 public key loaded");
-                        let hostname = std::env::var("PDS_HOSTNAME")
-                            .unwrap_or_else(|_| "localhost".to_string());
+                        let hostname = &tranquil_config::get().server.hostname;
                         let webhook_url = format!("https://{}/webhook/discord", hostname);
                         match discord_sender.register_slash_command(&app_id).await {
                             Ok(()) => info!("Discord /start slash command registered"),
@@ -118,22 +193,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         comms_service = comms_service.register_sender(discord_sender);
     }
 
-    if let Some(telegram_sender) = TelegramSender::from_env() {
-        let secret_token = match std::env::var("TELEGRAM_WEBHOOK_SECRET") {
-            Ok(s) => s,
-            Err(_) => {
-                return Err(
-                    "TELEGRAM_BOT_TOKEN is set but TELEGRAM_WEBHOOK_SECRET is missing. Both are required for secure Telegram integration.".into()
-                );
-            }
-        };
+    if let Some(telegram_sender) = TelegramSender::from_config(cfg) {
+        // Safe to unwrap: validated in TranquilConfig::validate()
+        let secret_token = tranquil_config::get()
+            .telegram
+            .webhook_secret
+            .clone()
+            .expect("telegram.webhook_secret checked during config validation");
         info!("Telegram comms enabled");
         match telegram_sender.resolve_bot_username().await {
             Ok(username) => {
                 info!(bot_username = %username, "Resolved Telegram bot username");
                 tranquil_pds::util::set_telegram_bot_username(username);
-                let hostname =
-                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                let hostname = tranquil_config::get().server.hostname.clone();
                 let webhook_url = format!("https://{}/webhook/telegram", hostname);
                 match telegram_sender
                     .set_webhook(&webhook_url, Some(&secret_token))
@@ -150,14 +222,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         comms_service = comms_service.register_sender(telegram_sender);
     }
 
-    if let Some(signal_sender) = SignalSender::from_env() {
+    if let Some(signal_sender) = SignalSender::from_config(cfg) {
         info!("Signal comms enabled");
         comms_service = comms_service.register_sender(signal_sender);
     }
 
     let comms_handle = tokio::spawn(comms_service.run(shutdown.clone()));
 
-    let crawlers_handle = if let Some(crawlers) = Crawlers::from_env() {
+    let crawlers_handle = if let Some(crawlers) = Crawlers::from_config(cfg) {
         let crawlers = Arc::new(
             crawlers.with_circuit_breaker(state.circuit_breakers.relay_notification.clone()),
         );
@@ -197,11 +269,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = tranquil_pds::app(state);
 
-    let host = std::env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let port: u16 = std::env::var("SERVER_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(3000);
+    let cfg = tranquil_config::get();
+    let host = &cfg.server.host;
+    let port = cfg.server.port;
 
     let addr: SocketAddr = format!("{}:{}", host, port)
         .parse()

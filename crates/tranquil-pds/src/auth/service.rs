@@ -1,4 +1,3 @@
-use crate::util::pds_hostname;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
@@ -146,10 +145,9 @@ pub struct ServiceTokenVerifier {
 
 impl ServiceTokenVerifier {
     pub fn new() -> Self {
-        let plc_directory_url = std::env::var("PLC_DIRECTORY_URL")
-            .unwrap_or_else(|_| "https://plc.directory".to_string());
+        let plc_directory_url = tranquil_config::get().plc.directory_url.clone();
 
-        let pds_hostname = pds_hostname();
+        let pds_hostname = &tranquil_config::get().server.hostname;
         let pds_did: Did = format!("did:web:{}", pds_hostname)
             .parse()
             .expect("PDS hostname produces a valid DID");

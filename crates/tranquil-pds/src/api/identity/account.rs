@@ -6,7 +6,6 @@ use crate::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
 use crate::rate_limit::{AccountCreationLimit, RateLimited};
 use crate::state::AppState;
 use crate::types::{Did, Handle, PlainPassword};
-use crate::util::{pds_hostname, pds_hostname_without_port};
 use crate::validation::validate_password;
 use axum::{
     Json,
@@ -141,7 +140,7 @@ pub async fn create_account(
         }
     }
 
-    let hostname_for_validation = pds_hostname_without_port();
+    let hostname_for_validation = tranquil_config::get().server.hostname_without_port();
     let pds_suffix = format!(".{}", hostname_for_validation);
 
     let validated_short_handle = if !input.handle.contains('.')
@@ -233,8 +232,8 @@ pub async fn create_account(
             },
         })
     };
-    let hostname = pds_hostname();
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname = &tranquil_config::get().server.hostname;
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let pds_endpoint = format!("https://{}", hostname);
     let suffix = format!(".{}", hostname_for_handles);
     let handle = if input.handle.ends_with(&suffix) {
@@ -326,8 +325,11 @@ pub async fn create_account(
                     )
                     .into_response();
                 } else {
-                    let rotation_key = std::env::var("PLC_ROTATION_KEY")
-                        .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
+                    let rotation_key = tranquil_config::get()
+                        .secrets
+                        .plc_rotation_key
+                        .clone()
+                        .unwrap_or_else(|| signing_key_to_did_key(&signing_key));
                     let genesis_result = match create_genesis_operation(
                         &signing_key,
                         &rotation_key,
@@ -359,8 +361,11 @@ pub async fn create_account(
                     genesis_result.did
                 }
             } else {
-                let rotation_key = std::env::var("PLC_ROTATION_KEY")
-                    .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
+                let rotation_key = tranquil_config::get()
+                    .secrets
+                    .plc_rotation_key
+                    .clone()
+                    .unwrap_or_else(|| signing_key_to_did_key(&signing_key));
                 let genesis_result = match create_genesis_operation(
                     &signing_key,
                     &rotation_key,
@@ -473,7 +478,7 @@ pub async fn create_account(
                     error!("Error creating session: {:?}", e);
                     return ApiError::InternalError(None).into_response();
                 }
-                let hostname = pds_hostname();
+                let hostname = &tranquil_config::get().server.hostname;
                 let verification_required = if let Some(ref user_email) = email {
                     let token = crate::auth::verification_token::generate_migration_token(
                         &did_typed, user_email,
@@ -543,7 +548,7 @@ pub async fn create_account(
         return ApiError::HandleTaken.into_response();
     }
 
-    let invite_code_required = crate::util::parse_env_bool("INVITE_CODE_REQUIRED");
+    let invite_code_required = tranquil_config::get().server.invite_code_required;
     if invite_code_required
         && input
             .invite_code
@@ -632,12 +637,14 @@ pub async fn create_account(
     let rev_str = rev.as_ref().to_string();
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
 
-    let birthdate_pref = std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").ok().map(|_| {
-        json!({
+    let birthdate_pref = if tranquil_config::get().server.age_assurance_override {
+        Some(json!({
             "$type": "app.bsky.actor.defs#personalDetailsPref",
             "birthDate": "1998-05-06T00:00:00.000Z"
-        })
-    });
+        }))
+    } else {
+        None
+    };
 
     let preferred_comms_channel = verification_channel;
 
@@ -748,7 +755,7 @@ pub async fn create_account(
             warn!("Failed to create default profile for {}: {}", did, e);
         }
     }
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     if !is_migration {
         if let Some(ref recipient) = verification_recipient {
             let verification_token = crate::auth::verification_token::generate_signup_token(

@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+tranquil-config = { workspace = true }
+
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }

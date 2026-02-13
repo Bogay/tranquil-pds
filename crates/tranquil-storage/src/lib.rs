@@ -121,7 +121,12 @@ mod s3 {
 
     impl S3BlobStorage {
         pub async fn new() -> Self {
-            let bucket = std::env::var("S3_BUCKET").expect("S3_BUCKET must be set");
+            let cfg = tranquil_config::get();
+            let bucket = cfg
+                .storage
+                .s3_bucket
+                .clone()
+                .expect("storage.s3_bucket (S3_BUCKET) must be set");
             let client = create_s3_client().await;
             Self { client, bucket }
         }
@@ -140,16 +145,20 @@ mod s3 {
             .load()
             .await;
 
-        std::env::var("S3_ENDPOINT").ok().map_or_else(
-            || Client::new(&config),
-            |endpoint| {
-                let s3_config = aws_sdk_s3::config::Builder::from(&config)
-                    .endpoint_url(endpoint)
-                    .force_path_style(true)
-                    .build();
-                Client::from_conf(s3_config)
-            },
-        )
+        tranquil_config::get()
+            .storage
+            .s3_endpoint
+            .as_deref()
+            .map_or_else(
+                || Client::new(&config),
+                |endpoint| {
+                    let s3_config = aws_sdk_s3::config::Builder::from(&config)
+                        .endpoint_url(endpoint)
+                        .force_path_style(true)
+                        .build();
+                    Client::from_conf(s3_config)
+                },
+            )
     }
 
     pub struct S3BackupStorage {
@@ -159,7 +168,7 @@ mod s3 {
 
     impl S3BackupStorage {
         pub async fn new() -> Option<Self> {
-            let bucket = std::env::var("BACKUP_S3_BUCKET").ok()?;
+            let bucket = tranquil_config::get().backup.s3_bucket.clone()?;
             let client = create_s3_client().await;
             Some(Self { client, bucket })
         }
@@ -499,12 +508,6 @@ impl FilesystemBlobStorage {
         })
     }
 
-    pub async fn from_env() -> Result<Self, StorageError> {
-        let path = std::env::var("BLOB_STORAGE_PATH")
-            .map_err(|_| StorageError::Other("BLOB_STORAGE_PATH not set".into()))?;
-        Self::new(path).await
-    }
-
     fn resolve_path(&self, key: &str) -> Result<PathBuf, StorageError> {
         validate_key(key)?;
         Ok(split_cid_path(key).map_or_else(
@@ -649,12 +652,6 @@ impl FilesystemBackupStorage {
         })
     }
 
-    pub async fn from_env() -> Result<Self, StorageError> {
-        let path = std::env::var("BACKUP_STORAGE_PATH")
-            .map_err(|_| StorageError::Other("BACKUP_STORAGE_PATH not set".into()))?;
-        Self::new(path).await
-    }
-
     fn resolve_path(&self, key: &str) -> Result<PathBuf, StorageError> {
         validate_key(key)?;
         Ok(self.base_path.join(key))
@@ -701,7 +698,8 @@ impl BackupStorage for FilesystemBackupStorage {
 }
 
 pub async fn create_blob_storage() -> Arc<dyn BlobStorage> {
-    let backend = std::env::var("BLOB_STORAGE_BACKEND").unwrap_or_else(|_| "filesystem".into());
+    let cfg = tranquil_config::get();
+    let backend = &cfg.storage.backend;
 
     match backend.as_str() {
         #[cfg(feature = "s3")]
@@ -718,7 +716,8 @@ pub async fn create_blob_storage() -> Arc<dyn BlobStorage> {
         }
         _ => {
             tracing::info!("Initializing filesystem blob storage");
-            FilesystemBlobStorage::from_env()
+            let path = cfg.storage.path.clone();
+            FilesystemBlobStorage::new(path)
                 .await
                 .unwrap_or_else(|e| {
                     panic!(
@@ -733,16 +732,14 @@ pub async fn create_blob_storage() -> Arc<dyn BlobStorage> {
 }
 
 pub async fn create_backup_storage() -> Option<Arc<dyn BackupStorage>> {
-    let enabled = std::env::var("BACKUP_ENABLED")
-        .map(|v| v != "false" && v != "0")
-        .unwrap_or(true);
+    let cfg = tranquil_config::get();
 
-    if !enabled {
-        tracing::info!("Backup storage disabled via BACKUP_ENABLED=false");
+    if !cfg.backup.enabled {
+        tracing::info!("Backup storage disabled via config");
         return None;
     }
 
-    let backend = std::env::var("BACKUP_STORAGE_BACKEND").unwrap_or_else(|_| "filesystem".into());
+    let backend = &cfg.backup.backend;
 
     match backend.as_str() {
         #[cfg(feature = "s3")]
@@ -767,7 +764,9 @@ pub async fn create_backup_storage() -> Option<Arc<dyn BackupStorage>> {
             );
             None
         }
-        _ => FilesystemBackupStorage::from_env().await.map_or_else(
+        _ => {
+            let path = cfg.backup.path.clone();
+            FilesystemBackupStorage::new(path).await.map_or_else(
             |e| {
                 tracing::error!(
                     "Failed to initialize filesystem backup storage: {}. \
@@ -781,7 +780,8 @@ pub async fn create_backup_storage() -> Option<Arc<dyn BackupStorage>> {
                 tracing::info!("Initialized filesystem backup storage");
                 Some(Arc::new(storage) as Arc<dyn BackupStorage>)
             },
-        ),
+        )
+        }
     }
 }
 

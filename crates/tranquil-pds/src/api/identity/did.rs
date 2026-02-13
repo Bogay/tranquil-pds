@@ -6,7 +6,7 @@ use crate::rate_limit::{
 };
 use crate::state::AppState;
 use crate::types::Handle;
-use crate::util::{get_header_str, pds_hostname, pds_hostname_without_port};
+use crate::util::get_header_str;
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -122,8 +122,8 @@ pub fn get_public_key_multibase(key_bytes: &[u8]) -> Result<String, KeyError> {
 }
 
 pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let hostname = pds_hostname();
-    let hostname_without_port = pds_hostname_without_port();
+    let hostname = &tranquil_config::get().server.hostname;
+    let hostname_without_port = tranquil_config::get().server.hostname_without_port();
     let host_header = get_header_str(&headers, http::header::HOST).unwrap_or(hostname);
     let host_without_port = host_header.split(':').next().unwrap_or(host_header);
     if host_without_port != hostname_without_port
@@ -275,8 +275,8 @@ async fn serve_subdomain_did_doc(state: &AppState, subdomain: &str, hostname: &s
 }
 
 pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
-    let hostname = pds_hostname();
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname = &tranquil_config::get().server.hostname;
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let current_handle = format!("{}.{}", handle, hostname_for_handles);
     let current_handle_typed: Handle = match current_handle.parse() {
         Ok(h) => h,
@@ -571,7 +571,7 @@ pub async fn get_recommended_did_credentials(
         ApiError::AuthenticationFailed(Some("OAuth tokens cannot get DID credentials".into()))
     })?;
 
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     let pds_endpoint = format!("https://{}", hostname);
     let signing_key = k256::ecdsa::SigningKey::from_slice(&key_bytes)
         .map_err(|_| ApiError::InternalError(None))?;
@@ -579,9 +579,9 @@ pub async fn get_recommended_did_credentials(
     let rotation_keys = if auth.did.starts_with("did:web:") {
         vec![]
     } else {
-        let server_rotation_key = match std::env::var("PLC_ROTATION_KEY") {
-            Ok(key) => key,
-            Err(_) => {
+        let server_rotation_key = match &tranquil_config::get().secrets.plc_rotation_key {
+            Some(key) => key.clone(),
+            None => {
                 warn!(
                     "PLC_ROTATION_KEY not set, falling back to user's signing key for rotation key recommendation"
                 );
@@ -675,7 +675,7 @@ pub async fn update_handle(
             "Inappropriate language in handle".into(),
         )));
     }
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let suffix = format!(".{}", hostname_for_handles);
     let is_service_domain =
         crate::handle::is_service_domain_handle(&new_handle, hostname_for_handles);

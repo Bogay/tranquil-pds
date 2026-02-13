@@ -1,7 +1,6 @@
 use crate::api::error::ApiError;
 use crate::auth::{Active, Auth};
 use crate::state::AppState;
-use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -148,7 +147,7 @@ pub async fn request_channel_verification(
 
     match channel {
         CommsChannel::Email => {
-            let hostname = pds_hostname();
+            let hostname = &tranquil_config::get().server.hostname;
             let handle_str = handle.unwrap_or("user");
             crate::comms::comms_repo::enqueue_email_update(
                 state.infra_repo.as_ref(),
@@ -167,7 +166,7 @@ pub async fn request_channel_verification(
             })?;
         }
         _ => {
-            let hostname = pds_hostname();
+            let hostname = &tranquil_config::get().server.hostname;
             let encoded_token = urlencoding::encode(&formatted_token);
             let encoded_identifier = urlencoding::encode(identifier);
             let verify_link = format!(

@@ -59,10 +59,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, params: Subscribe
 }
 
 fn get_backfill_hours() -> i64 {
-    std::env::var("FIREHOSE_BACKFILL_HOURS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(72)
+    tranquil_config::get().firehose.backfill_hours
 }
 
 async fn handle_socket_inner(
@@ -204,10 +201,7 @@ async fn handle_socket_inner(
             }
         }
     }
-    let max_lag_before_disconnect: u64 = std::env::var("FIREHOSE_MAX_LAG")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(5000);
+    let max_lag_before_disconnect: u64 = tranquil_config::get().firehose.max_lag;
     loop {
         tokio::select! {
             result = rx.recv() => {

@@ -168,7 +168,7 @@ impl<S: Service<Request, Response = Response, Error = Infallible>> Service<Reque
             }
 
             // If the age assurance override is set and this is an age assurance call then we dont want to proxy even if the client requests it
-            if std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_ok()
+            if tranquil_config::get().server.age_assurance_override
                 && (path.ends_with("app.bsky.ageassurance.getState")
                     || path.ends_with("app.bsky.unspecced.getAgeAssuranceState"))
             {

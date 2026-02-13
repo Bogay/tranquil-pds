@@ -18,10 +18,10 @@ This guide covers deploying Tranquil PDS using containers with podman.
 If you just want to get running quickly:
 
 ```sh
-cp .env.example .env
+cp example.toml config.toml
 ```
 
-Edit `.env` with your values. Generate secrets with `openssl rand -base64 48`.
+Edit `config.toml` with your values. Generate secrets with `openssl rand -base64 48`.
 
 Build and start:
 ```sh
@@ -59,7 +59,7 @@ Run the backend with host networking (so it can access postgres on localhost) an
 ```sh
 podman run -d --name tranquil-pds \
   --network=host \
-  --env-file /etc/tranquil-pds/tranquil-pds.env \
+  -v /etc/tranquil-pds/config.toml:/etc/tranquil-pds/config.toml:ro,Z \
   -v /var/lib/tranquil:/var/lib/tranquil:Z \
   tranquil-pds:latest
 ```
@@ -113,17 +113,21 @@ mkdir -p /etc/containers/systemd
 mkdir -p /srv/tranquil-pds/{postgres,blobs,backups,certs,acme,config}
 ```
 
-## Create an environment file
+## Create a configuration file
 
 ```bash
-cp /opt/tranquil-pds/.env.example /srv/tranquil-pds/config/tranquil-pds.env
-chmod 600 /srv/tranquil-pds/config/tranquil-pds.env
+cp /opt/tranquil-pds/example.toml /srv/tranquil-pds/config/config.toml
+chmod 600 /srv/tranquil-pds/config/config.toml
 ```
 
-Edit `/srv/tranquil-pds/config/tranquil-pds.env` and fill in your values. Generate secrets with:
+Edit `/srv/tranquil-pds/config/config.toml` and fill in your values. Generate secrets with:
 ```bash
 openssl rand -base64 48
 ```
+
+> **Note:** Every config option can also be set via environment variables
+> (see comments in `example.toml`). Environment variables always take
+> precedence over the config file.
 
 ## Install quadlet definitions
 
@@ -157,7 +161,6 @@ podman build -t tranquil-pds-frontend:latest ./frontend
 ## Create podman secrets
 
 ```bash
-source /srv/tranquil-pds/config/tranquil-pds.env
 echo "$DB_PASSWORD" | podman secret create tranquil-pds-db-password -
 ```
 
@@ -264,17 +267,21 @@ podman build -t tranquil-pds:latest .
 podman build -t tranquil-pds-frontend:latest ./frontend
 ```
 
-## Create an environment file
+## Create a configuration file
 
 ```sh
-cp /opt/tranquil-pds/.env.example /srv/tranquil-pds/config/tranquil-pds.env
-chmod 600 /srv/tranquil-pds/config/tranquil-pds.env
+cp /opt/tranquil-pds/example.toml /srv/tranquil-pds/config/config.toml
+chmod 600 /srv/tranquil-pds/config/config.toml
 ```
 
-Edit `/srv/tranquil-pds/config/tranquil-pds.env` and fill in your values. Generate secrets with:
+Edit `/srv/tranquil-pds/config/config.toml` and fill in your values. Generate secrets with:
 ```sh
 openssl rand -base64 48
 ```
+
+> **Note:** Every config option can also be set via environment variables
+> (see comments in `example.toml`). Environment variables always take
+> precedence over the config file.
 
 ## Set up compose and nginx
 
@@ -308,16 +315,11 @@ depend() {
     after firewall
 }
 start_pre() {
-    set -a
-    . /srv/tranquil-pds/config/tranquil-pds.env
-    set +a
+    checkpath -d /srv/tranquil-pds
 }
 stop() {
     ebegin "Stopping ${name}"
     cd /srv/tranquil-pds
-    set -a
-    . /srv/tranquil-pds/config/tranquil-pds.env
-    set +a
     podman-compose -f /srv/tranquil-pds/docker-compose.yml down
     eend $?
 }

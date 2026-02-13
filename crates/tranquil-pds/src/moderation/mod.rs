@@ -34,14 +34,7 @@ fn get_slur_regexes() -> &'static Vec<Regex> {
 }
 
 fn get_extra_banned_words() -> &'static Vec<String> {
-    EXTRA_BANNED_WORDS.get_or_init(|| {
-        std::env::var("PDS_BANNED_WORDS")
-            .unwrap_or_default()
-            .split(',')
-            .map(|s| s.trim().to_lowercase())
-            .filter(|s| !s.is_empty())
-            .collect()
-    })
+    EXTRA_BANNED_WORDS.get_or_init(|| tranquil_config::get().server.banned_word_list())
 }
 
 fn strip_trailing_digits(s: &str) -> &str {

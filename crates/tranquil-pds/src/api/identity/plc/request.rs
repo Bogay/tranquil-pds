@@ -2,7 +2,6 @@ use crate::api::EmptyResponse;
 use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{Auth, Permissive};
 use crate::state::AppState;
-use crate::util::pds_hostname;
 use axum::{
     extract::State,
     response::{IntoResponse, Response},
@@ -41,7 +40,7 @@ pub async fn request_plc_operation_signature(
         .await
         .log_db_err("creating PLC token")?;
 
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = crate::comms::comms_repo::enqueue_plc_operation(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),

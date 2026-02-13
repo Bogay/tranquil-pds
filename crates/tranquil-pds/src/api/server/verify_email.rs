@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::state::AppState;
-use crate::util::pds_hostname;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,7 +70,7 @@ pub async fn resend_migration_verification(
         return Ok(Json(ResendMigrationVerificationOutput { sent: true }));
     }
 
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     let token = crate::auth::verification_token::generate_migration_token(&user.did, &email);
     let formatted_token = crate::auth::verification_token::format_token_for_display(&token);
 

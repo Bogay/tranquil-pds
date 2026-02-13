@@ -61,13 +61,7 @@ pub struct VerificationToken {
 
 fn derive_verification_key() -> [u8; 32] {
     use hkdf::Hkdf;
-    let master_key = std::env::var("MASTER_KEY").unwrap_or_else(|_| {
-        if cfg!(test) || std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_ok() {
-            "test-master-key-not-for-production".to_string()
-        } else {
-            panic!("MASTER_KEY must be set");
-        }
-    });
+    let master_key = tranquil_config::get().secrets.master_key_or_default();
     let hk = Hkdf::<Sha256>::new(None, master_key.as_bytes());
     let mut key = [0u8; 32];
     hk.expand(b"tranquil-pds-verification-token-v1", &mut key)

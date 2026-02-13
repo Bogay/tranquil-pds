@@ -12,7 +12,7 @@ use tranquil_types::Handle;
 
 use crate::comms::comms_repo;
 use crate::state::AppState;
-use crate::util::{discord_public_key, pds_hostname};
+use crate::util::discord_public_key;
 
 #[derive(Deserialize)]
 struct Interaction {
@@ -185,7 +185,7 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
                 user_id,
                 tranquil_db_traits::CommsChannel::Discord,
                 &discord_user_id,
-                pds_hostname(),
+                &tranquil_config::get().server.hostname,
             )
             .await
             {

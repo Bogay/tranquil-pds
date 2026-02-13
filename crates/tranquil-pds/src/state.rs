@@ -1,19 +1,18 @@
 use crate::appview::DidResolver;
 use crate::auth::webauthn::WebAuthnConfig;
-use crate::cache::{Cache, DistributedRateLimiter, create_cache};
+use crate::cache::{create_cache, Cache, DistributedRateLimiter};
 use crate::circuit_breaker::CircuitBreakers;
 use crate::config::AuthConfig;
 use crate::rate_limit::RateLimiters;
 use crate::repo::PostgresBlockStore;
 use crate::repo_write_lock::RepoWriteLocks;
 use crate::sso::{SsoConfig, SsoManager};
-use crate::storage::{BackupStorage, BlobStorage, create_backup_storage, create_blob_storage};
+use crate::storage::{create_backup_storage, create_blob_storage, BackupStorage, BlobStorage};
 use crate::sync::firehose::SequencedEvent;
-use crate::util::pds_hostname;
 use sqlx::PgPool;
 use std::error::Error;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tranquil_db::{
@@ -25,10 +24,10 @@ use tranquil_db::{
 static RATE_LIMITING_DISABLED: AtomicBool = AtomicBool::new(false);
 
 pub fn init_rate_limit_override() {
-    let disabled = std::env::var("DISABLE_RATE_LIMITING").is_ok();
+    let disabled = tranquil_config::get().server.disable_rate_limiting;
     RATE_LIMITING_DISABLED.store(disabled, Ordering::Relaxed);
     if disabled {
-        tracing::warn!("rate limiting is DISABLED via DISABLE_RATE_LIMITING env var");
+        tracing::warn!("rate limiting is DISABLED via configuration");
     }
 }
 
@@ -205,23 +204,11 @@ impl RateLimitKind {
 
 impl AppState {
     pub async fn new(shutdown: CancellationToken) -> Result<Self, Box<dyn Error>> {
-        let database_url = std::env::var("DATABASE_URL")
-            .map_err(|_| "DATABASE_URL environment variable must be set")?;
-
-        let max_connections: u32 = std::env::var("DATABASE_MAX_CONNECTIONS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(100);
-
-        let min_connections: u32 = std::env::var("DATABASE_MIN_CONNECTIONS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(10);
-
-        let acquire_timeout_secs: u64 = std::env::var("DATABASE_ACQUIRE_TIMEOUT_SECS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(10);
+        let cfg = tranquil_config::get();
+        let database_url = &cfg.database.url;
+        let max_connections = cfg.database.max_connections;
+        let min_connections = cfg.database.min_connections;
+        let acquire_timeout_secs = cfg.database.acquire_timeout_secs;
 
         tracing::info!(
             "Configuring database pool: max={}, min={}, acquire_timeout={}s",
@@ -257,10 +244,7 @@ impl AppState {
         let blob_store = create_blob_storage().await;
         let backup_storage = create_backup_storage().await;
 
-        let firehose_buffer_size: usize = std::env::var("FIREHOSE_BUFFER_SIZE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(10000);
+        let firehose_buffer_size = tranquil_config::get().firehose.buffer_size;
 
         let (firehose_tx, _) = broadcast::channel(firehose_buffer_size);
         let rate_limiters = Arc::new(RateLimiters::new());
@@ -271,7 +255,7 @@ impl AppState {
         let sso_config = SsoConfig::init();
         let sso_manager = SsoManager::from_config(sso_config);
         let webauthn_config = Arc::new(
-            WebAuthnConfig::new(pds_hostname())
+            WebAuthnConfig::new(&tranquil_config::get().server.hostname)
                 .expect("Failed to create WebAuthn config at startup"),
         );
 

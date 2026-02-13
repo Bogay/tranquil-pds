@@ -9,13 +9,16 @@ If you're reaching for kubernetes for this app, you're experienced enough to kno
 You'll need a wildcard TLS certificate for `*.your-pds-hostname.example.com`. User handles are served as subdomains.
 
 The container image expects:
+- A TOML config file mounted at `/etc/tranquil-pds/config.toml` (or passed via `--config`)
 - `DATABASE_URL` - postgres connection string
 - `BLOB_STORAGE_PATH` - path to blob storage (mount a PV here)
 - `BACKUP_STORAGE_PATH` - path for repo backups (optional but recommended)
 - `PDS_HOSTNAME` - your PDS hostname (without protocol)
 - `JWT_SECRET`, `DPOP_SECRET`, `MASTER_KEY` - generate with `openssl rand -base64 48`
 - `CRAWLERS` - typically `https://bsky.network`
-and more, check the .env.example.
+
+and more, check the example.toml for all options. Environment variables can override any TOML value.
+You can also point to a config file via the `TRANQUIL_PDS_CONFIG` env var.
 
 Health check: `GET /xrpc/_health`
 

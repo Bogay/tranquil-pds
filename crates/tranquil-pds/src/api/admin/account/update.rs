@@ -3,7 +3,6 @@ use crate::api::error::ApiError;
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::{Did, Handle, PlainPassword};
-use crate::util::pds_hostname_without_port;
 use axum::{
     Json,
     extract::State,
@@ -70,7 +69,7 @@ pub async fn update_account_handle(
     {
         return Err(ApiError::InvalidHandle(None));
     }
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let handle = if !input_handle.contains('.') {
         format!("{}.{}", input_handle, hostname_for_handles)
     } else {

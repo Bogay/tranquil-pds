@@ -1,6 +1,5 @@
 use crate::circuit_breaker::CircuitBreaker;
 use crate::sync::firehose::SequencedEvent;
-use crate::util::pds_hostname;
 use reqwest::Client;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,18 +41,13 @@ impl Crawlers {
         self
     }
 
-    pub fn from_env() -> Option<Self> {
-        let hostname = pds_hostname();
+    pub fn from_config(cfg: &tranquil_config::TranquilConfig) -> Option<Self> {
+        let hostname = &cfg.server.hostname;
         if hostname == "localhost" {
             return None;
         }
 
-        let crawler_urls: Vec<String> = std::env::var("CRAWLERS")
-            .unwrap_or_default()
-            .split(',')
-            .filter(|s| !s.is_empty())
-            .map(|s| s.trim().to_string())
-            .collect();
+        let crawler_urls = cfg.firehose.crawler_list();
 
         if crawler_urls.is_empty() {
             return None;

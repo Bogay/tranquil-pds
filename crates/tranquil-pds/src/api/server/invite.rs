@@ -3,7 +3,6 @@ use crate::api::error::DbResultExt;
 use crate::auth::{Admin, Auth, NotTakendown};
 use crate::state::AppState;
 use crate::types::Did;
-use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -26,7 +25,7 @@ fn gen_random_token() -> String {
 }
 
 fn gen_invite_code() -> String {
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     let hostname_prefix = hostname.replace('.', "-");
     format!("{}-{}", hostname_prefix, gen_random_token())
 }

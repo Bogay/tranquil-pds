@@ -48,39 +48,10 @@ pub struct AuthConfig {
 impl AuthConfig {
     pub fn init() -> &'static Self {
         CONFIG.get_or_init(|| {
-            let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
-                if cfg!(test) || std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_ok() {
-                    "test-jwt-secret-not-for-production".to_string()
-                } else {
-                    panic!(
-                        "JWT_SECRET environment variable must be set in production. \
-                         Set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 for development/testing."
-                    );
-                }
-            });
+            let secrets = &tranquil_config::get().secrets;
 
-            let dpop_secret = std::env::var("DPOP_SECRET").unwrap_or_else(|_| {
-                if cfg!(test) || std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_ok() {
-                    "test-dpop-secret-not-for-production".to_string()
-                } else {
-                    panic!(
-                        "DPOP_SECRET environment variable must be set in production. \
-                         Set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 for development/testing."
-                    );
-                }
-            });
-
-            if jwt_secret.len() < 32
-                && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err()
-            {
-                panic!("JWT_SECRET must be at least 32 characters");
-            }
-
-            if dpop_secret.len() < 32
-                && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err()
-            {
-                panic!("DPOP_SECRET must be at least 32 characters");
-            }
+            let jwt_secret = secrets.jwt_secret_or_default();
+            let dpop_secret = secrets.dpop_secret_or_default();
 
             let mut hasher = Sha256::new();
             hasher.update(b"oauth-signing-key-derivation:");
@@ -114,22 +85,7 @@ impl AuthConfig {
             let kid_hash = kid_hasher.finalize();
             let signing_key_id = URL_SAFE_NO_PAD.encode(&kid_hash[..8]);
 
-            let master_key = std::env::var("MASTER_KEY").unwrap_or_else(|_| {
-                if cfg!(test) || std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_ok() {
-                    "test-master-key-not-for-production".to_string()
-                } else {
-                    panic!(
-                        "MASTER_KEY environment variable must be set in production. \
-                         Set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 for development/testing."
-                    );
-                }
-            });
-
-            if master_key.len() < 32
-                && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err()
-            {
-                panic!("MASTER_KEY must be at least 32 characters");
-            }
+            let master_key = secrets.master_key_or_default();
 
             let hk = Hkdf::<Sha256>::new(None, master_key.as_bytes());
             let mut key_encryption_key = [0u8; 32];

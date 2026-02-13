@@ -1,7 +1,6 @@
 use crate::api::error::{ApiError, DbResultExt};
 use crate::comms::comms_repo;
 use crate::types::Did;
-use crate::util::pds_hostname;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -162,7 +161,7 @@ async fn handle_channel_update(
         user_id,
         channel,
         &recipient,
-        pds_hostname(),
+        &tranquil_config::get().server.hostname,
     )
     .await
     {
@@ -260,7 +259,7 @@ async fn handle_signup_verification(
         user.id,
         channel,
         &recipient,
-        pds_hostname(),
+        &tranquil_config::get().server.hostname,
     )
     .await
     {

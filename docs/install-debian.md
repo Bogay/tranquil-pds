@@ -73,13 +73,23 @@ cargo build --release
 
 ```bash
 mkdir -p /etc/tranquil-pds
-cp /opt/tranquil-pds/.env.example /etc/tranquil-pds/tranquil-pds.env
-chmod 600 /etc/tranquil-pds/tranquil-pds.env
+cp /opt/tranquil-pds/example.toml /etc/tranquil-pds/config.toml
+chmod 600 /etc/tranquil-pds/config.toml
 ```
 
-Edit `/etc/tranquil-pds/tranquil-pds.env` and fill in your values. Generate secrets with:
+Edit `/etc/tranquil-pds/config.toml` and fill in your values. Generate secrets with:
 ```bash
 openssl rand -base64 48
+```
+
+> **Note:** Every config option can also be set via environment variables
+> (see comments in `example.toml`). Environment variables always take
+> precedence over the config file. You can also pass the config file path
+> via the `TRANQUIL_PDS_CONFIG` env var instead of `--config`.
+
+You can validate your configuration before starting the service:
+```bash
+/usr/local/bin/tranquil-pds --config /etc/tranquil-pds/config.toml validate
 ```
 
 ## Install frontend files
@@ -105,8 +115,7 @@ After=network.target postgresql.service
 Type=simple
 User=tranquil-pds
 Group=tranquil-pds
-EnvironmentFile=/etc/tranquil-pds/tranquil-pds.env
-ExecStart=/usr/local/bin/tranquil-pds
+ExecStart=/usr/local/bin/tranquil-pds --config /etc/tranquil-pds/config.toml
 Restart=always
 RestartSec=5
 ProtectSystem=strict

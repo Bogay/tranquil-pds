@@ -24,7 +24,10 @@ just run
 
 ## Configuration
 
-See `.env.example` for all configuration options.
+See `example.toml` for all configuration options.
+
+> [!NOTE]
+> The order of configuration precendence is: environment variables, than a config file passed via `--config`, than `/etc/tranquil-pds/config.toml`, than the built-in defaults. So you can use environment variables, or a config file, or both.
 
 ## Development
 

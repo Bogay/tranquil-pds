@@ -1,0 +1,509 @@
+[server]
+# Public hostname of the PDS (e.g. `pds.example.com`).
+#
+# Can also be specified via environment variable `PDS_HOSTNAME`.
+#
+# Required! This value must be specified.
+#hostname =
+
+# Address to bind the HTTP server to.
+#
+# Can also be specified via environment variable `SERVER_HOST`.
+#
+# Default value: "127.0.0.1"
+#host = "127.0.0.1"
+
+# Port to bind the HTTP server to.
+#
+# Can also be specified via environment variable `SERVER_PORT`.
+#
+# Default value: 3000
+#port = 3000
+
+# List of domains for user handles.
+# Defaults to the PDS hostname when not set.
+#
+# Can also be specified via environment variable `PDS_USER_HANDLE_DOMAINS`.
+#user_handle_domains =
+
+# List of domains available for user registration.
+# Defaults to the PDS hostname when not set.
+#
+# Can also be specified via environment variable `AVAILABLE_USER_DOMAINS`.
+#available_user_domains =
+
+# Enable PDS-hosted did:web identities.  Hosting did:web requires a
+# long-term commitment to serve DID documents; opt-in only.
+#
+# Can also be specified via environment variable `ENABLE_PDS_HOSTED_DID_WEB`.
+#
+# Default value: false
+#enable_pds_hosted_did_web = false
+
+# When set to true, skip age-assurance birthday prompt for all accounts.
+#
+# Can also be specified via environment variable `PDS_AGE_ASSURANCE_OVERRIDE`.
+#
+# Default value: false
+#age_assurance_override = false
+
+# Require an invite code for new account registration.
+#
+# Can also be specified via environment variable `INVITE_CODE_REQUIRED`.
+#
+# Default value: true
+#invite_code_required = true
+
+# Allow HTTP (non-TLS) proxy requests. Only useful during development.
+#
+# Can also be specified via environment variable `ALLOW_HTTP_PROXY`.
+#
+# Default value: false
+#allow_http_proxy = false
+
+# Disable all rate limiting. Should only be used in testing.
+#
+# Can also be specified via environment variable `DISABLE_RATE_LIMITING`.
+#
+# Default value: false
+#disable_rate_limiting = false
+
+# List of additional banned words for handle validation.
+#
+# Can also be specified via environment variable `PDS_BANNED_WORDS`.
+#banned_words =
+
+# URL to a privacy policy page.
+#
+# Can also be specified via environment variable `PRIVACY_POLICY_URL`.
+#privacy_policy_url =
+
+# URL to terms of service page.
+#
+# Can also be specified via environment variable `TERMS_OF_SERVICE_URL`.
+#terms_of_service_url =
+
+# Operator contact email address.
+#
+# Can also be specified via environment variable `CONTACT_EMAIL`.
+#contact_email =
+
+# Maximum allowed blob size in bytes (default 10 GiB).
+#
+# Can also be specified via environment variable `MAX_BLOB_SIZE`.
+#
+# Default value: 10737418240
+#max_blob_size = 10737418240
+
+[database]
+# PostgreSQL connection URL.
+#
+# Can also be specified via environment variable `DATABASE_URL`.
+#
+# Required! This value must be specified.
+#url =
+
+# Maximum number of connections in the pool.
+#
+# Can also be specified via environment variable `DATABASE_MAX_CONNECTIONS`.
+#
+# Default value: 100
+#max_connections = 100
+
+# Minimum number of idle connections kept in the pool.
+#
+# Can also be specified via environment variable `DATABASE_MIN_CONNECTIONS`.
+#
+# Default value: 10
+#min_connections = 10
+
+# Timeout in seconds when acquiring a connection from the pool.
+#
+# Can also be specified via environment variable `DATABASE_ACQUIRE_TIMEOUT_SECS`.
+#
+# Default value: 10
+#acquire_timeout_secs = 10
+
+[secrets]
+# Secret used for signing JWTs. Must be at least 32 characters in
+# production.
+#
+# Can also be specified via environment variable `JWT_SECRET`.
+#jwt_secret =
+
+# Secret used for DPoP proof validation. Must be at least 32 characters
+# in production.
+#
+# Can also be specified via environment variable `DPOP_SECRET`.
+#dpop_secret =
+
+# Master key used for key-encryption and HKDF derivation. Must be at
+# least 32 characters in production.
+#
+# Can also be specified via environment variable `MASTER_KEY`.
+#master_key =
+
+# PLC rotation key (DID key). If not set, user-level keys are used.
+#
+# Can also be specified via environment variable `PLC_ROTATION_KEY`.
+#plc_rotation_key =
+
+# Allow insecure/test secrets. NEVER enable in production.
+#
+# Can also be specified via environment variable `TRANQUIL_PDS_ALLOW_INSECURE_SECRETS`.
+#
+# Default value: false
+#allow_insecure = false
+
+[storage]
+# Storage backend: `filesystem` or `s3`.
+#
+# Can also be specified via environment variable `BLOB_STORAGE_BACKEND`.
+#
+# Default value: "filesystem"
+#backend = "filesystem"
+
+# Path on disk for the filesystem blob backend.
+#
+# Can also be specified via environment variable `BLOB_STORAGE_PATH`.
+#
+# Default value: "/var/lib/tranquil-pds/blobs"
+#path = "/var/lib/tranquil-pds/blobs"
+
+# S3 bucket name for blob storage.
+#
+# Can also be specified via environment variable `S3_BUCKET`.
+#s3_bucket =
+
+# Custom S3 endpoint URL (for MinIO, R2, etc.).
+#
+# Can also be specified via environment variable `S3_ENDPOINT`.
+#s3_endpoint =
+
+[backup]
+# Enable automatic backups.
+#
+# Can also be specified via environment variable `BACKUP_ENABLED`.
+#
+# Default value: true
+#enabled = true
+
+# Backup storage backend: `filesystem` or `s3`.
+#
+# Can also be specified via environment variable `BACKUP_STORAGE_BACKEND`.
+#
+# Default value: "filesystem"
+#backend = "filesystem"
+
+# Path on disk for the filesystem backup backend.
+#
+# Can also be specified via environment variable `BACKUP_STORAGE_PATH`.
+#
+# Default value: "/var/lib/tranquil-pds/backups"
+#path = "/var/lib/tranquil-pds/backups"
+
+# S3 bucket name for backups.
+#
+# Can also be specified via environment variable `BACKUP_S3_BUCKET`.
+#s3_bucket =
+
+# Number of backup revisions to keep per account.
+#
+# Can also be specified via environment variable `BACKUP_RETENTION_COUNT`.
+#
+# Default value: 7
+#retention_count = 7
+
+# Seconds between backup runs.
+#
+# Can also be specified via environment variable `BACKUP_INTERVAL_SECS`.
+#
+# Default value: 86400
+#interval_secs = 86400
+
+[cache]
+# Cache backend: `ripple` (default, built-in gossip) or `valkey`.
+#
+# Can also be specified via environment variable `CACHE_BACKEND`.
+#
+# Default value: "ripple"
+#backend = "ripple"
+
+# Valkey / Redis connection URL.  Required when `backend = "valkey"`.
+#
+# Can also be specified via environment variable `VALKEY_URL`.
+#valkey_url =
+
+[cache.ripple]
+# Address to bind the Ripple gossip protocol listener.
+#
+# Can also be specified via environment variable `RIPPLE_BIND`.
+#
+# Default value: "0.0.0.0:0"
+#bind_addr = "0.0.0.0:0"
+
+# List of seed peer addresses.
+#
+# Can also be specified via environment variable `RIPPLE_PEERS`.
+#peers =
+
+# Unique machine identifier. Auto-derived from hostname when not set.
+#
+# Can also be specified via environment variable `RIPPLE_MACHINE_ID`.
+#machine_id =
+
+# Gossip protocol interval in milliseconds.
+#
+# Can also be specified via environment variable `RIPPLE_GOSSIP_INTERVAL_MS`.
+#
+# Default value: 200
+#gossip_interval_ms = 200
+
+# Maximum cache size in megabytes.
+#
+# Can also be specified via environment variable `RIPPLE_CACHE_MAX_MB`.
+#
+# Default value: 256
+#cache_max_mb = 256
+
+[plc]
+# Base URL of the PLC directory.
+#
+# Can also be specified via environment variable `PLC_DIRECTORY_URL`.
+#
+# Default value: "https://plc.directory"
+#directory_url = "https://plc.directory"
+
+# HTTP request timeout in seconds.
+#
+# Can also be specified via environment variable `PLC_TIMEOUT_SECS`.
+#
+# Default value: 10
+#timeout_secs = 10
+
+# TCP connect timeout in seconds.
+#
+# Can also be specified via environment variable `PLC_CONNECT_TIMEOUT_SECS`.
+#
+# Default value: 5
+#connect_timeout_secs = 5
+
+# Seconds to cache DID documents in memory.
+#
+# Can also be specified via environment variable `DID_CACHE_TTL_SECS`.
+#
+# Default value: 300
+#did_cache_ttl_secs = 300
+
+[firehose]
+# Size of the in-memory broadcast buffer for firehose events.
+#
+# Can also be specified via environment variable `FIREHOSE_BUFFER_SIZE`.
+#
+# Default value: 10000
+#buffer_size = 10000
+
+# How many hours of historical events to replay for cursor-based
+# firehose connections.
+#
+# Can also be specified via environment variable `FIREHOSE_BACKFILL_HOURS`.
+#
+# Default value: 72
+#backfill_hours = 72
+
+# Maximum number of lagged events before disconnecting a slow consumer.
+#
+# Can also be specified via environment variable `FIREHOSE_MAX_LAG`.
+#
+# Default value: 5000
+#max_lag = 5000
+
+# List of relay / crawler notification URLs.
+#
+# Can also be specified via environment variable `CRAWLERS`.
+#crawlers =
+
+[email]
+# Sender email address. When unset, email sending is disabled.
+#
+# Can also be specified via environment variable `MAIL_FROM_ADDRESS`.
+#from_address =
+
+# Display name used in the `From` header.
+#
+# Can also be specified via environment variable `MAIL_FROM_NAME`.
+#
+# Default value: "Tranquil PDS"
+#from_name = "Tranquil PDS"
+
+# Path to the `sendmail` binary.
+#
+# Can also be specified via environment variable `SENDMAIL_PATH`.
+#
+# Default value: "/usr/sbin/sendmail"
+#sendmail_path = "/usr/sbin/sendmail"
+
+[discord]
+# Discord bot token. When unset, Discord integration is disabled.
+#
+# Can also be specified via environment variable `DISCORD_BOT_TOKEN`.
+#bot_token =
+
+[telegram]
+# Telegram bot token. When unset, Telegram integration is disabled.
+#
+# Can also be specified via environment variable `TELEGRAM_BOT_TOKEN`.
+#bot_token =
+
+# Secret token for incoming webhook verification.
+#
+# Can also be specified via environment variable `TELEGRAM_WEBHOOK_SECRET`.
+#webhook_secret =
+
+[signal]
+# Path to the `signal-cli` binary.
+#
+# Can also be specified via environment variable `SIGNAL_CLI_PATH`.
+#
+# Default value: "/usr/local/bin/signal-cli"
+#cli_path = "/usr/local/bin/signal-cli"
+
+# Sender phone number. When unset, Signal integration is disabled.
+#
+# Can also be specified via environment variable `SIGNAL_SENDER_NUMBER`.
+#sender_number =
+
+[notifications]
+# Polling interval in milliseconds for the comms queue.
+#
+# Can also be specified via environment variable `NOTIFICATION_POLL_INTERVAL_MS`.
+#
+# Default value: 1000
+#poll_interval_ms = 1000
+
+# Number of notifications to process per batch.
+#
+# Can also be specified via environment variable `NOTIFICATION_BATCH_SIZE`.
+#
+# Default value: 100
+#batch_size = 100
+
+[sso]
+[sso.github]
+# Default value: false
+#enabled = false
+
+#client_id =
+
+#client_secret =
+
+#display_name =
+
+[sso.discord]
+# Default value: false
+#enabled = false
+
+#client_id =
+
+#client_secret =
+
+#display_name =
+
+[sso.google]
+# Default value: false
+#enabled = false
+
+#client_id =
+
+#client_secret =
+
+#display_name =
+
+[sso.gitlab]
+# Default value: false
+#enabled = false
+
+#client_id =
+
+#client_secret =
+
+#issuer =
+
+#display_name =
+
+[sso.oidc]
+# Default value: false
+#enabled = false
+
+#client_id =
+
+#client_secret =
+
+#issuer =
+
+#display_name =
+
+[sso.apple]
+# Can also be specified via environment variable `SSO_APPLE_ENABLED`.
+# Default value: false
+#enabled = false
+
+# Can also be specified via environment variable `SSO_APPLE_CLIENT_ID`.
+#client_id =
+
+# Can also be specified via environment variable `SSO_APPLE_TEAM_ID`.
+#team_id =
+
+# Can also be specified via environment variable `SSO_APPLE_KEY_ID`.
+#key_id =
+
+# Can also be specified via environment variable `SSO_APPLE_PRIVATE_KEY`.
+#private_key =
+
+[moderation]
+# External report-handling service URL.
+#
+# Can also be specified via environment variable `REPORT_SERVICE_URL`.
+#report_service_url =
+
+# DID of the external report-handling service.
+#
+# Can also be specified via environment variable `REPORT_SERVICE_DID`.
+#report_service_did =
+
+[import]
+# Whether the PDS accepts repo imports.
+#
+# Can also be specified via environment variable `ACCEPTING_REPO_IMPORTS`.
+#
+# Default value: true
+#accepting = true
+
+# Maximum allowed import archive size in bytes (default 1 GiB).
+#
+# Can also be specified via environment variable `MAX_IMPORT_SIZE`.
+#
+# Default value: 1073741824
+#max_size = 1073741824
+
+# Maximum number of blocks allowed in an import.
+#
+# Can also be specified via environment variable `MAX_IMPORT_BLOCKS`.
+#
+# Default value: 500000
+#max_blocks = 500000
+
+# Skip CAR verification during import. Only for development/debugging.
+#
+# Can also be specified via environment variable `SKIP_IMPORT_VERIFICATION`.
+#
+# Default value: false
+#skip_verification = false
+
+[scheduled]
+# Interval in seconds between scheduled delete checks.
+#
+# Can also be specified via environment variable `SCHEDULED_DELETE_CHECK_INTERVAL_SECS`.
+#
+# Default value: 3600
+#delete_check_interval_secs = 3600

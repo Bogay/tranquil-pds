@@ -7,7 +7,6 @@ use crate::auth::{
 use crate::rate_limit::{PasswordResetLimit, RateLimited, ResetPasswordLimit};
 use crate::state::AppState;
 use crate::types::PlainPassword;
-use crate::util::{pds_hostname, pds_hostname_without_port};
 use crate::validation::validate_password;
 use axum::{
     Json,
@@ -38,7 +37,7 @@ pub async fn request_password_reset(
     if identifier.is_empty() {
         return ApiError::InvalidRequest("email or handle is required".into()).into_response();
     }
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized = identifier.to_lowercase();
     let normalized = normalized.strip_prefix('@').unwrap_or(&normalized);
     let is_email_lookup = normalized.contains('@');
@@ -78,7 +77,7 @@ pub async fn request_password_reset(
         error!("DB error setting reset code: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = crate::comms::comms_repo::enqueue_password_reset(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),

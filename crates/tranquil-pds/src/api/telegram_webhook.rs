@@ -8,7 +8,6 @@ use tracing::{debug, info, warn};
 
 use crate::comms::comms_repo;
 use crate::state::AppState;
-use crate::util::pds_hostname;
 
 #[derive(Deserialize)]
 struct TelegramUpdate {
@@ -32,9 +31,9 @@ pub async fn handle_telegram_webhook(
     headers: HeaderMap,
     body: String,
 ) -> impl IntoResponse {
-    let expected_secret = match std::env::var("TELEGRAM_WEBHOOK_SECRET") {
-        Ok(s) => s,
-        Err(_) => {
+    let expected_secret = match &tranquil_config::get().telegram.webhook_secret {
+        Some(s) => s.clone(),
+        None => {
             warn!("Telegram webhook called but TELEGRAM_WEBHOOK_SECRET is not configured");
             return StatusCode::FORBIDDEN;
         }
@@ -88,7 +87,7 @@ pub async fn handle_telegram_webhook(
                         user_id,
                         tranquil_db_traits::CommsChannel::Telegram,
                         &from.id.to_string(),
-                        pds_hostname(),
+                        &tranquil_config::get().server.hostname,
                     )
                     .await
                     {

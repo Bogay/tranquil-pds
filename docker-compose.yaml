@@ -11,6 +11,7 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/pds
     volumes:
+      - ./config.toml:/etc/tranquil-pds/config.toml:ro
       - blob_data:/var/lib/tranquil/blobs
       - backup_data:/var/lib/tranquil/backups
     depends_on:

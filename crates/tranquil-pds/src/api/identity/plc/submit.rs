@@ -4,7 +4,6 @@ use crate::auth::{Auth, Permissive};
 use crate::circuit_breaker::with_circuit_breaker;
 use crate::plc::{PlcClient, signing_key_to_did_key, validate_plc_operation};
 use crate::state::AppState;
-use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -42,7 +41,7 @@ pub async fn submit_plc_operation(
         .map_err(|e| ApiError::InvalidRequest(format!("Invalid operation: {}", e)))?;
 
     let op = &input.operation;
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     let public_url = format!("https://{}", hostname);
     let user = state
         .user_repo
@@ -70,8 +69,11 @@ pub async fn submit_plc_operation(
     })?;
 
     let user_did_key = signing_key_to_did_key(&signing_key);
-    let server_rotation_key =
-        std::env::var("PLC_ROTATION_KEY").unwrap_or_else(|_| user_did_key.clone());
+    let server_rotation_key = tranquil_config::get()
+        .secrets
+        .plc_rotation_key
+        .clone()
+        .unwrap_or_else(|| user_did_key.clone());
     if let Some(rotation_keys) = op.get("rotationKeys").and_then(|v| v.as_array()) {
         let has_server_key = rotation_keys
             .iter()

@@ -18,7 +18,6 @@ use crate::rate_limit::{
     check_user_rate_limit_with_message,
 };
 use crate::state::AppState;
-use crate::util::{pds_hostname, pds_hostname_without_port};
 
 fn generate_state() -> String {
     use rand::RngCore;
@@ -773,7 +772,7 @@ pub async fn check_handle_available(
         }
     };
 
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let full_handle = format!("{}.{}", validated, hostname_for_handles);
     let handle_typed: crate::types::Handle = match full_handle.parse() {
         Ok(h) => h,
@@ -856,8 +855,8 @@ pub async fn complete_registration(
         .await?
         .ok_or(ApiError::SsoSessionExpired)?;
 
-    let hostname = pds_hostname();
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname = &tranquil_config::get().server.hostname;
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
 
     let handle = match crate::api::validation::validate_short_handle(&input.handle) {
         Ok(h) => format!("{}.{}", h, hostname_for_handles),
@@ -948,7 +947,7 @@ pub async fn complete_registration(
             Err(_) => return Err(ApiError::InvalidInviteCode),
         }
     } else {
-        let invite_required = crate::util::parse_env_bool("INVITE_CODE_REQUIRED");
+        let invite_required = tranquil_config::get().server.invite_code_required;
         if invite_required {
             return Err(ApiError::InviteCodeRequired);
         }
@@ -1006,8 +1005,11 @@ pub async fn complete_registration(
             d.to_string()
         }
         _ => {
-            let rotation_key = std::env::var("PLC_ROTATION_KEY")
-                .unwrap_or_else(|_| crate::plc::signing_key_to_did_key(&signing_key));
+            let rotation_key = tranquil_config::get()
+                .secrets
+                .plc_rotation_key
+                .clone()
+                .unwrap_or_else(|| crate::plc::signing_key_to_did_key(&signing_key));
 
             let genesis_result = match crate::plc::create_genesis_operation(
                 &signing_key,
@@ -1085,12 +1087,14 @@ pub async fn complete_registration(
 
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
 
-    let birthdate_pref = std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").ok().map(|_| {
-        json!({
+    let birthdate_pref = if tranquil_config::get().server.age_assurance_override {
+        Some(json!({
             "$type": "app.bsky.actor.defs#personalDetailsPref",
             "birthDate": "1998-05-06T00:00:00.000Z"
-        })
-    });
+        }))
+    } else {
+        None
+    };
 
     let create_input = tranquil_db_traits::CreateSsoAccountInput {
         handle: handle_typed.clone(),
@@ -1299,7 +1303,7 @@ pub async fn complete_registration(
                 return Err(ApiError::InternalError(None));
             }
 
-            let hostname = pds_hostname();
+            let hostname = &tranquil_config::get().server.hostname;
             if let Err(e) = crate::comms::comms_repo::enqueue_welcome(
                 state.user_repo.as_ref(),
                 state.infra_repo.as_ref(),

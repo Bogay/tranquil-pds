@@ -24,7 +24,6 @@ use crate::auth::{ServiceTokenVerifier, generate_app_password, is_service_token}
 use crate::rate_limit::{AccountCreationLimit, PasswordResetLimit, RateLimited};
 use crate::state::AppState;
 use crate::types::{Did, Handle, PlainPassword};
-use crate::util::{pds_hostname, pds_hostname_without_port};
 use crate::validation::validate_password;
 
 fn generate_setup_token() -> String {
@@ -113,8 +112,8 @@ pub async fn create_passkey_account(
             .map(|d| d.starts_with("did:web:"))
             .unwrap_or(false);
 
-    let hostname = pds_hostname();
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname = &tranquil_config::get().server.hostname;
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let pds_suffix = format!(".{}", hostname_for_handles);
 
     let handle = if !input.handle.contains('.') || input.handle.ends_with(&pds_suffix) {
@@ -153,7 +152,7 @@ pub async fn create_passkey_account(
             Err(_) => return ApiError::InvalidInviteCode.into_response(),
         }
     } else {
-        let invite_required = crate::util::parse_env_bool("INVITE_CODE_REQUIRED");
+        let invite_required = tranquil_config::get().server.invite_code_required;
         if invite_required {
             return ApiError::InviteCodeRequired.into_response();
         }
@@ -309,8 +308,11 @@ pub async fn create_passkey_account(
                     .into_response();
                 }
             } else {
-                let rotation_key = std::env::var("PLC_ROTATION_KEY")
-                    .unwrap_or_else(|_| crate::plc::signing_key_to_did_key(&secret_key));
+                let rotation_key = tranquil_config::get()
+                    .secrets
+                    .plc_rotation_key
+                    .clone()
+                    .unwrap_or_else(|| crate::plc::signing_key_to_did_key(&secret_key));
 
                 let genesis_result = match crate::plc::create_genesis_operation(
                     &secret_key,
@@ -401,12 +403,14 @@ pub async fn create_passkey_account(
     };
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
 
-    let birthdate_pref = std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").ok().map(|_| {
-        json!({
+    let birthdate_pref = if tranquil_config::get().server.age_assurance_override {
+        Some(json!({
             "$type": "app.bsky.actor.defs#personalDetailsPref",
             "birthDate": "1998-05-06T00:00:00.000Z"
-        })
-    });
+        }))
+    } else {
+        None
+    };
 
     let handle_typed: Handle = match handle.parse() {
         Ok(h) => h,
@@ -820,7 +824,7 @@ pub async fn request_passkey_recovery(
     _rate_limit: RateLimited<PasswordResetLimit>,
     Json(input): Json<RequestPasskeyRecoveryInput>,
 ) -> Response {
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let identifier = input.email.trim().to_lowercase();
     let identifier = identifier.strip_prefix('@').unwrap_or(&identifier);
     let normalized_handle =
@@ -855,7 +859,7 @@ pub async fn request_passkey_recovery(
         return ApiError::InternalError(None).into_response();
     }
 
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     let recovery_url = format!(
         "https://{}/app/recover-passkey?did={}&token={}",
         hostname,

@@ -18,26 +18,18 @@ use serde_json::json;
 use tracing::{debug, error, info, warn};
 use tranquil_types::{AtUri, CidLink};
 
-const DEFAULT_MAX_IMPORT_SIZE: usize = 1024 * 1024 * 1024;
-const DEFAULT_MAX_BLOCKS: usize = 500000;
-
 pub async fn import_repo(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    let accepting_imports = std::env::var("ACCEPTING_REPO_IMPORTS")
-        .map(|v| v != "false" && v != "0")
-        .unwrap_or(true);
+    let accepting_imports = tranquil_config::get().import.accepting;
     if !accepting_imports {
         return Err(ApiError::InvalidRequest(
             "Service is not accepting repo imports".into(),
         ));
     }
-    let max_size: usize = std::env::var("MAX_IMPORT_SIZE")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_MAX_IMPORT_SIZE);
+    let max_size = tranquil_config::get().import.max_size as usize;
     if body.len() > max_size {
         return Err(ApiError::PayloadTooLarge(format!(
             "Import size exceeds limit of {} bytes",
@@ -108,7 +100,7 @@ pub async fn import_repo(
             commit_did, did
         )));
     }
-    let skip_verification = crate::util::parse_env_bool("SKIP_IMPORT_VERIFICATION");
+    let skip_verification = tranquil_config::get().import.skip_verification;
     let is_migration = user.deactivated_at.is_some();
     if skip_verification {
         warn!("Skipping all CAR verification for import (SKIP_IMPORT_VERIFICATION=true)");
@@ -196,10 +188,7 @@ pub async fn import_repo(
             }
         }
     }
-    let max_blocks: usize = std::env::var("MAX_IMPORT_BLOCKS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_MAX_BLOCKS);
+    let max_blocks = tranquil_config::get().import.max_blocks as usize;
     let _write_lock = state.repo_write_locks.lock(user_id).await;
     match apply_import(
         &state.repo_repo,
@@ -324,7 +313,7 @@ pub async fn import_repo(
             {
                 warn!("Failed to sequence import event: {:?}", e);
             }
-            if std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_ok() {
+            if tranquil_config::get().server.age_assurance_override {
                 let birthdate_pref = json!({
                     "$type": "app.bsky.actor.defs#personalDetailsPref",
                     "birthDate": "1998-05-06T00:00:00.000Z"

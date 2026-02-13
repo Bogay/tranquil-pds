@@ -5,7 +5,6 @@ use crate::cache::Cache;
 use crate::plc::PlcClient;
 use crate::state::AppState;
 use crate::types::PlainPassword;
-use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -131,7 +130,7 @@ async fn assert_valid_did_document_for_service(
     did: &crate::types::Did,
     with_retry: bool,
 ) -> Result<(), ApiError> {
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     let expected_endpoint = format!("https://{}", hostname);
 
     if did.as_str().starts_with("did:plc:") {
@@ -201,7 +200,7 @@ async fn assert_valid_did_document_for_service(
         .await
         .map_err(ApiError::InvalidRequest)?;
 
-        let server_rotation_key = std::env::var("PLC_ROTATION_KEY").ok();
+        let server_rotation_key = tranquil_config::get().secrets.plc_rotation_key.clone();
         if let Some(ref expected_rotation_key) = server_rotation_key {
             let rotation_keys = doc_data
                 .get("rotationKeys")
@@ -552,7 +551,7 @@ pub async fn request_account_delete(
         .create_deletion_request(&confirmation_token, session_mfa.did(), expires_at)
         .await
         .log_db_err("creating deletion token")?;
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = crate::comms::comms_repo::enqueue_account_deletion(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),

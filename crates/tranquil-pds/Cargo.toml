@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 tranquil-types = { workspace = true }
+tranquil-config = { workspace = true }
 tranquil-crypto = { workspace = true }
 tranquil-storage = { workspace = true }
 tranquil-cache = { workspace = true }
@@ -29,6 +30,7 @@ bs58 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 cid = { workspace = true }
+clap = { workspace = true }
 dotenvy = { workspace = true }
 ed25519-dalek = { workspace = true }
 futures = { workspace = true }

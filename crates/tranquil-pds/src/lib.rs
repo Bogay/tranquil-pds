@@ -658,7 +658,9 @@ pub fn app(state: AppState) -> Router {
             post(api::discord_webhook::handle_discord_webhook)
                 .layer(DefaultBodyLimit::max(64 * 1024)),
         )
-        .layer(DefaultBodyLimit::max(util::get_max_blob_size()))
+        .layer(DefaultBodyLimit::max(
+            tranquil_config::get().server.max_blob_size as usize,
+        ))
         .layer(axum::middleware::map_response(rewrite_422_to_400))
         .layer(middleware::from_fn(metrics::metrics_middleware))
         .layer(

@@ -9,7 +9,6 @@ use crate::auth::{
 use crate::rate_limit::{TotpVerifyLimit, check_user_rate_limit_with_message};
 use crate::state::AppState;
 use crate::types::PlainPassword;
-use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -52,7 +51,7 @@ pub async fn create_totp_secret(
         .log_db_err("fetching handle")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     let uri = generate_totp_uri(&secret, &handle, hostname);
 
     let qr_code = generate_qr_png_base64(&secret, &handle, hostname).map_err(|e| {

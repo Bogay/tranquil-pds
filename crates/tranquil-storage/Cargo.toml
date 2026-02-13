@@ -9,6 +9,7 @@ default = []
 s3 = ["dep:aws-config", "dep:aws-sdk-s3"]
 
 [dependencies]
+tranquil-config = { workspace = true }
 tranquil-infra = { workspace = true }
 
 async-trait = { workspace = true }

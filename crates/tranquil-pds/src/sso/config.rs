@@ -1,4 +1,3 @@
-use crate::util::pds_hostname;
 use std::sync::OnceLock;
 use tranquil_db_traits::SsoProviderType;
 
@@ -34,24 +33,58 @@ pub struct SsoConfig {
 impl SsoConfig {
     pub fn init() -> &'static Self {
         SSO_CONFIG.get_or_init(|| {
-            let github = Self::load_provider("GITHUB", false);
-            let discord = Self::load_provider("DISCORD", false);
-            let google = Self::load_provider("GOOGLE", false);
-            let gitlab = Self::load_provider("GITLAB", true);
-            let oidc = Self::load_provider("OIDC", true);
-            let apple = Self::load_apple_provider();
-
-            let config = SsoConfig {
-                github,
-                discord,
-                google,
-                gitlab,
-                oidc,
-                apple,
+            let sso = &tranquil_config::get().sso;
+           let config = SsoConfig {
+               github: Self::provider_from_config(
+                   sso.github.enabled,
+                   sso.github.client_id.as_deref(),
+                   sso.github.client_secret.as_deref(),
+                   None,
+                   sso.github.display_name.as_deref(),
+                   "GITHUB",
+                   false,
+               ),
+               discord: Self::provider_from_config(
+                   sso.discord.enabled,
+                   sso.discord.client_id.as_deref(),
+                   sso.discord.client_secret.as_deref(),
+                   None,
+                   sso.discord.display_name.as_deref(),
+                   "DISCORD",
+                   false,
+               ),
+               google: Self::provider_from_config(
+                   sso.google.enabled,
+                   sso.google.client_id.as_deref(),
+                   sso.google.client_secret.as_deref(),
+                   None,
+                   sso.google.display_name.as_deref(),
+                   "GOOGLE",
+                   false,
+               ),
+               gitlab: Self::provider_from_config(
+                   sso.gitlab.enabled,
+                   sso.gitlab.client_id.as_deref(),
+                   sso.gitlab.client_secret.as_deref(),
+                   sso.gitlab.issuer.as_deref(),
+                   sso.gitlab.display_name.as_deref(),
+                   "GITLAB",
+                   true,
+               ),
+               oidc: Self::provider_from_config(
+                   sso.oidc.enabled,
+                   sso.oidc.client_id.as_deref(),
+                   sso.oidc.client_secret.as_deref(),
+                   sso.oidc.issuer.as_deref(),
+                   sso.oidc.display_name.as_deref(),
+                   "OIDC",
+                   true,
+               ),
+               apple: Self::apple_from_config(&sso.apple),
             };
 
             if config.is_any_enabled() {
-                let hostname = pds_hostname();
+                let hostname = &tranquil_config::get().server.hostname;
                 if hostname.is_empty() || hostname == "localhost" {
                     panic!(
                         "PDS_HOSTNAME must be set to a valid hostname when SSO is enabled. \
@@ -72,87 +105,68 @@ impl SsoConfig {
         })
     }
 
-    pub fn get_redirect_uri() -> &'static str {
-        SSO_REDIRECT_URI
-            .get()
-            .map(|s| s.as_str())
-            .expect("SSO redirect URI not initialized - call SsoConfig::init() first")
-    }
-
-    fn load_provider(name: &str, needs_issuer: bool) -> Option<ProviderConfig> {
-        let enabled = crate::util::parse_env_bool(&format!("SSO_{}_ENABLED", name));
-
+    fn provider_from_config(
+        enabled: bool,
+        client_id: Option<&str>,
+        client_secret: Option<&str>,
+        issuer: Option<&str>,
+        display_name: Option<&str>,
+        name: &str,
+        needs_issuer: bool,
+    ) -> Option<ProviderConfig> {
         if !enabled {
             return None;
         }
+        let client_id = client_id.filter(|s| !s.is_empty())?;
+        let client_secret = client_secret.filter(|s| !s.is_empty())?;
 
-        let client_id = std::env::var(format!("SSO_{}_CLIENT_ID", name)).ok()?;
-        let client_secret = std::env::var(format!("SSO_{}_CLIENT_SECRET", name)).ok()?;
-
-        if client_id.is_empty() || client_secret.is_empty() {
-            tracing::warn!(
-                "SSO_{} enabled but missing client_id or client_secret",
-                name
-            );
-            return None;
-        }
-
-        let issuer = if needs_issuer {
-            let issuer_val = std::env::var(format!("SSO_{}_ISSUER", name)).ok();
-            if issuer_val.is_none() || issuer_val.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+        if needs_issuer {
+            let issuer_val = issuer.filter(|s| !s.is_empty());
+            if issuer_val.is_none() {
                 tracing::warn!("SSO_{} requires ISSUER but none provided", name);
                 return None;
             }
-            issuer_val
-        } else {
-            None
-        };
-
-        let display_name = std::env::var(format!("SSO_{}_NAME", name)).ok();
+        }
 
         Some(ProviderConfig {
-            client_id,
-            client_secret,
-            issuer,
-            display_name,
+            client_id: client_id.to_string(),
+            client_secret: client_secret.to_string(),
+            issuer: issuer.map(|s| s.to_string()),
+            display_name: display_name.map(|s| s.to_string()),
         })
     }
 
-    fn load_apple_provider() -> Option<AppleProviderConfig> {
-        let enabled = crate::util::parse_env_bool("SSO_APPLE_ENABLED");
-
-        if !enabled {
+    fn apple_from_config(cfg: &tranquil_config::SsoAppleConfig) -> Option<AppleProviderConfig> {
+        if !cfg.enabled {
             return None;
         }
+        let client_id = cfg.client_id.as_deref().filter(|s| !s.is_empty())?;
+        let team_id = cfg.team_id.as_deref().filter(|s| !s.is_empty())?;
+        let key_id = cfg.key_id.as_deref().filter(|s| !s.is_empty())?;
+        let private_key_pem = cfg.private_key.as_deref().filter(|s| !s.is_empty())?;
 
-        let client_id = std::env::var("SSO_APPLE_CLIENT_ID").ok()?;
-        let team_id = std::env::var("SSO_APPLE_TEAM_ID").ok()?;
-        let key_id = std::env::var("SSO_APPLE_KEY_ID").ok()?;
-        let private_key_pem = std::env::var("SSO_APPLE_PRIVATE_KEY").ok()?;
-
-        if client_id.is_empty() {
-            tracing::warn!("SSO_APPLE enabled but missing CLIENT_ID");
-            return None;
-        }
-        if team_id.is_empty() || team_id.len() != 10 {
+        if team_id.len() != 10 {
             tracing::warn!("SSO_APPLE enabled but TEAM_ID is invalid (must be 10 characters)");
             return None;
         }
-        if key_id.is_empty() {
-            tracing::warn!("SSO_APPLE enabled but missing KEY_ID");
-            return None;
-        }
-        if private_key_pem.is_empty() || !private_key_pem.contains("PRIVATE KEY") {
+        if !private_key_pem.contains("PRIVATE KEY") {
             tracing::warn!("SSO_APPLE enabled but PRIVATE_KEY is invalid");
             return None;
         }
 
         Some(AppleProviderConfig {
-            client_id,
-            team_id,
-            key_id,
-            private_key_pem,
+            client_id: client_id.to_string(),
+            team_id: team_id.to_string(),
+            key_id: key_id.to_string(),
+            private_key_pem: private_key_pem.to_string(),
         })
+    }
+
+    pub fn get_redirect_uri() -> &'static str {
+        SSO_REDIRECT_URI
+            .get()
+            .map(|s| s.as_str())
+            .expect("SSO redirect URI not initialized - call SsoConfig::init() first")
     }
 
     pub fn get() -> &'static Self {

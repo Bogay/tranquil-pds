@@ -112,20 +112,19 @@ pub struct EmailSender {
 }
 
 impl EmailSender {
-    pub fn new(from_address: String, from_name: String) -> Self {
+    pub fn new(from_address: String, from_name: String, sendmail_path: String) -> Self {
         Self {
             from_address,
             from_name,
-            sendmail_path: std::env::var("SENDMAIL_PATH")
-                .unwrap_or_else(|_| "/usr/sbin/sendmail".to_string()),
+            sendmail_path,
         }
     }
 
-    pub fn from_env() -> Option<Self> {
-        let from_address = std::env::var("MAIL_FROM_ADDRESS").ok()?;
-        let from_name =
-            std::env::var("MAIL_FROM_NAME").unwrap_or_else(|_| "Tranquil PDS".to_string());
-        Some(Self::new(from_address, from_name))
+    pub fn from_config(cfg: &tranquil_config::TranquilConfig) -> Option<Self> {
+        let from_address = cfg.email.from_address.clone()?;
+        let from_name = cfg.email.from_name.clone();
+        let sendmail_path = cfg.email.sendmail_path.clone();
+        Some(Self::new(from_address, from_name, sendmail_path))
     }
 
     pub fn format_email(&self, notification: &QueuedComms) -> String {
@@ -190,8 +189,8 @@ impl DiscordSender {
         }
     }
 
-    pub fn from_env() -> Option<Self> {
-        let bot_token = std::env::var("DISCORD_BOT_TOKEN").ok()?;
+    pub fn from_config(cfg: &tranquil_config::TranquilConfig) -> Option<Self> {
+        let bot_token = cfg.discord.bot_token.clone()?;
         Some(Self::new(bot_token))
     }
 
@@ -454,8 +453,8 @@ impl TelegramSender {
         }
     }
 
-    pub fn from_env() -> Option<Self> {
-        let bot_token = std::env::var("TELEGRAM_BOT_TOKEN").ok()?;
+    pub fn from_config(cfg: &tranquil_config::TranquilConfig) -> Option<Self> {
+        let bot_token = cfg.telegram.bot_token.clone()?;
         Some(Self::new(bot_token))
     }
 
@@ -586,10 +585,9 @@ impl SignalSender {
         }
     }
 
-    pub fn from_env() -> Option<Self> {
-        let signal_cli_path = std::env::var("SIGNAL_CLI_PATH")
-            .unwrap_or_else(|_| "/usr/local/bin/signal-cli".to_string());
-        let sender_number = std::env::var("SIGNAL_SENDER_NUMBER").ok()?;
+    pub fn from_config(cfg: &tranquil_config::TranquilConfig) -> Option<Self> {
+        let signal_cli_path = cfg.signal.cli_path.clone();
+        let sender_number = cfg.signal.sender_number.clone()?;
         Some(Self::new(signal_cli_path, sender_number))
     }
 }

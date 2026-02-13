@@ -87,13 +87,11 @@ pub async fn verify_handle_ownership(
     }
 }
 
-pub fn is_service_domain_handle(handle: &str, hostname: &str) -> bool {
+pub fn is_service_domain_handle(handle: &str, _hostname: &str) -> bool {
     if !handle.contains('.') {
         return true;
     }
-    let service_domains: Vec<String> = std::env::var("PDS_SERVICE_HANDLE_DOMAINS")
-        .map(|s| s.split(',').map(|d| d.trim().to_string()).collect())
-        .unwrap_or_else(|_| vec![hostname.to_string()]);
+    let service_domains = tranquil_config::get().server.user_handle_domain_list();
     service_domains
         .iter()
         .any(|domain| handle.ends_with(&format!(".{}", domain)) || handle == domain)

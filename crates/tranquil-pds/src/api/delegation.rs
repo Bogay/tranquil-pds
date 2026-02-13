@@ -8,7 +8,6 @@ use crate::delegation::{
 use crate::rate_limit::{AccountCreationLimit, RateLimited};
 use crate::state::AppState;
 use crate::types::{Did, Handle};
-use crate::util::{pds_hostname, pds_hostname_without_port};
 use axum::{
     Json,
     extract::{Query, State},
@@ -435,8 +434,8 @@ pub async fn create_delegated_account(
         Err(response) => return Ok(response),
     };
 
-    let hostname = pds_hostname();
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname = &tranquil_config::get().server.hostname;
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let pds_suffix = format!(".{}", hostname_for_handles);
 
     let handle = if !input.handle.contains('.') || input.handle.ends_with(&pds_suffix) {
@@ -475,7 +474,7 @@ pub async fn create_delegated_account(
             Err(_) => return Ok(ApiError::InvalidInviteCode.into_response()),
         }
     } else {
-        let invite_required = crate::util::parse_env_bool("INVITE_CODE_REQUIRED");
+        let invite_required = tranquil_config::get().server.invite_code_required;
         if invite_required {
             return Ok(ApiError::InviteCodeRequired.into_response());
         }
@@ -497,8 +496,11 @@ pub async fn create_delegated_account(
         }
     };
 
-    let rotation_key = std::env::var("PLC_ROTATION_KEY")
-        .unwrap_or_else(|_| crate::plc::signing_key_to_did_key(&signing_key));
+    let rotation_key = tranquil_config::get()
+        .secrets
+        .plc_rotation_key
+        .clone()
+        .unwrap_or_else(|| crate::plc::signing_key_to_did_key(&signing_key));
 
     let genesis_result = match crate::plc::create_genesis_operation(
         &signing_key,

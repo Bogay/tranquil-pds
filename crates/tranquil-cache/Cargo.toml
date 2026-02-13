@@ -9,6 +9,7 @@ default = []
 valkey = ["dep:redis"]
 
 [dependencies]
+tranquil-config = { workspace = true }
 tranquil-infra = { workspace = true }
 tranquil-ripple = { workspace = true }
 

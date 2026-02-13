@@ -10,7 +10,7 @@ use crate::rate_limit::{
 };
 use crate::state::AppState;
 use crate::types::{Did, Handle, PlainPassword};
-use crate::util::{extract_client_ip, pds_hostname, pds_hostname_without_port};
+use crate::util::extract_client_ip;
 use axum::{
     Json,
     extract::{Query, State},
@@ -253,8 +253,8 @@ pub async fn authorize_get(
 
     if let Some(ref login_hint) = request_data.parameters.login_hint {
         tracing::info!(login_hint = %login_hint, "Checking login_hint for delegation");
-        let hostname_for_handles = pds_hostname_without_port();
-        let normalized = NormalizedLoginIdentifier::normalize(login_hint, hostname_for_handles);
+        let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
+        let normalized = NormalizedLoginIdentifier::normalize(login_hint, &hostname_for_handles);
         tracing::info!(normalized = %normalized, "Normalized login_hint");
 
         match state
@@ -526,13 +526,13 @@ pub async fn authorize_post(
             url_encode(error_msg)
         ))
     };
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_username =
-        NormalizedLoginIdentifier::normalize(&form.username, hostname_for_handles);
+        NormalizedLoginIdentifier::normalize(&form.username, &hostname_for_handles);
     tracing::debug!(
         original_username = %form.username,
         normalized_username = %normalized_username,
-        pds_hostname = %pds_hostname(),
+        pds_hostname = %tranquil_config::get().server.hostname,
         "Normalized username for lookup"
     );
     let user = match state
@@ -677,7 +677,7 @@ pub async fn authorize_post(
             .await
         {
             Ok(challenge) => {
-                let hostname = pds_hostname();
+                let hostname = &tranquil_config::get().server.hostname;
                 if let Err(e) = enqueue_2fa_code(
                     state.user_repo.as_ref(),
                     state.infra_repo.as_ref(),
@@ -992,7 +992,7 @@ pub async fn authorize_select(
             .await
         {
             Ok(challenge) => {
-                let hostname = pds_hostname();
+                let hostname = &tranquil_config::get().server.hostname;
                 if let Err(e) = enqueue_2fa_code(
                     state.user_repo.as_ref(),
                     state.infra_repo.as_ref(),
@@ -1116,7 +1116,7 @@ fn build_success_redirect(
         '?'
     };
     redirect_url.push(separator);
-    let pds_host = pds_hostname();
+    let pds_host = &tranquil_config::get().server.hostname;
     redirect_url.push_str(&format!(
         "iss={}",
         url_encode(&format!("https://{}", pds_host))
@@ -1134,7 +1134,7 @@ fn build_intermediate_redirect_url(
     state: Option<&str>,
     response_mode: Option<&str>,
 ) -> String {
-    let pds_host = pds_hostname();
+    let pds_host = &tranquil_config::get().server.hostname;
     let mut url = format!(
         "https://{}/oauth/authorize/redirect?redirect_uri={}&code={}",
         pds_host,
@@ -1991,9 +1991,9 @@ pub async fn check_user_has_passkeys(
     State(state): State<AppState>,
     Query(query): Query<CheckPasskeysQuery>,
 ) -> Response {
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let bare_identifier =
-        BareLoginIdentifier::from_identifier(&query.identifier, hostname_for_handles);
+        BareLoginIdentifier::from_identifier(&query.identifier, &hostname_for_handles);
 
     let user = state
         .user_repo
@@ -2023,9 +2023,9 @@ pub async fn check_user_security_status(
     State(state): State<AppState>,
     Query(query): Query<CheckPasskeysQuery>,
 ) -> Response {
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_identifier =
-        NormalizedLoginIdentifier::normalize(&query.identifier, hostname_for_handles);
+        NormalizedLoginIdentifier::normalize(&query.identifier, &hostname_for_handles);
 
     let user = state
         .user_repo
@@ -2131,9 +2131,9 @@ pub async fn passkey_start(
             .into_response();
     }
 
-    let hostname_for_handles = pds_hostname_without_port();
+    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_username =
-        NormalizedLoginIdentifier::normalize(&form.identifier, hostname_for_handles);
+        NormalizedLoginIdentifier::normalize(&form.identifier, &hostname_for_handles);
 
     let user = match state
         .user_repo
@@ -2602,7 +2602,7 @@ pub async fn passkey_finish(
             .await
         {
             Ok(challenge) => {
-                let hostname = pds_hostname();
+                let hostname = &tranquil_config::get().server.hostname;
                 if let Err(e) = enqueue_2fa_code(
                     state.user_repo.as_ref(),
                     state.infra_repo.as_ref(),
@@ -2881,7 +2881,7 @@ pub async fn authorize_passkey_finish(
     headers: HeaderMap,
     Json(form): Json<AuthorizePasskeySubmit>,
 ) -> Response {
-    let pds_hostname = pds_hostname();
+    let pds_hostname = &tranquil_config::get().server.hostname;
     let passkey_finish_request_id = RequestId::from(form.request_uri.clone());
 
     let request_data = match state

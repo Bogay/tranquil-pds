@@ -21,14 +21,9 @@ pub struct CommsService {
 
 impl CommsService {
     pub fn new(infra_repo: Arc<dyn InfraRepository>) -> Self {
-        let poll_interval_ms: u64 = std::env::var("NOTIFICATION_POLL_INTERVAL_MS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1000);
-        let batch_size: i64 = std::env::var("NOTIFICATION_BATCH_SIZE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(100);
+        let cfg = tranquil_config::get();
+        let poll_interval_ms = cfg.notifications.poll_interval_ms;
+        let batch_size = cfg.notifications.batch_size;
         Self {
             infra_repo,
             senders: HashMap::new(),

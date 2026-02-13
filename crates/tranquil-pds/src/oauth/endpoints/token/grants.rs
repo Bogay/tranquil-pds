@@ -12,7 +12,6 @@ use crate::oauth::{
     verify_client_auth,
 };
 use crate::state::AppState;
-use crate::util::pds_hostname;
 use axum::Json;
 use axum::http::{HeaderMap, Method};
 use chrono::{Duration, Utc};
@@ -101,7 +100,7 @@ pub async fn handle_authorization_code_grant(
     let dpop_jkt = if let Some(proof) = &dpop_proof {
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-        let pds_hostname = pds_hostname();
+        let pds_hostname = &tranquil_config::get().server.hostname;
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, Method::POST.as_str(), &token_endpoint, None)?;
         if !state
@@ -348,7 +347,7 @@ pub async fn handle_refresh_token_grant(
     let dpop_jkt = if let Some(proof) = &dpop_proof {
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-        let pds_hostname = pds_hostname();
+        let pds_hostname = &tranquil_config::get().server.hostname;
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, Method::POST.as_str(), &token_endpoint, None)?;
         if !state

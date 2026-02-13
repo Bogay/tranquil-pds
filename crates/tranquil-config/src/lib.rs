@@ -1,0 +1,883 @@
+use confique::Config;
+use std::fmt;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+static CONFIG: OnceLock<TranquilConfig> = OnceLock::new();
+
+/// Errors discovered during configuration validation.
+#[derive(Debug)]
+pub struct ConfigError {
+    pub errors: Vec<String>,
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "configuration validation failed:")?;
+        for err in &self.errors {
+            writeln!(f, "  - {err}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
+/// Initialize the global configuration. Must be called once at startup before
+/// any other code accesses the configuration. Panics if called more than once.
+pub fn init(config: TranquilConfig) {
+    CONFIG
+        .set(config)
+        .expect("tranquil-config: configuration already initialized");
+}
+
+/// Returns a reference to the global configuration.
+/// Panics if [`init`] has not been called yet.
+pub fn get() -> &'static TranquilConfig {
+    CONFIG
+        .get()
+        .expect("tranquil-config: not initialized - call tranquil_config::init() first")
+}
+
+/// Returns a reference to the global configuration if it has been initialized.
+pub fn try_get() -> Option<&'static TranquilConfig> {
+    CONFIG.get()
+}
+
+/// Load configuration from an optional TOML file path, with environment
+/// variable overrides applied on top. Fields annotated with `#[config(env)]`
+/// are read from the corresponding environment variables when the `.env()`
+/// layer is active.
+///
+/// Precedence (highest to lowest):
+/// 1. Environment variables
+/// 2. TOML config file (if provided)
+/// 3. Built-in defaults
+pub fn load(config_path: Option<&PathBuf>) -> Result<TranquilConfig, confique::Error> {
+    let mut builder = TranquilConfig::builder().env();
+    if let Some(path) = config_path {
+        builder = builder.file(path);
+    }
+    builder.file("/etc/tranquil-pds/config.toml").load()
+}
+
+// Root configuration
+#[derive(Debug, Config)]
+pub struct TranquilConfig {
+    #[config(nested)]
+    pub server: ServerConfig,
+
+    #[config(nested)]
+    pub database: DatabaseConfig,
+
+    #[config(nested)]
+    pub secrets: SecretsConfig,
+
+    #[config(nested)]
+    pub storage: StorageConfig,
+
+    #[config(nested)]
+    pub backup: BackupConfig,
+
+    #[config(nested)]
+    pub cache: CacheConfig,
+
+    #[config(nested)]
+    pub plc: PlcConfig,
+
+    #[config(nested)]
+    pub firehose: FirehoseConfig,
+
+    #[config(nested)]
+    pub email: EmailConfig,
+
+    #[config(nested)]
+    pub discord: DiscordConfig,
+
+    #[config(nested)]
+    pub telegram: TelegramConfig,
+
+    #[config(nested)]
+    pub signal: SignalConfig,
+
+    #[config(nested)]
+    pub notifications: NotificationConfig,
+
+    #[config(nested)]
+    pub sso: SsoConfig,
+
+    #[config(nested)]
+    pub moderation: ModerationConfig,
+
+    #[config(nested)]
+    pub import: ImportConfig,
+
+    #[config(nested)]
+    pub scheduled: ScheduledConfig,
+}
+
+impl TranquilConfig {
+    /// Validate cross-field constraints that cannot be expressed through
+    /// confique's declarative defaults alone.  Call this once after loading
+    /// the configuration and before [`init`].
+    ///
+    /// Returns `Ok(())` when the configuration is consistent, or a
+    /// [`ConfigError`] listing every problem found.
+    pub fn validate(&self, ignore_secrets: bool) -> Result<(), ConfigError> {
+        let mut errors = Vec::new();
+
+        // -- secrets ----------------------------------------------------------
+        if !ignore_secrets && !self.secrets.allow_insecure && !cfg!(test) {
+            if let Some(ref s) = self.secrets.jwt_secret {
+                if s.len() < 32 {
+                    errors.push(
+                        "secrets.jwt_secret (JWT_SECRET) must be at least 32 characters"
+                            .to_string(),
+                    );
+                }
+            } else {
+                errors.push(
+                    "secrets.jwt_secret (JWT_SECRET) is required in production \
+                     (set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=true for development)"
+                        .to_string(),
+                );
+            }
+
+            if let Some(ref s) = self.secrets.dpop_secret {
+                if s.len() < 32 {
+                    errors.push(
+                        "secrets.dpop_secret (DPOP_SECRET) must be at least 32 characters"
+                            .to_string(),
+                    );
+                }
+            } else {
+                errors.push(
+                    "secrets.dpop_secret (DPOP_SECRET) is required in production \
+                     (set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=true for development)"
+                        .to_string(),
+                );
+            }
+
+            if let Some(ref s) = self.secrets.master_key {
+                if s.len() < 32 {
+                    errors.push(
+                        "secrets.master_key (MASTER_KEY) must be at least 32 characters"
+                            .to_string(),
+                    );
+                }
+            } else {
+                errors.push(
+                    "secrets.master_key (MASTER_KEY) is required in production \
+                     (set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=true for development)"
+                        .to_string(),
+                );
+            }
+        }
+
+        // -- telegram ---------------------------------------------------------
+        if self.telegram.bot_token.is_some() && self.telegram.webhook_secret.is_none() {
+            errors.push(
+                "telegram.bot_token is set but telegram.webhook_secret is missing; \
+                 both are required for secure Telegram integration"
+                    .to_string(),
+            );
+        }
+
+        // -- blob storage -----------------------------------------------------
+        match self.storage.backend.as_str() {
+            "s3" => {
+                if self.storage.s3_bucket.is_none() {
+                    errors.push(
+                        "storage.backend is \"s3\" but storage.s3_bucket (S3_BUCKET) \
+                         is not set"
+                            .to_string(),
+                    );
+                }
+            }
+            "filesystem" => {}
+            other => {
+                errors.push(format!(
+                    "storage.backend must be \"filesystem\" or \"s3\", got \"{other}\""
+                ));
+            }
+        }
+
+        // -- backup storage ---------------------------------------------------
+        if self.backup.enabled {
+            match self.backup.backend.as_str() {
+                "s3" => {
+                    if self.backup.s3_bucket.is_none() {
+                        errors.push(
+                            "backup.backend is \"s3\" but backup.s3_bucket \
+                             (BACKUP_S3_BUCKET) is not set"
+                                .to_string(),
+                        );
+                    }
+                }
+                "filesystem" => {}
+                other => {
+                    errors.push(format!(
+                        "backup.backend must be \"filesystem\" or \"s3\", got \"{other}\""
+                    ));
+                }
+            }
+        }
+
+        // -- SSO providers ----------------------------------------------------
+        self.validate_sso_provider("sso.github", &self.sso.github, &mut errors);
+        self.validate_sso_provider("sso.google", &self.sso.google, &mut errors);
+        self.validate_sso_discord(&mut errors);
+        self.validate_sso_with_issuer("sso.gitlab", &self.sso.gitlab, &mut errors);
+        self.validate_sso_with_issuer("sso.oidc", &self.sso.oidc, &mut errors);
+        self.validate_sso_apple(&mut errors);
+
+        // -- moderation -------------------------------------------------------
+        let has_url = self.moderation.report_service_url.is_some();
+        let has_did = self.moderation.report_service_did.is_some();
+        if has_url != has_did {
+            errors.push(
+                "moderation.report_service_url and moderation.report_service_did \
+                 must both be set or both be unset"
+                    .to_string(),
+            );
+        }
+
+        // -- cache ------------------------------------------------------------
+        match self.cache.backend.as_str() {
+            "valkey" => {
+                if self.cache.valkey_url.is_none() {
+                    errors.push(
+                        "cache.backend is \"valkey\" but cache.valkey_url (VALKEY_URL) \
+                         is not set"
+                            .to_string(),
+                    );
+                }
+            }
+            "ripple" => {}
+            other => {
+                errors.push(format!(
+                    "cache.backend must be \"ripple\" or \"valkey\", got \"{other}\""
+                ));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigError { errors })
+        }
+    }
+
+    fn validate_sso_provider(&self, prefix: &str, p: &SsoProviderConfig, errors: &mut Vec<String>) {
+        if p.enabled {
+            if p.client_id.is_none() {
+                errors.push(format!(
+                    "{prefix}.client_id is required when {prefix}.enabled = true"
+                ));
+            }
+            if p.client_secret.is_none() {
+                errors.push(format!(
+                    "{prefix}.client_secret is required when {prefix}.enabled = true"
+                ));
+            }
+        }
+    }
+
+    fn validate_sso_discord(&self, errors: &mut Vec<String>) {
+        let p = &self.sso.discord;
+        if p.enabled {
+            if p.client_id.is_none() {
+                errors.push(
+                    "sso.discord.client_id is required when sso.discord.enabled = true".to_string(),
+                );
+            }
+            if p.client_secret.is_none() {
+                errors.push(
+                    "sso.discord.client_secret is required when sso.discord.enabled = true"
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    fn validate_sso_with_issuer(
+        &self,
+        prefix: &str,
+        p: &SsoProviderWithIssuerConfig,
+        errors: &mut Vec<String>,
+    ) {
+        if p.enabled {
+            if p.client_id.is_none() {
+                errors.push(format!(
+                    "{prefix}.client_id is required when {prefix}.enabled = true"
+                ));
+            }
+            if p.client_secret.is_none() {
+                errors.push(format!(
+                    "{prefix}.client_secret is required when {prefix}.enabled = true"
+                ));
+            }
+            if p.issuer.is_none() {
+                errors.push(format!(
+                    "{prefix}.issuer is required when {prefix}.enabled = true"
+                ));
+            }
+        }
+    }
+
+    fn validate_sso_apple(&self, errors: &mut Vec<String>) {
+        let p = &self.sso.apple;
+        if p.enabled {
+            if p.client_id.is_none() {
+                errors.push(
+                    "sso.apple.client_id is required when sso.apple.enabled = true".to_string(),
+                );
+            }
+            if p.team_id.is_none() {
+                errors.push(
+                    "sso.apple.team_id is required when sso.apple.enabled = true".to_string(),
+                );
+            }
+            if p.key_id.is_none() {
+                errors
+                    .push("sso.apple.key_id is required when sso.apple.enabled = true".to_string());
+            }
+            if p.private_key.is_none() {
+                errors.push(
+                    "sso.apple.private_key is required when sso.apple.enabled = true".to_string(),
+                );
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Server
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Config)]
+pub struct ServerConfig {
+    /// Public hostname of the PDS (e.g. `pds.example.com`).
+    #[config(env = "PDS_HOSTNAME")]
+    pub hostname: String,
+
+    /// Address to bind the HTTP server to.
+    #[config(env = "SERVER_HOST", default = "127.0.0.1")]
+    pub host: String,
+
+    /// Port to bind the HTTP server to.
+    #[config(env = "SERVER_PORT", default = 3000)]
+    pub port: u16,
+
+    /// List of domains for user handles.
+    /// Defaults to the PDS hostname when not set.
+    #[config(env = "PDS_USER_HANDLE_DOMAINS", parse_env = split_comma_list)]
+    pub user_handle_domains: Option<Vec<String>>,
+
+    /// List of domains available for user registration.
+    /// Defaults to the PDS hostname when not set.
+    #[config(env = "AVAILABLE_USER_DOMAINS", parse_env = split_comma_list)]
+    pub available_user_domains: Option<Vec<String>>,
+
+    /// Enable PDS-hosted did:web identities.  Hosting did:web requires a
+    /// long-term commitment to serve DID documents; opt-in only.
+    #[config(env = "ENABLE_PDS_HOSTED_DID_WEB", default = false)]
+    pub enable_pds_hosted_did_web: bool,
+
+    /// When set to true, skip age-assurance birthday prompt for all accounts.
+    #[config(env = "PDS_AGE_ASSURANCE_OVERRIDE", default = false)]
+    pub age_assurance_override: bool,
+
+    /// Require an invite code for new account registration.
+    #[config(env = "INVITE_CODE_REQUIRED", default = true)]
+    pub invite_code_required: bool,
+
+    /// Allow HTTP (non-TLS) proxy requests. Only useful during development.
+    #[config(env = "ALLOW_HTTP_PROXY", default = false)]
+    pub allow_http_proxy: bool,
+
+    /// Disable all rate limiting. Should only be used in testing.
+    #[config(env = "DISABLE_RATE_LIMITING", default = false)]
+    pub disable_rate_limiting: bool,
+
+    /// List of additional banned words for handle validation.
+    #[config(env = "PDS_BANNED_WORDS", parse_env = split_comma_list)]
+    pub banned_words: Option<Vec<String>>,
+
+    /// URL to a privacy policy page.
+    #[config(env = "PRIVACY_POLICY_URL")]
+    pub privacy_policy_url: Option<String>,
+
+    /// URL to terms of service page.
+    #[config(env = "TERMS_OF_SERVICE_URL")]
+    pub terms_of_service_url: Option<String>,
+
+    /// Operator contact email address.
+    #[config(env = "CONTACT_EMAIL")]
+    pub contact_email: Option<String>,
+
+    /// Maximum allowed blob size in bytes (default 10 GiB).
+    #[config(env = "MAX_BLOB_SIZE", default = 10_737_418_240u64)]
+    pub max_blob_size: u64,
+}
+
+impl ServerConfig {
+    /// The public HTTPS URL for this PDS.
+    pub fn public_url(&self) -> String {
+        format!("https://{}", self.hostname)
+    }
+
+    /// Hostname without port suffix (e.g. `pds.example.com` from
+    /// `pds.example.com:443`).
+    pub fn hostname_without_port(&self) -> &str {
+        self.hostname.split(':').next().unwrap_or(&self.hostname)
+    }
+
+    /// Returns the extra banned words list, or an empty vec when unset.
+    pub fn banned_word_list(&self) -> Vec<String> {
+        self.banned_words.clone().unwrap_or_default()
+    }
+
+    /// Returns the available user domains, falling back to `[hostname_without_port]`.
+    pub fn available_user_domain_list(&self) -> Vec<String> {
+        self.available_user_domains
+            .clone()
+            .unwrap_or_else(|| vec![self.hostname_without_port().to_string()])
+    }
+
+    /// Returns the user handle domains, falling back to `[hostname_without_port]`.
+    pub fn user_handle_domain_list(&self) -> Vec<String> {
+        self.user_handle_domains
+            .clone()
+            .unwrap_or_else(|| vec![self.hostname_without_port().to_string()])
+    }
+}
+
+#[derive(Debug, Config)]
+pub struct DatabaseConfig {
+    /// PostgreSQL connection URL.
+    #[config(env = "DATABASE_URL")]
+    pub url: String,
+
+    /// Maximum number of connections in the pool.
+    #[config(env = "DATABASE_MAX_CONNECTIONS", default = 100)]
+    pub max_connections: u32,
+
+    /// Minimum number of idle connections kept in the pool.
+    #[config(env = "DATABASE_MIN_CONNECTIONS", default = 10)]
+    pub min_connections: u32,
+
+    /// Timeout in seconds when acquiring a connection from the pool.
+    #[config(env = "DATABASE_ACQUIRE_TIMEOUT_SECS", default = 10)]
+    pub acquire_timeout_secs: u64,
+}
+
+#[derive(Config)]
+pub struct SecretsConfig {
+    /// Secret used for signing JWTs. Must be at least 32 characters in
+    /// production.
+    #[config(env = "JWT_SECRET")]
+    pub jwt_secret: Option<String>,
+
+    /// Secret used for DPoP proof validation. Must be at least 32 characters
+    /// in production.
+    #[config(env = "DPOP_SECRET")]
+    pub dpop_secret: Option<String>,
+
+    /// Master key used for key-encryption and HKDF derivation. Must be at
+    /// least 32 characters in production.
+    #[config(env = "MASTER_KEY")]
+    pub master_key: Option<String>,
+
+    /// PLC rotation key (DID key). If not set, user-level keys are used.
+    #[config(env = "PLC_ROTATION_KEY")]
+    pub plc_rotation_key: Option<String>,
+
+    /// Allow insecure/test secrets. NEVER enable in production.
+    #[config(env = "TRANQUIL_PDS_ALLOW_INSECURE_SECRETS", default = false)]
+    pub allow_insecure: bool,
+}
+
+impl std::fmt::Debug for SecretsConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretsConfig")
+            .field(
+                "jwt_secret",
+                &self.jwt_secret.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "dpop_secret",
+                &self.dpop_secret.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "master_key",
+                &self.master_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "plc_rotation_key",
+                &self.plc_rotation_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("allow_insecure", &self.allow_insecure)
+            .finish()
+    }
+}
+
+impl SecretsConfig {
+    /// Resolve the JWT secret, falling back to an insecure default if
+    /// `allow_insecure` is true.
+    pub fn jwt_secret_or_default(&self) -> String {
+        self.jwt_secret.clone().unwrap_or_else(|| {
+            if cfg!(test) || self.allow_insecure {
+                "test-jwt-secret-not-for-production".to_string()
+            } else {
+                panic!(
+                    "JWT_SECRET must be set in production. \
+                     Set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=true for development/testing."
+                );
+            }
+        })
+    }
+
+    /// Resolve the DPoP secret, falling back to an insecure default if
+    /// `allow_insecure` is true.
+    pub fn dpop_secret_or_default(&self) -> String {
+        self.dpop_secret.clone().unwrap_or_else(|| {
+            if cfg!(test) || self.allow_insecure {
+                "test-dpop-secret-not-for-production".to_string()
+            } else {
+                panic!(
+                    "DPOP_SECRET must be set in production. \
+                     Set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=true for development/testing."
+                );
+            }
+        })
+    }
+
+    /// Resolve the master key, falling back to an insecure default if
+    /// `allow_insecure` is true.
+    pub fn master_key_or_default(&self) -> String {
+        self.master_key.clone().unwrap_or_else(|| {
+            if cfg!(test) || self.allow_insecure {
+                "test-master-key-not-for-production".to_string()
+            } else {
+                panic!(
+                    "MASTER_KEY must be set in production. \
+                     Set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=true for development/testing."
+                );
+            }
+        })
+    }
+}
+
+#[derive(Debug, Config)]
+pub struct StorageConfig {
+    /// Storage backend: `filesystem` or `s3`.
+    #[config(env = "BLOB_STORAGE_BACKEND", default = "filesystem")]
+    pub backend: String,
+
+    /// Path on disk for the filesystem blob backend.
+    #[config(env = "BLOB_STORAGE_PATH", default = "/var/lib/tranquil-pds/blobs")]
+    pub path: String,
+
+    /// S3 bucket name for blob storage.
+    #[config(env = "S3_BUCKET")]
+    pub s3_bucket: Option<String>,
+
+    /// Custom S3 endpoint URL (for MinIO, R2, etc.).
+    #[config(env = "S3_ENDPOINT")]
+    pub s3_endpoint: Option<String>,
+}
+
+#[derive(Debug, Config)]
+pub struct BackupConfig {
+    /// Enable automatic backups.
+    #[config(env = "BACKUP_ENABLED", default = true)]
+    pub enabled: bool,
+
+    /// Backup storage backend: `filesystem` or `s3`.
+    #[config(env = "BACKUP_STORAGE_BACKEND", default = "filesystem")]
+    pub backend: String,
+
+    /// Path on disk for the filesystem backup backend.
+    #[config(env = "BACKUP_STORAGE_PATH", default = "/var/lib/tranquil-pds/backups")]
+    pub path: String,
+
+    /// S3 bucket name for backups.
+    #[config(env = "BACKUP_S3_BUCKET")]
+    pub s3_bucket: Option<String>,
+
+    /// Number of backup revisions to keep per account.
+    #[config(env = "BACKUP_RETENTION_COUNT", default = 7)]
+    pub retention_count: u32,
+
+    /// Seconds between backup runs.
+    #[config(env = "BACKUP_INTERVAL_SECS", default = 86400)]
+    pub interval_secs: u64,
+}
+
+#[derive(Debug, Config)]
+pub struct CacheConfig {
+    /// Cache backend: `ripple` (default, built-in gossip) or `valkey`.
+    #[config(env = "CACHE_BACKEND", default = "ripple")]
+    pub backend: String,
+
+    /// Valkey / Redis connection URL.  Required when `backend = "valkey"`.
+    #[config(env = "VALKEY_URL")]
+    pub valkey_url: Option<String>,
+
+    #[config(nested)]
+    pub ripple: RippleCacheConfig,
+}
+
+#[derive(Debug, Config)]
+pub struct PlcConfig {
+    /// Base URL of the PLC directory.
+    #[config(env = "PLC_DIRECTORY_URL", default = "https://plc.directory")]
+    pub directory_url: String,
+
+    /// HTTP request timeout in seconds.
+    #[config(env = "PLC_TIMEOUT_SECS", default = 10)]
+    pub timeout_secs: u64,
+
+    /// TCP connect timeout in seconds.
+    #[config(env = "PLC_CONNECT_TIMEOUT_SECS", default = 5)]
+    pub connect_timeout_secs: u64,
+
+    /// Seconds to cache DID documents in memory.
+    #[config(env = "DID_CACHE_TTL_SECS", default = 300)]
+    pub did_cache_ttl_secs: u64,
+}
+
+#[derive(Debug, Config)]
+pub struct FirehoseConfig {
+    /// Size of the in-memory broadcast buffer for firehose events.
+    #[config(env = "FIREHOSE_BUFFER_SIZE", default = 10000)]
+    pub buffer_size: usize,
+
+    /// How many hours of historical events to replay for cursor-based
+    /// firehose connections.
+    #[config(env = "FIREHOSE_BACKFILL_HOURS", default = 72)]
+    pub backfill_hours: i64,
+
+    /// Maximum number of lagged events before disconnecting a slow consumer.
+    #[config(env = "FIREHOSE_MAX_LAG", default = 5000)]
+    pub max_lag: u64,
+
+    /// List of relay / crawler notification URLs.
+    #[config(env = "CRAWLERS", parse_env = split_comma_list)]
+    pub crawlers: Option<Vec<String>>,
+}
+
+impl FirehoseConfig {
+    /// Returns the list of crawler URLs, falling back to `["https://bsky.network"]`
+    /// when none are configured.
+    pub fn crawler_list(&self) -> Vec<String> {
+        self.crawlers
+            .clone()
+            .unwrap_or_else(|| vec!["https://bsky.network".to_string()])
+    }
+}
+
+#[derive(Debug, Config)]
+pub struct EmailConfig {
+    /// Sender email address. When unset, email sending is disabled.
+    #[config(env = "MAIL_FROM_ADDRESS")]
+    pub from_address: Option<String>,
+
+    /// Display name used in the `From` header.
+    #[config(env = "MAIL_FROM_NAME", default = "Tranquil PDS")]
+    pub from_name: String,
+
+    /// Path to the `sendmail` binary.
+    #[config(env = "SENDMAIL_PATH", default = "/usr/sbin/sendmail")]
+    pub sendmail_path: String,
+}
+
+#[derive(Debug, Config)]
+pub struct DiscordConfig {
+    /// Discord bot token. When unset, Discord integration is disabled.
+    #[config(env = "DISCORD_BOT_TOKEN")]
+    pub bot_token: Option<String>,
+}
+
+#[derive(Debug, Config)]
+pub struct TelegramConfig {
+    /// Telegram bot token. When unset, Telegram integration is disabled.
+    #[config(env = "TELEGRAM_BOT_TOKEN")]
+    pub bot_token: Option<String>,
+
+    /// Secret token for incoming webhook verification.
+    #[config(env = "TELEGRAM_WEBHOOK_SECRET")]
+    pub webhook_secret: Option<String>,
+}
+
+#[derive(Debug, Config)]
+pub struct SignalConfig {
+    /// Path to the `signal-cli` binary.
+    #[config(env = "SIGNAL_CLI_PATH", default = "/usr/local/bin/signal-cli")]
+    pub cli_path: String,
+
+    /// Sender phone number. When unset, Signal integration is disabled.
+    #[config(env = "SIGNAL_SENDER_NUMBER")]
+    pub sender_number: Option<String>,
+}
+
+#[derive(Debug, Config)]
+pub struct NotificationConfig {
+    /// Polling interval in milliseconds for the comms queue.
+    #[config(env = "NOTIFICATION_POLL_INTERVAL_MS", default = 1000)]
+    pub poll_interval_ms: u64,
+
+    /// Number of notifications to process per batch.
+    #[config(env = "NOTIFICATION_BATCH_SIZE", default = 100)]
+    pub batch_size: i64,
+}
+
+#[derive(Debug, Config)]
+pub struct SsoConfig {
+    #[config(nested)]
+    pub github: SsoProviderConfig,
+
+    #[config(nested)]
+    pub discord: SsoDiscordProviderConfig,
+
+    #[config(nested)]
+    pub google: SsoProviderConfig,
+
+    #[config(nested)]
+    pub gitlab: SsoProviderWithIssuerConfig,
+
+    #[config(nested)]
+    pub oidc: SsoProviderWithIssuerConfig,
+
+    #[config(nested)]
+    pub apple: SsoAppleConfig,
+}
+
+// Generic SSO provider (GitHub, Google)
+#[derive(Debug, Config)]
+pub struct SsoProviderConfig {
+    #[config(default = false)]
+    pub enabled: bool,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub display_name: Option<String>,
+}
+
+// SSO provider with custom env prefixes for Discord
+// (since the nested TOML key is `sso.discord` but env vars are `SSO_DISCORD_*`)
+#[derive(Debug, Config)]
+pub struct SsoDiscordProviderConfig {
+    #[config(default = false)]
+    pub enabled: bool,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub display_name: Option<String>,
+}
+
+// SSO providers that require an issuer URL (GitLab, OIDC)
+#[derive(Debug, Config)]
+pub struct SsoProviderWithIssuerConfig {
+    #[config(default = false)]
+    pub enabled: bool,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub issuer: Option<String>,
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Config)]
+pub struct SsoAppleConfig {
+    #[config(env = "SSO_APPLE_ENABLED", default = false)]
+    pub enabled: bool,
+
+    #[config(env = "SSO_APPLE_CLIENT_ID")]
+    pub client_id: Option<String>,
+
+    #[config(env = "SSO_APPLE_TEAM_ID")]
+    pub team_id: Option<String>,
+
+    #[config(env = "SSO_APPLE_KEY_ID")]
+    pub key_id: Option<String>,
+
+    #[config(env = "SSO_APPLE_PRIVATE_KEY")]
+    pub private_key: Option<String>,
+}
+
+#[derive(Debug, Config)]
+pub struct ModerationConfig {
+    /// External report-handling service URL.
+    #[config(env = "REPORT_SERVICE_URL")]
+    pub report_service_url: Option<String>,
+
+    /// DID of the external report-handling service.
+    #[config(env = "REPORT_SERVICE_DID")]
+    pub report_service_did: Option<String>,
+}
+
+#[derive(Debug, Config)]
+pub struct ImportConfig {
+    /// Whether the PDS accepts repo imports.
+    #[config(env = "ACCEPTING_REPO_IMPORTS", default = true)]
+    pub accepting: bool,
+
+    /// Maximum allowed import archive size in bytes (default 1 GiB).
+    #[config(env = "MAX_IMPORT_SIZE", default = 1_073_741_824)]
+    pub max_size: u64,
+
+    /// Maximum number of blocks allowed in an import.
+    #[config(env = "MAX_IMPORT_BLOCKS", default = 500000)]
+    pub max_blocks: u64,
+
+    /// Skip CAR verification during import. Only for development/debugging.
+    #[config(env = "SKIP_IMPORT_VERIFICATION", default = false)]
+    pub skip_verification: bool,
+}
+
+/// Parse a comma-separated environment variable into a `Vec<String>`,
+/// trimming whitespace and dropping empty entries.
+///
+/// Signature matches confique's `parse_env` expectation: `fn(&str) -> Result<T, E>`.
+fn split_comma_list(value: &str) -> Result<Vec<String>, std::convert::Infallible> {
+    Ok(value
+        .split(',')
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect())
+}
+
+#[derive(Debug, Config)]
+pub struct RippleCacheConfig {
+    /// Address to bind the Ripple gossip protocol listener.
+    #[config(env = "RIPPLE_BIND", default = "0.0.0.0:0")]
+    pub bind_addr: String,
+
+    /// List of seed peer addresses.
+    #[config(env = "RIPPLE_PEERS", parse_env = split_comma_list)]
+    pub peers: Option<Vec<String>>,
+
+    /// Unique machine identifier. Auto-derived from hostname when not set.
+    #[config(env = "RIPPLE_MACHINE_ID")]
+    pub machine_id: Option<u64>,
+
+    /// Gossip protocol interval in milliseconds.
+    #[config(env = "RIPPLE_GOSSIP_INTERVAL_MS", default = 200)]
+    pub gossip_interval_ms: u64,
+
+    /// Maximum cache size in megabytes.
+    #[config(env = "RIPPLE_CACHE_MAX_MB", default = 256)]
+    pub cache_max_mb: usize,
+}
+
+#[derive(Debug, Config)]
+pub struct ScheduledConfig {
+    /// Interval in seconds between scheduled delete checks.
+    #[config(env = "SCHEDULED_DELETE_CHECK_INTERVAL_SECS", default = 3600)]
+    pub delete_check_interval_secs: u64,
+}
+
+/// Generate a TOML configuration template with all available options,
+/// defaults, and documentation comments.
+pub fn template() -> String {
+    confique::toml::template::<TranquilConfig>(confique::toml::FormatOptions::default())
+}

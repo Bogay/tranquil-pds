@@ -1,6 +1,5 @@
 use crate::config::AuthConfig;
 use crate::oauth::OAuthError;
-use crate::util::pds_hostname;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
@@ -52,7 +51,7 @@ pub fn create_access_token_with_delegation(
 ) -> Result<String, OAuthError> {
     use serde_json::json;
     let jti = uuid::Uuid::new_v4().to_string();
-    let pds_hostname = pds_hostname();
+    let pds_hostname = &tranquil_config::get().server.hostname;
     let issuer = format!("https://{}", pds_hostname);
     let now = Utc::now().timestamp();
     let exp = now + ACCESS_TOKEN_EXPIRY_SECONDS;

@@ -64,13 +64,10 @@ pub struct DidResolver {
 
 impl DidResolver {
     pub fn new() -> Self {
-        let cache_ttl_secs: u64 = std::env::var("DID_CACHE_TTL_SECS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(300);
+        let cfg = tranquil_config::get();
+        let cache_ttl_secs = cfg.plc.did_cache_ttl_secs;
 
-        let plc_directory_url = std::env::var("PLC_DIRECTORY_URL")
-            .unwrap_or_else(|_| "https://plc.directory".to_string());
+        let plc_directory_url = cfg.plc.directory_url.clone();
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))

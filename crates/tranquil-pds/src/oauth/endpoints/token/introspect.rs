@@ -2,7 +2,6 @@ use super::helpers::extract_token_claims;
 use crate::oauth::OAuthError;
 use crate::rate_limit::{OAuthIntrospectLimit, OAuthRateLimited};
 use crate::state::AppState;
-use crate::util::pds_hostname;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::{Form, Json};
@@ -112,7 +111,7 @@ pub async fn introspect_token(
     if token_data.expires_at < Utc::now() {
         return Ok(Json(inactive_response));
     }
-    let pds_hostname = pds_hostname();
+    let pds_hostname = &tranquil_config::get().server.hostname;
     let issuer = format!("https://{}", pds_hostname);
     Ok(Json(IntrospectResponse {
         active: true,

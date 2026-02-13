@@ -438,12 +438,8 @@ pub async fn start_scheduled_tasks(
     sso_repo: Arc<dyn SsoRepository>,
     shutdown: CancellationToken,
 ) {
-    let check_interval = Duration::from_secs(
-        std::env::var("SCHEDULED_DELETE_CHECK_INTERVAL_SECS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(3600),
-    );
+    let check_interval =
+        Duration::from_secs(tranquil_config::get().scheduled.delete_check_interval_secs);
 
     info!(
         check_interval_secs = check_interval.as_secs(),

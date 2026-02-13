@@ -3,7 +3,6 @@ use crate::api::{EmptyResponse, TokenRequiredResponse, VerifiedResponse};
 use crate::auth::{Auth, NotTakendown};
 use crate::rate_limit::{EmailUpdateLimit, RateLimited, VerificationCheckLimit};
 use crate::state::AppState;
-use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -105,7 +104,7 @@ pub async fn request_email_update(
             }
         }
 
-        let hostname = pds_hostname();
+        let hostname = &tranquil_config::get().server.hostname;
         if let Err(e) = crate::comms::comms_repo::enqueue_short_token_email(
             state.user_repo.as_ref(),
             state.infra_repo.as_ref(),
@@ -367,7 +366,7 @@ pub async fn update_email(
     );
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
@@ -531,7 +530,7 @@ pub async fn authorize_email_update(
 
     info!(did = %did, "Email update authorized via link click");
 
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     let redirect_url = format!(
         "https://{}/app/verify?type=email-authorize-success",
         hostname

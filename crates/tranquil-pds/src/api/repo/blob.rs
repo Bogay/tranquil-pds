@@ -3,7 +3,7 @@ use crate::auth::{Auth, AuthAny, NotTakendown, Permissive, VerifyScope};
 use crate::delegation::DelegationActionType;
 use crate::state::AppState;
 use crate::types::{CidLink, Did};
-use crate::util::{get_header_str, get_max_blob_size};
+use crate::util::get_header_str;
 use axum::body::Body;
 use axum::{
     Json,
@@ -89,7 +89,7 @@ pub async fn upload_blob(
         .ok_or(ApiError::InternalError(None))?;
 
     let temp_key = format!("temp/{}", uuid::Uuid::new_v4());
-    let max_size = u64::try_from(get_max_blob_size()).unwrap_or(u64::MAX);
+    let max_size = tranquil_config::get().server.max_blob_size;
 
     let body_stream = body.into_data_stream();
     let mapped_stream =

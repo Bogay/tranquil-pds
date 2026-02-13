@@ -127,7 +127,9 @@ fn create_signed_token_with_act(
     let jti = uuid::Uuid::new_v4().to_string();
 
     let aud_hostname = hostname.map(|h| h.to_string()).unwrap_or_else(|| {
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+        tranquil_config::try_get()
+            .map(|c| c.server.hostname.clone())
+            .unwrap_or_else(|| "localhost".to_string())
     });
 
     let claims = Claims {
@@ -253,7 +255,9 @@ fn create_hs256_token_with_metadata(
         sub: did.to_owned(),
         aud: format!(
             "did:web:{}",
-            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+            tranquil_config::try_get()
+                .map(|c| c.server.hostname.clone())
+                .unwrap_or_else(|| "localhost".to_string())
         ),
         exp: expiration,
         iat: Utc::now().timestamp(),

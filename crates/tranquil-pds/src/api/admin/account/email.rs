@@ -2,7 +2,6 @@ use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::Did;
-use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -45,7 +44,7 @@ pub async fn send_email(
 
     let email = user.email.ok_or(ApiError::NoEmail)?;
     let (user_id, handle) = (user.id, user.handle);
-    let hostname = pds_hostname();
+    let hostname = &tranquil_config::get().server.hostname;
     let subject = input
         .subject
         .clone()
