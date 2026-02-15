@@ -30,7 +30,7 @@ impl FromStr for TokenType {
     type Err = TokenTypeParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+        match s.to_ascii_lowercase().as_str() {
             "at+jwt" => Ok(Self::Access),
             "refresh+jwt" => Ok(Self::Refresh),
             "jwt" => Ok(Self::Service),
@@ -88,7 +88,7 @@ impl FromStr for SigningAlgorithm {
     type Err = SigningAlgorithmParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+        match s.to_ascii_uppercase().as_str() {
             "ES256K" => Ok(Self::ES256K),
             "HS256" => Ok(Self::HS256),
             _ => Err(SigningAlgorithmParseError(s.to_string())),
@@ -258,3 +258,44 @@ impl fmt::Display for TokenVerifyError {
 }
 
 impl std::error::Error for TokenVerifyError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_type_accepts_bluesky_uppercase_jwt() {
+        let result: Result<Header, _> =
+            serde_json::from_str(r#"{"alg":"ES256K","typ":"JWT"}"#);
+        let header = result.expect("should parse uppercase JWT from bluesky reference pds");
+        assert_eq!(header.typ, TokenType::Service);
+        assert_eq!(header.alg, SigningAlgorithm::ES256K);
+    }
+
+    #[test]
+    fn token_type_accepts_lowercase_jwt() {
+        let result: Result<Header, _> =
+            serde_json::from_str(r#"{"alg":"ES256K","typ":"jwt"}"#);
+        let header = result.expect("should parse lowercase jwt");
+        assert_eq!(header.typ, TokenType::Service);
+    }
+
+    #[test]
+    fn token_type_accepts_mixed_case_access() {
+        assert_eq!(TokenType::from_str("AT+JWT").unwrap(), TokenType::Access);
+        assert_eq!(TokenType::from_str("at+jwt").unwrap(), TokenType::Access);
+        assert_eq!(TokenType::from_str("At+Jwt").unwrap(), TokenType::Access);
+    }
+
+    #[test]
+    fn token_type_rejects_unknown() {
+        assert!(TokenType::from_str("bearer").is_err());
+    }
+
+    #[test]
+    fn signing_algorithm_case_insensitive() {
+        assert_eq!(SigningAlgorithm::from_str("ES256K").unwrap(), SigningAlgorithm::ES256K);
+        assert_eq!(SigningAlgorithm::from_str("es256k").unwrap(), SigningAlgorithm::ES256K);
+        assert_eq!(SigningAlgorithm::from_str("hs256").unwrap(), SigningAlgorithm::HS256);
+    }
+}
