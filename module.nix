@@ -10,7 +10,9 @@ let
 
   inherit (lib) types mkOption;
 
-  backendUrl = "http://127.0.0.1:${toString cfg.settings.SERVER_PORT}";
+  settingsFormat = pkgs.formats.toml { };
+
+  backendUrl = "http://127.0.0.1:${toString cfg.settings.server.port}";
 
   useACME = cfg.nginx.enableACME && cfg.nginx.useACMEHost == null;
   hasSSL = useACME || cfg.nginx.useACMEHost != null;
@@ -100,76 +102,66 @@ in
 
     settings = mkOption {
       type = types.submodule {
-        freeformType = types.attrsOf (
-          types.nullOr (
-            types.oneOf [
-              types.str
-              types.path
-              types.int
-            ]
-          )
-        );
+        freeformType = settingsFormat.type;
 
         options = {
-          SERVER_HOST = mkOption {
-            type = types.str;
-            default = "127.0.0.1";
-            description = "Host for tranquil-pds to listen on";
+          server = {
+            host = mkOption {
+              type = types.str;
+              default = "127.0.0.1";
+              description = "Host for tranquil-pds to listen on";
+            };
+
+            port = mkOption {
+              type = types.int;
+              default = 3000;
+              description = "Port for tranquil-pds to listen on";
+            };
+
+            hostname = mkOption {
+              type = types.str;
+              default = "";
+              example = "pds.example.com";
+              description = "The public-facing hostname of the PDS";
+            };
+
+            max_blob_size = mkOption {
+              type = types.int;
+              default = 10737418240; # 10 GiB
+              description = "Maximum allowed blob size in bytes.";
+            };
           };
 
-          SERVER_PORT = mkOption {
-            type = types.int;
-            default = 3000;
-            description = "Port for tranquil-pds to listen on";
+          storage = {
+            path = mkOption {
+              type = types.path;
+              default = "/var/lib/tranquil-pds/blobs";
+              description = "Directory for storing blobs";
+            };
           };
 
-          PDS_HOSTNAME = mkOption {
-            type = types.nullOr types.str;
-            default = null;
-            example = "pds.example.com";
-            description = "The public-facing hostname of the PDS";
+          backup = {
+            path = mkOption {
+              type = types.path;
+              default = "/var/lib/tranquil-pds/backups";
+              description = "Directory for storing backups";
+            };
           };
 
-          BLOB_STORAGE_PATH = mkOption {
-            type = types.path;
-            default = "/var/lib/tranquil-pds/blobs";
-            description = "Directory for storing blobs";
+          email = {
+            sendmail_path = mkOption {
+              type = types.path;
+              default = lib.getExe pkgs.system-sendmail;
+              description = "Path to the sendmail executable to use for sending emails.";
+            };
           };
 
-          BACKUP_STORAGE_PATH = mkOption {
-            type = types.path;
-            default = "/var/lib/tranquil-pds/backups";
-            description = "Directory for storing backups";
-          };
-
-          MAIL_FROM_ADDRESS = mkOption {
-            type = types.nullOr types.str;
-            default = null;
-            description = "Email address to use in the From header when sending emails.";
-          };
-
-          SENDMAIL_PATH = mkOption {
-            type = types.path;
-            default = lib.getExe pkgs.system-sendmail;
-            description = "Path to the sendmail executable to use for sending emails.";
-          };
-
-          SIGNAL_SENDER_NUMBER = mkOption {
-            type = types.nullOr types.str;
-            default = null;
-            description = "Phone number (in international format) to use for sending Signal notifications.";
-          };
-
-          SIGNAL_CLI_PATH = mkOption {
-            type = types.path;
-            default = lib.getExe pkgs.signal-cli;
-            description = "Path to the signal-cli executable to use for sending Signal notifications.";
-          };
-
-          MAX_BLOB_SIZE = mkOption {
-            type = types.int;
-            default = 10737418240; # 10 GiB
-            description = "Maximum allowed blob size in bytes.";
+          signal = {
+            cli_path = mkOption {
+              type = types.path;
+              default = lib.getExe pkgs.signal-cli;
+              description = "Path to the signal-cli executable to use for sending Signal notifications.";
+            };
           };
         };
       };
@@ -198,7 +190,8 @@ in
           ];
         };
 
-        services.tranquil-pds.settings.DATABASE_URL = lib.mkDefault "postgresql:///${cfg.user}?host=/run/postgresql";
+        services.tranquil-pds.settings.database.url =
+          lib.mkDefault "postgresql:///${cfg.user}?host=/run/postgresql";
 
         systemd.services.tranquil-pds = {
           requires = [ "postgresql.service" ];
@@ -210,15 +203,15 @@ in
         services.nginx = {
           enable = true;
 
-          virtualHosts.${cfg.settings.PDS_HOSTNAME} = {
-            serverAliases = [ "*.${cfg.settings.PDS_HOSTNAME}" ];
+          virtualHosts.${cfg.settings.server.hostname} = {
+            serverAliases = [ "*.${cfg.settings.server.hostname}" ];
             forceSSL = hasSSL;
             enableACME = useACME;
             useACMEHost = cfg.nginx.useACMEHost;
 
             root = lib.mkIf (cfg.frontend.package != null) cfg.frontend.package;
 
-            extraConfig = "client_max_body_size ${toString cfg.settings.MAX_BLOB_SIZE};";
+            extraConfig = "client_max_body_size ${toString cfg.settings.server.max_blob_size};";
 
             locations = lib.mkMerge [
               {
@@ -321,8 +314,8 @@ in
           lib.genAttrs
             [
               cfg.dataDir
-              cfg.settings.BLOB_STORAGE_PATH
-              cfg.settings.BACKUP_STORAGE_PATH
+              cfg.settings.storage.path
+              cfg.settings.backup.path
             ]
             (_: {
               d = {
@@ -330,6 +323,10 @@ in
                 inherit (cfg) user group;
               };
             });
+
+        environment.etc = {
+          "tranquil-pds/config.toml".source = settingsFormat.generate "tranquil-pds.toml" cfg.settings;
+        };
 
         systemd.services.tranquil-pds = {
           description = "Tranquil PDS - AT Protocol Personal Data Server";
@@ -348,13 +345,6 @@ in
             StateDirectory = "tranquil-pds";
 
             EnvironmentFile = cfg.environmentFiles;
-            Environment = lib.mapAttrsToList (k: v: "${k}=${if builtins.isInt v then toString v else v}") (
-              lib.filterAttrs (k: v:
-                if k == "SENDMAIL_PATH" then cfg.settings.MAIL_FROM_ADDRESS != null
-                else if k == "SIGNAL_CLI_PATH" then cfg.settings.SIGNAL_SENDER_NUMBER != null
-                else v != null
-              ) cfg.settings
-            );
 
             NoNewPrivileges = true;
             ProtectSystem = "strict";
@@ -377,8 +367,8 @@ in
             RemoveIPC = true;
 
             ReadWritePaths = [
-              cfg.settings.BLOB_STORAGE_PATH
-              cfg.settings.BACKUP_STORAGE_PATH
+              cfg.settings.storage.path
+              cfg.settings.backup.path
             ];
           };
         };
