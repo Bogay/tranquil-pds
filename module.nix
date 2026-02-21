@@ -1,11 +1,9 @@
-self:
-{
+self: {
   lib,
   pkgs,
   config,
   ...
-}:
-let
+}: let
   cfg = config.services.tranquil-pds;
 
   inherit (lib) types mkOption;
@@ -16,8 +14,7 @@ let
 
   useACME = cfg.nginx.enableACME && cfg.nginx.useACMEHost == null;
   hasSSL = useACME || cfg.nginx.useACMEHost != null;
-in
-{
+in {
   _class = "nixos";
 
   options.services.tranquil-pds = {
@@ -167,11 +164,11 @@ in
       };
 
       description = ''
-        Environment variables to set for the service. Secrets should be
+        Configuration options to set for the service. Secrets should be
         specified using {option}`environmentFile`.
 
-        Refer to <https://tangled.org/tranquil.farm/tranquil-pds/blob/main/.env.example>
-        available environment variables.
+        Refer to <https://tangled.org/tranquil.farm/tranquil-pds/blob/main/example.toml>
+        for available configuration options.
       '';
     };
   };
