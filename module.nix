@@ -261,7 +261,7 @@ in {
               }
 
               (lib.optionalAttrs (cfg.frontend.package != null) {
-                "= /oauth/client-metadata.json" = {
+                "= /oauth-client-metadata.json" = {
                   root = "${cfg.frontend.package}";
                   extraConfig = ''
                     default_type application/json;

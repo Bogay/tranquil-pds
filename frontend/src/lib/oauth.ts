@@ -14,7 +14,7 @@ const SCOPES = [
 ].join(" ");
 
 const CLIENT_ID = !(import.meta.env.DEV)
-  ? `${globalThis.location.origin}/oauth/client-metadata.json`
+  ? `${globalThis.location.origin}/oauth-client-metadata.json`
   : `http://localhost/?scope=${SCOPES}`;
 
 const REDIRECT_URI = `${globalThis.location.origin}/app/`;

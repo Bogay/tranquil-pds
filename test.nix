@@ -147,10 +147,10 @@ pkgs.testers.nixosTest {
         code = http_status("/xrpc/_health", host="alice.pds.test")
         assert code == "200", f"subdomain routing failed: {code}"
 
-    with subtest("client-metadata.json served with host substitution"):
-        meta_raw = http_get("/oauth/client-metadata.json")
+    with subtest("oauth-client-metadata.json served with host substitution"):
+        meta_raw = http_get("/oauth-client-metadata.json")
         meta = json.loads(meta_raw)
-        assert "client_id" in meta, f"no client_id in client-metadata: {meta}"
+        assert "client_id" in meta, f"no client_id in oauth-client-metadata: {meta}"
         assert "pds.test" in meta_raw, "host substitution did not apply"
 
     with subtest("static assets location exists"):

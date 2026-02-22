@@ -1055,7 +1055,7 @@ export function createLocalClient(): AtprotoClient {
 }
 
 export function getMigrationOAuthClientId(): string {
-  return `${globalThis.location.origin}/oauth/client-metadata.json`;
+  return `${globalThis.location.origin}/oauth-client-metadata.json`;
 }
 
 export function getMigrationOAuthRedirectUri(): string {
