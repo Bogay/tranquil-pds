@@ -83,11 +83,12 @@ aws-config = { workspace = true, optional = true }
 aws-sdk-s3 = { workspace = true, optional = true }
 
 [features]
-default = ["s3", "valkey"]
+default = ["frontend", "s3", "valkey"]
 external-infra = []
 s3-storage = ["tranquil-storage/s3", "dep:aws-config", "dep:aws-sdk-s3"]
 s3 = ["s3-storage"]
 valkey = ["tranquil-cache/valkey", "dep:redis"]
+frontend = []
 
 [dev-dependencies]
 ciborium = { workspace = true }

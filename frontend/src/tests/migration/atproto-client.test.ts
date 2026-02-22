@@ -166,7 +166,7 @@ describe("migration/atproto-client", () => {
 
     it("builds authorization URL with required parameters", () => {
       const url = buildOAuthAuthorizationUrl(mockMetadata, {
-        clientId: "https://example.com/oauth/client-metadata.json",
+        clientId: "https://example.com/oauth-client-metadata.json",
         redirectUri: "https://example.com/migrate",
         codeChallenge: "abc123",
         state: "state123",
@@ -177,7 +177,7 @@ describe("migration/atproto-client", () => {
       expect(parsed.pathname).toBe("/oauth/authorize");
       expect(parsed.searchParams.get("response_type")).toBe("code");
       expect(parsed.searchParams.get("client_id")).toBe(
-        "https://example.com/oauth/client-metadata.json",
+        "https://example.com/oauth-client-metadata.json",
       );
       expect(parsed.searchParams.get("redirect_uri")).toBe(
         "https://example.com/migrate",
@@ -256,7 +256,7 @@ describe("migration/atproto-client", () => {
     it("returns client metadata URL based on origin", () => {
       const clientId = getMigrationOAuthClientId();
       expect(clientId).toBe(
-        `${globalThis.location.origin}/oauth/client-metadata.json`,
+        `${globalThis.location.origin}/oauth-client-metadata.json`,
       );
     });
   });

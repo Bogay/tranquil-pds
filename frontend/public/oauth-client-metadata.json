@@ -1,10 +1,10 @@
 {
-  "client_id": "https://__PDS_HOSTNAME__/oauth/client-metadata.json",
-  "client_name": "PDS Account Manager",
-  "client_uri": "https://__PDS_HOSTNAME__",
+  "client_id": "https://__FRONTEND_HOSTNAME__/oauth-client-metadata.json",
+  "client_name": "Tranquil PDS Account Manager",
+  "client_uri": "https://__FRONTEND_HOSTNAME__",
   "redirect_uris": [
-    "https://__PDS_HOSTNAME__/app/",
-    "https://__PDS_HOSTNAME__/app/migrate"
+    "https://__FRONTEND_HOSTNAME__/app/",
+    "https://__FRONTEND_HOSTNAME__/app/migrate"
   ],
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],

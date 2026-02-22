@@ -51,7 +51,7 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: `${hostname}/oauth/client-metadata.json`,
+        client_id: `${hostname}/oauth-client-metadata.json`,
         redirect_uri: `${hostname}/app/`,
         response_type: 'code',
         scope: 'atproto',

@@ -1,6 +1,9 @@
+use std::fmt::Debug;
+
 use crate::oauth::jwks::{JwkSet, create_jwk_set};
 use crate::state::AppState;
 use axum::{Json, extract::State};
+use http::{HeaderName, header};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -139,4 +142,21 @@ pub async fn oauth_jwks(State(_state): State<AppState>) -> Json<JwkSet> {
         y: Some(config.signing_key_y.clone()),
     };
     Json(create_jwk_set(vec![server_key]))
+}
+
+pub async fn frontend_client_metadata()
+-> axum::response::Result<([(HeaderName, &'static str); 1], String)> {
+    let frontend_hostname = &tranquil_config::get().server.hostname;
+    let metadata_string = tokio::fs::read_to_string(format!(
+        "{}/oauth-client-metadata.json",
+        &tranquil_config::get().frontend.dir
+    ))
+    .await
+    // TODO: consider if a better conversion can be done here.
+    .map_err(|io_err| io_err.to_string())?;
+
+    Ok((
+        [(header::CONTENT_TYPE, "application/json")],
+        metadata_string.replace("__FRONTEND_HOSTNAME__", frontend_hostname),
+    ))
 }

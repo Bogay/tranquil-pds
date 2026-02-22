@@ -39,7 +39,10 @@ use http::StatusCode;
 use serde_json::json;
 use state::AppState;
 use tower::ServiceBuilder;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::{ServeDir, ServeFile},
+};
 pub use tranquil_db_traits::AccountStatus;
 pub use types::{AccountState, AtIdentifier, AtUri, Did, Handle, Nsid, Rkey};
 
@@ -650,7 +653,9 @@ pub fn app(state: AppState) -> Router {
             get(oauth::endpoints::oauth_authorization_server),
         );
 
-    Router::new()
+    if cfg!(feature = "frontend") {}
+
+    let router = Router::new()
         .nest_service("/xrpc", xrpc_service)
         .nest("/oauth", oauth_router)
         .nest("/.well-known", well_known_router)
@@ -695,7 +700,35 @@ pub fn app(state: AppState) -> Router {
                     util::HEADER_ATPROTO_CONTENT_LABELERS,
                 ]),
         )
-        .with_state(state)
+        .with_state(state);
+
+    if cfg!(feature = "frontend") && tranquil_config::get().frontend.enabled {
+        let frontend_dir = &tranquil_config::get().frontend.dir;
+        let index_path = format!("{}/index.html", frontend_dir);
+        let homepage_path = format!("{}/homepage.html", frontend_dir);
+
+        let homepage_exists = std::path::Path::new(&homepage_path).exists();
+        let homepage_file = if homepage_exists {
+            homepage_path
+        } else {
+            index_path.clone()
+        };
+
+        let spa_router = Router::new().fallback_service(ServeFile::new(&index_path));
+
+        let serve_dir = ServeDir::new(&frontend_dir).not_found_service(ServeFile::new(&index_path));
+
+        return router
+            .route(
+                "/oauth-client-metadata.json",
+                get(oauth::endpoints::frontend_client_metadata),
+            )
+            .route_service("/", ServeFile::new(&homepage_file))
+            .nest("/app", spa_router)
+            .fallback_service(serve_dir);
+    }
+
+    router
 }
 
 async fn rewrite_422_to_400(response: axum::response::Response) -> axum::response::Response {

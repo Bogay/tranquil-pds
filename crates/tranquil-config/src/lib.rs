@@ -97,6 +97,9 @@ pub struct TranquilConfig {
     pub server: ServerConfig,
 
     #[config(nested)]
+    pub frontend: FrontendConfig,
+
+    #[config(nested)]
     pub database: DatabaseConfig,
 
     #[config(nested)]
@@ -480,6 +483,18 @@ impl ServerConfig {
             .clone()
             .unwrap_or_else(|| vec![self.hostname_without_port().to_string()])
     }
+}
+
+#[derive(Debug, Config)]
+pub struct FrontendConfig {
+    /// Whether to enable the built in serving of the frontend.
+    #[config(env = "FRONTEND_ENABLED", default = true)]
+    pub enabled: bool,
+
+    /// Directory to serve as the frontend. The oauth_client_metadata.json will have any references to
+    /// the frontend hostname replaced by the configured frontend hostname.
+    #[config(env = "FRONTEND_DIR", default = "/var/lib/tranquil-pds/frontend")]
+    pub dir: String,
 }
 
 #[derive(Debug, Config)]

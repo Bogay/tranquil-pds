@@ -179,7 +179,7 @@ server {
         proxy_request_buffering off;
     }
 
-    location = /oauth/client-metadata.json {
+    location = /oauth-client-metadata.json {
         root /var/www/tranquil-pds;
         default_type application/json;
         sub_filter_once off;
