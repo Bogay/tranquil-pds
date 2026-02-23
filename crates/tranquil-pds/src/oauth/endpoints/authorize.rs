@@ -964,22 +964,33 @@ pub async fn authorize_select(
     let has_totp = crate::api::server::has_totp_enabled(&state, &did).await;
     let select_early_device_typed = device_id.clone();
     if has_totp {
-        if state
-            .oauth_repo
-            .set_authorization_did(&select_request_id, &did, Some(&select_early_device_typed))
-            .await
-            .is_err()
-        {
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "server_error",
-                "An error occurred. Please try again.",
-            );
+        let device_is_trusted =
+            crate::api::server::is_device_trusted(state.oauth_repo.as_ref(), &device_id, &did)
+                .await;
+        if !device_is_trusted {
+            if state
+                .oauth_repo
+                .set_authorization_did(
+                    &select_request_id,
+                    &did,
+                    Some(&select_early_device_typed),
+                )
+                .await
+                .is_err()
+            {
+                return json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "An error occurred. Please try again.",
+                );
+            }
+            return Json(serde_json::json!({
+                "needs_totp": true
+            }))
+            .into_response();
         }
-        return Json(serde_json::json!({
-            "needs_totp": true
-        }))
-        .into_response();
+        let _ = crate::api::server::extend_device_trust(state.oauth_repo.as_ref(), &device_id)
+            .await;
     }
     if user.two_factor_enabled {
         let _ = state
@@ -1912,11 +1923,38 @@ pub async fn authorize_2fa_post(
             "Invalid verification code. Please try again.",
         );
     }
-    let device_id = extract_device_cookie(&headers);
-    if form.trust_device
-        && let Some(ref dev_id) = device_id
-    {
-        let _ = crate::api::server::trust_device(state.oauth_repo.as_ref(), dev_id).await;
+    let mut device_id = extract_device_cookie(&headers);
+    let mut new_cookie: Option<String> = None;
+    if form.trust_device {
+        let trust_device_id = match &device_id {
+            Some(existing_id) => existing_id.clone(),
+            None => {
+                let new_id = DeviceId::generate();
+                let new_device_id_typed = DeviceIdType::new(new_id.0.clone());
+                let device_data = DeviceData {
+                    session_id: SessionId::generate(),
+                    user_agent: extract_user_agent(&headers),
+                    ip_address: extract_client_ip(&headers, None),
+                    last_seen_at: Utc::now(),
+                };
+                if state
+                    .oauth_repo
+                    .create_device(&new_device_id_typed, &device_data)
+                    .await
+                    .is_ok()
+                {
+                    new_cookie = Some(make_device_cookie(&new_device_id_typed));
+                    device_id = Some(new_device_id_typed.clone());
+                }
+                new_device_id_typed
+            }
+        };
+        let _ = state
+            .oauth_repo
+            .upsert_account_device(&did, &trust_device_id)
+            .await;
+        let _ = crate::api::server::trust_device(state.oauth_repo.as_ref(), &trust_device_id)
+            .await;
     }
     let requested_scope_str = request_data
         .parameters
@@ -1941,6 +1979,14 @@ pub async fn authorize_2fa_post(
             "/app/oauth/consent?request_uri={}",
             url_encode(&form.request_uri)
         );
+        if let Some(cookie) = new_cookie {
+            return (
+                StatusCode::OK,
+                [(SET_COOKIE, cookie)],
+                Json(serde_json::json!({"redirect_uri": consent_url})),
+            )
+                .into_response();
+        }
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
     }
     let code = Code::generate();
@@ -1969,10 +2015,16 @@ pub async fn authorize_2fa_post(
         request_data.parameters.state.as_deref(),
         request_data.parameters.response_mode.map(|m| m.as_str()),
     );
-    Json(serde_json::json!({
-        "redirect_uri": redirect_url
-    }))
-    .into_response()
+    if let Some(cookie) = new_cookie {
+        (
+            StatusCode::OK,
+            [(SET_COOKIE, cookie)],
+            Json(serde_json::json!({"redirect_uri": redirect_url})),
+        )
+            .into_response()
+    } else {
+        Json(serde_json::json!({"redirect_uri": redirect_url})).into_response()
+    }
 }
 
 #[derive(Debug, Deserialize)]

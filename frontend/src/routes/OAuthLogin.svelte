@@ -1,7 +1,7 @@
 <script lang="ts">
   import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
-  import { startOAuthLogin } from '../lib/oauth'
+  import { startOAuthLogin, ensureRequestUri } from '../lib/oauth'
   import {
     prepareRequestOptions,
     serializeAssertionResponse,
@@ -57,6 +57,7 @@
   })
 
   $effect(() => {
+    ensureRequestUri('').catch(() => {})
     fetchAuthRequestInfo()
     fetchSsoProviders()
   })
