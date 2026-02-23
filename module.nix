@@ -9,11 +9,6 @@ self: {
   inherit (lib) types mkOption;
 
   settingsFormat = pkgs.formats.toml { };
-
-  backendUrl = "http://127.0.0.1:${toString cfg.settings.server.port}";
-
-  useACME = cfg.nginx.enableACME && cfg.nginx.useACMEHost == null;
-  hasSSL = useACME || cfg.nginx.useACMEHost != null;
 in {
   _class = "nixos";
 
@@ -42,7 +37,7 @@ in {
     dataDir = mkOption {
       type = types.str;
       default = "/var/lib/tranquil-pds";
-      description = "Directory for tranquil-pds data (blobs, backups)";
+      description = "Working directory for tranquil-pds. Also expected to be used for data (blobs, backups)";
     };
 
     environmentFiles = mkOption {
@@ -67,34 +62,6 @@ in {
       description = ''
         Create the postgres database and user on the local host.
       '';
-    };
-
-    frontend.package = mkOption {
-      type = types.nullOr types.package;
-      default = self.packages.${pkgs.stdenv.hostPlatform.system}.tranquil-frontend;
-      defaultText = lib.literalExpression "self.packages.\${pkgs.stdenv.hostPlatform.system}.tranquil-frontend";
-      description = "Frontend package to serve via nginx (set null to disable frontend)";
-    };
-
-    nginx = {
-      enable = lib.mkEnableOption "nginx reverse proxy for tranquil-pds";
-
-      enableACME = mkOption {
-        type = types.bool;
-        default = true;
-        description = "Enable ACME for the pds domain";
-      };
-
-      useACMEHost = mkOption {
-        type = types.nullOr types.str;
-        default = null;
-        description = ''
-          Use a pre-configured ACME certificate instead of generating one.
-          Set this to the cert name from security.acme.certs for wildcard setups.
-
-          REMEMBER: Handle subdomains (*.pds.example.com) require a wildcard cert via DNS-01.
-        '';
-      };
     };
 
     settings = mkOption {
@@ -126,6 +93,18 @@ in {
               type = types.int;
               default = 10737418240; # 10 GiB
               description = "Maximum allowed blob size in bytes.";
+            };
+          };
+
+          frontend = {
+            enabled = lib.mkEnabeOption "serving the frontend from the backend. Disable to server the frontend manually"
+              // { default = true; };
+
+            dir = mkOption {
+              type = types.nullOr types.package;
+              default = self.packages.${pkgs.stdenv.hostPlatform.system}.tranquil-frontend;
+              defaultText = lib.literalExpression "self.packages.\${pkgs.stdenv.hostPlatform.system}.tranquil-frontend";
+              description = "Frontend package to be served by the backend";
             };
           };
 
@@ -174,7 +153,7 @@ in {
   };
 
   config = lib.mkIf cfg.enable (
-    lib.mkMerge [
+    lib.mkMerge [            
       (lib.mkIf cfg.database.createLocally {
         services.postgresql = {
           enable = true;
@@ -196,109 +175,7 @@ in {
         };
       })
 
-      (lib.mkIf cfg.nginx.enable {
-        services.nginx = {
-          enable = true;
-
-          virtualHosts.${cfg.settings.server.hostname} = {
-            serverAliases = [ "*.${cfg.settings.server.hostname}" ];
-            forceSSL = hasSSL;
-            enableACME = useACME;
-            useACMEHost = cfg.nginx.useACMEHost;
-
-            root = lib.mkIf (cfg.frontend.package != null) cfg.frontend.package;
-
-            extraConfig = "client_max_body_size ${toString cfg.settings.server.max_blob_size};";
-
-            locations = lib.mkMerge [
-              {
-                "/xrpc/" = {
-                  proxyPass = backendUrl;
-                  proxyWebsockets = true;
-                  extraConfig = ''
-                    proxy_read_timeout 86400;
-                    proxy_send_timeout 86400;
-                    proxy_buffering off;
-                    proxy_request_buffering off;
-                  '';
-                };
-
-                "/oauth/" = {
-                  proxyPass = backendUrl;
-                  extraConfig = ''
-                    proxy_read_timeout 300;
-                    proxy_send_timeout 300;
-                  '';
-                };
-
-                "/.well-known/" = {
-                  proxyPass = backendUrl;
-                };
-
-                "/webhook/" = {
-                  proxyPass = backendUrl;
-                };
-
-                "= /metrics" = {
-                  proxyPass = backendUrl;
-                };
-
-                "= /health" = {
-                  proxyPass = backendUrl;
-                };
-
-                "= /robots.txt" = {
-                  proxyPass = backendUrl;
-                };
-
-                "= /logo" = {
-                  proxyPass = backendUrl;
-                };
-
-                "~ ^/u/[^/]+/did\\.json$" = {
-                  proxyPass = backendUrl;
-                };
-              }
-
-              (lib.optionalAttrs (cfg.frontend.package != null) {
-                "= /oauth-client-metadata.json" = {
-                  root = "${cfg.frontend.package}";
-                  extraConfig = ''
-                    default_type application/json;
-                    sub_filter_once off;
-                    sub_filter_types application/json;
-                    sub_filter '__PDS_HOSTNAME__' $host;
-                  '';
-                };
-
-                "/assets/" = {
-                  # TODO: use `add_header_inherit` when nixpkgs updates to nginx 1.29.3+
-                  extraConfig = ''
-                    expires 1y;
-                    add_header Cache-Control "public, immutable";
-                  '';
-                  tryFiles = "$uri =404";
-                };
-
-                "/app/" = {
-                  tryFiles = "$uri $uri/ /index.html";
-                };
-
-                "= /" = {
-                  tryFiles = "/homepage.html /index.html";
-                };
-
-                "/" = {
-                  tryFiles = "$uri $uri/ /index.html";
-                  priority = 9999;
-                };
-              })
-            ];
-          };
-        };
-      })
-
-      {
+      {      
         users.users.${cfg.user} = {
           isSystemUser = true;
           inherit (cfg) group;
