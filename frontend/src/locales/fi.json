@@ -542,7 +542,8 @@
       "passkeyHintNotAvailable": "Ei pääsyavainta",
       "passwordPlaceholder": "Salasana",
       "usePasskey": "Käytä pääsyavainta",
-      "orUseCredentials": "tai"
+      "orUseCredentials": "tai",
+      "verificationResent": "Vahvistuskoodi lähetetty"
     },
     "register": {
       "title": "Luo tili",

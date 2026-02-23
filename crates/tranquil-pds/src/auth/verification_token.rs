@@ -321,8 +321,13 @@ pub fn normalize_token_input(input: &str) -> String {
 mod tests {
     use super::*;
 
+    fn init() {
+        tranquil_config::ensure_test_defaults();
+    }
+
     #[test]
     fn test_signup_token() {
+        init();
         let did: Did = "did:plc:test123".parse().unwrap();
         let channel = CommsChannel::Email;
         let identifier = "test@example.com";
@@ -337,6 +342,7 @@ mod tests {
 
     #[test]
     fn test_migration_token() {
+        init();
         let did: Did = "did:plc:test123".parse().unwrap();
         let email = "test@example.com";
         let token = generate_migration_token(&did, email);
@@ -349,6 +355,7 @@ mod tests {
 
     #[test]
     fn test_token_case_insensitive() {
+        init();
         let did: Did = "did:plc:test123".parse().unwrap();
         let token = generate_signup_token(&did, CommsChannel::Email, "Test@Example.COM");
         let result = verify_signup_token(&token, CommsChannel::Email, "test@example.com");
@@ -357,6 +364,7 @@ mod tests {
 
     #[test]
     fn test_token_wrong_identifier() {
+        init();
         let did: Did = "did:plc:test123".parse().unwrap();
         let token = generate_signup_token(&did, CommsChannel::Email, "test@example.com");
         let result = verify_signup_token(&token, CommsChannel::Email, "other@example.com");
@@ -365,6 +373,7 @@ mod tests {
 
     #[test]
     fn test_token_wrong_channel() {
+        init();
         let did: Did = "did:plc:test123".parse().unwrap();
         let token = generate_signup_token(&did, CommsChannel::Email, "test@example.com");
         let result = verify_signup_token(&token, CommsChannel::Discord, "test@example.com");
@@ -373,6 +382,7 @@ mod tests {
 
     #[test]
     fn test_expired_token() {
+        init();
         let did: Did = "did:plc:test123".parse().unwrap();
         let token = generate_token_with_expiry(
             &did,
@@ -388,12 +398,14 @@ mod tests {
 
     #[test]
     fn test_invalid_token() {
+        init();
         let result = verify_signup_token("invalid-token", CommsChannel::Email, "test@example.com");
         assert!(matches!(result, Err(VerifyError::InvalidFormat)));
     }
 
     #[test]
     fn test_purpose_mismatch() {
+        init();
         let did: Did = "did:plc:test123".parse().unwrap();
         let email = "test@example.com";
         let signup_token = generate_signup_token(&did, CommsChannel::Email, email);
@@ -403,6 +415,7 @@ mod tests {
 
     #[test]
     fn test_discord_channel() {
+        init();
         let did: Did = "did:plc:test123".parse().unwrap();
         let discord_id = "123456789012345678";
         let token = generate_signup_token(&did, CommsChannel::Discord, discord_id);

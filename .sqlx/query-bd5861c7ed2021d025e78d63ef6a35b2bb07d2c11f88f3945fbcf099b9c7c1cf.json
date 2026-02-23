@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_authorization_request\n            SET expires_at = $2\n            WHERE id = $1 AND did IS NOT NULL AND code IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bd5861c7ed2021d025e78d63ef6a35b2bb07d2c11f88f3945fbcf099b9c7c1cf"
+}

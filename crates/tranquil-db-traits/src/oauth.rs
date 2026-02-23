@@ -192,6 +192,11 @@ pub trait OAuthRepository: Send + Sync {
     ) -> Result<Option<RequestData>, DbError>;
     async fn delete_authorization_request(&self, request_id: &RequestId) -> Result<(), DbError>;
     async fn delete_expired_authorization_requests(&self) -> Result<u64, DbError>;
+    async fn extend_authorization_request_expiry(
+        &self,
+        request_id: &RequestId,
+        new_expires_at: DateTime<Utc>,
+    ) -> Result<bool, DbError>;
     async fn mark_request_authenticated(
         &self,
         request_id: &RequestId,

@@ -33,3 +33,7 @@ pub fn email_update_key(did: &str) -> String {
 pub fn scope_ref_key(cid: &str) -> String {
     format!("scope_ref:{}", cid)
 }
+
+pub fn auto_verify_sent_key(did: &str) -> String {
+    format!("auto_verify_sent:{}", did)
+}

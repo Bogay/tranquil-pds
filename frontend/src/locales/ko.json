@@ -542,7 +542,8 @@
       "passkeyHintNotAvailable": "패스키 없음",
       "passwordPlaceholder": "비밀번호",
       "usePasskey": "패스키 사용",
-      "orUseCredentials": "또는"
+      "orUseCredentials": "또는",
+      "verificationResent": "인증 코드 전송됨"
     },
     "register": {
       "title": "계정 만들기",

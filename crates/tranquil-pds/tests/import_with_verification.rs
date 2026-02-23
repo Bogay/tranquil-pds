@@ -64,7 +64,7 @@ async fn test_import_with_valid_signature_and_mock_plc() {
     let mock_plc = setup_mock_plc_directory(&did, did_doc).await;
     unsafe {
         std::env::set_var("PLC_DIRECTORY_URL", mock_plc.uri());
-        std::env::remove_var("SKIP_IMPORT_VERIFICATION");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "false");
     }
     let (car_bytes, _root_cid) = build_car_with_signature(&did, &signing_key);
     let import_res = client
@@ -108,7 +108,7 @@ async fn test_import_with_wrong_signing_key_fails() {
     let mock_plc = setup_mock_plc_directory(&did, did_doc).await;
     unsafe {
         std::env::set_var("PLC_DIRECTORY_URL", mock_plc.uri());
-        std::env::remove_var("SKIP_IMPORT_VERIFICATION");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "false");
     }
     let (car_bytes, _root_cid) = build_car_with_signature(&did, &wrong_signing_key);
     let import_res = client
@@ -157,7 +157,7 @@ async fn test_import_with_did_mismatch_fails() {
     let mock_plc = setup_mock_plc_directory(&did, did_doc).await;
     unsafe {
         std::env::set_var("PLC_DIRECTORY_URL", mock_plc.uri());
-        std::env::remove_var("SKIP_IMPORT_VERIFICATION");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "false");
     }
     let (car_bytes, _root_cid) = build_car_with_signature(wrong_did, &signing_key);
     let import_res = client
@@ -202,7 +202,7 @@ async fn test_import_with_plc_resolution_failure() {
         .await;
     unsafe {
         std::env::set_var("PLC_DIRECTORY_URL", mock_plc.uri());
-        std::env::remove_var("SKIP_IMPORT_VERIFICATION");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "false");
     }
     let (car_bytes, _root_cid) = build_car_with_signature(&did, &signing_key);
     let import_res = client
@@ -248,7 +248,7 @@ async fn test_import_with_no_signing_key_in_did_doc() {
     let mock_plc = setup_mock_plc_directory(&did, did_doc_without_key).await;
     unsafe {
         std::env::set_var("PLC_DIRECTORY_URL", mock_plc.uri());
-        std::env::remove_var("SKIP_IMPORT_VERIFICATION");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "false");
     }
     let (car_bytes, _root_cid) = build_car_with_signature(&did, &signing_key);
     let import_res = client

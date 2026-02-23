@@ -542,7 +542,8 @@
       "passkeyHintNotAvailable": "パスキーなし",
       "passwordPlaceholder": "パスワード",
       "usePasskey": "パスキーを使用",
-      "orUseCredentials": "または"
+      "orUseCredentials": "または",
+      "verificationResent": "確認コードを送信しました"
     },
     "register": {
       "title": "アカウント作成",

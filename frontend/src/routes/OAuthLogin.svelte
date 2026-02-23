@@ -18,6 +18,18 @@
     icon: string
   }
 
+  const PENDING_VERIFICATION_KEY = 'tranquil_pds_pending_verification'
+
+  function storePendingVerification(data: { did?: string; handle?: string; channel?: string }) {
+    if (data.did) {
+      localStorage.setItem(PENDING_VERIFICATION_KEY, JSON.stringify({
+        did: data.did,
+        handle: data.handle ?? '',
+        channel: data.channel ?? '',
+      }))
+    }
+  }
+
   let username = $state('')
   let ssoProviders = $state<SsoProvider[]>([])
   let ssoLoading = $state<string | null>(null)
@@ -25,6 +37,7 @@
   let rememberDevice = $state(false)
   let submitting = $state(false)
   let error = $state<string | null>(null)
+  let verificationResent = $state(false)
   let hasPasskeys = $state(false)
   let hasTotp = $state(false)
   let hasPassword = $state(true)
@@ -52,7 +65,11 @@
   $effect(() => {
     const urlError = getErrorFromUrl()
     if (urlError) {
-      error = urlError
+      if (urlError === 'account_not_verified') {
+        verificationResent = true
+      } else {
+        error = urlError
+      }
     }
   })
 
@@ -200,6 +217,7 @@
 
     submitting = true
     error = null
+    verificationResent = false
 
     try {
       const startResponse = await fetch('/oauth/passkey/start', {
@@ -216,6 +234,12 @@
 
       if (!startResponse.ok) {
         const data = await startResponse.json()
+        if (data.error === 'account_not_verified') {
+          verificationResent = true
+          storePendingVerification(data)
+          submitting = false
+          return
+        }
         error = data.error_description || data.error || 'Failed to start passkey login'
         submitting = false
         return
@@ -251,6 +275,12 @@
       const data = await finishResponse.json()
 
       if (!finishResponse.ok) {
+        if (data.error === 'account_not_verified') {
+          verificationResent = true
+          storePendingVerification(data)
+          submitting = false
+          return
+        }
         error = data.error_description || data.error || 'Passkey authentication failed'
         submitting = false
         return
@@ -294,6 +324,7 @@
 
     submitting = true
     error = null
+    verificationResent = false
 
     try {
       const response = await fetch('/oauth/authorize', {
@@ -313,6 +344,12 @@
       const data = await response.json()
 
       if (!response.ok) {
+        if (data.error === 'account_not_verified') {
+          verificationResent = true
+          storePendingVerification(data)
+          submitting = false
+          return
+        }
         error = data.error_description || data.error || 'Login failed'
         submitting = false
         return
@@ -354,7 +391,12 @@
     {/if}
   </header>
 
-  {#if error}
+  {#if verificationResent}
+    <div class="message warning">
+      <p>{$_('oauth.login.verificationResent')}</p>
+      <a href={`${getFullUrl(routes.verify)}${getRequestUri() ? `?request_uri=${encodeURIComponent(getRequestUri()!)}` : ''}`}>{$_('verify.tokenTitle')}</a>
+    </div>
+  {:else if error}
     <div class="message error">{error}</div>
   {/if}
 

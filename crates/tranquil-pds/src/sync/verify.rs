@@ -145,7 +145,8 @@ impl CarVerifier {
     }
 
     async fn resolve_plc_did(&self, did: &str) -> Result<DidDocument<'static>, VerifyError> {
-        let plc_url = tranquil_config::get().plc.directory_url.clone();
+        let plc_url = std::env::var("PLC_DIRECTORY_URL")
+            .unwrap_or_else(|_| tranquil_config::get().plc.directory_url.clone());
         let url = format!("{}/{}", plc_url, urlencoding::encode(did));
         let response = self
             .http_client

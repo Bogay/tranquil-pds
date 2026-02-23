@@ -542,7 +542,8 @@
       "passkeyHintNotAvailable": "Ingen nyckel registrerad",
       "passwordPlaceholder": "Lösenord",
       "usePasskey": "Använd nyckel",
-      "orUseCredentials": "eller"
+      "orUseCredentials": "eller",
+      "verificationResent": "Verifieringskod skickad"
     },
     "register": {
       "title": "Skapa konto",

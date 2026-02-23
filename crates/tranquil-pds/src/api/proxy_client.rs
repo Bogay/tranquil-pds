@@ -63,7 +63,7 @@ pub fn is_ssrf_safe(url: &str) -> Result<(), SsrfError> {
     let parsed = Url::parse(url).map_err(|_| SsrfError::InvalidUrl)?;
     let scheme = parsed.scheme();
     if scheme != "https" {
-        let allow_http = tranquil_config::get().server.allow_http_proxy
+        let allow_http = tranquil_config::try_get().is_some_and(|c| c.server.allow_http_proxy)
             || url.starts_with("http://127.0.0.1")
             || url.starts_with("http://localhost");
         if !allow_http {

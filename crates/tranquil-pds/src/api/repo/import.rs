@@ -100,7 +100,14 @@ pub async fn import_repo(
             commit_did, did
         )));
     }
-    let skip_verification = tranquil_config::get().import.skip_verification;
+    let skip_verification = std::env::var("SKIP_IMPORT_VERIFICATION")
+        .ok()
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or_else(|| {
+            tranquil_config::try_get()
+                .map(|c| c.import.skip_verification)
+                .unwrap_or(false)
+        });
     let is_migration = user.deactivated_at.is_some();
     if skip_verification {
         warn!("Skipping all CAR verification for import (SKIP_IMPORT_VERIFICATION=true)");

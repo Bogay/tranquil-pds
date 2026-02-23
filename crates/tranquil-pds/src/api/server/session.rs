@@ -149,12 +149,23 @@ pub async fn create_session(
         .unwrap_or(false);
     if !is_verified && !is_delegated {
         warn!("Login attempt for unverified account: {}", row.did);
+        let resend_info = auto_resend_verification(&state, &row.did).await;
+        let handle = resend_info
+            .as_ref()
+            .map(|r| r.handle.to_string())
+            .unwrap_or_else(|| row.handle.to_string());
+        let channel = resend_info
+            .as_ref()
+            .map(|r| r.channel.as_str())
+            .unwrap_or(row.preferred_comms_channel.as_str());
         return (
             StatusCode::FORBIDDEN,
             Json(json!({
-                "error": "AccountNotVerified",
+                "error": "account_not_verified",
                 "message": "Please verify your account before logging in",
-                "did": row.did
+                "did": row.did,
+                "handle": handle,
+                "channel": channel
             })),
         )
             .into_response();
@@ -728,6 +739,79 @@ pub async fn confirm_signup(
         preferred_channel_verified: true,
     })
     .into_response()
+}
+
+const AUTO_VERIFY_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(120);
+
+pub struct AutoResendResult {
+    pub handle: tranquil_types::Handle,
+    pub channel: tranquil_db_traits::CommsChannel,
+}
+
+pub async fn auto_resend_verification(state: &AppState, did: &Did) -> Option<AutoResendResult> {
+    let debounce_key = crate::cache_keys::auto_verify_sent_key(did.as_str());
+    let debounced = state.cache.get(&debounce_key).await.is_some();
+    let row = match state.user_repo.get_resend_verification_by_did(did).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return None,
+        Err(e) => {
+            warn!(
+                "Failed to fetch resend verification info for {}: {:?}",
+                did, e
+            );
+            return None;
+        }
+    };
+    if row.channel_verification.has_any_verified() {
+        return None;
+    }
+    let result = AutoResendResult {
+        handle: row.handle.clone(),
+        channel: row.channel,
+    };
+    let is_bot_channel = matches!(
+        row.channel,
+        tranquil_db_traits::CommsChannel::Telegram | tranquil_db_traits::CommsChannel::Discord
+    );
+    if is_bot_channel || debounced {
+        return Some(result);
+    }
+    let recipient = match row.channel {
+        tranquil_db_traits::CommsChannel::Email => row.email.clone().unwrap_or_default(),
+        tranquil_db_traits::CommsChannel::Signal => row.signal_username.clone().unwrap_or_default(),
+        _ => return Some(result),
+    };
+    if recipient.is_empty() {
+        warn!(
+            "No recipient configured for auto-resend verification: {}",
+            did
+        );
+        return Some(result);
+    }
+    let verification_token =
+        crate::auth::verification_token::generate_signup_token(did, row.channel, &recipient);
+    let formatted_token =
+        crate::auth::verification_token::format_token_for_display(&verification_token);
+    let hostname = &tranquil_config::get().server.hostname;
+    if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
+        state.user_repo.as_ref(),
+        state.infra_repo.as_ref(),
+        row.id,
+        row.channel,
+        &recipient,
+        &formatted_token,
+        hostname,
+    )
+    .await
+    {
+        warn!("Failed to auto-resend verification for {}: {:?}", did, e);
+        return Some(result);
+    }
+    let _ = state
+        .cache
+        .set(&debounce_key, "1", AUTO_VERIFY_DEBOUNCE)
+        .await;
+    Some(result)
 }
 
 #[derive(Deserialize)]

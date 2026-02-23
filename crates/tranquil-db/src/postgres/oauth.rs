@@ -615,6 +615,26 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(result.rows_affected())
     }
 
+    async fn extend_authorization_request_expiry(
+        &self,
+        request_id: &RequestId,
+        new_expires_at: DateTime<Utc>,
+    ) -> Result<bool, DbError> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE oauth_authorization_request
+            SET expires_at = $2
+            WHERE id = $1 AND did IS NOT NULL AND code IS NULL
+            "#,
+            request_id.as_str(),
+            new_expires_at
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn mark_request_authenticated(
         &self,
         request_id: &RequestId,

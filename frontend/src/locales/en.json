@@ -542,7 +542,8 @@
       "passkeyHintNotAvailable": "No passkey registered",
       "passwordPlaceholder": "Password",
       "usePasskey": "Use passkey",
-      "orUseCredentials": "or"
+      "orUseCredentials": "or",
+      "verificationResent": "Verification code sent"
     },
     "sso": {
       "linkedAccounts": "Linked Accounts",

@@ -169,6 +169,13 @@ struct ResolvedRecipient {
     recipient: String,
 }
 
+pub fn resolve_delivery_channel(
+    prefs: &UserCommsPrefs,
+    channel: tranquil_db_traits::CommsChannel,
+) -> tranquil_db_traits::CommsChannel {
+    resolve_recipient(prefs, channel).channel
+}
+
 fn resolve_recipient(
     prefs: &UserCommsPrefs,
     channel: tranquil_db_traits::CommsChannel,

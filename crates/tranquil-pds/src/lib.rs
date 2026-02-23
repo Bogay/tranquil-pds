@@ -589,6 +589,7 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/authorize/consent", get(oauth::endpoints::consent_get))
         .route("/authorize/consent", post(oauth::endpoints::consent_post))
+        .route("/authorize/renew", post(oauth::endpoints::authorize_renew))
         .route(
             "/authorize/redirect",
             get(oauth::endpoints::authorize_redirect),

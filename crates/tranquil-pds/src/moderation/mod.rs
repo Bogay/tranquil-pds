@@ -34,7 +34,11 @@ fn get_slur_regexes() -> &'static Vec<Regex> {
 }
 
 fn get_extra_banned_words() -> &'static Vec<String> {
-    EXTRA_BANNED_WORDS.get_or_init(|| tranquil_config::get().server.banned_word_list())
+    EXTRA_BANNED_WORDS.get_or_init(|| {
+        tranquil_config::try_get()
+            .map(|c| c.server.banned_word_list())
+            .unwrap_or_default()
+    })
 }
 
 fn strip_trailing_digits(s: &str) -> &str {
