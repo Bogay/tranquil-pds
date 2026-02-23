@@ -7,15 +7,6 @@ services:
     restart: unless-stopped
     environment:
       SERVER_HOST: "0.0.0.0"
-      SERVER_PORT: "3000"
-      PDS_HOSTNAME: "${PDS_HOSTNAME:?PDS_HOSTNAME is required}"
-      DATABASE_URL: "postgres://tranquil_pds:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/pds"
-      BLOB_STORAGE_PATH: "/var/lib/tranquil/blobs"
-      BACKUP_STORAGE_PATH: "/var/lib/tranquil/backups"
-      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}"
-      DPOP_SECRET: "${DPOP_SECRET:?DPOP_SECRET is required (min 32 chars)}"
-      MASTER_KEY: "${MASTER_KEY:?MASTER_KEY is required (min 32 chars)}"
-      CRAWLERS: "${CRAWLERS:-https://bsky.network}"
     volumes:
       - ./config.toml:/etc/tranquil-pds/config.toml:ro
       - blob_data:/var/lib/tranquil/blobs
@@ -60,7 +51,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: tranquil_pds
-      POSTGRES_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD is required}"
+      POSTGRES_PASSWORD: "CHANGE-ME"
       POSTGRES_DB: pds
     volumes:
       - postgres_data:/var/lib/postgresql/data
