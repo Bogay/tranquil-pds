@@ -17,7 +17,7 @@ The PDS itself is a single binary with no nodeJS runtime. However, at time of wr
 ## Quick Start
 
 ```bash
-cp .env.example .env
+cp example.toml config.toml
 podman compose up db -d
 just run
 ```
@@ -27,7 +27,7 @@ just run
 See `example.toml` for all configuration options.
 
 > [!NOTE]
-> The order of configuration precendence is: environment variables, than a config file passed via `--config`, than `/etc/tranquil-pds/config.toml`, than the built-in defaults. So you can use environment variables, or a config file, or both.
+> The order of configuration precedence is: environment variables, then a config file passed via `--config`, then `/etc/tranquil-pds/config.toml`, then the built-in defaults. So you can use environment variables, or a config file, or both.
 
 ## Development
 
@@ -42,10 +42,10 @@ just lint
 
 ### Quick Deploy (Docker/Podman Compose)
 
-Edit `.env` with your values. Generate secrets with `openssl rand -base64 48`.
+Edit `config.toml` with your values. Generate secrets with `openssl rand -base64 48`.
 
 ```bash
-cp .env.example .env
+cp example.toml config.toml
 podman-compose -f docker-compose.prod.yaml up -d
 ```
 
