@@ -124,10 +124,15 @@ impl PlcClient {
     }
 
     pub fn with_cache(base_url: Option<String>, cache: Option<Arc<dyn Cache>>) -> Self {
-        let cfg = tranquil_config::get();
-        let base_url = base_url.unwrap_or_else(|| cfg.plc.directory_url.clone());
-        let timeout_secs = cfg.plc.timeout_secs;
-        let connect_timeout_secs = cfg.plc.connect_timeout_secs;
+        let cfg = tranquil_config::try_get();
+        let base_url = base_url
+            .or_else(|| std::env::var("PLC_DIRECTORY_URL").ok())
+            .unwrap_or_else(|| {
+                cfg.map(|c| c.plc.directory_url.clone())
+                    .unwrap_or_else(|| "https://plc.directory".to_string())
+            });
+        let timeout_secs = cfg.map_or(10, |c| c.plc.timeout_secs);
+        let connect_timeout_secs = cfg.map_or(5, |c| c.plc.connect_timeout_secs);
         let client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             .connect_timeout(Duration::from_secs(connect_timeout_secs))

@@ -548,6 +548,7 @@ async fn spawn_server(config: ServerConfig) -> ServerInstance {
     unsafe {
         std::env::set_var("PDS_HOSTNAME", format!("pds.test:{}", addr.port()));
     }
+    tranquil_config::ensure_test_defaults();
     let rate_limiters = RateLimiters::new()
         .with_login_limit(10000)
         .with_account_creation_limit(10000)

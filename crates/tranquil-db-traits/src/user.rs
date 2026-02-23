@@ -886,6 +886,8 @@ pub struct UserResendVerification {
 #[derive(Debug, Clone)]
 pub struct UserResetCodeInfo {
     pub id: Uuid,
+    pub did: Did,
+    pub preferred_comms_channel: CommsChannel,
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -956,6 +958,7 @@ pub struct UserForPasskeyRecovery {
 pub struct UserForRecovery {
     pub id: Uuid,
     pub did: Did,
+    pub preferred_comms_channel: CommsChannel,
     pub recovery_token: Option<String>,
     pub recovery_token_expires_at: Option<DateTime<Utc>>,
 }

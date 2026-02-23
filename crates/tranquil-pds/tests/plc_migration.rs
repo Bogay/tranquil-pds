@@ -698,7 +698,7 @@ async fn test_cross_pds_migration_with_records() {
         .await;
     unsafe {
         std::env::set_var("PLC_DIRECTORY_URL", mock_server.uri());
-        std::env::remove_var("SKIP_IMPORT_VERIFICATION");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "false");
     }
     let import_res = client
         .post(format!(
@@ -775,7 +775,7 @@ async fn test_migration_rejects_wrong_did_document() {
         .await;
     unsafe {
         std::env::set_var("PLC_DIRECTORY_URL", mock_server.uri());
-        std::env::remove_var("SKIP_IMPORT_VERIFICATION");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "false");
     }
     let import_res = client
         .post(format!(
@@ -931,7 +931,7 @@ async fn test_full_migration_flow_end_to_end() {
         .expect("Submit failed");
     assert_eq!(submit_res.status(), StatusCode::OK);
     unsafe {
-        std::env::remove_var("SKIP_IMPORT_VERIFICATION");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "false");
     }
     let import_res = client
         .post(format!(

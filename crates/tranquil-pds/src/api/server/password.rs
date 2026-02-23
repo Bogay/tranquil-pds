@@ -182,6 +182,20 @@ pub async fn reset_password(
         }
     }))
     .await;
+    if let Ok(Some(prefs)) = state.user_repo.get_comms_prefs(user_id).await {
+        let actual_channel =
+            crate::comms::resolve_delivery_channel(&prefs, user.preferred_comms_channel);
+        if let Err(e) = state
+            .user_repo
+            .set_channel_verified(&user.did, actual_channel)
+            .await
+        {
+            warn!(
+                "Failed to implicitly verify channel on password reset: {:?}",
+                e
+            );
+        }
+    }
     info!("Password reset completed for user {}", user_id);
     EmptyResponse::ok().into_response()
 }

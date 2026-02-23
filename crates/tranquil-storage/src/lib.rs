@@ -767,20 +767,20 @@ pub async fn create_backup_storage() -> Option<Arc<dyn BackupStorage>> {
         _ => {
             let path = cfg.backup.path.clone();
             FilesystemBackupStorage::new(path).await.map_or_else(
-            |e| {
-                tracing::error!(
-                    "Failed to initialize filesystem backup storage: {}. \
+                |e| {
+                    tracing::error!(
+                        "Failed to initialize filesystem backup storage: {}. \
                      Set BACKUP_STORAGE_PATH to a valid directory path. \
                      Backups will be disabled.",
-                    e
-                );
-                None
-            },
-            |storage| {
-                tracing::info!("Initialized filesystem backup storage");
-                Some(Arc::new(storage) as Arc<dyn BackupStorage>)
-            },
-        )
+                        e
+                    );
+                    None
+                },
+                |storage| {
+                    tracing::info!("Initialized filesystem backup storage");
+                    Some(Arc::new(storage) as Arc<dyn BackupStorage>)
+                },
+            )
         }
     }
 }

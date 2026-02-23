@@ -44,6 +44,35 @@ pub fn try_get() -> Option<&'static TranquilConfig> {
     CONFIG.get()
 }
 
+/// Initialize with minimal defaults for unit tests.
+/// Noop if already initialized.
+pub fn ensure_test_defaults() {
+    use std::env;
+    let _ = CONFIG.get_or_init(|| {
+        unsafe {
+            if env::var("PDS_HOSTNAME").is_err() {
+                env::set_var("PDS_HOSTNAME", "test.local");
+            }
+            if env::var("DATABASE_URL").is_err() {
+                env::set_var("DATABASE_URL", "postgres://localhost/test");
+            }
+            if env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err() {
+                env::set_var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS", "1");
+            }
+            if env::var("INVITE_CODE_REQUIRED").is_err() {
+                env::set_var("INVITE_CODE_REQUIRED", "false");
+            }
+            if env::var("ENABLE_PDS_HOSTED_DID_WEB").is_err() {
+                env::set_var("ENABLE_PDS_HOSTED_DID_WEB", "true");
+            }
+        }
+        TranquilConfig::builder()
+            .env()
+            .load()
+            .expect("failed to load test config defaults")
+    });
+}
+
 /// Load configuration from an optional TOML file path, with environment
 /// variable overrides applied on top. Fields annotated with `#[config(env)]`
 /// are read from the corresponding environment variables when the `.env()`

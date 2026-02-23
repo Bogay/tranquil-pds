@@ -265,8 +265,7 @@ mod tests {
 
     #[test]
     fn token_type_accepts_bluesky_uppercase_jwt() {
-        let result: Result<Header, _> =
-            serde_json::from_str(r#"{"alg":"ES256K","typ":"JWT"}"#);
+        let result: Result<Header, _> = serde_json::from_str(r#"{"alg":"ES256K","typ":"JWT"}"#);
         let header = result.expect("should parse uppercase JWT from bluesky reference pds");
         assert_eq!(header.typ, TokenType::Service);
         assert_eq!(header.alg, SigningAlgorithm::ES256K);
@@ -274,8 +273,7 @@ mod tests {
 
     #[test]
     fn token_type_accepts_lowercase_jwt() {
-        let result: Result<Header, _> =
-            serde_json::from_str(r#"{"alg":"ES256K","typ":"jwt"}"#);
+        let result: Result<Header, _> = serde_json::from_str(r#"{"alg":"ES256K","typ":"jwt"}"#);
         let header = result.expect("should parse lowercase jwt");
         assert_eq!(header.typ, TokenType::Service);
     }
@@ -294,8 +292,17 @@ mod tests {
 
     #[test]
     fn signing_algorithm_case_insensitive() {
-        assert_eq!(SigningAlgorithm::from_str("ES256K").unwrap(), SigningAlgorithm::ES256K);
-        assert_eq!(SigningAlgorithm::from_str("es256k").unwrap(), SigningAlgorithm::ES256K);
-        assert_eq!(SigningAlgorithm::from_str("hs256").unwrap(), SigningAlgorithm::HS256);
+        assert_eq!(
+            SigningAlgorithm::from_str("ES256K").unwrap(),
+            SigningAlgorithm::ES256K
+        );
+        assert_eq!(
+            SigningAlgorithm::from_str("es256k").unwrap(),
+            SigningAlgorithm::ES256K
+        );
+        assert_eq!(
+            SigningAlgorithm::from_str("hs256").unwrap(),
+            SigningAlgorithm::HS256
+        );
     }
 }

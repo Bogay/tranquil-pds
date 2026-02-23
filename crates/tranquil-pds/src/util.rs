@@ -374,6 +374,7 @@ mod tests {
     #[test]
     fn test_build_full_url_adds_xrpc_prefix_for_atproto_paths() {
         unsafe { std::env::set_var("PDS_HOSTNAME", "example.com") };
+        tranquil_config::ensure_test_defaults();
         assert_eq!(
             build_full_url("/com.atproto.server.getSession"),
             "https://example.com/xrpc/com.atproto.server.getSession"

@@ -1715,7 +1715,7 @@ impl UserRepository for PostgresUserRepository {
         code: &str,
     ) -> Result<Option<UserResetCodeInfo>, DbError> {
         sqlx::query!(
-            "SELECT id, password_reset_code_expires_at FROM users WHERE password_reset_code = $1",
+            "SELECT id, did, preferred_comms_channel as \"preferred_comms_channel: CommsChannel\", password_reset_code_expires_at FROM users WHERE password_reset_code = $1",
             code
         )
         .fetch_optional(&self.pool)
@@ -1724,6 +1724,8 @@ impl UserRepository for PostgresUserRepository {
         .map(|opt| {
             opt.map(|row| UserResetCodeInfo {
                 id: row.id,
+                did: Did::from(row.did),
+                preferred_comms_channel: row.preferred_comms_channel,
                 expires_at: row.password_reset_code_expires_at,
             })
         })
@@ -2202,7 +2204,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_user_for_recovery(&self, did: &Did) -> Result<Option<UserForRecovery>, DbError> {
         let row = sqlx::query!(
-            "SELECT id, did, recovery_token, recovery_token_expires_at FROM users WHERE did = $1",
+            "SELECT id, did, preferred_comms_channel as \"preferred_comms_channel: CommsChannel\", recovery_token, recovery_token_expires_at FROM users WHERE did = $1",
             did.as_str()
         )
         .fetch_optional(&self.pool)
@@ -2212,6 +2214,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(row.map(|r| UserForRecovery {
             id: r.id,
             did: Did::from(r.did),
+            preferred_comms_channel: r.preferred_comms_channel,
             recovery_token: r.recovery_token,
             recovery_token_expires_at: r.recovery_token_expires_at,
         }))

@@ -946,6 +946,20 @@ pub async fn recover_passkey_account(
     if result.passkeys_deleted > 0 {
         info!(did = %input.did, count = result.passkeys_deleted, "Deleted lost passkeys during account recovery");
     }
+    if let Ok(Some(prefs)) = state.user_repo.get_comms_prefs(user.id).await {
+        let actual_channel =
+            crate::comms::resolve_delivery_channel(&prefs, user.preferred_comms_channel);
+        if let Err(e) = state
+            .user_repo
+            .set_channel_verified(&input.did, actual_channel)
+            .await
+        {
+            warn!(
+                "Failed to implicitly verify channel on passkey recovery: {:?}",
+                e
+            );
+        }
+    }
     info!(did = %input.did, "Passkey-only account recovered with temporary password");
     SuccessResponse::ok().into_response()
 }

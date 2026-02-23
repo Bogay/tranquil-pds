@@ -457,7 +457,13 @@
       showSetPasswordForm = false
     } catch (e) {
       if (e instanceof ApiError) {
-        toast.error(e.message)
+        if (e.error === 'ReauthRequired') {
+          reauthMethods = e.reauthMethods || ['passkey']
+          pendingAction = () => handleSetPassword(new Event('submit'))
+          showReauthModal = true
+        } else {
+          toast.error(e.message)
+        }
       } else {
         toast.error($_('security.failedToSetPassword'))
       }

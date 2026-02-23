@@ -87,11 +87,13 @@ pub async fn verify_handle_ownership(
     }
 }
 
-pub fn is_service_domain_handle(handle: &str, _hostname: &str) -> bool {
+pub fn is_service_domain_handle(handle: &str, hostname: &str) -> bool {
     if !handle.contains('.') {
         return true;
     }
-    let service_domains = tranquil_config::get().server.user_handle_domain_list();
+    let service_domains = tranquil_config::try_get()
+        .map(|c| c.server.user_handle_domain_list())
+        .unwrap_or_else(|| vec![hostname.to_string()]);
     service_domains
         .iter()
         .any(|domain| handle.ends_with(&format!(".{}", domain)) || handle == domain)

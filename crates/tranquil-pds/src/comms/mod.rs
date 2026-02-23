@@ -7,4 +7,4 @@ pub use tranquil_comms::{
     mime_encode_header, sanitize_header_value, validate_locale,
 };
 
-pub use service::{CommsService, repo as comms_repo};
+pub use service::{CommsService, repo as comms_repo, resolve_delivery_channel};

@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, did, preferred_comms_channel as \"preferred_comms_channel: CommsChannel\", recovery_token, recovery_token_expires_at FROM users WHERE did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "preferred_comms_channel: CommsChannel",
+        "type_info": {
+          "Custom": {
+            "name": "comms_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "recovery_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "recovery_token_expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "85882f1c27888b695582395b798b8e4994ed1d761a598f938f2271e5ba320eea"
+}

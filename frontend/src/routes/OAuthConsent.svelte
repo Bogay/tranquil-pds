@@ -62,6 +62,21 @@
     return params.get('request_uri')
   }
 
+  async function tryRenewRequest(requestUri: string): Promise<boolean> {
+    try {
+      const response = await fetch('/oauth/authorize/renew', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_uri: requestUri }),
+      })
+      if (!response.ok) return false
+      const data = await response.json()
+      return data.renewed === true
+    } catch {
+      return false
+    }
+  }
+
   async function fetchConsentData() {
     const requestUri = getRequestUri()
     if (!requestUri) {
@@ -72,13 +87,32 @@
     }
 
     try {
-      const response = await fetch(`/oauth/authorize/consent?request_uri=${encodeURIComponent(requestUri)}`)
+      let response = await fetch(`/oauth/authorize/consent?request_uri=${encodeURIComponent(requestUri)}`)
       if (!response.ok) {
         const data = await response.json()
-        console.error('[OAuthConsent] Consent fetch failed:', data)
-        error = data.error_description || data.error || $_('oauth.error.genericError')
-        loading = false
-        return
+        if (data.error === 'expired_request') {
+          const renewed = await tryRenewRequest(requestUri)
+          if (renewed) {
+            response = await fetch(`/oauth/authorize/consent?request_uri=${encodeURIComponent(requestUri)}`)
+            if (!response.ok) {
+              const retryData = await response.json()
+              console.error('[OAuthConsent] Consent fetch failed after renewal:', retryData)
+              error = retryData.error_description || retryData.error || $_('oauth.error.genericError')
+              loading = false
+              return
+            }
+          } else {
+            console.error('[OAuthConsent] Consent fetch failed:', data)
+            error = data.error_description || data.error || $_('oauth.error.genericError')
+            loading = false
+            return
+          }
+        } else {
+          console.error('[OAuthConsent] Consent fetch failed:', data)
+          error = data.error_description || data.error || $_('oauth.error.genericError')
+          loading = false
+          return
+        }
       }
       const data: ConsentData = await response.json()
 

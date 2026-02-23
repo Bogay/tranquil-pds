@@ -28,6 +28,8 @@ use tranquil_types::{AuthorizationCode, ClientId, DeviceId as DeviceIdType, Requ
 use urlencoding::encode as url_encode;
 
 const DEVICE_COOKIE_NAME: &str = "oauth_device_id";
+const RENEW_EXPIRY_SECONDS: i64 = 600;
+const MAX_RENEWAL_STALENESS_SECONDS: i64 = 3600;
 
 fn redirect_see_other(uri: &str) -> Response {
     (
@@ -556,14 +558,6 @@ pub async fn authorize_post(
     if user.takedown_ref.is_some() {
         return show_login_error("This account has been taken down.", json_response);
     }
-    let is_verified = user.channel_verification.has_any_verified();
-    if !is_verified {
-        return show_login_error(
-            "Please verify your account before logging in.",
-            json_response,
-        );
-    }
-
     if user.account_type.is_delegated() {
         if state
             .oauth_repo
@@ -629,6 +623,35 @@ pub async fn authorize_post(
     };
     if !password_valid {
         return show_login_error("Invalid handle/email or password.", json_response);
+    }
+    let is_verified = user.channel_verification.has_any_verified();
+    if !is_verified {
+        let resend_info = crate::api::server::auto_resend_verification(&state, &user.did).await;
+        let handle = resend_info
+            .as_ref()
+            .map(|r| r.handle.to_string())
+            .unwrap_or_else(|| form.username.clone());
+        let channel = resend_info
+            .map(|r| r.channel.as_str().to_owned())
+            .unwrap_or_else(|| user.preferred_comms_channel.as_str().to_owned());
+        if json_response {
+            return (
+                axum::http::StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "account_not_verified",
+                    "error_description": "Please verify your account before logging in.",
+                    "did": user.did,
+                    "handle": handle,
+                    "channel": channel
+                })),
+            )
+                .into_response();
+        }
+        return redirect_see_other(&format!(
+            "/app/oauth/login?request_uri={}&error={}",
+            url_encode(&form.request_uri),
+            url_encode("account_not_verified")
+        ));
     }
     let has_totp = crate::api::server::has_totp_enabled(&state, &user.did).await;
     if has_totp {
@@ -955,11 +978,18 @@ pub async fn authorize_select(
     };
     let is_verified = user.channel_verification.has_any_verified();
     if !is_verified {
-        return json_error(
+        let resend_info = crate::api::server::auto_resend_verification(&state, &did).await;
+        return (
             StatusCode::FORBIDDEN,
-            "access_denied",
-            "Please verify your account before logging in.",
-        );
+            Json(serde_json::json!({
+                "error": "account_not_verified",
+                "error_description": "Please verify your account before logging in.",
+                "did": did,
+                "handle": resend_info.as_ref().map(|r| r.handle.to_string()),
+                "channel": resend_info.as_ref().map(|r| r.channel.as_str())
+            })),
+        )
+            .into_response();
     }
     let has_totp = crate::api::server::has_totp_enabled(&state, &did).await;
     let select_early_device_typed = device_id.clone();
@@ -970,11 +1000,7 @@ pub async fn authorize_select(
         if !device_is_trusted {
             if state
                 .oauth_repo
-                .set_authorization_did(
-                    &select_request_id,
-                    &did,
-                    Some(&select_early_device_typed),
-                )
+                .set_authorization_did(&select_request_id, &did, Some(&select_early_device_typed))
                 .await
                 .is_err()
             {
@@ -989,8 +1015,8 @@ pub async fn authorize_select(
             }))
             .into_response();
         }
-        let _ = crate::api::server::extend_device_trust(state.oauth_repo.as_ref(), &device_id)
-            .await;
+        let _ =
+            crate::api::server::extend_device_trust(state.oauth_repo.as_ref(), &device_id).await;
     }
     if user.two_factor_enabled {
         let _ = state
@@ -1041,55 +1067,9 @@ pub async fn authorize_select(
         .upsert_account_device(&did, &select_device_typed)
         .await;
 
-    let requested_scope_str = request_data
-        .parameters
-        .scope
-        .as_deref()
-        .unwrap_or("atproto");
-    let requested_scopes: Vec<String> = requested_scope_str
-        .split_whitespace()
-        .map(|s| s.to_string())
-        .collect();
-    let client_id_typed = ClientId::from(request_data.parameters.client_id.clone());
-    let needs_consent = should_show_consent(
-        state.oauth_repo.as_ref(),
-        &did,
-        &client_id_typed,
-        &requested_scopes,
-    )
-    .await
-    .unwrap_or(true);
-
-    if needs_consent {
-        if state
-            .oauth_repo
-            .set_authorization_did(&select_request_id, &did, Some(&select_device_typed))
-            .await
-            .is_err()
-        {
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "server_error",
-                "An error occurred. Please try again.",
-            );
-        }
-        let consent_url = format!(
-            "/app/oauth/consent?request_uri={}",
-            url_encode(&form.request_uri)
-        );
-        return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
-    }
-
-    let code = Code::generate();
-    let select_code = AuthorizationCode::from(code.0.clone());
     if state
         .oauth_repo
-        .update_authorization_request(
-            &select_request_id,
-            &did,
-            Some(&select_device_typed),
-            &select_code,
-        )
+        .set_authorization_did(&select_request_id, &did, Some(&select_device_typed))
         .await
         .is_err()
     {
@@ -1099,16 +1079,11 @@ pub async fn authorize_select(
             "An error occurred. Please try again.",
         );
     }
-    let redirect_url = build_intermediate_redirect_url(
-        &request_data.parameters.redirect_uri,
-        &code.0,
-        request_data.parameters.state.as_deref(),
-        request_data.parameters.response_mode.map(|m| m.as_str()),
+    let consent_url = format!(
+        "/app/oauth/consent?request_uri={}",
+        url_encode(&form.request_uri)
     );
-    Json(serde_json::json!({
-        "redirect_uri": redirect_url
-    }))
-    .into_response()
+    Json(serde_json::json!({"redirect_uri": consent_url})).into_response()
 }
 
 fn build_success_redirect(
@@ -1401,13 +1376,9 @@ pub async fn consent_get(
             }
         },
         Err(_) => {
-            let _ = state
-                .oauth_repo
-                .delete_authorization_request(&consent_request_id)
-                .await;
             return json_error(
                 StatusCode::BAD_REQUEST,
-                "invalid_request",
+                "expired_request",
                 "Authorization request has expired",
             );
         }
@@ -1758,6 +1729,93 @@ pub async fn consent_post(
     Json(serde_json::json!({ "redirect_uri": intermediate_url })).into_response()
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RenewRequest {
+    pub request_uri: String,
+}
+
+pub async fn authorize_renew(
+    State(state): State<AppState>,
+    _rate_limit: OAuthRateLimited<OAuthAuthorizeLimit>,
+    Json(form): Json<RenewRequest>,
+) -> Response {
+    let request_id = RequestId::from(form.request_uri.clone());
+    let request_data = match state
+        .oauth_repo
+        .get_authorization_request(&request_id)
+        .await
+    {
+        Ok(Some(data)) => data,
+        Ok(None) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Unknown authorization request",
+            );
+        }
+        Err(_) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "Database error",
+            );
+        }
+    };
+
+    if request_data.did.is_none() {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Authorization request not yet authenticated",
+        );
+    }
+
+    let now = Utc::now();
+    if request_data.expires_at >= now {
+        return Json(serde_json::json!({
+            "request_uri": form.request_uri,
+            "renewed": false
+        }))
+        .into_response();
+    }
+
+    let staleness = now - request_data.expires_at;
+    if staleness.num_seconds() > MAX_RENEWAL_STALENESS_SECONDS {
+        let _ = state
+            .oauth_repo
+            .delete_authorization_request(&request_id)
+            .await;
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Authorization request expired too long ago to renew",
+        );
+    }
+
+    let new_expires_at = now + chrono::Duration::seconds(RENEW_EXPIRY_SECONDS);
+    match state
+        .oauth_repo
+        .extend_authorization_request_expiry(&request_id, new_expires_at)
+        .await
+    {
+        Ok(true) => Json(serde_json::json!({
+            "request_uri": form.request_uri,
+            "renewed": true
+        }))
+        .into_response(),
+        Ok(false) => json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Authorization request could not be renewed",
+        ),
+        Err(_) => json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server_error",
+            "Database error",
+        ),
+    }
+}
+
 pub async fn authorize_2fa_post(
     State(state): State<AppState>,
     _rate_limit: OAuthRateLimited<OAuthAuthorizeLimit>,
@@ -1953,8 +2011,7 @@ pub async fn authorize_2fa_post(
             .oauth_repo
             .upsert_account_device(&did, &trust_device_id)
             .await;
-        let _ = crate::api::server::trust_device(state.oauth_repo.as_ref(), &trust_device_id)
-            .await;
+        let _ = crate::api::server::trust_device(state.oauth_repo.as_ref(), &trust_device_id).await;
     }
     let requested_scope_str = request_data
         .parameters
@@ -2240,11 +2297,15 @@ pub async fn passkey_start(
     let is_verified = user.channel_verification.has_any_verified();
 
     if !is_verified {
+        let resend_info = crate::api::server::auto_resend_verification(&state, &user.did).await;
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({
-                "error": "access_denied",
-                "error_description": "Please verify your account before logging in."
+                "error": "account_not_verified",
+                "error_description": "Please verify your account before logging in.",
+                "did": user.did,
+                "handle": resend_info.as_ref().map(|r| r.handle.to_string()),
+                "channel": resend_info.as_ref().map(|r| r.channel.as_str())
             })),
         )
             .into_response();
@@ -3389,11 +3450,15 @@ pub async fn register_complete(
     };
 
     if !is_verified {
+        let resend_info = crate::api::server::auto_resend_verification(&state, &did).await;
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({
-                "error": "access_denied",
-                "error_description": "Please verify your account before continuing."
+                "error": "account_not_verified",
+                "error_description": "Please verify your account before continuing.",
+                "did": did,
+                "handle": resend_info.as_ref().map(|r| r.handle.to_string()),
+                "channel": resend_info.as_ref().map(|r| r.channel.as_str())
             })),
         )
             .into_response();
