@@ -56,7 +56,7 @@ in {
 
         Generate these with:
         ```
-        openssl rand --hex 32
+        openssl rand -base64 48
         ```
       '';
     };
