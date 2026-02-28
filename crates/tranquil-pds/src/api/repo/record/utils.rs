@@ -380,10 +380,6 @@ pub async fn commit_and_log(
             ApplyCommitError::Database(msg) => CommitError::DatabaseError(msg),
         })?;
 
-    if result.is_account_active {
-        let _ = sequence_sync_event(state, did, &new_root_cid.to_string(), Some(&rev_str)).await;
-    }
-
     Ok(CommitResult {
         commit_cid: new_root_cid,
         rev: rev_str,
