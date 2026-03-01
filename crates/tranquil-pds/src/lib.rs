@@ -43,6 +43,16 @@ use tower_http::cors::{Any, CorsLayer};
 pub use tranquil_db_traits::AccountStatus;
 pub use types::{AccountState, AtIdentifier, AtUri, Did, Handle, Nsid, Rkey};
 
+#[cfg(debug_assertions)]
+pub const BUILD_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (built ",
+    env!("BUILD_TIMESTAMP"),
+    ")"
+);
+#[cfg(not(debug_assertions))]
+pub const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub fn app(state: AppState) -> Router {
     let xrpc_router = Router::new()
         .route("/_health", get(api::server::health))

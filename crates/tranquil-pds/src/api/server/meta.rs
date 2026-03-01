@@ -1,3 +1,4 @@
+use crate::BUILD_VERSION;
 use crate::state::AppState;
 use crate::util::{discord_app_id, discord_bot_username, telegram_bot_username};
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
@@ -55,7 +56,7 @@ pub async fn describe_server() -> impl IntoResponse {
         "did": format!("did:web:{}", pds_hostname),
         "links": links,
         "contact": contact,
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": BUILD_VERSION,
         "availableCommsChannels": get_available_comms_channels(),
         "selfHostedDidWebEnabled": is_self_hosted_did_web_enabled()
     });
@@ -72,7 +73,17 @@ pub async fn describe_server() -> impl IntoResponse {
 }
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
     match state.infra_repo.health_check().await {
-        Ok(true) => (StatusCode::OK, "OK"),
-        _ => (StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable"),
+        Ok(true) => (
+            StatusCode::OK,
+            Json(json!({
+                "version": format!("tranquil {}", BUILD_VERSION)
+            })),
+        ),
+        _ => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "error": "Service Unavailable"
+            })),
+        ),
     }
 }

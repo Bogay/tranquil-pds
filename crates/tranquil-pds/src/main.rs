@@ -5,17 +5,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+use tranquil_pds::BUILD_VERSION;
 use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
-
-#[cfg(debug_assertions)]
-const BUILD_VERSION: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
-    " (built ",
-    env!("BUILD_TIMESTAMP"),
-    ")"
-);
-#[cfg(not(debug_assertions))]
-const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
 use tranquil_pds::scheduled::{
