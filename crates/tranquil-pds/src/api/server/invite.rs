@@ -14,7 +14,7 @@ use tracing::error;
 
 const BASE32_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
 
-fn gen_random_token() -> String {
+pub(crate) fn gen_random_token() -> String {
     let mut rng = rand::thread_rng();
     let gen_segment = |rng: &mut rand::rngs::ThreadRng, len: usize| -> String {
         (0..len)
@@ -24,7 +24,7 @@ fn gen_random_token() -> String {
     format!("{}-{}", gen_segment(&mut rng, 5), gen_segment(&mut rng, 5))
 }
 
-fn gen_invite_code() -> String {
+pub fn gen_invite_code() -> String {
     let hostname = &tranquil_config::get().server.hostname;
     let hostname_prefix = hostname.replace('.', "-");
     format!("{}-{}", hostname_prefix, gen_random_token())

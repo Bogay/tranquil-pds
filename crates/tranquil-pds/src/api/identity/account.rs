@@ -548,28 +548,38 @@ pub async fn create_account(
         return ApiError::HandleTaken.into_response();
     }
 
-    let invite_code_required = tranquil_config::get().server.invite_code_required;
-    if invite_code_required
-        && input
-            .invite_code
-            .as_ref()
-            .map(|c| c.trim().is_empty())
-            .unwrap_or(true)
-    {
-        return ApiError::InviteCodeRequired.into_response();
-    }
-    if let Some(code) = &input.invite_code
-        && !code.trim().is_empty()
-    {
-        let valid = match state.user_repo.check_and_consume_invite_code(code).await {
-            Ok(v) => v,
-            Err(e) => {
-                error!("Error checking invite code: {:?}", e);
-                return ApiError::InternalError(None).into_response();
+    let is_bootstrap = state.bootstrap_invite_code.is_some()
+        && state.user_repo.count_users().await.unwrap_or(1) == 0;
+
+    if is_bootstrap {
+        match input.invite_code.as_deref() {
+            Some(code) if Some(code) == state.bootstrap_invite_code.as_deref() => {}
+            _ => return ApiError::InvalidInviteCode.into_response(),
+        }
+    } else {
+        let invite_code_required = tranquil_config::get().server.invite_code_required;
+        if invite_code_required
+            && input
+                .invite_code
+                .as_ref()
+                .map(|c| c.trim().is_empty())
+                .unwrap_or(true)
+        {
+            return ApiError::InviteCodeRequired.into_response();
+        }
+        if let Some(code) = &input.invite_code
+            && !code.trim().is_empty()
+        {
+            let valid = match state.user_repo.check_and_consume_invite_code(code).await {
+                Ok(v) => v,
+                Err(e) => {
+                    error!("Error checking invite code: {:?}", e);
+                    return ApiError::InternalError(None).into_response();
+                }
+            };
+            if !valid {
+                return ApiError::InvalidInviteCode.into_response();
             }
-        };
-        if !valid {
-            return ApiError::InvalidInviteCode.into_response();
         }
     }
 
@@ -678,7 +688,11 @@ pub async fn create_account(
         commit_cid: commit_cid_str.clone(),
         repo_rev: rev_str.clone(),
         genesis_block_cids,
-        invite_code: input.invite_code.clone(),
+        invite_code: if is_bootstrap {
+            None
+        } else {
+            input.invite_code.clone()
+        },
         birthdate_pref,
     };
 
