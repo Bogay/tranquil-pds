@@ -146,7 +146,15 @@ pub async fn create_passkey_account(
         return ApiError::InvalidEmail.into_response();
     }
 
-    let _validated_invite_code = if let Some(ref code) = input.invite_code {
+    let is_bootstrap = state.bootstrap_invite_code.is_some()
+        && state.user_repo.count_users().await.unwrap_or(1) == 0;
+
+    let _validated_invite_code = if is_bootstrap {
+        match input.invite_code.as_deref() {
+            Some(code) if Some(code) == state.bootstrap_invite_code.as_deref() => None,
+            _ => return ApiError::InvalidInviteCode.into_response(),
+        }
+    } else if let Some(ref code) = input.invite_code {
         match state.infra_repo.validate_invite_code(code).await {
             Ok(validated) => Some(validated),
             Err(_) => return ApiError::InvalidInviteCode.into_response(),
@@ -447,7 +455,11 @@ pub async fn create_passkey_account(
         commit_cid: commit_cid.to_string(),
         repo_rev: rev.as_ref().to_string(),
         genesis_block_cids,
-        invite_code: input.invite_code.clone(),
+        invite_code: if is_bootstrap {
+            None
+        } else {
+            input.invite_code.clone()
+        },
         birthdate_pref,
     };
 

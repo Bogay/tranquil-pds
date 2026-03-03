@@ -58,6 +58,7 @@ pub struct AppState {
     pub sso_manager: SsoManager,
     pub webauthn_config: Arc<WebAuthnConfig>,
     pub shutdown: CancellationToken,
+    pub bootstrap_invite_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -232,7 +233,26 @@ impl AppState {
             .await
             .map_err(|e| format!("Failed to run migrations: {}", e))?;
 
-        Ok(Self::from_db(db, shutdown).await)
+        let bootstrap_invite_code = match (
+            cfg.server.invite_code_required,
+            sqlx::query_scalar!("SELECT COUNT(*) FROM users")
+                .fetch_one(&db)
+                .await,
+        ) {
+            (true, Ok(Some(0))) => {
+                let code = crate::api::server::invite::gen_invite_code();
+                tracing::info!(
+                    "No users exist and invite codes are required. Bootstrap invite code: {}",
+                    code
+                );
+                Some(code)
+            }
+            _ => None,
+        };
+
+        let mut state = Self::from_db(db, shutdown).await;
+        state.bootstrap_invite_code = bootstrap_invite_code;
+        Ok(state)
     }
 
     pub async fn from_db(db: PgPool, shutdown: CancellationToken) -> Self {
@@ -285,6 +305,7 @@ impl AppState {
             sso_manager,
             webauthn_config,
             shutdown,
+            bootstrap_invite_code: None,
         }
     }
 
