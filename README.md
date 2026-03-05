@@ -1,5 +1,7 @@
 # Tranquil PDS
 
+> **Mirror notice:** This is an unofficial mirror of [tranquil.farm/tranquil-pds](https://tangled.org/tranquil.farm/tranquil-pds) on Tangled. Issues and contributions should be directed upstream. This mirror exists to publish container images to GHCR.
+
 A Personal Data Server for the AT Protocol.
 
 "A what for the what?" -> glad you asked: Bluesky, Tangled, and a bunch of other web applications use a federated protocol called AT Protocol (atproto). Your account lives on a PDS, a server that stores your posts, profile, follows, cryptographic keys, et cetera. The beauty is that a PDS is the *only* place your data lives permanently - so you can navigate any atproto app knowing that your data is yours and not getting locked behind any one app's walls.
