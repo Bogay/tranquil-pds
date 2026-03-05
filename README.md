@@ -1,5 +1,7 @@
 # Tranquil PDS
 
+> **Mirror notice:** This is an unofficial mirror of [tranquil.farm/tranquil-pds](https://tangled.org/tranquil.farm/tranquil-pds) on Tangled. Issues and contributions should be directed upstream. This mirror exists to publish container images to GHCR.
+
 A Personal Data Server for the AT Protocol.
 
 Bluesky runs on a federated protocol called AT Protocol. Your account lives on a PDS, a server that stores your posts, profile, follows, and cryptographic keys. Bluesky hosts one for you at bsky.social, but you can run your own. Self-hosting means you control your data; you're not dependent on any company's servers, and your account + data is actually yours.
