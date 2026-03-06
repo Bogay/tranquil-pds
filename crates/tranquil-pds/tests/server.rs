@@ -11,7 +11,13 @@ async fn test_server_basics() {
     let base = base_url().await;
     let health = client.get(format!("{}/health", base)).send().await.unwrap();
     assert_eq!(health.status(), StatusCode::OK);
-    assert_eq!(health.text().await.unwrap(), "OK");
+    assert!(
+        health
+            .text()
+            .await
+            .unwrap()
+            .starts_with("{\"version\":\"tranquil ")
+    );
     let describe = client
         .get(format!("{}/xrpc/com.atproto.server.describeServer", base))
         .send()
