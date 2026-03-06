@@ -370,7 +370,7 @@ pub async fn commit_and_log(
         commit_event,
     };
 
-    let result = state
+    let _result = state
         .repo_repo
         .apply_commit(input)
         .await

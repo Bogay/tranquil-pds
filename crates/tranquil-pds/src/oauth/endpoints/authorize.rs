@@ -2692,61 +2692,6 @@ pub async fn passkey_finish(
 
     tracing::info!(did = %did, "Passkey authentication successful");
 
-    let has_totp = crate::api::server::has_totp_enabled(&state, &did).await;
-    if has_totp {
-        return Json(serde_json::json!({
-            "needs_totp": true
-        }))
-        .into_response();
-    }
-
-    let user = state.user_repo.get_2fa_status_by_did(&did).await;
-
-    if let Ok(Some(user)) = user
-        && user.two_factor_enabled
-    {
-        let _ = state
-            .oauth_repo
-            .delete_2fa_challenge_by_request_uri(&passkey_finish_request_id)
-            .await;
-        match state
-            .oauth_repo
-            .create_2fa_challenge(&did, &passkey_finish_request_id)
-            .await
-        {
-            Ok(challenge) => {
-                let hostname = &tranquil_config::get().server.hostname;
-                if let Err(e) = enqueue_2fa_code(
-                    state.user_repo.as_ref(),
-                    state.infra_repo.as_ref(),
-                    user.id,
-                    &challenge.code,
-                    hostname,
-                )
-                .await
-                {
-                    tracing::warn!(did = %did, error = %e, "Failed to enqueue 2FA notification");
-                }
-                let channel_name = user.preferred_comms_channel.display_name();
-                return Json(serde_json::json!({
-                    "needs_2fa": true,
-                    "channel": channel_name
-                }))
-                .into_response();
-            }
-            Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "error": "server_error",
-                        "error_description": "An error occurred."
-                    })),
-                )
-                    .into_response();
-            }
-        }
-    }
-
     let device_id = extract_device_cookie(&headers);
     let requested_scope_str = request_data
         .parameters
