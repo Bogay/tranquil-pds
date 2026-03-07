@@ -34,7 +34,7 @@ pub fn is_self_hosted_did_web_enabled() -> bool {
 pub async fn describe_server() -> impl IntoResponse {
     let cfg = tranquil_config::get();
     let pds_hostname = &cfg.server.hostname;
-    let domains = cfg.server.available_user_domain_list();
+    let domains = cfg.server.user_handle_domain_list();
     let invite_code_required = cfg.server.invite_code_required;
     let privacy_policy = cfg.server.privacy_policy_url.clone();
     let terms_of_service = cfg.server.terms_of_service_url.clone();

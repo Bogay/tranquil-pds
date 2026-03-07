@@ -406,11 +406,6 @@ pub struct ServerConfig {
     #[config(env = "PDS_USER_HANDLE_DOMAINS", parse_env = split_comma_list)]
     pub user_handle_domains: Option<Vec<String>>,
 
-    /// List of domains available for user registration.
-    /// Defaults to the PDS hostname when not set.
-    #[config(env = "AVAILABLE_USER_DOMAINS", parse_env = split_comma_list)]
-    pub available_user_domains: Option<Vec<String>>,
-
     /// Enable PDS-hosted did:web identities.  Hosting did:web requires a
     /// long-term commitment to serve DID documents; opt-in only.
     #[config(env = "ENABLE_PDS_HOSTED_DID_WEB", default = false)]
@@ -468,13 +463,6 @@ impl ServerConfig {
     /// Returns the extra banned words list, or an empty vec when unset.
     pub fn banned_word_list(&self) -> Vec<String> {
         self.banned_words.clone().unwrap_or_default()
-    }
-
-    /// Returns the available user domains, falling back to `[hostname_without_port]`.
-    pub fn available_user_domain_list(&self) -> Vec<String> {
-        self.available_user_domains
-            .clone()
-            .unwrap_or_else(|| vec![self.hostname_without_port().to_string()])
     }
 
     /// Returns the user handle domains, falling back to `[hostname_without_port]`.
