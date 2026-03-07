@@ -54,7 +54,8 @@ services:
       POSTGRES_PASSWORD: "CHANGE-ME"
       POSTGRES_DB: pds
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # In memory of @mrrp.lol when Lewis had "/data" here and the account got nuked on restart including rotation key :(
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tranquil_pds -d pds"]
       interval: 10s
