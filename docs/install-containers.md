@@ -145,7 +145,7 @@ Optional quadlets for valkey and minio are also available in `deploy/quadlets/` 
 ## Create nginx configuration
 
 ```bash
-cp /opt/tranquil-pds/nginx.frontend.conf /srv/tranquil-pds/config/nginx.conf
+cp /opt/tranquil-pds/nginx.conf /srv/tranquil-pds/config/nginx.conf
 ```
 
 ## Clone and build images
@@ -288,7 +288,7 @@ openssl rand -base64 48
 Copy the production compose and nginx configs:
 ```sh
 cp /opt/tranquil-pds/docker-compose.prod.yaml /srv/tranquil-pds/docker-compose.yml
-cp /opt/tranquil-pds/nginx.frontend.conf /srv/tranquil-pds/config/nginx.conf
+cp /opt/tranquil-pds/nginx.conf /srv/tranquil-pds/config/nginx.conf
 ```
 
 Edit `/srv/tranquil-pds/docker-compose.yml` to adjust paths if needed:

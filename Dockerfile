@@ -1,3 +1,8 @@
+FROM denoland/deno:alpine AS frontend
+WORKDIR /app
+COPY frontend/ ./
+RUN deno task build
+
 FROM rust:1.92-alpine AS builder
 RUN apk add --no-cache ca-certificates musl-dev pkgconfig openssl-dev openssl-libs-static
 WORKDIR /app
@@ -18,6 +23,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM alpine:3.23
 RUN apk add --no-cache msmtp ca-certificates && ln -sf /usr/bin/msmtp /usr/sbin/sendmail
 COPY --from=builder /tmp/tranquil-pds /usr/local/bin/tranquil-pds
+COPY --from=frontend /app/dist /var/lib/tranquil-pds/frontend
 COPY migrations /app/migrations
 WORKDIR /app
 ENV SERVER_HOST=0.0.0.0

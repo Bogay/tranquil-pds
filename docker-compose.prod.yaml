@@ -27,25 +27,6 @@ services:
         reservations:
           memory: 256M
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    image: tranquil-pds-frontend:latest
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-        reservations:
-          memory: 32M
-
   db:
     image: postgres:18-alpine
     restart: unless-stopped
@@ -76,12 +57,11 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.frontend.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
       - acme_challenge:/var/www/acme:ro
     depends_on:
       - tranquil-pds
-      - frontend
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
