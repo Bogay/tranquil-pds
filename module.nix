@@ -97,7 +97,7 @@ in {
           };
 
           frontend = {
-            enabled = lib.mkEnabeOption "serving the frontend from the backend. Disable to server the frontend manually"
+            enabled = lib.mkEnableOption "serving the frontend from the backend. Disable to serve the frontend manually"
               // { default = true; };
 
             dir = mkOption {
