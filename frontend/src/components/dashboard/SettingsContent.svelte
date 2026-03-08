@@ -9,6 +9,7 @@
   import { getSessionEmail } from '../../lib/types/api'
   import { formatDate } from '../../lib/date'
   import { navigate, routes } from '../../lib/router.svelte'
+  import HandleInput from '../HandleInput.svelte'
 
   interface Props {
     session: Session
@@ -17,14 +18,17 @@
   let { session }: Props = $props()
 
   const supportedLocales = getSupportedLocales()
-  let pdsHostname = $state<string | null>(null)
+  let availableDomains = $state<string[]>([])
+  let selectedDomain = $state('')
+  let pdsHostname = $derived(selectedDomain || null)
 
   onMount(() => {
     const init = async () => {
       try {
         const info = await api.describeServer()
         if (info.availableUserDomains?.length) {
-          pdsHostname = info.availableUserDomains[0]
+          availableDomains = info.availableUserDomains
+          selectedDomain = info.availableUserDomains[0]
         }
       } catch {}
       loadBackups()
@@ -150,7 +154,7 @@
     if (!newHandle) return
     handleLoading = true
     try {
-      const fullHandle = showBYOHandle ? newHandle : `${newHandle}.${pdsHostname}`
+      const fullHandle = showBYOHandle ? newHandle : `${newHandle}.${selectedDomain}`
       await api.updateHandle(session.accessJwt, unsafeAsHandle(fullHandle))
       await refreshSession()
       toast.success($_('settings.messages.handleUpdated'))
@@ -481,12 +485,18 @@
       <form onsubmit={handleUpdateHandle}>
         <div class="field">
           <label for="new-handle">{$_('settings.newHandle')}</label>
-          <div class="handle-input-wrapper">
-            <input id="new-handle" type="text" bind:value={newHandle} placeholder={$_('settings.newHandlePlaceholder')} disabled={handleLoading} required />
-            <span class="handle-suffix">.{pdsHostname ?? '...'}</span>
-          </div>
+          <HandleInput
+            id="new-handle"
+            value={newHandle}
+            domains={availableDomains}
+            {selectedDomain}
+            placeholder={$_('settings.newHandlePlaceholder')}
+            disabled={handleLoading}
+            onInput={(v) => { newHandle = v }}
+            onDomainChange={(d) => { selectedDomain = d }}
+          />
         </div>
-        <button type="submit" disabled={handleLoading || !newHandle || !pdsHostname}>
+        <button type="submit" disabled={handleLoading || !newHandle || !selectedDomain}>
           {handleLoading ? $_('settings.updating') : $_('settings.changeHandleButton')}
         </button>
       </form>
@@ -687,36 +697,6 @@
     background: var(--accent);
     border-color: var(--accent);
     color: var(--text-inverse);
-  }
-
-  .handle-input-wrapper {
-    display: flex;
-    align-items: center;
-    background: var(--bg-input);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-
-  .handle-input-wrapper input {
-    flex: 1;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-  }
-
-  .handle-input-wrapper input:focus {
-    outline: none;
-    box-shadow: none;
-  }
-
-  .handle-suffix {
-    padding: 0 var(--space-3);
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    white-space: nowrap;
-    border-left: 1px solid var(--border-color);
-    background: var(--bg-card);
   }
 
   .loading,

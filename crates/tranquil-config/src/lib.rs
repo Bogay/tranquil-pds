@@ -468,8 +468,15 @@ impl ServerConfig {
     /// Returns the user handle domains, falling back to `[hostname_without_port]`.
     pub fn user_handle_domain_list(&self) -> Vec<String> {
         self.user_handle_domains
-            .clone()
+            .as_deref()
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_vec())
             .unwrap_or_else(|| vec![self.hostname_without_port().to_string()])
+    }
+
+    /// Alias for `user_handle_domain_list` (for callers that were using the now-removed `available_user_domains` field).
+    pub fn available_user_domain_list(&self) -> Vec<String> {
+        self.user_handle_domain_list()
     }
 }
 

@@ -10,6 +10,7 @@
     DidDocStep,
   } from '../lib/registration'
   import AccountTypeSwitcher from '../components/AccountTypeSwitcher.svelte'
+  import HandleInput from '../components/HandleInput.svelte'
   import { ensureRequestUri, getRequestUriFromUrl } from '../lib/oauth'
 
   let serverInfo = $state<{
@@ -25,6 +26,7 @@
   let flow = $state<ReturnType<typeof createRegistrationFlow> | null>(null)
   let confirmPassword = $state('')
   let clientName = $state<string | null>(null)
+  let selectedDomain = $state('')
   let checkHandleTimeout: ReturnType<typeof setTimeout> | null = null
 
   $effect(() => {
@@ -106,6 +108,7 @@
         const hostname = serverInfo?.availableUserDomains?.[0] || window.location.hostname
         flow = createRegistrationFlow('password', hostname)
       }
+      selectedDomain = serverInfo?.availableUserDomains?.[0] || window.location.hostname
     } catch (e) {
       console.error('Failed to load server info:', e)
     } finally {
@@ -229,9 +232,7 @@
   let fullHandle = $derived(() => {
     if (!flow?.info.handle.trim()) return ''
     if (flow.info.handle.includes('.')) return flow.info.handle.trim()
-    const domain = serverInfo?.availableUserDomains?.[0]
-    if (domain) return `${flow.info.handle.trim()}.${domain}`
-    return flow.info.handle.trim()
+    return selectedDomain ? `${flow.info.handle.trim()}.${selectedDomain}` : flow.info.handle.trim()
   })
 
   function extractDomain(did: string): string {
@@ -305,13 +306,14 @@
     <form class="register-form" onsubmit={handleInfoSubmit}>
       <div class="field">
         <label for="handle">{$_('register.handle')}</label>
-        <input
-          id="handle"
-          type="text"
-          bind:value={flow.info.handle}
+        <HandleInput
+          value={flow.info.handle}
+          domains={serverInfo?.availableUserDomains ?? []}
+          {selectedDomain}
           placeholder={$_('register.handlePlaceholder')}
           disabled={flow.state.submitting}
-          required
+          onInput={(v) => { flow!.info.handle = v }}
+          onDomainChange={(d) => { selectedDomain = d }}
         />
         {#if flow.info.handle.includes('.')}
           <p class="hint warning">{$_('register.handleDotWarning')}</p>

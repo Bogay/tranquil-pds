@@ -3,6 +3,7 @@
   import { _ } from '../lib/i18n'
   import { toast } from '../lib/toast.svelte'
   import SsoIcon from '../components/SsoIcon.svelte'
+  import HandleInput from '../components/HandleInput.svelte'
 
   interface PendingRegistration {
     request_uri: string
@@ -47,6 +48,7 @@
   let handleAvailable = $state<boolean | null>(null)
   let checkingHandle = $state(false)
   let handleError = $state<string | null>(null)
+  let selectedDomain = $state('')
 
   let didType = $state<'plc' | 'web' | 'web-external'>('plc')
   let externalDid = $state('')
@@ -95,8 +97,8 @@
 
   let fullHandle = $derived(() => {
     if (!handle.trim()) return ''
-    const domain = serverInfo?.availableUserDomains?.[0]
-    return domain ? `${handle.trim()}.${domain}` : handle.trim()
+    if (handle.includes('.')) return handle.trim()
+    return selectedDomain ? `${handle.trim()}.${selectedDomain}` : handle.trim()
   })
 
   onMount(() => {
@@ -121,6 +123,7 @@
           telegram: available.includes('telegram'),
           signal: available.includes('signal'),
         }
+        selectedDomain = data.availableUserDomains?.[0] || window.location.hostname
       }
     } catch {
       serverInfo = null
@@ -390,14 +393,14 @@
         <form onsubmit={handleSubmit}>
           <div class="field">
             <label for="handle">{$_('sso_register.handle_label')}</label>
-            <input
-              id="handle"
-              type="text"
-              bind:value={handle}
+            <HandleInput
+              value={handle}
+              domains={serverInfo?.availableUserDomains ?? []}
+              {selectedDomain}
               placeholder={$_('register.handlePlaceholder')}
               disabled={submitting}
-              required
-              autocomplete="off"
+              onInput={(v) => { handle = v }}
+              onDomainChange={(d) => { selectedDomain = d }}
             />
             {#if checkingHandle}
               <p class="hint">{$_('common.checking')}</p>

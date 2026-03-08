@@ -675,20 +675,24 @@ pub async fn update_handle(
             "Inappropriate language in handle".into(),
         )));
     }
-    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
-    let suffix = format!(".{}", hostname_for_handles);
-    let is_service_domain =
-        crate::handle::is_service_domain_handle(&new_handle, hostname_for_handles);
-    let handle = if is_service_domain && new_handle != hostname_for_handles {
-        let short_part = if new_handle.ends_with(&suffix) {
-            new_handle.strip_suffix(&suffix).unwrap_or(&new_handle)
-        } else {
-            &new_handle
-        };
-        let full_handle = if new_handle.ends_with(&suffix) {
-            new_handle.clone()
-        } else {
-            format!("{}.{}", new_handle, hostname_for_handles)
+    let handle_domains = tranquil_config::get().server.user_handle_domain_list();
+    let matched_handle_domain = handle_domains
+        .iter()
+        .filter(|d| new_handle.ends_with(&format!(".{}", d)))
+        .max_by_key(|d| d.len())
+        .cloned();
+    let is_domain_itself = handle_domains.iter().any(|d| d == &new_handle);
+    let handle = if (!new_handle.contains('.') || matched_handle_domain.is_some()) && !is_domain_itself {
+        let (short_part, full_handle) = match &matched_handle_domain {
+            Some(domain) => {
+                let suffix = format!(".{}", domain);
+                let short = new_handle.strip_suffix(&suffix).unwrap_or(&new_handle);
+                (short.to_string(), new_handle.clone())
+            }
+            None => {
+                let primary = &handle_domains[0];
+                (new_handle.clone(), format!("{}.{}", new_handle, primary))
+            }
         };
         if full_handle == current_handle {
             let handle_typed: Handle = match full_handle.parse() {

@@ -435,20 +435,22 @@ pub async fn create_delegated_account(
     };
 
     let hostname = &tranquil_config::get().server.hostname;
-    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
-    let pds_suffix = format!(".{}", hostname_for_handles);
+    let available_domains = tranquil_config::get().server.available_user_domain_list();
+    let matched_domain = available_domains
+        .iter()
+        .filter(|d| input.handle.ends_with(&format!(".{}", d)))
+        .max_by_key(|d| d.len());
 
-    let handle = if !input.handle.contains('.') || input.handle.ends_with(&pds_suffix) {
-        let handle_to_validate = if input.handle.ends_with(&pds_suffix) {
-            input
+    let handle = if !input.handle.contains('.') || matched_domain.is_some() {
+        let handle_to_validate = match matched_domain {
+            Some(domain) => input
                 .handle
-                .strip_suffix(&pds_suffix)
-                .unwrap_or(&input.handle)
-        } else {
-            &input.handle
+                .strip_suffix(&format!(".{}", domain))
+                .unwrap_or(&input.handle),
+            None => &input.handle,
         };
         match crate::api::validation::validate_short_handle(handle_to_validate) {
-            Ok(h) => format!("{}.{}", h, hostname_for_handles),
+            Ok(h) => format!("{}.{}", h, matched_domain.unwrap_or(&available_domains[0])),
             Err(e) => {
                 return Ok(ApiError::InvalidRequest(e.to_string()).into_response());
             }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AuthMethod, HandlePreservation, ServerDescription } from '../../lib/migration/types'
   import { _ } from '../../lib/i18n'
+  import HandleInput from '../HandleInput.svelte'
 
   interface Props {
     handleInput: string
@@ -171,23 +172,15 @@
   {:else}
     <div class="field">
       <label for="new-handle">{$_('migration.inbound.chooseHandle.newHandle')}</label>
-      <div class="handle-input-group">
-        <input
-          id="new-handle"
-          type="text"
-          placeholder="username"
-          value={handleInput}
-          oninput={(e) => onHandleChange((e.target as HTMLInputElement).value)}
-          onblur={onCheckHandle}
-        />
-        {#if serverInfo && serverInfo.availableUserDomains.length > 0 && !handleInput.includes('.')}
-          <select value={selectedDomain} onchange={(e) => onDomainChange((e.target as HTMLSelectElement).value)}>
-            {#each serverInfo.availableUserDomains as domain}
-              <option value={domain}>.{domain}</option>
-            {/each}
-          </select>
-        {/if}
-      </div>
+      <HandleInput
+        id="new-handle"
+        value={handleInput}
+        domains={serverInfo?.availableUserDomains ?? []}
+        {selectedDomain}
+        placeholder="username"
+        onInput={onHandleChange}
+        onDomainChange={onDomainChange}
+      />
 
       {#if handleTooShort}
         <p class="hint error">{$_('migration.inbound.chooseHandle.handleTooShort')}</p>

@@ -22,6 +22,10 @@ filter = "test(/import_with_verification/) | test(/plc_migration/)"
 test-group = "serial-env-tests"
 
 [[profile.default.overrides]]
+filter = "binary(handle_domains)"
+test-group = "serial-env-tests"
+
+[[profile.default.overrides]]
 filter = "binary(ripple_cluster)"
 test-group = "serial-env-tests"
 
@@ -39,6 +43,10 @@ test-group = "heavy-load-tests"
 
 [[profile.ci.overrides]]
 filter = "test(/import_with_verification/) | test(/plc_migration/)"
+test-group = "serial-env-tests"
+
+[[profile.ci.overrides]]
+filter = "binary(handle_domains)"
 test-group = "serial-env-tests"
 
 [[profile.ci.overrides]]

@@ -772,8 +772,8 @@ pub async fn check_handle_available(
         }
     };
 
-    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
-    let full_handle = format!("{}.{}", validated, hostname_for_handles);
+    let available_domains = tranquil_config::get().server.available_user_domain_list();
+    let full_handle = format!("{}.{}", validated, &available_domains[0]);
     let handle_typed: crate::types::Handle = match full_handle.parse() {
         Ok(h) => h,
         Err(_) => return Err(ApiError::InvalidHandle(None)),
@@ -856,10 +856,10 @@ pub async fn complete_registration(
         .ok_or(ApiError::SsoSessionExpired)?;
 
     let hostname = &tranquil_config::get().server.hostname;
-    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
+    let available_domains = tranquil_config::get().server.available_user_domain_list();
 
     let handle = match crate::api::validation::validate_short_handle(&input.handle) {
-        Ok(h) => format!("{}.{}", h, hostname_for_handles),
+        Ok(h) => format!("{}.{}", h, &available_domains[0]),
         Err(_) => return Err(ApiError::InvalidHandle(None)),
     };
 
@@ -981,7 +981,8 @@ pub async fn complete_registration(
 
     let did = match did_type {
         "web" => {
-            let subdomain_host = format!("{}.{}", input.handle, hostname_for_handles);
+            let pds_hostname = tranquil_config::get().server.hostname_without_port();
+            let subdomain_host = format!("{}.{}", input.handle, pds_hostname);
             let encoded_subdomain = subdomain_host.replace(':', "%3A");
             let self_hosted_did = format!("did:web:{}", encoded_subdomain);
             tracing::info!(did = %self_hosted_did, "Creating self-hosted did:web SSO account");

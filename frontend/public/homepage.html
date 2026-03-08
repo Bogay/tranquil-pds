@@ -428,7 +428,7 @@
 
       <footer class="site-footer">
         <span>Made by people who don't take themselves too seriously</span>
-        <span>Open Source: issues & PRs welcome</span>
+        <span>Open source & open hearts</span>
       </footer>
     </div>
 
@@ -485,14 +485,7 @@
         })
         .then(function (info) {
           var hostnameEl = document.getElementById("hostname");
-          if (
-            info.availableUserDomains &&
-            info.availableUserDomains.length
-          ) {
-            hostnameEl.textContent = info.availableUserDomains[0];
-          } else {
-            hostnameEl.textContent = "Tranquil PDS";
-          }
+          hostnameEl.textContent = window.location.hostname;
           hostnameEl.classList.remove("placeholder");
           if (info.version) {
             document.getElementById("version").textContent =
@@ -501,7 +494,7 @@
         })
         .catch(function () {
           var hostnameEl = document.getElementById("hostname");
-          hostnameEl.textContent = "Tranquil PDS";
+          hostnameEl.textContent = window.location.hostname;
           hostnameEl.classList.remove("placeholder");
         });
 

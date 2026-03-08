@@ -69,9 +69,9 @@ pub async fn update_account_handle(
     {
         return Err(ApiError::InvalidHandle(None));
     }
-    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
+    let available_domains = tranquil_config::get().server.available_user_domain_list();
     let handle = if !input_handle.contains('.') {
-        format!("{}.{}", input_handle, hostname_for_handles)
+        format!("{}.{}", input_handle, &available_domains[0])
     } else {
         input_handle.to_string()
     };

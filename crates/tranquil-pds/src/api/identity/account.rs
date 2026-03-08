@@ -140,19 +140,21 @@ pub async fn create_account(
         }
     }
 
-    let hostname_for_validation = tranquil_config::get().server.hostname_without_port();
-    let pds_suffix = format!(".{}", hostname_for_validation);
+    let available_domains = tranquil_config::get().server.available_user_domain_list();
+    let matched_domain = available_domains
+        .iter()
+        .filter(|d| input.handle.ends_with(&format!(".{}", d)))
+        .max_by_key(|d| d.len());
 
     let validated_short_handle = if !input.handle.contains('.')
-        || input.handle.ends_with(&pds_suffix)
+        || matched_domain.is_some()
     {
-        let handle_to_validate = if input.handle.ends_with(&pds_suffix) {
-            input
+        let handle_to_validate = match matched_domain {
+            Some(domain) => input
                 .handle
-                .strip_suffix(&pds_suffix)
-                .unwrap_or(&input.handle)
-        } else {
-            &input.handle
+                .strip_suffix(&format!(".{}", domain))
+                .unwrap_or(&input.handle),
+            None => &input.handle,
         };
         match crate::api::validation::validate_short_handle(handle_to_validate) {
             Ok(h) => h,
@@ -233,15 +235,11 @@ pub async fn create_account(
         })
     };
     let hostname = &tranquil_config::get().server.hostname;
-    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let pds_endpoint = format!("https://{}", hostname);
-    let suffix = format!(".{}", hostname_for_handles);
-    let handle = if input.handle.ends_with(&suffix) {
-        format!("{}.{}", validated_short_handle, hostname_for_handles)
-    } else if input.handle.contains('.') {
-        validated_short_handle.clone()
-    } else {
-        format!("{}.{}", validated_short_handle, hostname_for_handles)
+    let handle = match matched_domain {
+        Some(domain) => format!("{}.{}", validated_short_handle, domain),
+        None if input.handle.contains('.') => validated_short_handle.clone(),
+        None => format!("{}.{}", validated_short_handle, &available_domains[0]),
     };
     let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
         if let Some(signing_key_did) = &input.signing_key {
@@ -276,7 +274,8 @@ pub async fn create_account(
             if !crate::api::server::meta::is_self_hosted_did_web_enabled() {
                 return ApiError::SelfHostedDidWebDisabled.into_response();
             }
-            let subdomain_host = format!("{}.{}", input.handle, hostname_for_handles);
+            let pds_hostname = tranquil_config::get().server.hostname_without_port();
+            let subdomain_host = format!("{}.{}", input.handle, pds_hostname);
             let encoded_subdomain = subdomain_host.replace(':', "%3A");
             let self_hosted_did = format!("did:web:{}", encoded_subdomain);
             info!(did = %self_hosted_did, "Creating self-hosted did:web account (subdomain)");
