@@ -22,10 +22,13 @@ pub trait CommsSender: Send + Sync {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SendError {
-    #[error("Failed to spawn sendmail process: {0}")]
-    ProcessSpawn(#[from] std::io::Error),
-    #[error("Sendmail exited with non-zero status: {0}")]
-    SendmailFailed(String),
+    #[error("Failed to spawn {command}: {source}")]
+    ProcessSpawn {
+        command: String,
+        source: std::io::Error,
+    },
+    #[error("{command} exited with non-zero status: {detail}")]
+    ProcessFailed { command: String, detail: String },
     #[error("Channel not configured: {0:?}")]
     NotConfigured(CommsChannel),
     #[error("External service error: {0}")]
@@ -160,14 +163,31 @@ impl CommsSender for EmailSender {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()?;
+            .spawn()
+            .map_err(|e| SendError::ProcessSpawn {
+                command: self.sendmail_path.clone(),
+                source: e,
+            })?;
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(email_content.as_bytes()).await?;
+            stdin.write_all(email_content.as_bytes()).await.map_err(|e| {
+                SendError::ProcessSpawn {
+                    command: self.sendmail_path.clone(),
+                    source: e,
+                }
+            })?;
         }
-        let output = child.wait_with_output().await?;
+        let output = child.wait_with_output().await.map_err(|e| {
+            SendError::ProcessSpawn {
+                command: self.sendmail_path.clone(),
+                source: e,
+            }
+        })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(SendError::SendmailFailed(stderr.to_string()));
+            return Err(SendError::ProcessFailed {
+                command: self.sendmail_path.clone(),
+                detail: stderr.to_string(),
+            });
         }
         Ok(())
     }
@@ -656,7 +676,10 @@ impl CommsSender for SignalSender {
                         retry_delay(attempt).await;
                         continue;
                     }
-                    return Err(SendError::ProcessSpawn(e));
+                    return Err(SendError::ProcessSpawn {
+                        command: self.signal_cli_path.clone(),
+                        source: e,
+                    });
                 }
                 Err(_) => {
                     if attempt < MAX_RETRIES - 1 {
