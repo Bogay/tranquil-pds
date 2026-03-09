@@ -122,17 +122,21 @@ pub fn get_public_key_multibase(key_bytes: &[u8]) -> Result<String, KeyError> {
 }
 
 pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let hostname = &tranquil_config::get().server.hostname;
-    let hostname_without_port = tranquil_config::get().server.hostname_without_port();
+    let cfg = tranquil_config::get();
+    let hostname = &cfg.server.hostname;
+    let hostname_without_port = cfg.server.hostname_without_port();
     let host_header = get_header_str(&headers, http::header::HOST).unwrap_or(hostname);
     let host_without_port = host_header.split(':').next().unwrap_or(host_header);
-    if host_without_port != hostname_without_port
-        && host_without_port.ends_with(&format!(".{}", hostname_without_port))
-    {
-        let handle = host_without_port
-            .strip_suffix(&format!(".{}", hostname_without_port))
-            .unwrap_or(host_without_port);
-        return serve_subdomain_did_doc(&state, handle, hostname).await;
+    if host_without_port != hostname_without_port {
+        let is_subdomain = cfg
+            .server
+            .available_user_domain_list()
+            .into_iter()
+            .chain(std::iter::once(hostname_without_port.to_string()))
+            .any(|d| host_without_port.ends_with(&format!(".{}", d)));
+        if is_subdomain {
+            return serve_handle_did_doc(&state, host_without_port, hostname).await;
+        }
     }
     let did = if hostname.contains(':') {
         format!("did:web:{}", hostname.replace(':', "%3A"))
@@ -151,11 +155,9 @@ pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -
     .into_response()
 }
 
-async fn serve_subdomain_did_doc(state: &AppState, subdomain: &str, hostname: &str) -> Response {
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(hostname);
-    let subdomain_host = format!("{}.{}", subdomain, hostname_for_handles);
-    let encoded_subdomain = subdomain_host.replace(':', "%3A");
-    let expected_did = format!("did:web:{}", encoded_subdomain);
+async fn serve_handle_did_doc(state: &AppState, handle: &str, hostname: &str) -> Response {
+    let encoded_handle = handle.replace(':', "%3A");
+    let expected_did = format!("did:web:{}", encoded_handle);
     let expected_did_typed: crate::types::Did = match expected_did.parse() {
         Ok(d) => d,
         Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),

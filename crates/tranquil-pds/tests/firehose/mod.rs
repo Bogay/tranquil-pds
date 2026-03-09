@@ -133,10 +133,6 @@ pub struct FirehoseConsumer {
 }
 
 impl FirehoseConsumer {
-    pub async fn connect(port: u16) -> Self {
-        Self::connect_inner(port, None).await
-    }
-
     pub async fn connect_with_cursor(port: u16, cursor: i64) -> Self {
         Self::connect_inner(port, Some(cursor)).await
     }

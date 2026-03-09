@@ -276,3 +276,37 @@ async fn update_handle_bare_uses_configured_domain() {
         "updateHandle with bare handle should use configured domain, not PDS hostname"
     );
 }
+
+#[tokio::test]
+async fn did_web_uses_handle_domain_not_hostname() {
+    unsafe {
+        std::env::set_var("ENABLE_PDS_HOSTED_DID_WEB", "true");
+    }
+    let client = client();
+    let base = base_url_with_domain().await;
+    let short_handle = format!("hd{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let payload = json!({
+        "handle": short_handle,
+        "email": format!("{}@example.com", short_handle),
+        "password": "Testpass123!",
+        "didType": "web"
+    });
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base
+        ))
+        .json(&payload)
+        .send()
+        .await
+        .expect("createAccount request failed");
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Invalid JSON");
+    let did = body["did"].as_str().expect("No DID in response");
+    let expected_did = format!("did:web:{}.{}", short_handle, HANDLE_DOMAIN);
+    assert_eq!(
+        did, expected_did,
+        "did:web should use handle domain '{}', not PDS hostname",
+        HANDLE_DOMAIN
+    );
+}

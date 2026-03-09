@@ -112,8 +112,9 @@ pub async fn create_passkey_account(
             .map(|d| d.starts_with("did:web:"))
             .unwrap_or(false);
 
-    let hostname = &tranquil_config::get().server.hostname;
-    let available_domains = tranquil_config::get().server.available_user_domain_list();
+    let cfg = tranquil_config::get();
+    let hostname = &cfg.server.hostname;
+    let available_domains = cfg.server.available_user_domain_list();
     let matched_domain = available_domains
         .iter()
         .filter(|d| input.handle.ends_with(&format!(".{}", d)))
@@ -134,7 +135,10 @@ pub async fn create_passkey_account(
             }
         }
     } else {
-        input.handle.to_lowercase()
+        match crate::api::validation::validate_full_domain_handle(&input.handle) {
+            Ok(h) => h,
+            Err(_) => return ApiError::InvalidHandle(None).into_response(),
+        }
     };
 
     let email = input
@@ -246,10 +250,11 @@ pub async fn create_passkey_account(
 
     let did = match did_type {
         "web" => {
-            let pds_hostname = tranquil_config::get().server.hostname_without_port();
-            let subdomain_host = format!("{}.{}", input.handle, pds_hostname);
-            let encoded_subdomain = subdomain_host.replace(':', "%3A");
-            let self_hosted_did = format!("did:web:{}", encoded_subdomain);
+            if !crate::api::server::meta::is_self_hosted_did_web_enabled() {
+                return ApiError::SelfHostedDidWebDisabled.into_response();
+            }
+            let encoded_handle = handle.replace(':', "%3A");
+            let self_hosted_did = format!("did:web:{}", encoded_handle);
             info!(did = %self_hosted_did, "Creating self-hosted did:web passkey account");
             self_hosted_did
         }

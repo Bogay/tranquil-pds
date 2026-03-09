@@ -34,6 +34,7 @@ export interface RegistrationFlowState {
   error: string | null;
   submitting: boolean;
   pdsHostname: string;
+  selectedDomain: string;
   handleAvailable: boolean | null;
   checkingHandle: boolean;
   discordInUse: boolean;
@@ -68,6 +69,7 @@ export function createRegistrationFlow(
     error: null,
     submitting: false,
     pdsHostname,
+    selectedDomain: "",
     handleAvailable: null,
     checkingHandle: false,
     discordInUse: false,
@@ -84,7 +86,10 @@ export function createRegistrationFlow(
   }
 
   function getFullHandle(): string {
-    return `${state.info.handle.trim()}.${state.pdsHostname}`;
+    const handle = state.info.handle.trim();
+    if (handle.includes('.')) return handle;
+    const domain = state.selectedDomain || state.pdsHostname;
+    return `${handle}.${domain}`;
   }
 
   function extractDomain(did: string): string {
@@ -132,10 +137,10 @@ export function createRegistrationFlow(
     }
     state.checkingHandle = true;
     try {
+      const params = new URLSearchParams({ handle });
+      if (state.selectedDomain) params.set("domain", state.selectedDomain);
       const response = await fetch(
-        `${getPdsEndpoint()}/oauth/sso/check-handle-available?handle=${
-          encodeURIComponent(handle)
-        }`,
+        `${getPdsEndpoint()}/oauth/sso/check-handle-available?${params}`,
       );
       const data = await response.json();
       state.handleAvailable = data.available === true;
@@ -239,7 +244,7 @@ export function createRegistrationFlow(
       }
 
       const result = await api.createAccount({
-        handle: state.info.handle.trim(),
+        handle: getFullHandle(),
         email: state.info.email.trim(),
         password: state.info.password!,
         inviteCode: state.info.inviteCode?.trim() || undefined,
@@ -291,7 +296,7 @@ export function createRegistrationFlow(
       }
 
       const result = await api.createPasskeyAccount({
-        handle: unsafeAsHandle(state.info.handle.trim()),
+        handle: unsafeAsHandle(getFullHandle()),
         email: state.info.email?.trim()
           ? unsafeAsEmail(state.info.email.trim())
           : undefined,
@@ -532,6 +537,9 @@ export function createRegistrationFlow(
     getPdsDid,
     getFullHandle,
     extractDomain,
+    setSelectedDomain(domain: string) {
+      state.selectedDomain = domain;
+    },
 
     proceedFromInfo,
     selectKeyMode,

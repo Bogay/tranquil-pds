@@ -109,6 +109,7 @@
         flow = createRegistrationFlow('password', hostname)
       }
       selectedDomain = serverInfo?.availableUserDomains?.[0] || window.location.hostname
+      if (flow) flow.setSelectedDomain(selectedDomain)
     } catch (e) {
       console.error('Failed to load server info:', e)
     } finally {
@@ -313,7 +314,7 @@
           placeholder={$_('register.handlePlaceholder')}
           disabled={flow.state.submitting}
           onInput={(v) => { flow!.info.handle = v }}
-          onDomainChange={(d) => { selectedDomain = d }}
+          onDomainChange={(d) => { selectedDomain = d; flow!.setSelectedDomain(d) }}
         />
         {#if flow.info.handle.includes('.')}
           <p class="hint warning">{$_('register.handleDotWarning')}</p>

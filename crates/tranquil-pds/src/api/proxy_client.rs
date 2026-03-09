@@ -215,20 +215,32 @@ mod tests {
     use super::*;
     #[test]
     fn test_ssrf_safe_https() {
-        assert!(is_ssrf_safe("https://api.bsky.app/xrpc/test").is_ok());
+        assert!(is_ssrf_safe("https://1.1.1.1/xrpc/test").is_ok());
     }
     #[test]
     fn test_ssrf_blocks_http_by_default() {
-        let result = is_ssrf_safe("http://external.example.com/xrpc/test");
-        assert!(matches!(
-            result,
-            Err(SsrfError::InsecureProtocol(_)) | Err(SsrfError::DnsResolutionFailed(_))
-        ));
+        let result = is_ssrf_safe("http://93.184.216.34/xrpc/test");
+        assert!(matches!(result, Err(SsrfError::InsecureProtocol(_))));
     }
     #[test]
     fn test_ssrf_allows_localhost_http() {
         assert!(is_ssrf_safe("http://127.0.0.1:8080/test").is_ok());
         assert!(is_ssrf_safe("http://localhost:8080/test").is_ok());
+    }
+    #[test]
+    fn test_ssrf_blocks_non_unicast_ip() {
+        assert!(matches!(
+            is_ssrf_safe("https://0.0.0.0/test"),
+            Err(SsrfError::NonUnicastIp(_))
+        ));
+        assert!(matches!(
+            is_ssrf_safe("https://224.0.0.1/test"),
+            Err(SsrfError::NonUnicastIp(_))
+        ));
+        assert!(matches!(
+            is_ssrf_safe("https://255.255.255.255/test"),
+            Err(SsrfError::NonUnicastIp(_))
+        ));
     }
     #[test]
     fn test_validate_at_uri() {

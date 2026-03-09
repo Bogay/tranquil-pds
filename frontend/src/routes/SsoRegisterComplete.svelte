@@ -165,6 +165,7 @@
   let checkHandleTimeout: ReturnType<typeof setTimeout> | null = null
 
   $effect(() => {
+    void selectedDomain
     if (checkHandleTimeout) {
       clearTimeout(checkHandleTimeout)
     }
@@ -182,7 +183,9 @@
     handleError = null
 
     try {
-      const response = await fetch(`/oauth/sso/check-handle-available?handle=${encodeURIComponent(handle)}`)
+      const params = new URLSearchParams({ handle })
+      if (selectedDomain) params.set('domain', selectedDomain)
+      const response = await fetch(`/oauth/sso/check-handle-available?${params}`)
       const data = await response.json()
       handleAvailable = data.available
       if (!data.available && data.reason) {
@@ -269,6 +272,9 @@
       return
     }
 
+    const fullHandle = !handle.includes('.') && selectedDomain
+      ? `${handle.trim()}.${selectedDomain}`
+      : handle.trim()
     submitting = true
 
     try {
@@ -280,7 +286,7 @@
         },
         body: JSON.stringify({
           token,
-          handle,
+          handle: fullHandle,
           email: email || null,
           invite_code: inviteCode || null,
           verification_channel: verificationChannel,

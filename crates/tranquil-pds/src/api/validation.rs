@@ -258,6 +258,49 @@ pub enum ReservedHandlePolicy {
     Reject,
 }
 
+pub fn validate_full_domain_handle(handle: &str) -> Result<String, HandleValidationError> {
+    let handle = handle.trim();
+
+    if handle.is_empty() {
+        return Err(HandleValidationError::Empty);
+    }
+
+    if handle.contains(' ') || handle.contains('\t') || handle.contains('\n') {
+        return Err(HandleValidationError::ContainsSpaces);
+    }
+
+    if handle.len() > MAX_HANDLE_LENGTH {
+        return Err(HandleValidationError::TooLong);
+    }
+
+    if handle
+        .chars()
+        .any(|c| !c.is_ascii_alphanumeric() && c != '.' && c != '-')
+    {
+        return Err(HandleValidationError::InvalidCharacters);
+    }
+
+    if !handle.contains('.') {
+        return Err(HandleValidationError::InvalidCharacters);
+    }
+
+    let labels: Vec<&str> = handle.split('.').collect();
+    let has_invalid_label = labels
+        .iter()
+        .any(|label| label.is_empty() || label.len() > MAX_DOMAIN_LABEL_LENGTH || label.starts_with('-') || label.ends_with('-'));
+    if has_invalid_label {
+        return Err(HandleValidationError::InvalidCharacters);
+    }
+
+    let handle_lower = handle.to_lowercase();
+
+    if crate::moderation::has_explicit_slur(&handle_lower) {
+        return Err(HandleValidationError::BannedWord);
+    }
+
+    Ok(handle_lower)
+}
+
 pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationError> {
     validate_service_handle(handle, ReservedHandlePolicy::Reject)
 }

@@ -140,7 +140,8 @@ pub async fn create_account(
         }
     }
 
-    let available_domains = tranquil_config::get().server.available_user_domain_list();
+    let cfg = tranquil_config::get();
+    let available_domains = cfg.server.available_user_domain_list();
     let matched_domain = available_domains
         .iter()
         .filter(|d| input.handle.ends_with(&format!(".{}", d)))
@@ -163,23 +164,10 @@ pub async fn create_account(
             }
         }
     } else {
-        if input.handle.contains(' ') || input.handle.contains('\t') {
-            return ApiError::InvalidRequest("Handle cannot contain spaces".into()).into_response();
+        match crate::api::validation::validate_full_domain_handle(&input.handle) {
+            Ok(h) => h,
+            Err(e) => return ApiError::from(e).into_response(),
         }
-        if let Some(c) = input
-            .handle
-            .chars()
-            .find(|c| !c.is_ascii_alphanumeric() && *c != '.' && *c != '-')
-        {
-            return ApiError::InvalidRequest(format!("Handle contains invalid character: {}", c))
-                .into_response();
-        }
-        let handle_lower = input.handle.to_lowercase();
-        if crate::moderation::has_explicit_slur(&handle_lower) {
-            return ApiError::InvalidRequest("Inappropriate language in handle".into())
-                .into_response();
-        }
-        handle_lower
     };
     let email: Option<String> = input
         .email
@@ -234,7 +222,7 @@ pub async fn create_account(
             },
         })
     };
-    let hostname = &tranquil_config::get().server.hostname;
+    let hostname = &cfg.server.hostname;
     let pds_endpoint = format!("https://{}", hostname);
     let handle = match matched_domain {
         Some(domain) => format!("{}.{}", validated_short_handle, domain),
@@ -274,10 +262,8 @@ pub async fn create_account(
             if !crate::api::server::meta::is_self_hosted_did_web_enabled() {
                 return ApiError::SelfHostedDidWebDisabled.into_response();
             }
-            let pds_hostname = tranquil_config::get().server.hostname_without_port();
-            let subdomain_host = format!("{}.{}", input.handle, pds_hostname);
-            let encoded_subdomain = subdomain_host.replace(':', "%3A");
-            let self_hosted_did = format!("did:web:{}", encoded_subdomain);
+            let encoded_handle = handle.replace(':', "%3A");
+            let self_hosted_did = format!("did:web:{}", encoded_handle);
             info!(did = %self_hosted_did, "Creating self-hosted did:web account (subdomain)");
             self_hosted_did
         }
