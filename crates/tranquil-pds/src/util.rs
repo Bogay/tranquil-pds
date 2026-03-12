@@ -1,4 +1,6 @@
 use axum::http::{HeaderMap, HeaderName};
+use base64::Engine as _;
+
 use cid::Cid;
 use ipld_core::ipld::Ipld;
 use rand::Rng;
@@ -7,6 +9,13 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::OnceLock;
+
+const BASE64_STANDARD_INDIFFERENT: base64::engine::GeneralPurpose =
+    base64::engine::GeneralPurpose::new(
+        &base64::alphabet::STANDARD,
+        base64::engine::GeneralPurposeConfig::new()
+            .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
+    );
 
 const BASE32_ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz234567";
 
@@ -171,6 +180,13 @@ pub fn json_to_ipld(value: &JsonValue) -> Ipld {
                 && let Ok(cid) = Cid::from_str(link)
             {
                 return Ipld::Link(cid);
+            }
+            if let Some(JsonValue::String(b64)) = obj.get("$bytes")
+                && obj.len() == 1
+            {
+                if let Ok(bytes) = BASE64_STANDARD_INDIFFERENT.decode(b64) {
+                    return Ipld::Bytes(bytes);
+                }
             }
             let map: BTreeMap<String, Ipld> = obj
                 .iter()
@@ -345,6 +361,128 @@ mod tests {
             return;
         }
         panic!("Failed to find CID link in parsed CBOR");
+    }
+
+    #[test]
+    fn test_json_to_ipld_bytes_simple() {
+        let json = serde_json::json!({
+            "$bytes": "aGVsbG8gd29ybGQ="
+        });
+        let ipld = json_to_ipld(&json);
+        match ipld {
+            Ipld::Bytes(bytes) => {
+                assert_eq!(bytes, b"hello world");
+            }
+            _ => panic!("Expected Ipld::Bytes, got {:?}", ipld),
+        }
+    }
+
+    #[test]
+    fn test_json_to_ipld_bytes_empty() {
+        let json = serde_json::json!({
+            "$bytes": ""
+        });
+        let ipld = json_to_ipld(&json);
+        match ipld {
+            Ipld::Bytes(bytes) => {
+                assert!(bytes.is_empty());
+            }
+            _ => panic!("Expected Ipld::Bytes, got {:?}", ipld),
+        }
+    }
+
+    #[test]
+    fn test_json_to_ipld_bytes_with_special_base64_chars() {
+        let json = serde_json::json!({
+            "$bytes": "ygoGIpnVb/HQTIZythM9t1iLHkoWY5OeeqlhD0JEEgqHedDSCxG8F1YfipZPMA3JzKG6ssWNzOmZ9iSSW0nDvmjJ5ldwwbgt"
+        });
+        let ipld = json_to_ipld(&json);
+        match ipld {
+            Ipld::Bytes(bytes) => {
+                assert!(!bytes.is_empty());
+            }
+            _ => panic!("Expected Ipld::Bytes, got {:?}", ipld),
+        }
+    }
+
+    #[test]
+    fn test_json_to_ipld_bytes_unpadded() {
+        let padded = json_to_ipld(&serde_json::json!({ "$bytes": "aGVsbG8=" }));
+        let unpadded = json_to_ipld(&serde_json::json!({ "$bytes": "aGVsbG8" }));
+        match (&padded, &unpadded) {
+            (Ipld::Bytes(a), Ipld::Bytes(b)) => {
+                assert_eq!(a, b"hello");
+                assert_eq!(b, b"hello");
+            }
+            _ => panic!(
+                "Expected Ipld::Bytes for both, got {:?} / {:?}",
+                padded, unpadded
+            ),
+        }
+    }
+
+    #[test]
+    fn test_json_to_ipld_bytes_produces_cbor_byte_string_not_map() {
+        let json = serde_json::json!({"$bytes": "SGVsbG8="});
+        let ipld = json_to_ipld(&json);
+        let cbor = serde_ipld_dagcbor::to_vec(&ipld).expect("CBOR serialization failed");
+        assert_eq!(
+            cbor[0] & 0xE0,
+            0x40,
+            "expected CBOR byte string (major type 2), got major type {}",
+            cbor[0] >> 5
+        );
+    }
+
+    #[test]
+    fn test_json_to_ipld_bytes_not_confused_with_extra_keys() {
+        let json = serde_json::json!({
+            "$bytes": "aGVsbG8=",
+            "extra": "field"
+        });
+        let ipld = json_to_ipld(&json);
+        match ipld {
+            Ipld::Map(_) => {}
+            _ => panic!(
+                "Expected Ipld::Map for $bytes with extra keys, got {:?}",
+                ipld
+            ),
+        }
+    }
+
+    #[test]
+    fn test_json_to_ipld_bytes_nested_in_record() {
+        let record = serde_json::json!({
+            "$type": "app.opake.grant",
+            "recipient": "did:plc:example",
+            "wrappedKey": {
+                "algo": "x25519-hkdf-a256kw",
+                "ciphertext": {
+                    "$bytes": "ygoGIpnVb/HQTIZythM9t1iLHkoWY5OeeqlhD0JEEgqHedDSCxG8F1YfipZPMA3JzKG6ssWNzOmZ9iSSW0nDvmjJ5ldwwbgt"
+                }
+            },
+            "encryptedMetadata": {
+                "ciphertext": { "$bytes": "aGVsbG8=" },
+                "nonce": { "$bytes": "d29ybGQ=" }
+            }
+        });
+        let ipld = json_to_ipld(&record);
+        let cbor_bytes = serde_ipld_dagcbor::to_vec(&ipld).expect("CBOR serialization failed");
+        let parsed: Ipld =
+            serde_ipld_dagcbor::from_slice(&cbor_bytes).expect("CBOR deserialization failed");
+        if let Ipld::Map(map) = &parsed
+            && let Some(Ipld::Map(wrapped)) = map.get("wrappedKey")
+            && let Some(Ipld::Bytes(ct)) = wrapped.get("ciphertext")
+            && let Some(Ipld::Map(meta)) = map.get("encryptedMetadata")
+            && let Some(Ipld::Bytes(meta_ct)) = meta.get("ciphertext")
+            && let Some(Ipld::Bytes(nonce)) = meta.get("nonce")
+        {
+            assert!(!ct.is_empty());
+            assert_eq!(meta_ct, b"hello");
+            assert_eq!(nonce, b"world");
+            return;
+        }
+        panic!("Failed to find Bytes in parsed CBOR: {:?}", parsed);
     }
 
     #[test]
