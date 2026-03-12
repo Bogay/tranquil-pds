@@ -16,6 +16,7 @@ members = [
     "crates/tranquil-db-traits",
     "crates/tranquil-db",
     "crates/tranquil-pds",
+    "crates/tranquil-lexicon",
 ]
 
 [workspace.package]
@@ -38,6 +39,9 @@ tranquil-comms = { path = "crates/tranquil-comms" }
 tranquil-db-traits = { path = "crates/tranquil-db-traits" }
 tranquil-db = { path = "crates/tranquil-db" }
 tranquil-ripple = { path = "crates/tranquil-ripple" }
+tranquil-lexicon = { path = "crates/tranquil-lexicon" }
+
+unicode-segmentation = "1"
 
 aes-gcm = "0.10"
 backon = "1"

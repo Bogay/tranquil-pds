@@ -6213,6 +6213,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tranquil-lexicon"
+version = "0.3.1"
+dependencies = [
+ "chrono",
+ "hickory-resolver",
+ "parking_lot",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "unicode-segmentation",
+ "urlencoding",
+ "wiremock",
+]
+
+[[package]]
 name = "tranquil-oauth"
 version = "0.3.1"
 dependencies = [
@@ -6309,6 +6327,7 @@ dependencies = [
  "tranquil-crypto",
  "tranquil-db",
  "tranquil-db-traits",
+ "tranquil-lexicon",
  "tranquil-oauth",
  "tranquil-repo",
  "tranquil-ripple",
