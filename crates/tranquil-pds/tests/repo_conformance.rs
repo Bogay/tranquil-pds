@@ -6,17 +6,58 @@ use helpers::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
+fn ensure_test_schemas() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let registry = tranquil_lexicon::LexiconRegistry::global();
+        let post_schema: tranquil_lexicon::LexiconDoc = serde_json::from_value(json!({
+            "lexicon": 1,
+            "id": "com.test.feed.post",
+            "defs": {
+                "main": {
+                    "type": "record",
+                    "key": "tid",
+                    "record": {
+                        "type": "object",
+                        "required": ["text", "createdAt"],
+                        "properties": {
+                            "text": { "type": "string", "maxLength": 300, "maxGraphemes": 300 },
+                            "createdAt": { "type": "string", "format": "datetime" },
+                            "reply": { "type": "ref", "ref": "#replyRef" },
+                            "embed": { "type": "union", "refs": [] },
+                            "langs": { "type": "array", "maxLength": 3, "items": { "type": "string", "format": "language" } },
+                            "tags": { "type": "array", "maxLength": 8, "items": { "type": "string", "maxLength": 640, "maxGraphemes": 64 } },
+                            "facets": { "type": "array", "items": { "type": "unknown" } }
+                        }
+                    }
+                },
+                "replyRef": {
+                    "type": "object",
+                    "required": ["root", "parent"],
+                    "properties": {
+                        "root": { "type": "unknown" },
+                        "parent": { "type": "unknown" }
+                    }
+                }
+            }
+        })).expect("invalid post schema");
+        registry.preload(post_schema);
+    });
+}
+
 #[tokio::test]
 async fn test_create_record_response_schema() {
+    ensure_test_schemas();
     let client = client();
     let (did, jwt) = setup_new_user("conform-create").await;
     let now = Utc::now().to_rfc3339();
 
     let payload = json!({
         "repo": did,
-        "collection": "app.bsky.feed.post",
+        "collection": "com.test.feed.post",
         "record": {
-            "$type": "app.bsky.feed.post",
+            "$type": "com.test.feed.post",
             "text": "Testing conformance",
             "createdAt": now
         }
@@ -73,10 +114,10 @@ async fn test_create_record_no_validation_status_when_validate_false() {
 
     let payload = json!({
         "repo": did,
-        "collection": "app.bsky.feed.post",
+        "collection": "com.test.feed.post",
         "validate": false,
         "record": {
-            "$type": "app.bsky.feed.post",
+            "$type": "com.test.feed.post",
             "text": "Testing without validation",
             "createdAt": now
         }
@@ -106,16 +147,17 @@ async fn test_create_record_no_validation_status_when_validate_false() {
 
 #[tokio::test]
 async fn test_put_record_response_schema() {
+    ensure_test_schemas();
     let client = client();
     let (did, jwt) = setup_new_user("conform-put").await;
     let now = Utc::now().to_rfc3339();
 
     let payload = json!({
         "repo": did,
-        "collection": "app.bsky.feed.post",
+        "collection": "com.test.feed.post",
         "rkey": "conformance-put",
         "record": {
-            "$type": "app.bsky.feed.post",
+            "$type": "com.test.feed.post",
             "text": "Testing putRecord conformance",
             "createdAt": now
         }
@@ -160,10 +202,10 @@ async fn test_delete_record_response_schema() {
 
     let create_payload = json!({
         "repo": did,
-        "collection": "app.bsky.feed.post",
+        "collection": "com.test.feed.post",
         "rkey": "to-delete",
         "record": {
-            "$type": "app.bsky.feed.post",
+            "$type": "com.test.feed.post",
             "text": "This will be deleted",
             "createdAt": now
         }
@@ -182,7 +224,7 @@ async fn test_delete_record_response_schema() {
 
     let delete_payload = json!({
         "repo": did,
-        "collection": "app.bsky.feed.post",
+        "collection": "com.test.feed.post",
         "rkey": "to-delete"
     });
     let delete_res = client
@@ -215,7 +257,7 @@ async fn test_delete_record_noop_response() {
 
     let delete_payload = json!({
         "repo": did,
-        "collection": "app.bsky.feed.post",
+        "collection": "com.test.feed.post",
         "rkey": "nonexistent-record"
     });
     let delete_res = client
@@ -240,6 +282,7 @@ async fn test_delete_record_noop_response() {
 
 #[tokio::test]
 async fn test_apply_writes_response_schema() {
+    ensure_test_schemas();
     let client = client();
     let (did, jwt) = setup_new_user("conform-apply").await;
     let now = Utc::now().to_rfc3339();
@@ -249,20 +292,20 @@ async fn test_apply_writes_response_schema() {
         "writes": [
             {
                 "$type": "com.atproto.repo.applyWrites#create",
-                "collection": "app.bsky.feed.post",
+                "collection": "com.test.feed.post",
                 "rkey": "apply-test-1",
                 "value": {
-                    "$type": "app.bsky.feed.post",
+                    "$type": "com.test.feed.post",
                     "text": "First post",
                     "createdAt": now
                 }
             },
             {
                 "$type": "com.atproto.repo.applyWrites#create",
-                "collection": "app.bsky.feed.post",
+                "collection": "com.test.feed.post",
                 "rkey": "apply-test-2",
                 "value": {
-                    "$type": "app.bsky.feed.post",
+                    "$type": "com.test.feed.post",
                     "text": "Second post",
                     "createdAt": now
                 }
@@ -312,16 +355,17 @@ async fn test_apply_writes_response_schema() {
 
 #[tokio::test]
 async fn test_apply_writes_update_and_delete_results() {
+    ensure_test_schemas();
     let client = client();
     let (did, jwt) = setup_new_user("conform-apply-upd").await;
     let now = Utc::now().to_rfc3339();
 
     let create_payload = json!({
         "repo": did,
-        "collection": "app.bsky.feed.post",
+        "collection": "com.test.feed.post",
         "rkey": "to-update",
         "record": {
-            "$type": "app.bsky.feed.post",
+            "$type": "com.test.feed.post",
             "text": "Original",
             "createdAt": now
         }
@@ -342,17 +386,17 @@ async fn test_apply_writes_update_and_delete_results() {
         "writes": [
             {
                 "$type": "com.atproto.repo.applyWrites#update",
-                "collection": "app.bsky.feed.post",
+                "collection": "com.test.feed.post",
                 "rkey": "to-update",
                 "value": {
-                    "$type": "app.bsky.feed.post",
+                    "$type": "com.test.feed.post",
                     "text": "Updated",
                     "createdAt": now
                 }
             },
             {
                 "$type": "com.atproto.repo.applyWrites#delete",
-                "collection": "app.bsky.feed.post",
+                "collection": "com.test.feed.post",
                 "rkey": "to-update"
             }
         ]
@@ -415,7 +459,7 @@ async fn test_get_record_error_code() {
         ))
         .query(&[
             ("repo", did.as_str()),
-            ("collection", "app.bsky.feed.post"),
+            ("collection", "com.test.feed.post"),
             ("rkey", "nonexistent"),
         ])
         .send()
@@ -520,14 +564,14 @@ async fn test_put_record_noop_same_content() {
     let now = Utc::now().to_rfc3339();
 
     let record = json!({
-        "$type": "app.bsky.feed.post",
+        "$type": "com.test.feed.post",
         "text": "This content will not change",
         "createdAt": now
     });
 
     let payload = json!({
         "repo": did,
-        "collection": "app.bsky.feed.post",
+        "collection": "com.test.feed.post",
         "rkey": "noop-test",
         "record": record.clone()
     });

@@ -684,7 +684,9 @@ pub async fn update_handle(
         .max_by_key(|d| d.len())
         .cloned();
     let is_domain_itself = handle_domains.iter().any(|d| d == &new_handle);
-    let handle = if (!new_handle.contains('.') || matched_handle_domain.is_some()) && !is_domain_itself {
+    let handle = if (!new_handle.contains('.') || matched_handle_domain.is_some())
+        && !is_domain_itself
+    {
         let (short_part, full_handle) = match &matched_handle_domain {
             Some(domain) => {
                 let suffix = format!(".{}", domain);

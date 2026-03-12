@@ -1,5 +1,6 @@
 use serde_json::Value;
 use thiserror::Error;
+use tranquil_lexicon::LexValidationError;
 
 #[derive(Debug, Error)]
 pub enum ValidationError {
@@ -75,375 +76,151 @@ impl RecordValidator {
         collection: &str,
         rkey: Option<&str>,
     ) -> Result<ValidationStatus, ValidationError> {
-        let obj = record.as_object().ok_or_else(|| {
-            ValidationError::InvalidRecord("Record must be an object".to_string())
-        })?;
-        let record_type = obj
-            .get("$type")
-            .and_then(|v| v.as_str())
-            .ok_or(ValidationError::MissingType)?;
-        if record_type != collection {
-            return Err(ValidationError::TypeMismatch {
-                expected: collection.to_string(),
-                actual: record_type.to_string(),
-            });
-        }
-        if let Some(created_at) = obj.get("createdAt").and_then(|v| v.as_str()) {
-            validate_datetime(created_at, "createdAt")?;
-        }
-        match record_type {
-            "app.bsky.feed.post" => Self::validate_post(obj)?,
-            "app.bsky.actor.profile" => Self::validate_profile(obj)?,
-            "app.bsky.feed.like" => Self::validate_like(obj)?,
-            "app.bsky.feed.repost" => Self::validate_repost(obj)?,
-            "app.bsky.graph.follow" => Self::validate_follow(obj)?,
-            "app.bsky.graph.block" => Self::validate_block(obj)?,
-            "app.bsky.graph.list" => Self::validate_list(obj)?,
-            "app.bsky.graph.listitem" => Self::validate_list_item(obj)?,
-            "app.bsky.feed.generator" => Self::validate_feed_generator(obj, rkey)?,
-            "app.bsky.feed.threadgate" => Self::validate_threadgate(obj)?,
-            "app.bsky.labeler.service" => Self::validate_labeler_service(obj)?,
-            "app.bsky.graph.starterpack" => Self::validate_starterpack(obj)?,
-            _ => {
+        let (record_type, obj) = validate_preamble(record, collection)?;
+        let registry = tranquil_lexicon::LexiconRegistry::global();
+
+        match tranquil_lexicon::validate_record(registry, record_type, record) {
+            Ok(()) => {
+                check_banned_content(record_type, obj, rkey)?;
+                Ok(ValidationStatus::Valid)
+            }
+            Err(LexValidationError::LexiconNotFound(_)) => {
                 if self.require_lexicon {
-                    return Err(ValidationError::UnknownType(record_type.to_string()));
-                }
-                return Ok(ValidationStatus::Unknown);
-            }
-        }
-        Ok(ValidationStatus::Valid)
-    }
-
-    fn validate_post(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("text") {
-            return Err(ValidationError::MissingField("text".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        if let Some(text) = obj.get("text").and_then(|v| v.as_str()) {
-            let grapheme_count = text.chars().count();
-            if grapheme_count > 3000 {
-                return Err(ValidationError::InvalidField {
-                    path: "text".to_string(),
-                    message: format!(
-                        "Text exceeds maximum length of 3000 characters (got {})",
-                        grapheme_count
-                    ),
-                });
-            }
-        }
-        if let Some(langs) = obj.get("langs").and_then(|v| v.as_array())
-            && langs.len() > 3
-        {
-            return Err(ValidationError::InvalidField {
-                path: "langs".to_string(),
-                message: "Maximum 3 languages allowed".to_string(),
-            });
-        }
-        if let Some(tags) = obj.get("tags").and_then(|v| v.as_array()) {
-            if tags.len() > 8 {
-                return Err(ValidationError::InvalidField {
-                    path: "tags".to_string(),
-                    message: "Maximum 8 tags allowed".to_string(),
-                });
-            }
-            for (i, tag) in tags.iter().enumerate() {
-                if let Some(tag_str) = tag.as_str() {
-                    if tag_str.len() > 640 {
-                        return Err(ValidationError::InvalidField {
-                            path: format!("tags/{}", i),
-                            message: "Tag exceeds maximum length of 640 bytes".to_string(),
-                        });
-                    }
-                    if crate::moderation::has_explicit_slur(tag_str) {
-                        return Err(ValidationError::BannedContent {
-                            path: format!("tags/{}", i),
-                        });
-                    }
+                    Err(ValidationError::UnknownType(record_type.to_string()))
+                } else {
+                    check_banned_content(record_type, obj, rkey)?;
+                    Ok(ValidationStatus::Unknown)
                 }
             }
-        }
-        if let Some(facets) = obj.get("facets").and_then(|v| v.as_array()) {
-            for (i, facet) in facets.iter().enumerate() {
-                if let Some(features) = facet.get("features").and_then(|v| v.as_array()) {
-                    for (j, feature) in features.iter().enumerate() {
-                        let is_tag = feature
-                            .get("$type")
-                            .and_then(|v| v.as_str())
-                            .is_some_and(|t| t == "app.bsky.richtext.facet#tag");
-                        if is_tag
-                            && let Some(tag) = feature.get("tag").and_then(|v| v.as_str())
-                            && crate::moderation::has_explicit_slur(tag)
-                        {
-                            return Err(ValidationError::BannedContent {
-                                path: format!("facets/{}/features/{}/tag", i, j),
-                            });
-                        }
-                    }
-                }
+            Err(LexValidationError::MissingRequired { path }) => {
+                Err(ValidationError::MissingField(path))
+            }
+            Err(LexValidationError::InvalidField { path, message }) => {
+                Err(ValidationError::InvalidField { path, message })
+            }
+            Err(LexValidationError::RecursionDepthExceeded { path }) => {
+                Err(ValidationError::InvalidField {
+                    path,
+                    message: "recursion depth exceeded".to_string(),
+                })
             }
         }
-        Ok(())
-    }
-
-    fn validate_profile(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str()) {
-            let grapheme_count = display_name.chars().count();
-            if grapheme_count > 640 {
-                return Err(ValidationError::InvalidField {
-                    path: "displayName".to_string(),
-                    message: format!(
-                        "Display name exceeds maximum length of 640 characters (got {})",
-                        grapheme_count
-                    ),
-                });
-            }
-            if crate::moderation::has_explicit_slur(display_name) {
-                return Err(ValidationError::BannedContent {
-                    path: "displayName".to_string(),
-                });
-            }
-        }
-        if let Some(description) = obj.get("description").and_then(|v| v.as_str()) {
-            let grapheme_count = description.chars().count();
-            if grapheme_count > 2560 {
-                return Err(ValidationError::InvalidField {
-                    path: "description".to_string(),
-                    message: format!(
-                        "Description exceeds maximum length of 2560 characters (got {})",
-                        grapheme_count
-                    ),
-                });
-            }
-            if crate::moderation::has_explicit_slur(description) {
-                return Err(ValidationError::BannedContent {
-                    path: "description".to_string(),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_like(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("subject") {
-            return Err(ValidationError::MissingField("subject".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        Self::validate_strong_ref(obj.get("subject"), "subject")?;
-        Ok(())
-    }
-
-    fn validate_repost(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("subject") {
-            return Err(ValidationError::MissingField("subject".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        Self::validate_strong_ref(obj.get("subject"), "subject")?;
-        Ok(())
-    }
-
-    fn validate_follow(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("subject") {
-            return Err(ValidationError::MissingField("subject".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        if let Some(subject) = obj.get("subject").and_then(|v| v.as_str())
-            && !subject.starts_with("did:")
-        {
-            return Err(ValidationError::InvalidField {
-                path: "subject".to_string(),
-                message: "Subject must be a DID".to_string(),
-            });
-        }
-        Ok(())
-    }
-
-    fn validate_block(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("subject") {
-            return Err(ValidationError::MissingField("subject".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        if let Some(subject) = obj.get("subject").and_then(|v| v.as_str())
-            && !subject.starts_with("did:")
-        {
-            return Err(ValidationError::InvalidField {
-                path: "subject".to_string(),
-                message: "Subject must be a DID".to_string(),
-            });
-        }
-        Ok(())
-    }
-
-    fn validate_list(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("name") {
-            return Err(ValidationError::MissingField("name".to_string()));
-        }
-        if !obj.contains_key("purpose") {
-            return Err(ValidationError::MissingField("purpose".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
-            if name.is_empty() || name.len() > 64 {
-                return Err(ValidationError::InvalidField {
-                    path: "name".to_string(),
-                    message: "Name must be 1-64 characters".to_string(),
-                });
-            }
-            if crate::moderation::has_explicit_slur(name) {
-                return Err(ValidationError::BannedContent {
-                    path: "name".to_string(),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_list_item(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("subject") {
-            return Err(ValidationError::MissingField("subject".to_string()));
-        }
-        if !obj.contains_key("list") {
-            return Err(ValidationError::MissingField("list".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        Ok(())
-    }
-
-    fn validate_feed_generator(
-        obj: &serde_json::Map<String, Value>,
-        rkey: Option<&str>,
-    ) -> Result<(), ValidationError> {
-        if !obj.contains_key("did") {
-            return Err(ValidationError::MissingField("did".to_string()));
-        }
-        if !obj.contains_key("displayName") {
-            return Err(ValidationError::MissingField("displayName".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        if let Some(rkey) = rkey
-            && crate::moderation::has_explicit_slur(rkey)
-        {
-            return Err(ValidationError::BannedContent {
-                path: "rkey".to_string(),
-            });
-        }
-        if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str()) {
-            if display_name.is_empty() || display_name.len() > 240 {
-                return Err(ValidationError::InvalidField {
-                    path: "displayName".to_string(),
-                    message: "displayName must be 1-240 characters".to_string(),
-                });
-            }
-            if crate::moderation::has_explicit_slur(display_name) {
-                return Err(ValidationError::BannedContent {
-                    path: "displayName".to_string(),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_starterpack(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("name") {
-            return Err(ValidationError::MissingField("name".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
-            if name.is_empty() || name.len() > 500 {
-                return Err(ValidationError::InvalidField {
-                    path: "name".to_string(),
-                    message: "name must be 1-500 characters".to_string(),
-                });
-            }
-            if crate::moderation::has_explicit_slur(name) {
-                return Err(ValidationError::BannedContent {
-                    path: "name".to_string(),
-                });
-            }
-        }
-        if let Some(description) = obj.get("description").and_then(|v| v.as_str()) {
-            if description.len() > 3000 {
-                return Err(ValidationError::InvalidField {
-                    path: "description".to_string(),
-                    message: "description must be at most 3000 characters".to_string(),
-                });
-            }
-            if crate::moderation::has_explicit_slur(description) {
-                return Err(ValidationError::BannedContent {
-                    path: "description".to_string(),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_threadgate(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("post") {
-            return Err(ValidationError::MissingField("post".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        Ok(())
-    }
-
-    fn validate_labeler_service(
-        obj: &serde_json::Map<String, Value>,
-    ) -> Result<(), ValidationError> {
-        if !obj.contains_key("policies") {
-            return Err(ValidationError::MissingField("policies".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        Ok(())
-    }
-
-    fn validate_strong_ref(value: Option<&Value>, path: &str) -> Result<(), ValidationError> {
-        let obj =
-            value
-                .and_then(|v| v.as_object())
-                .ok_or_else(|| ValidationError::InvalidField {
-                    path: path.to_string(),
-                    message: "Must be a strong reference object".to_string(),
-                })?;
-        if !obj.contains_key("uri") {
-            return Err(ValidationError::MissingField(format!("{}/uri", path)));
-        }
-        if !obj.contains_key("cid") {
-            return Err(ValidationError::MissingField(format!("{}/cid", path)));
-        }
-        if let Some(uri) = obj.get("uri").and_then(|v| v.as_str())
-            && !uri.starts_with("at://")
-        {
-            return Err(ValidationError::InvalidField {
-                path: format!("{}/uri", path),
-                message: "URI must be an at:// URI".to_string(),
-            });
-        }
-        Ok(())
     }
 }
 
+fn validate_preamble<'a>(
+    record: &'a Value,
+    collection: &str,
+) -> Result<(&'a str, &'a serde_json::Map<String, Value>), ValidationError> {
+    let obj = record
+        .as_object()
+        .ok_or_else(|| ValidationError::InvalidRecord("Record must be an object".to_string()))?;
+    let record_type = obj
+        .get("$type")
+        .and_then(|v| v.as_str())
+        .ok_or(ValidationError::MissingType)?;
+    if record_type != collection {
+        return Err(ValidationError::TypeMismatch {
+            expected: collection.to_string(),
+            actual: record_type.to_string(),
+        });
+    }
+    if let Some(created_at) = obj.get("createdAt").and_then(|v| v.as_str()) {
+        validate_datetime(created_at, "createdAt")?;
+    }
+    Ok((record_type, obj))
+}
+
+fn check_banned_content(
+    record_type: &str,
+    obj: &serde_json::Map<String, Value>,
+    rkey: Option<&str>,
+) -> Result<(), ValidationError> {
+    match record_type {
+        "app.bsky.feed.post" => {
+            check_post_banned_content(obj)?;
+        }
+        "app.bsky.actor.profile" => {
+            check_string_field(obj, "displayName")?;
+            check_string_field(obj, "description")?;
+        }
+        "app.bsky.graph.list" => {
+            check_string_field(obj, "name")?;
+        }
+        "app.bsky.graph.starterpack" => {
+            check_string_field(obj, "name")?;
+            check_string_field(obj, "description")?;
+        }
+        "app.bsky.feed.generator" => {
+            if let Some(rkey) = rkey {
+                if crate::moderation::has_explicit_slur(rkey) {
+                    return Err(ValidationError::BannedContent {
+                        path: "rkey".to_string(),
+                    });
+                }
+            }
+            check_string_field(obj, "displayName")?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn check_post_banned_content(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    if let Some(tags) = obj.get("tags").and_then(|v| v.as_array()) {
+        tags.iter().enumerate().try_for_each(|(i, tag)| {
+            if let Some(tag_str) = tag.as_str() {
+                if crate::moderation::has_explicit_slur(tag_str) {
+                    return Err(ValidationError::BannedContent {
+                        path: format!("tags/{}", i),
+                    });
+                }
+            }
+            Ok(())
+        })?;
+    }
+    if let Some(facets) = obj.get("facets").and_then(|v| v.as_array()) {
+        facets.iter().enumerate().try_for_each(|(i, facet)| {
+            if let Some(features) = facet.get("features").and_then(|v| v.as_array()) {
+                features.iter().enumerate().try_for_each(|(j, feature)| {
+                    let is_tag = feature
+                        .get("$type")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|t| t == "app.bsky.richtext.facet#tag");
+                    if is_tag {
+                        if let Some(tag) = feature.get("tag").and_then(|v| v.as_str()) {
+                            if crate::moderation::has_explicit_slur(tag) {
+                                return Err(ValidationError::BannedContent {
+                                    path: format!("facets/{}/features/{}/tag", i, j),
+                                });
+                            }
+                        }
+                    }
+                    Ok(())
+                })?;
+            }
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
+fn check_string_field(
+    obj: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<(), ValidationError> {
+    if let Some(value) = obj.get(field).and_then(|v| v.as_str()) {
+        if crate::moderation::has_explicit_slur(value) {
+            return Err(ValidationError::BannedContent {
+                path: field.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn validate_datetime(value: &str, path: &str) -> Result<(), ValidationError> {
-    if chrono::DateTime::parse_from_rfc3339(value).is_err() {
+    if !tranquil_lexicon::is_valid_datetime(value) {
         return Err(ValidationError::InvalidDatetime {
             path: path.to_string(),
         });
@@ -452,84 +229,22 @@ fn validate_datetime(value: &str, path: &str) -> Result<(), ValidationError> {
 }
 
 pub fn validate_record_key(rkey: &str) -> Result<(), ValidationError> {
-    if rkey.is_empty() {
-        return Err(ValidationError::InvalidRecord(
-            "Record key cannot be empty".to_string(),
-        ));
-    }
-    if rkey.len() > 512 {
-        return Err(ValidationError::InvalidRecord(
-            "Record key exceeds maximum length of 512".to_string(),
-        ));
-    }
-    if rkey == "." || rkey == ".." {
-        return Err(ValidationError::InvalidRecord(
-            "Record key cannot be '.' or '..'".to_string(),
-        ));
-    }
-    let valid_chars = rkey
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '~');
-    if !valid_chars {
-        return Err(ValidationError::InvalidRecord(
-            "Record key contains invalid characters (must be alphanumeric, '.', '-', '_', or '~')"
-                .to_string(),
-        ));
-    }
-    Ok(())
-}
-
-pub fn is_valid_did(did: &str) -> bool {
-    if !did.starts_with("did:") {
-        return false;
-    }
-    let parts: Vec<&str> = did.splitn(3, ':').collect();
-    if parts.len() < 3 {
-        return false;
-    }
-    let method = parts[1];
-    if method.is_empty() || !method.chars().all(|c| c.is_ascii_lowercase()) {
-        return false;
-    }
-    let id = parts[2];
-    !id.is_empty()
-}
-
-pub fn validate_did(did: &str) -> Result<(), ValidationError> {
-    if !is_valid_did(did) {
-        return Err(ValidationError::InvalidField {
-            path: "did".to_string(),
-            message: "Invalid DID format".to_string(),
-        });
+    if !tranquil_lexicon::is_valid_record_key(rkey) {
+        return Err(ValidationError::InvalidRecord(format!(
+            "Invalid record key: '{}'",
+            rkey
+        )));
     }
     Ok(())
 }
 
 pub fn validate_collection_nsid(collection: &str) -> Result<(), ValidationError> {
-    if collection.is_empty() {
-        return Err(ValidationError::InvalidRecord(
-            "Collection NSID cannot be empty".to_string(),
-        ));
+    if !tranquil_lexicon::is_valid_nsid(collection) {
+        return Err(ValidationError::InvalidRecord(format!(
+            "Invalid collection NSID: '{}'",
+            collection
+        )));
     }
-    let parts: Vec<&str> = collection.split('.').collect();
-    if parts.len() < 3 {
-        return Err(ValidationError::InvalidRecord(
-            "Collection NSID must have at least 3 segments".to_string(),
-        ));
-    }
-    parts.iter().try_for_each(|part| {
-        if part.is_empty() {
-            return Err(ValidationError::InvalidRecord(
-                "Collection NSID segments cannot be empty".to_string(),
-            ));
-        }
-        if !part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-            return Err(ValidationError::InvalidRecord(
-                "Collection NSID segments must be alphanumeric or hyphens".to_string(),
-            ));
-        }
-        Ok(())
-    })?;
     Ok(())
 }
 
@@ -629,110 +344,4 @@ fn is_common_password(password: &str) -> bool {
 
     let lower = password.to_lowercase();
     COMMON_PASSWORDS.iter().any(|p| p.to_lowercase() == lower)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_validate_post() {
-        let validator = RecordValidator::new();
-        let valid_post = json!({
-            "$type": "app.bsky.feed.post",
-            "text": "Hello, world!",
-            "createdAt": "2024-01-01T00:00:00.000Z"
-        });
-        assert_eq!(
-            validator
-                .validate(&valid_post, "app.bsky.feed.post")
-                .unwrap(),
-            ValidationStatus::Valid
-        );
-    }
-
-    #[test]
-    fn test_validate_post_missing_text() {
-        let validator = RecordValidator::new();
-        let invalid_post = json!({
-            "$type": "app.bsky.feed.post",
-            "createdAt": "2024-01-01T00:00:00.000Z"
-        });
-        assert!(
-            validator
-                .validate(&invalid_post, "app.bsky.feed.post")
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn test_validate_type_mismatch() {
-        let validator = RecordValidator::new();
-        let record = json!({
-            "$type": "app.bsky.feed.like",
-            "subject": {"uri": "at://did:plc:test/app.bsky.feed.post/123", "cid": "bafyrei..."},
-            "createdAt": "2024-01-01T00:00:00.000Z"
-        });
-        let result = validator.validate(&record, "app.bsky.feed.post");
-        assert!(matches!(result, Err(ValidationError::TypeMismatch { .. })));
-    }
-
-    #[test]
-    fn test_validate_unknown_type() {
-        let validator = RecordValidator::new();
-        let record = json!({
-            "$type": "com.example.custom",
-            "data": "test"
-        });
-        assert_eq!(
-            validator.validate(&record, "com.example.custom").unwrap(),
-            ValidationStatus::Unknown
-        );
-    }
-
-    #[test]
-    fn test_validate_unknown_type_strict() {
-        let validator = RecordValidator::new().require_lexicon(true);
-        let record = json!({
-            "$type": "com.example.custom",
-            "data": "test"
-        });
-        let result = validator.validate(&record, "com.example.custom");
-        assert!(matches!(result, Err(ValidationError::UnknownType(_))));
-    }
-
-    #[test]
-    fn test_validate_record_key() {
-        assert!(validate_record_key("valid-key_123").is_ok());
-        assert!(validate_record_key("3k2n5j2").is_ok());
-        assert!(validate_record_key(".").is_err());
-        assert!(validate_record_key("..").is_err());
-        assert!(validate_record_key("").is_err());
-        assert!(validate_record_key("invalid/key").is_err());
-    }
-
-    #[test]
-    fn test_validate_collection_nsid() {
-        assert!(validate_collection_nsid("app.bsky.feed.post").is_ok());
-        assert!(validate_collection_nsid("com.atproto.repo.record").is_ok());
-        assert!(validate_collection_nsid("invalid").is_err());
-        assert!(validate_collection_nsid("a.b").is_err());
-        assert!(validate_collection_nsid("").is_err());
-    }
-
-    #[test]
-    fn test_is_valid_did() {
-        assert!(is_valid_did("did:plc:1234567890abcdefghijk"));
-        assert!(is_valid_did("did:web:example.com"));
-        assert!(is_valid_did(
-            "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
-        ));
-        assert!(!is_valid_did(""));
-        assert!(!is_valid_did("plc:1234567890abcdefghijk"));
-        assert!(!is_valid_did("did:"));
-        assert!(!is_valid_did("did:plc:"));
-        assert!(!is_valid_did("did::something"));
-        assert!(!is_valid_did("DID:plc:test"));
-    }
 }

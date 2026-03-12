@@ -136,7 +136,9 @@ pub async fn create_record(
             &input.collection,
             input.rkey.as_ref(),
             input.validate.requires_lexicon(),
-        ) {
+        )
+        .await
+        {
             Ok(status) => Some(status),
             Err(err_response) => return Ok(*err_response),
         }
@@ -456,7 +458,9 @@ pub async fn put_record(
             &input.collection,
             Some(&input.rkey),
             input.validate.requires_lexicon(),
-        ) {
+        )
+        .await
+        {
             Ok(status) => Some(status),
             Err(err_response) => return Ok(*err_response),
         }

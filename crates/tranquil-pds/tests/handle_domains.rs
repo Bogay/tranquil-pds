@@ -23,10 +23,7 @@ async fn describe_server_returns_configured_domain() {
     let client = client();
     let base = base_url_with_domain().await;
     let res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.server.describeServer",
-            base
-        ))
+        .get(format!("{}/xrpc/com.atproto.server.describeServer", base))
         .send()
         .await
         .expect("describeServer request failed");
@@ -54,10 +51,7 @@ async fn short_handle_uses_configured_domain() {
         "password": "Testpass123!"
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&payload)
         .send()
         .await
@@ -91,10 +85,7 @@ async fn full_handle_with_configured_domain_accepted() {
         "password": "Testpass123!"
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&payload)
         .send()
         .await
@@ -122,10 +113,7 @@ async fn handle_with_pds_hostname_treated_as_custom() {
         "password": "Testpass123!"
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&payload)
         .send()
         .await
@@ -150,10 +138,7 @@ async fn resolve_handle_works_with_configured_domain() {
         "password": "Testpass123!"
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&payload)
         .send()
         .await
@@ -164,10 +149,7 @@ async fn resolve_handle_works_with_configured_domain() {
     let full_handle = body["handle"].as_str().expect("No handle").to_string();
 
     let res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.identity.resolveHandle",
-            base
-        ))
+        .get(format!("{}/xrpc/com.atproto.identity.resolveHandle", base))
         .query(&[("handle", full_handle.as_str())])
         .send()
         .await
@@ -201,10 +183,7 @@ async fn admin_update_handle_uses_configured_domain() {
     assert_eq!(res.status(), StatusCode::OK);
 
     let res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.identity.resolveHandle",
-            base
-        ))
+        .get(format!("{}/xrpc/com.atproto.identity.resolveHandle", base))
         .query(&[("handle", format!("{}.{}", new_short, HANDLE_DOMAIN))])
         .send()
         .await
@@ -228,10 +207,7 @@ async fn update_handle_bare_uses_configured_domain() {
         "password": "Testpass123!"
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&payload)
         .send()
         .await
@@ -243,10 +219,7 @@ async fn update_handle_bare_uses_configured_domain() {
 
     let new_short = format!("hd{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.identity.updateHandle",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.identity.updateHandle", base))
         .bearer_auth(&access_jwt)
         .header(header::CONTENT_TYPE, "application/json")
         .json(&json!({ "handle": new_short }))
@@ -261,10 +234,7 @@ async fn update_handle_bare_uses_configured_domain() {
     );
 
     let res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.identity.resolveHandle",
-            base
-        ))
+        .get(format!("{}/xrpc/com.atproto.identity.resolveHandle", base))
         .query(&[("handle", format!("{}.{}", new_short, HANDLE_DOMAIN))])
         .send()
         .await
@@ -292,10 +262,7 @@ async fn did_web_uses_handle_domain_not_hostname() {
         "didType": "web"
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&payload)
         .send()
         .await

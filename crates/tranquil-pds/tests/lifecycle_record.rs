@@ -193,13 +193,13 @@ async fn test_record_crud_lifecycle() {
 async fn test_profile_with_blob_lifecycle() {
     let client = client();
     let (did, jwt) = setup_new_user("profile-blob").await;
-    let blob_data = b"This is test blob data for a profile avatar";
+    let blob_data = b"\x89PNG\r\n\x1a\nfake image data for test";
     let upload_res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.uploadBlob",
             base_url().await
         ))
-        .header(header::CONTENT_TYPE, "text/plain")
+        .header(header::CONTENT_TYPE, "image/png")
         .bearer_auth(&jwt)
         .body(blob_data.to_vec())
         .send()

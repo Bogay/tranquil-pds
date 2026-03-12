@@ -147,9 +147,7 @@ pub async fn create_account(
         .filter(|d| input.handle.ends_with(&format!(".{}", d)))
         .max_by_key(|d| d.len());
 
-    let validated_short_handle = if !input.handle.contains('.')
-        || matched_domain.is_some()
-    {
+    let validated_short_handle = if !input.handle.contains('.') || matched_domain.is_some() {
         let handle_to_validate = match matched_domain {
             Some(domain) => input
                 .handle

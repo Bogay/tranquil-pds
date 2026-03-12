@@ -17,6 +17,7 @@ tranquil-oauth = { workspace = true }
 tranquil-comms = { workspace = true }
 tranquil-db = { workspace = true }
 tranquil-db-traits = { workspace = true }
+tranquil-lexicon = { workspace = true, features = ["resolve"] }
 
 aes-gcm = { workspace = true }
 async-trait = { workspace = true }

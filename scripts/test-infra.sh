@@ -59,6 +59,7 @@ export TRANQUIL_PDS_TEST_INFRA_READY="1"
 export TRANQUIL_PDS_ALLOW_INSECURE_SECRETS="1"
 export SKIP_IMPORT_VERIFICATION="true"
 export DISABLE_RATE_LIMITING="1"
+export TRANQUIL_LEXICON_OFFLINE="1"
 EOF
     echo ""
     echo "Infrastructure ready!"

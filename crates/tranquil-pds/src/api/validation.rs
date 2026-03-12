@@ -285,9 +285,12 @@ pub fn validate_full_domain_handle(handle: &str) -> Result<String, HandleValidat
     }
 
     let labels: Vec<&str> = handle.split('.').collect();
-    let has_invalid_label = labels
-        .iter()
-        .any(|label| label.is_empty() || label.len() > MAX_DOMAIN_LABEL_LENGTH || label.starts_with('-') || label.ends_with('-'));
+    let has_invalid_label = labels.iter().any(|label| {
+        label.is_empty()
+            || label.len() > MAX_DOMAIN_LABEL_LENGTH
+            || label.starts_with('-')
+            || label.ends_with('-')
+    });
     if has_invalid_label {
         return Err(HandleValidationError::InvalidCharacters);
     }

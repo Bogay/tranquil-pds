@@ -1,10 +1,9 @@
+use tranquil_lexicon::is_valid_did;
 use tranquil_pds::api::validation::{
     HandleValidationError, MAX_DOMAIN_LABEL_LENGTH, MAX_EMAIL_LENGTH, MAX_LOCAL_PART_LENGTH,
     MAX_SERVICE_HANDLE_LOCAL_PART, is_valid_email, validate_short_handle,
 };
-use tranquil_pds::validation::{
-    is_valid_did, validate_collection_nsid, validate_password, validate_record_key,
-};
+use tranquil_pds::validation::{validate_collection_nsid, validate_password, validate_record_key};
 
 #[test]
 fn test_record_key_boundary_min() {
@@ -59,7 +58,6 @@ fn test_record_key_invalid_chars() {
     assert!(validate_record_key("a+b").is_err());
     assert!(validate_record_key("a=b").is_err());
     assert!(validate_record_key("a?b").is_err());
-    assert!(validate_record_key("a:b").is_err());
     assert!(validate_record_key("a;b").is_err());
     assert!(validate_record_key("a<b").is_err());
     assert!(validate_record_key("a>b").is_err());
@@ -160,7 +158,7 @@ fn test_did_validation_method_case() {
 
 #[test]
 fn test_did_validation_method_chars() {
-    assert!(!is_valid_did("did:plc1:abc"));
+    assert!(is_valid_did("did:plc1:abc"));
     assert!(!is_valid_did("did:plc-x:abc"));
     assert!(!is_valid_did("did:plc_x:abc"));
 }

@@ -776,15 +776,10 @@ pub async fn check_handle_available(
     let available_domains = tranquil_config::get().server.available_user_domain_list();
     if let Some(ref d) = query.domain {
         if !available_domains.iter().any(|ad| ad == d) {
-            return Err(ApiError::InvalidRequest(
-                "Unknown user domain".into(),
-            ));
+            return Err(ApiError::InvalidRequest("Unknown user domain".into()));
         }
     }
-    let domain = query
-        .domain
-        .as_deref()
-        .unwrap_or(&available_domains[0]);
+    let domain = query.domain.as_deref().unwrap_or(&available_domains[0]);
     let full_handle = format!("{}.{}", validated, domain);
     let handle_typed: crate::types::Handle = match full_handle.parse() {
         Ok(h) => h,

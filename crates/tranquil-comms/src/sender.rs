@@ -169,19 +169,21 @@ impl CommsSender for EmailSender {
                 source: e,
             })?;
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(email_content.as_bytes()).await.map_err(|e| {
-                SendError::ProcessSpawn {
+            stdin
+                .write_all(email_content.as_bytes())
+                .await
+                .map_err(|e| SendError::ProcessSpawn {
                     command: self.sendmail_path.clone(),
                     source: e,
-                }
-            })?;
+                })?;
         }
-        let output = child.wait_with_output().await.map_err(|e| {
-            SendError::ProcessSpawn {
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|e| SendError::ProcessSpawn {
                 command: self.sendmail_path.clone(),
                 source: e,
-            }
-        })?;
+            })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(SendError::ProcessFailed {

@@ -3,41 +3,20 @@ use crate::types::{Nsid, Rkey};
 use crate::validation::{RecordValidator, ValidationError, ValidationStatus};
 use axum::response::Response;
 
-pub fn validate_record(record: &serde_json::Value, collection: &Nsid) -> Result<(), Box<Response>> {
-    validate_record_with_rkey(record, collection, None)
-}
-
-pub fn validate_record_with_rkey(
-    record: &serde_json::Value,
-    collection: &Nsid,
-    rkey: Option<&Rkey>,
-) -> Result<(), Box<Response>> {
-    let validator = RecordValidator::new();
-    validation_error_to_response(validator.validate_with_rkey(
-        record,
-        collection.as_str(),
-        rkey.map(|r| r.as_str()),
-    ))
-}
-
-pub fn validate_record_with_status(
+pub async fn validate_record_with_status(
     record: &serde_json::Value,
     collection: &Nsid,
     rkey: Option<&Rkey>,
     require_lexicon: bool,
 ) -> Result<ValidationStatus, Box<Response>> {
+    let registry = tranquil_lexicon::LexiconRegistry::global();
+    if !registry.has_schema(collection.as_str()) {
+        let _ = registry.resolve_dynamic(collection.as_str()).await;
+    }
+
     let validator = RecordValidator::new().require_lexicon(require_lexicon);
     match validator.validate_with_rkey(record, collection.as_str(), rkey.map(|r| r.as_str())) {
         Ok(status) => Ok(status),
-        Err(e) => Err(validation_error_to_box_response(e)),
-    }
-}
-
-fn validation_error_to_response(
-    result: Result<ValidationStatus, ValidationError>,
-) -> Result<(), Box<Response>> {
-    match result {
-        Ok(_) => Ok(()),
         Err(e) => Err(validation_error_to_box_response(e)),
     }
 }

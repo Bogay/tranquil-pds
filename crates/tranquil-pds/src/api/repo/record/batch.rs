@@ -65,7 +65,9 @@ async fn process_single_write(
                     collection,
                     rkey.as_ref(),
                     validate.requires_lexicon(),
-                ) {
+                )
+                .await
+                {
                     Ok(status) => Some(status),
                     Err(err_response) => return Err(*err_response),
                 }
@@ -116,7 +118,9 @@ async fn process_single_write(
                     collection,
                     Some(rkey),
                     validate.requires_lexicon(),
-                ) {
+                )
+                .await
+                {
                     Ok(status) => Some(status),
                     Err(err_response) => return Err(*err_response),
                 }
