@@ -8,8 +8,23 @@ RUN apk add --no-cache ca-certificates musl-dev pkgconfig openssl-dev openssl-li
 WORKDIR /app
 ARG SLIM="false"
 COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
 COPY .sqlx ./.sqlx
+COPY crates/tranquil-types ./crates/tranquil-types
+COPY crates/tranquil-crypto ./crates/tranquil-crypto
+COPY crates/tranquil-scopes ./crates/tranquil-scopes
+COPY crates/tranquil-config ./crates/tranquil-config
+COPY crates/tranquil-repo ./crates/tranquil-repo
+COPY crates/tranquil-lexicon ./crates/tranquil-lexicon
+COPY crates/tranquil-oauth ./crates/tranquil-oauth
+COPY crates/tranquil-db-traits ./crates/tranquil-db-traits
+COPY crates/tranquil-infra ./crates/tranquil-infra
+COPY crates/tranquil-auth ./crates/tranquil-auth
+COPY crates/tranquil-comms ./crates/tranquil-comms
+COPY crates/tranquil-db ./crates/tranquil-db
+COPY crates/tranquil-ripple ./crates/tranquil-ripple
+COPY crates/tranquil-storage ./crates/tranquil-storage
+COPY crates/tranquil-cache ./crates/tranquil-cache
+COPY crates/tranquil-pds ./crates/tranquil-pds
 COPY migrations ./crates/tranquil-pds/migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
