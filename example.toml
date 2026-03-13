@@ -390,57 +390,79 @@
 
 [sso]
 [sso.github]
+# Can also be specified via environment variable `SSO_GITHUB_ENABLED`.
 # Default value: false
 #enabled = false
 
+# Can also be specified via environment variable `SSO_GITHUB_CLIENT_ID`.
 #client_id =
 
+# Can also be specified via environment variable `SSO_GITHUB_CLIENT_SECRET`.
 #client_secret =
 
+# Can also be specified via environment variable `SSO_GITHUB_DISPLAY_NAME`.
 #display_name =
 
 [sso.discord]
+# Can also be specified via environment variable `SSO_DISCORD_ENABLED`.
 # Default value: false
 #enabled = false
 
+# Can also be specified via environment variable `SSO_DISCORD_CLIENT_ID`.
 #client_id =
 
+# Can also be specified via environment variable `SSO_DISCORD_CLIENT_SECRET`.
 #client_secret =
 
+# Can also be specified via environment variable `SSO_DISCORD_DISPLAY_NAME`.
 #display_name =
 
 [sso.google]
+# Can also be specified via environment variable `SSO_GOOGLE_ENABLED`.
 # Default value: false
 #enabled = false
 
+# Can also be specified via environment variable `SSO_GOOGLE_CLIENT_ID`.
 #client_id =
 
+# Can also be specified via environment variable `SSO_GOOGLE_CLIENT_SECRET`.
 #client_secret =
 
+# Can also be specified via environment variable `SSO_GOOGLE_DISPLAY_NAME`.
 #display_name =
 
 [sso.gitlab]
+# Can also be specified via environment variable `SSO_GITLAB_ENABLED`.
 # Default value: false
 #enabled = false
 
+# Can also be specified via environment variable `SSO_GITLAB_CLIENT_ID`.
 #client_id =
 
+# Can also be specified via environment variable `SSO_GITLAB_CLIENT_SECRET`.
 #client_secret =
 
+# Can also be specified via environment variable `SSO_GITLAB_ISSUER`.
 #issuer =
 
+# Can also be specified via environment variable `SSO_GITLAB_DISPLAY_NAME`.
 #display_name =
 
 [sso.oidc]
+# Can also be specified via environment variable `SSO_OIDC_ENABLED`.
 # Default value: false
 #enabled = false
 
+# Can also be specified via environment variable `SSO_OIDC_CLIENT_ID`.
 #client_id =
 
+# Can also be specified via environment variable `SSO_OIDC_CLIENT_SECRET`.
 #client_secret =
 
+# Can also be specified via environment variable `SSO_OIDC_ISSUER`.
 #issuer =
 
+# Can also be specified via environment variable `SSO_OIDC_DISPLAY_NAME`.
 #display_name =
 
 [sso.apple]

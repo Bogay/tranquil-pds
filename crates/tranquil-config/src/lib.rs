@@ -258,7 +258,7 @@ impl TranquilConfig {
         // -- SSO providers ----------------------------------------------------
         self.validate_sso_provider("sso.github", &self.sso.github, &mut errors);
         self.validate_sso_provider("sso.google", &self.sso.google, &mut errors);
-        self.validate_sso_discord(&mut errors);
+        self.validate_sso_provider("sso.discord", &self.sso.discord, &mut errors);
         self.validate_sso_with_issuer("sso.gitlab", &self.sso.gitlab, &mut errors);
         self.validate_sso_with_issuer("sso.oidc", &self.sso.oidc, &mut errors);
         self.validate_sso_apple(&mut errors);
@@ -300,34 +300,22 @@ impl TranquilConfig {
         }
     }
 
-    fn validate_sso_provider(&self, prefix: &str, p: &SsoProviderConfig, errors: &mut Vec<String>) {
-        if p.enabled {
-            if p.client_id.is_none() {
+    fn validate_sso_provider(
+        &self,
+        prefix: &str,
+        p: &impl SsoProviderConfig,
+        errors: &mut Vec<String>,
+    ) {
+        if p.get_enabled() {
+            if p.get_client_id().is_none() {
                 errors.push(format!(
                     "{prefix}.client_id is required when {prefix}.enabled = true"
                 ));
             }
-            if p.client_secret.is_none() {
+            if p.get_client_secret().is_none() {
                 errors.push(format!(
                     "{prefix}.client_secret is required when {prefix}.enabled = true"
                 ));
-            }
-        }
-    }
-
-    fn validate_sso_discord(&self, errors: &mut Vec<String>) {
-        let p = &self.sso.discord;
-        if p.enabled {
-            if p.client_id.is_none() {
-                errors.push(
-                    "sso.discord.client_id is required when sso.discord.enabled = true".to_string(),
-                );
-            }
-            if p.client_secret.is_none() {
-                errors.push(
-                    "sso.discord.client_secret is required when sso.discord.enabled = true"
-                        .to_string(),
-                );
             }
         }
     }
@@ -335,21 +323,12 @@ impl TranquilConfig {
     fn validate_sso_with_issuer(
         &self,
         prefix: &str,
-        p: &SsoProviderWithIssuerConfig,
+        p: &(impl SsoProviderConfig + SsoProviderIssuerConfig),
         errors: &mut Vec<String>,
     ) {
-        if p.enabled {
-            if p.client_id.is_none() {
-                errors.push(format!(
-                    "{prefix}.client_id is required when {prefix}.enabled = true"
-                ));
-            }
-            if p.client_secret.is_none() {
-                errors.push(format!(
-                    "{prefix}.client_secret is required when {prefix}.enabled = true"
-                ));
-            }
-            if p.issuer.is_none() {
+        self.validate_sso_provider(prefix, p, errors);
+        if p.get_enabled() {
+            if p.get_issuer().is_none() {
                 errors.push(format!(
                     "{prefix}.issuer is required when {prefix}.enabled = true"
                 ));
@@ -772,57 +751,219 @@ pub struct NotificationConfig {
     pub batch_size: i64,
 }
 
+pub trait SsoProviderConfig {
+    fn get_enabled(&self) -> bool;
+    fn get_client_id(&self) -> &Option<String>;
+    fn get_client_secret(&self) -> &Option<String>;
+    fn get_display_name(&self) -> &Option<String>;
+}
+
+pub trait SsoProviderIssuerConfig {
+    fn get_issuer(&self) -> &Option<String>;
+}
+
 #[derive(Debug, Config)]
 pub struct SsoConfig {
     #[config(nested)]
-    pub github: SsoProviderConfig,
+    pub github: SsoGitHubConfig,
 
     #[config(nested)]
-    pub discord: SsoDiscordProviderConfig,
+    pub discord: SsoDiscordConfig,
 
     #[config(nested)]
-    pub google: SsoProviderConfig,
+    pub google: SsoGoogleConfig,
 
     #[config(nested)]
-    pub gitlab: SsoProviderWithIssuerConfig,
+    pub gitlab: SsoGitLabConfig,
 
     #[config(nested)]
-    pub oidc: SsoProviderWithIssuerConfig,
+    pub oidc: SsoOidcConfig,
 
     #[config(nested)]
     pub apple: SsoAppleConfig,
 }
 
-// Generic SSO provider (GitHub, Google)
 #[derive(Debug, Config)]
-pub struct SsoProviderConfig {
-    #[config(default = false)]
+pub struct SsoGitHubConfig {
+    #[config(env = "SSO_GITHUB_ENABLED", default = false)]
     pub enabled: bool,
+
+    #[config(env = "SSO_GITHUB_CLIENT_ID")]
     pub client_id: Option<String>,
+
+    #[config(env = "SSO_GITHUB_CLIENT_SECRET")]
     pub client_secret: Option<String>,
+
+    #[config(env = "SSO_GITHUB_DISPLAY_NAME")]
     pub display_name: Option<String>,
 }
 
-// SSO provider with custom env prefixes for Discord
-// (since the nested TOML key is `sso.discord` but env vars are `SSO_DISCORD_*`)
+impl SsoProviderConfig for SsoGitHubConfig {
+    fn get_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn get_client_id(&self) -> &Option<String> {
+        &self.client_id
+    }
+
+    fn get_client_secret(&self) -> &Option<String> {
+        &self.client_secret
+    }
+
+    fn get_display_name(&self) -> &Option<String> {
+        &self.display_name
+    }
+}
+
 #[derive(Debug, Config)]
-pub struct SsoDiscordProviderConfig {
-    #[config(default = false)]
+pub struct SsoDiscordConfig {
+    #[config(env = "SSO_DISCORD_ENABLED", default = false)]
     pub enabled: bool,
+
+    #[config(env = "SSO_DISCORD_CLIENT_ID")]
     pub client_id: Option<String>,
+
+    #[config(env = "SSO_DISCORD_CLIENT_SECRET")]
     pub client_secret: Option<String>,
+
+    #[config(env = "SSO_DISCORD_DISPLAY_NAME")]
     pub display_name: Option<String>,
 }
 
-// SSO providers that require an issuer URL (GitLab, OIDC)
+impl SsoProviderConfig for SsoDiscordConfig {
+    fn get_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn get_client_id(&self) -> &Option<String> {
+        &self.client_id
+    }
+
+    fn get_client_secret(&self) -> &Option<String> {
+        &self.client_secret
+    }
+
+    fn get_display_name(&self) -> &Option<String> {
+        &self.display_name
+    }
+}
+
 #[derive(Debug, Config)]
-pub struct SsoProviderWithIssuerConfig {
-    #[config(default = false)]
+pub struct SsoGoogleConfig {
+    #[config(env = "SSO_GOOGLE_ENABLED", default = false)]
     pub enabled: bool,
+
+    #[config(env = "SSO_GOOGLE_CLIENT_ID")]
     pub client_id: Option<String>,
+
+    #[config(env = "SSO_GOOGLE_CLIENT_SECRET")]
     pub client_secret: Option<String>,
+
+    #[config(env = "SSO_GOOGLE_DISPLAY_NAME")]
+    pub display_name: Option<String>,
+}
+
+impl SsoProviderConfig for SsoGoogleConfig {
+    fn get_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn get_client_id(&self) -> &Option<String> {
+        &self.client_id
+    }
+
+    fn get_client_secret(&self) -> &Option<String> {
+        &self.client_secret
+    }
+
+    fn get_display_name(&self) -> &Option<String> {
+        &self.display_name
+    }
+}
+
+#[derive(Debug, Config)]
+pub struct SsoGitLabConfig {
+    #[config(env = "SSO_GITLAB_ENABLED", default = false)]
+    pub enabled: bool,
+
+    #[config(env = "SSO_GITLAB_CLIENT_ID")]
+    pub client_id: Option<String>,
+
+    #[config(env = "SSO_GITLAB_CLIENT_SECRET")]
+    pub client_secret: Option<String>,
+
+    #[config(env = "SSO_GITLAB_ISSUER")]
     pub issuer: Option<String>,
+
+    #[config(env = "SSO_GITLAB_DISPLAY_NAME")]
     pub display_name: Option<String>,
+}
+
+impl SsoProviderConfig for SsoGitLabConfig {
+    fn get_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn get_client_id(&self) -> &Option<String> {
+        &self.client_id
+    }
+
+    fn get_client_secret(&self) -> &Option<String> {
+        &self.client_secret
+    }
+
+    fn get_display_name(&self) -> &Option<String> {
+        &self.display_name
+    }
+}
+
+impl SsoProviderIssuerConfig for SsoGitLabConfig {
+    fn get_issuer(&self) -> &Option<String> {
+        &self.issuer
+    }
+}
+
+#[derive(Debug, Config)]
+pub struct SsoOidcConfig {
+    #[config(env = "SSO_OIDC_ENABLED", default = false)]
+    pub enabled: bool,
+
+    #[config(env = "SSO_OIDC_CLIENT_ID")]
+    pub client_id: Option<String>,
+
+    #[config(env = "SSO_OIDC_CLIENT_SECRET")]
+    pub client_secret: Option<String>,
+
+    #[config(env = "SSO_OIDC_ISSUER")]
+    pub issuer: Option<String>,
+
+    #[config(env = "SSO_OIDC_DISPLAY_NAME")]
+    pub display_name: Option<String>,
+}
+
+impl SsoProviderConfig for SsoOidcConfig {
+    fn get_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn get_client_id(&self) -> &Option<String> {
+        &self.client_id
+    }
+
+    fn get_client_secret(&self) -> &Option<String> {
+        &self.client_secret
+    }
+
+    fn get_display_name(&self) -> &Option<String> {
+        &self.display_name
+    }
+}
+
+impl SsoProviderIssuerConfig for SsoOidcConfig {
+    fn get_issuer(&self) -> &Option<String> {
+        &self.issuer
+    }
 }
 
 #[derive(Debug, Config)]
