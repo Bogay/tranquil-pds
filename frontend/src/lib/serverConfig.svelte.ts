@@ -64,7 +64,7 @@ function setFavicon(hasLogo: boolean) {
       link.rel = "icon";
       document.head.appendChild(link);
     }
-    link.href = "/logo";
+    link.href = "/favicon.ico";
   } else if (link) {
     link.remove();
   }

@@ -131,7 +131,7 @@
       logoCid = config.logoCid
       originalLogoCid = config.logoCid
       if (config.logoCid) {
-        logoPreview = '/logo'
+        logoPreview = '/favicon.ico'
       }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : $_('admin.failedToLoadConfig'))

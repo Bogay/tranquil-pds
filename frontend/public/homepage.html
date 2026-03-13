@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/favicon.ico" type="image/png">
     <title>Tranquil PDS</title>
     <style>
       :root {
@@ -367,7 +368,7 @@
 
     <nav>
       <div class="nav-left">
-        <img src="/logo" alt="Logo" class="nav-logo hidden" id="navLogo">
+        <img src="/favicon.ico" alt="Logo" class="nav-logo hidden" id="navLogo">
         <span class="hostname" id="hostname">loading...</span>
         <span class="user-count hidden" id="userCount"></span>
       </div>
@@ -556,7 +557,7 @@
         })
         .catch(() => {});
 
-      fetch("/logo", { method: "HEAD" })
+      fetch("/favicon.ico", { method: "HEAD" })
         .then((r) => {
           if (r.ok) {
             document.getElementById("navLogo").classList.remove(

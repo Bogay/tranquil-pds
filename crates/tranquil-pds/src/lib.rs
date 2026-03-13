@@ -662,7 +662,7 @@ pub fn app(state: AppState) -> Router {
         .route("/metrics", get(metrics::metrics_handler))
         .route("/health", get(api::server::health))
         .route("/robots.txt", get(api::server::robots_txt))
-        .route("/logo", get(api::server::get_logo))
+        .route("/favicon.ico", get(api::server::get_logo))
         .route("/u/{handle}/did.json", get(api::identity::user_did_doc))
         .route(
             "/webhook/telegram",
