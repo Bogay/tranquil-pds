@@ -327,12 +327,10 @@ impl TranquilConfig {
         errors: &mut Vec<String>,
     ) {
         self.validate_sso_provider(prefix, p, errors);
-        if p.get_enabled() {
-            if p.get_issuer().is_none() {
-                errors.push(format!(
-                    "{prefix}.issuer is required when {prefix}.enabled = true"
-                ));
-            }
+        if p.get_enabled() && p.get_issuer().is_none() {
+            errors.push(format!(
+                "{prefix}.issuer is required when {prefix}.enabled = true"
+            ));
         }
     }
 

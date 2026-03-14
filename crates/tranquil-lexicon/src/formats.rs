@@ -46,9 +46,7 @@ pub fn is_valid_uri(s: &str) -> bool {
 }
 
 pub fn is_valid_cid(s: &str) -> bool {
-    s.len() >= 8
-        && s.chars().all(|c| c.is_ascii_alphanumeric())
-        && s.starts_with(|c: char| c == 'b' || c == 'z' || c == 'Q')
+    s.len() >= 8 && s.chars().all(|c| c.is_ascii_alphanumeric()) && s.starts_with(['b', 'z', 'Q'])
 }
 
 pub fn is_valid_language(s: &str) -> bool {

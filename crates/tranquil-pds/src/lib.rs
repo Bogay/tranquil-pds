@@ -653,8 +653,6 @@ pub fn app(state: AppState) -> Router {
             get(oauth::endpoints::oauth_authorization_server),
         );
 
-    if cfg!(feature = "frontend") {}
-
     let router = Router::new()
         .nest_service("/xrpc", xrpc_service)
         .nest("/oauth", oauth_router)
@@ -716,7 +714,7 @@ pub fn app(state: AppState) -> Router {
 
         let spa_router = Router::new().fallback_service(ServeFile::new(&index_path));
 
-        let serve_dir = ServeDir::new(&frontend_dir).not_found_service(ServeFile::new(&index_path));
+        let serve_dir = ServeDir::new(frontend_dir).not_found_service(ServeFile::new(&index_path));
 
         return router
             .route(

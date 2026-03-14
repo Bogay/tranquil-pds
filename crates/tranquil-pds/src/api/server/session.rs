@@ -68,7 +68,7 @@ pub async fn create_session(
     let pds_host = &tranquil_config::get().server.hostname;
     let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_identifier =
-        NormalizedLoginIdentifier::normalize(&input.identifier, &hostname_for_handles);
+        NormalizedLoginIdentifier::normalize(&input.identifier, hostname_for_handles);
     info!(
         "Normalized identifier: {} -> {}",
         input.identifier, normalized_identifier

@@ -339,15 +339,14 @@ fn validate_blob_ref(
         }
     }
 
-    if let Some(max_size) = lex_blob.max_size {
-        if let Some(size) = obj.get("size").and_then(|v| v.as_u64()) {
-            if size > max_size {
-                return Err(LexValidationError::field(
-                    path,
-                    format!("blob size {} exceeds max_size {}", size, max_size),
-                ));
-            }
-        }
+    if let (Some(max_size), Some(size)) =
+        (lex_blob.max_size, obj.get("size").and_then(|v| v.as_u64()))
+        && size > max_size
+    {
+        return Err(LexValidationError::field(
+            path,
+            format!("blob size {} exceeds max_size {}", size, max_size),
+        ));
     }
 
     Ok(())

@@ -355,7 +355,7 @@ async fn validate_bearer_token_with_options_internal(
                     )
                     .await;
 
-                let status_cache_key = crate::cache_keys::user_status_key(&did.to_string());
+                let status_cache_key = crate::cache_keys::user_status_key(did.as_ref());
                 let cached = CachedUserStatus {
                     deactivated: user.deactivated_at.is_some(),
                     takendown: user.takedown_ref.is_some(),
@@ -394,7 +394,7 @@ async fn validate_bearer_token_with_options_internal(
             match verify_access_token_typed(token, &decrypted_key) {
                 Ok(token_data) => {
                     let jti = &token_data.claims.jti;
-                    let session_cache_key = crate::cache_keys::session_key(&did, &jti);
+                    let session_cache_key = crate::cache_keys::session_key(&did, jti);
                     let mut session_valid = false;
 
                     if let Some(c) = cache {
@@ -530,6 +530,7 @@ pub enum AccountRequirement {
     AnyStatus,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn validate_token_with_dpop(
     user_repo: &dyn UserRepository,
     oauth_repo: &dyn OAuthRepository,

@@ -224,7 +224,7 @@ impl AppState {
             .acquire_timeout(std::time::Duration::from_secs(acquire_timeout_secs))
             .idle_timeout(std::time::Duration::from_secs(300))
             .max_lifetime(std::time::Duration::from_secs(1800))
-            .connect(&database_url)
+            .connect(database_url)
             .await
             .map_err(|e| format!("Failed to connect to Postgres: {}", e))?;
 

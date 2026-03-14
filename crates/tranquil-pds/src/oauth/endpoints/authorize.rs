@@ -256,7 +256,7 @@ pub async fn authorize_get(
     if let Some(ref login_hint) = request_data.parameters.login_hint {
         tracing::info!(login_hint = %login_hint, "Checking login_hint for delegation");
         let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
-        let normalized = NormalizedLoginIdentifier::normalize(login_hint, &hostname_for_handles);
+        let normalized = NormalizedLoginIdentifier::normalize(login_hint, hostname_for_handles);
         tracing::info!(normalized = %normalized, "Normalized login_hint");
 
         match state
@@ -530,7 +530,7 @@ pub async fn authorize_post(
     };
     let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_username =
-        NormalizedLoginIdentifier::normalize(&form.username, &hostname_for_handles);
+        NormalizedLoginIdentifier::normalize(&form.username, hostname_for_handles);
     tracing::debug!(
         original_username = %form.username,
         normalized_username = %normalized_username,
@@ -2102,7 +2102,7 @@ pub async fn check_user_has_passkeys(
 ) -> Response {
     let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let bare_identifier =
-        BareLoginIdentifier::from_identifier(&query.identifier, &hostname_for_handles);
+        BareLoginIdentifier::from_identifier(&query.identifier, hostname_for_handles);
 
     let user = state
         .user_repo
@@ -2134,7 +2134,7 @@ pub async fn check_user_security_status(
 ) -> Response {
     let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_identifier =
-        NormalizedLoginIdentifier::normalize(&query.identifier, &hostname_for_handles);
+        NormalizedLoginIdentifier::normalize(&query.identifier, hostname_for_handles);
 
     let user = state
         .user_repo
@@ -2242,7 +2242,7 @@ pub async fn passkey_start(
 
     let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_username =
-        NormalizedLoginIdentifier::normalize(&form.identifier, &hostname_for_handles);
+        NormalizedLoginIdentifier::normalize(&form.identifier, hostname_for_handles);
 
     let user = match state
         .user_repo

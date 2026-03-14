@@ -152,12 +152,12 @@ fn check_banned_content(
             check_string_field(obj, "description")?;
         }
         "app.bsky.feed.generator" => {
-            if let Some(rkey) = rkey {
-                if crate::moderation::has_explicit_slur(rkey) {
-                    return Err(ValidationError::BannedContent {
-                        path: "rkey".to_string(),
-                    });
-                }
+            if let Some(rkey) = rkey
+                && crate::moderation::has_explicit_slur(rkey)
+            {
+                return Err(ValidationError::BannedContent {
+                    path: "rkey".to_string(),
+                });
             }
             check_string_field(obj, "displayName")?;
         }
@@ -169,12 +169,12 @@ fn check_banned_content(
 fn check_post_banned_content(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
     if let Some(tags) = obj.get("tags").and_then(|v| v.as_array()) {
         tags.iter().enumerate().try_for_each(|(i, tag)| {
-            if let Some(tag_str) = tag.as_str() {
-                if crate::moderation::has_explicit_slur(tag_str) {
-                    return Err(ValidationError::BannedContent {
-                        path: format!("tags/{}", i),
-                    });
-                }
+            if let Some(tag_str) = tag.as_str()
+                && crate::moderation::has_explicit_slur(tag_str)
+            {
+                return Err(ValidationError::BannedContent {
+                    path: format!("tags/{}", i),
+                });
             }
             Ok(())
         })?;
@@ -187,14 +187,13 @@ fn check_post_banned_content(obj: &serde_json::Map<String, Value>) -> Result<(),
                         .get("$type")
                         .and_then(|v| v.as_str())
                         .is_some_and(|t| t == "app.bsky.richtext.facet#tag");
-                    if is_tag {
-                        if let Some(tag) = feature.get("tag").and_then(|v| v.as_str()) {
-                            if crate::moderation::has_explicit_slur(tag) {
-                                return Err(ValidationError::BannedContent {
-                                    path: format!("facets/{}/features/{}/tag", i, j),
-                                });
-                            }
-                        }
+                    if is_tag
+                        && let Some(tag) = feature.get("tag").and_then(|v| v.as_str())
+                        && crate::moderation::has_explicit_slur(tag)
+                    {
+                        return Err(ValidationError::BannedContent {
+                            path: format!("facets/{}/features/{}/tag", i, j),
+                        });
                     }
                     Ok(())
                 })?;
@@ -209,12 +208,12 @@ fn check_string_field(
     obj: &serde_json::Map<String, Value>,
     field: &str,
 ) -> Result<(), ValidationError> {
-    if let Some(value) = obj.get(field).and_then(|v| v.as_str()) {
-        if crate::moderation::has_explicit_slur(value) {
-            return Err(ValidationError::BannedContent {
-                path: field.to_string(),
-            });
-        }
+    if let Some(value) = obj.get(field).and_then(|v| v.as_str())
+        && crate::moderation::has_explicit_slur(value)
+    {
+        return Err(ValidationError::BannedContent {
+            path: field.to_string(),
+        });
     }
     Ok(())
 }
