@@ -16,11 +16,15 @@ members = [
     "crates/tranquil-db-traits",
     "crates/tranquil-db",
     "crates/tranquil-pds",
+    "crates/tranquil-server",
+    "crates/tranquil-sync",
+    "crates/tranquil-oauth-server",
+    "crates/tranquil-api",
     "crates/tranquil-lexicon",
 ]
 
 [workspace.package]
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 
@@ -40,6 +44,11 @@ tranquil-db-traits = { path = "crates/tranquil-db-traits" }
 tranquil-db = { path = "crates/tranquil-db" }
 tranquil-ripple = { path = "crates/tranquil-ripple" }
 tranquil-lexicon = { path = "crates/tranquil-lexicon" }
+tranquil-pds = { path = "crates/tranquil-pds" }
+tranquil-server = { path = "crates/tranquil-server" }
+tranquil-sync = { path = "crates/tranquil-sync" }
+tranquil-oauth-server = { path = "crates/tranquil-oauth-server" }
+tranquil-api = { path = "crates/tranquil-api" }
 
 unicode-segmentation = "1"
 

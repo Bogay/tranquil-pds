@@ -25,15 +25,19 @@ COPY crates/tranquil-ripple ./crates/tranquil-ripple
 COPY crates/tranquil-storage ./crates/tranquil-storage
 COPY crates/tranquil-cache ./crates/tranquil-cache
 COPY crates/tranquil-pds ./crates/tranquil-pds
+COPY crates/tranquil-sync ./crates/tranquil-sync
+COPY crates/tranquil-api ./crates/tranquil-api
+COPY crates/tranquil-oauth-server ./crates/tranquil-oauth-server
+COPY crates/tranquil-server ./crates/tranquil-server
 COPY migrations ./crates/tranquil-pds/migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     if [ "$SLIM" = "true" ]; then \
-      SQLX_OFFLINE=true cargo build --release -p tranquil-pds --no-default-features; \
+      SQLX_OFFLINE=true cargo build --release -p tranquil-server --no-default-features; \
     else \
-      SQLX_OFFLINE=true cargo build --release -p tranquil-pds; \
+      SQLX_OFFLINE=true cargo build --release -p tranquil-server; \
     fi && \
-    cp target/release/tranquil-pds /tmp/tranquil-pds
+    cp target/release/tranquil-server /tmp/tranquil-pds
 
 FROM alpine:3.23 AS signal-cli
 RUN apk add --no-cache curl tar

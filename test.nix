@@ -17,22 +17,37 @@ pkgs.testers.nixosTest {
       enable = true;
       database.createLocally = true;
 
-      nginx = {
-        enable = true;
-        enableACME = false;
-      };
-
       settings = {
-        PDS_HOSTNAME = "pds.test";
-        SERVER_HOST = "0.0.0.0";
+        server.hostname = "pds.test";
+        server.host = "0.0.0.0";
+        server.disable_rate_limiting = true;
+        server.invite_code_required = false;
+        server.enable_pds_hosted_did_web = true;
 
-        DISABLE_RATE_LIMITING = 1;
-        TRANQUIL_PDS_ALLOW_INSECURE_SECRETS = 1;
-
-        JWT_SECRET="test-jwt-secret-must-be-32-chars-long";
-        DPOP_SECRET="test-dpop-secret-must-be-32-chars-long";
-        MASTER_KEY="test-master-key-must-be-32-chars-long";
+        secrets.jwt_secret = "test-jwt-secret-must-be-32-chars-long";
+        secrets.dpop_secret = "test-dpop-secret-must-be-32-chars-long";
+        secrets.master_key = "test-master-key-must-be-32-chars-long";
+        secrets.allow_insecure = true;
       };
+    };
+
+    services.nginx = let
+      vhost = {
+        locations."/" = {
+          proxyPass = "http://127.0.0.1:3000";
+          proxyWebsockets = true;
+          extraConfig = ''
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 120s;
+          '';
+        };
+      };
+    in {
+      enable = true;
+      recommendedProxySettings = true;
+      virtualHosts."pds.test" = vhost;
+      virtualHosts."*.pds.test" = vhost;
     };
   };
 
@@ -50,7 +65,7 @@ pkgs.testers.nixosTest {
         base = "http://localhost" if via == "nginx" else "http://localhost:3000"
         url = f"{base}/xrpc/{endpoint}"
 
-        parts = ["curl", "-sf", "-X", method, host_header]
+        parts = ["curl", "-s", "-w", r"'\n%{http_code}'", "-X", method, host_header]
         if headers:
             parts.extend(f"-H '{k}: {v}'" for k, v in headers.items())
         if data is not None:
@@ -60,7 +75,12 @@ pkgs.testers.nixosTest {
             parts.append(f"--data-binary @{raw_body}")
         parts.append(f"'{url}'")
 
-        return server.succeed(" ".join(parts))
+        result = server.succeed(" ".join(parts))
+        lines = result.rsplit("\n", 1)
+        body = lines[0] if len(lines) > 1 else result
+        status = lines[1].strip() if len(lines) > 1 else "000"
+        assert status.startswith("2"), f"xrpc {endpoint} returned HTTP {status}: {body}"
+        return body
 
     def xrpc_json(method, endpoint, **kwargs):
         return json.loads(xrpc(method, endpoint, **kwargs))

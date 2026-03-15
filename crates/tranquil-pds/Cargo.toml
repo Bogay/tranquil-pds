@@ -31,8 +31,6 @@ bs58 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 cid = { workspace = true }
-clap = { workspace = true }
-dotenvy = { workspace = true }
 ed25519-dalek = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
@@ -75,7 +73,6 @@ tower = { workspace = true }
 tower-http = { workspace = true }
 tower-layer = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true }
 webauthn-rs = { workspace = true }
@@ -97,4 +94,7 @@ ctor = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
 tranquil-ripple = { workspace = true }
+tranquil-sync = { workspace = true }
+tranquil-api = { workspace = true }
+tranquil-oauth-server = { workspace = true }
 wiremock = { workspace = true }

@@ -1,5 +1,5 @@
 use crate::circuit_breaker::CircuitBreaker;
-use crate::sync::firehose::SequencedEvent;
+use tranquil_db_traits::SequencedEvent;
 use reqwest::Client;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

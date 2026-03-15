@@ -8,7 +8,7 @@ use crate::repo::PostgresBlockStore;
 use crate::repo_write_lock::RepoWriteLocks;
 use crate::sso::{SsoConfig, SsoManager};
 use crate::storage::{BackupStorage, BlobStorage, create_backup_storage, create_blob_storage};
-use crate::sync::firehose::SequencedEvent;
+use tranquil_db_traits::SequencedEvent;
 use sqlx::PgPool;
 use std::error::Error;
 use std::sync::Arc;
@@ -240,7 +240,7 @@ impl AppState {
                 .await,
         ) {
             (true, Ok(Some(0))) => {
-                let code = crate::api::server::invite::gen_invite_code();
+                let code = crate::util::gen_invite_code();
                 tracing::info!(
                     "No users exist and invite codes are required. Bootstrap invite code: {}",
                     code

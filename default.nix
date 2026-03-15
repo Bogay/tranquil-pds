@@ -36,6 +36,6 @@ in rustPlatform.buildRustPackage {
 
   meta = {
     license = lib.licenses.agpl3Plus;
-    mainProgram = "tranquil-pds";
+    mainProgram = "tranquil-server";
   };
 }

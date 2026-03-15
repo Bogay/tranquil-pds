@@ -1,24 +1,14 @@
-pub mod blob;
 pub mod car;
-pub mod commit;
-pub mod crawl;
-pub mod deprecated;
 pub mod firehose;
 pub mod frame;
 pub mod import;
-pub mod listener;
-pub mod repo;
-pub mod subscribe_repos;
 pub mod util;
 pub mod verify;
 
-pub use blob::{get_blob, list_blobs};
-pub use commit::{get_latest_commit, get_repo_status, list_repos};
-pub use crawl::{notify_of_update, request_crawl};
-pub use deprecated::{get_checkout, get_head};
-pub use repo::{get_blocks, get_record, get_repo};
-pub use subscribe_repos::subscribe_repos;
-pub use tranquil_db_traits::AccountStatus;
+#[cfg(test)]
+mod verify_tests;
+
+pub use firehose::SequencedEvent;
 pub use util::{
     RepoAccessLevel, RepoAccount, RepoAvailabilityError, assert_repo_availability,
     get_account_with_status,

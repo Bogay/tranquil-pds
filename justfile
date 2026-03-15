@@ -2,9 +2,9 @@ default:
     @just --list
 
 run:
-    cargo run
+    cargo run -p tranquil-server
 run-release:
-    cargo run --release
+    cargo run -p tranquil-server --release
 build:
     cargo build
 build-release:

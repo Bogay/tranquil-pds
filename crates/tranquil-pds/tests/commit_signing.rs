@@ -96,7 +96,7 @@ fn test_unsigned_commit_has_5_fields() {
 
 #[test]
 fn test_create_signed_commit_helper() {
-    use tranquil_pds::api::repo::record::utils::create_signed_commit;
+    use tranquil_pds::repo_ops::create_signed_commit;
 
     let signing_key = SigningKey::random(&mut rand::thread_rng());
     let did: Did = "did:plc:testuser123456789abcdef"

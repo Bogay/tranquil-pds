@@ -13,6 +13,7 @@ use tranquil_db_traits::OAuthRepository;
 pub mod account_verified;
 pub mod email_token;
 pub mod extractor;
+pub mod reauth;
 pub mod legacy_2fa;
 pub mod login_identifier;
 pub mod mfa_verified;

@@ -74,7 +74,7 @@ pub async fn require_legacy_session_mfa<'a>(
     state: &AppState,
     user: &'a AuthenticatedUser,
 ) -> Result<MfaVerified<'a>, Response> {
-    use crate::api::server::reauth::{check_legacy_session_mfa, legacy_mfa_required_response};
+    use crate::auth::reauth::{check_legacy_session_mfa, legacy_mfa_required_response};
 
     if check_legacy_session_mfa(&*state.session_repo, &user.did).await {
         Ok(MfaVerified::from_session_reauth(user))
@@ -87,7 +87,7 @@ pub async fn require_reauth_window<'a>(
     state: &AppState,
     user: &'a AuthenticatedUser,
 ) -> Result<MfaVerified<'a>, Response> {
-    use crate::api::server::reauth::{REAUTH_WINDOW_SECONDS, reauth_required_response};
+    use crate::auth::reauth::{REAUTH_WINDOW_SECONDS, reauth_required_response};
     use chrono::Utc;
 
     let status = state
@@ -117,7 +117,7 @@ pub async fn require_reauth_window_if_available<'a>(
     state: &AppState,
     user: &'a AuthenticatedUser,
 ) -> Result<Option<MfaVerified<'a>>, Response> {
-    use crate::api::server::reauth::{check_reauth_required_cached, reauth_required_response};
+    use crate::auth::reauth::{check_reauth_required_cached, reauth_required_response};
 
     let has_password = state
         .user_repo

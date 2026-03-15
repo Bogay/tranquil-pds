@@ -1,4 +1,4 @@
-use crate::sync::verify::{CarVerifier, VerifyError};
+use super::{CarVerifier, VerifyError};
 use bytes::Bytes;
 use cid::Cid;
 use sha2::{Digest, Sha256};

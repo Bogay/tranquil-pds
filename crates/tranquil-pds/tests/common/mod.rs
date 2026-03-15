@@ -563,8 +563,19 @@ async fn spawn_server(config: ServerConfig) -> ServerInstance {
     if let Some((cache, distributed_rate_limiter)) = config.cache {
         state = state.with_cache(cache, distributed_rate_limiter);
     }
-    tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
-    let app = tranquil_pds::app(state);
+    tranquil_sync::listener::start_sequencer_listener(state.clone()).await;
+    let app = tranquil_pds::app_with_routes(
+        state,
+        tranquil_pds::ExternalRoutes {
+            xrpc: tranquil_api::api_routes().merge(tranquil_sync::sync_routes()),
+            oauth: tranquil_oauth_server::oauth_routes(),
+            well_known: tranquil_oauth_server::well_known_oauth_routes()
+                .merge(tranquil_api::well_known_api_routes()),
+            extra: tranquil_api::misc_routes()
+                .merge(tranquil_api::webhook_routes())
+                .merge(tranquil_oauth_server::frontend_client_metadata_route()),
+        },
+    );
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });

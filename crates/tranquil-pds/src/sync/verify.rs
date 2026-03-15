@@ -130,7 +130,7 @@ impl CarVerifier {
             .ok_or(VerifyError::NoSigningKey)
     }
 
-    async fn resolve_did_document(&self, did: &Did) -> Result<DidDocument<'static>, VerifyError> {
+    pub(crate) async fn resolve_did_document(&self, did: &Did) -> Result<DidDocument<'static>, VerifyError> {
         let did_str = did.as_str();
         if did_str.starts_with("did:plc:") {
             self.resolve_plc_did(did_str).await
@@ -197,7 +197,7 @@ impl CarVerifier {
         Ok(doc.into_static())
     }
 
-    fn verify_mst_structure(
+    pub(crate) fn verify_mst_structure(
         &self,
         data_cid: &Cid,
         blocks: &HashMap<Cid, Bytes>,

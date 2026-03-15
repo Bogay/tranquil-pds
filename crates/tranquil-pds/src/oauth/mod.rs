@@ -1,6 +1,4 @@
 pub mod db;
-pub mod endpoints;
-pub mod jwks;
 pub mod scopes;
 pub mod verify;
 

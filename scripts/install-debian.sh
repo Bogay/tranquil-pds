@@ -317,7 +317,7 @@ chmod 600 /etc/tranquil-pds/tranquil-pds.env
 
 log_info "Installing Tranquil PDS..."
 id -u tranquil-pds &>/dev/null || useradd -r -s /sbin/nologin tranquil-pds
-cp /opt/tranquil-pds/target/release/tranquil-pds /usr/local/bin/
+cp /opt/tranquil-pds/target/release/tranquil-server /usr/local/bin/tranquil-pds
 mkdir -p /var/lib/tranquil-pds
 cp -r /opt/tranquil-pds/frontend/dist /var/lib/tranquil-pds/frontend
 chown -R tranquil-pds:tranquil-pds /var/lib/tranquil-pds

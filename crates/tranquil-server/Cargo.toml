@@ -1,0 +1,28 @@
+[package]
+name = "tranquil-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tranquil-pds = { workspace = true }
+tranquil-sync = { workspace = true }
+tranquil-api = { workspace = true }
+tranquil-oauth-server = { workspace = true }
+tranquil-config = { workspace = true }
+
+axum = { workspace = true }
+clap = { workspace = true }
+dotenvy = { workspace = true }
+ed25519-dalek = { workspace = true }
+hex = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[features]
+default = ["frontend", "s3", "valkey"]
+frontend = ["tranquil-pds/frontend"]
+s3 = ["tranquil-pds/s3"]
+valkey = ["tranquil-pds/valkey"]

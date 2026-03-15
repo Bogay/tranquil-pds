@@ -1,0 +1,320 @@
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::scheduled::generate_repo_car_from_user_blocks;
+use tranquil_pds::state::AppState;
+use tranquil_pds::sync::car::{encode_car_block, encode_car_header};
+use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
+use axum::{
+    extract::{Query, RawQuery, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use cid::Cid;
+use jacquard_repo::storage::BlockStore;
+use serde::Deserialize;
+use std::str::FromStr;
+use tracing::error;
+use tranquil_types::Did;
+
+struct GetBlocksParams {
+    did: Did,
+    cids: Vec<String>,
+}
+
+fn parse_get_blocks_query(query_string: &str) -> Result<GetBlocksParams, ApiError> {
+    let did_str = tranquil_pds::util::parse_repeated_query_param(Some(query_string), "did")
+        .into_iter()
+        .next()
+        .ok_or_else(|| ApiError::InvalidRequest("Missing required parameter: did".into()))?;
+    let did: Did = did_str
+        .parse()
+        .map_err(|_| ApiError::InvalidRequest("invalid did".into()))?;
+    let cids = tranquil_pds::util::parse_repeated_query_param(Some(query_string), "cids");
+    Ok(GetBlocksParams { did, cids })
+}
+
+pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery) -> Response {
+    let Some(query_string) = query else {
+        return ApiError::InvalidRequest("Missing query parameters".into()).into_response();
+    };
+
+    let GetBlocksParams {
+        did,
+        cids: cid_strings,
+    } = match parse_get_blocks_query(&query_string) {
+        Ok(parsed) => parsed,
+        Err(e) => return e.into_response(),
+    };
+
+    let _account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+            .await
+        {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
+
+    let cids: Vec<Cid> = match cid_strings
+        .iter()
+        .map(|s| Cid::from_str(s).map_err(|_| s.clone()))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(cids) => cids,
+        Err(invalid) => {
+            return ApiError::InvalidRequest(format!("Invalid CID: {}", invalid)).into_response();
+        }
+    };
+
+    if cids.is_empty() {
+        return ApiError::InvalidRequest("No CIDs provided".into()).into_response();
+    }
+
+    let blocks = match state.block_store.get_many(&cids).await {
+        Ok(blocks) => blocks,
+        Err(e) => {
+            error!("Failed to get blocks: {}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    let missing_cids: Vec<String> = blocks
+        .iter()
+        .zip(&cids)
+        .filter(|(block_opt, _)| block_opt.is_none())
+        .map(|(_, cid)| cid.to_string())
+        .collect();
+    if !missing_cids.is_empty() {
+        return ApiError::InvalidRequest(format!(
+            "Could not find blocks: {}",
+            missing_cids.join(", ")
+        ))
+        .into_response();
+    }
+
+    let header = match tranquil_pds::sync::car::encode_car_header_null_root() {
+        Ok(h) => h,
+        Err(e) => {
+            error!("Failed to encode CAR header: {}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+    let mut car_bytes = header;
+    blocks
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, block_opt)| block_opt.map(|block| (cids[i], block)))
+        .for_each(|(cid, block)| car_bytes.extend_from_slice(&encode_car_block(&cid, &block)));
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
+        car_bytes,
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct GetRepoQuery {
+    pub did: Did,
+    pub since: Option<String>,
+}
+
+pub async fn get_repo(
+    State(state): State<AppState>,
+    Query(query): Query<GetRepoQuery>,
+) -> Response {
+    let did = query.did;
+    let account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+            .await
+        {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
+
+    let Some(head_str) = account.repo_root_cid else {
+        return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
+    };
+
+    let Ok(head_cid) = Cid::from_str(&head_str) else {
+        return ApiError::InternalError(None).into_response();
+    };
+
+    if let Some(since) = &query.since {
+        return get_repo_since(&state, &did, &head_cid, since).await;
+    }
+
+    let car_bytes = match generate_repo_car_from_user_blocks(
+        state.repo_repo.as_ref(),
+        &state.block_store,
+        account.user_id,
+        &head_cid,
+    )
+    .await
+    {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            error!("Failed to generate repo CAR: {}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
+        car_bytes,
+    )
+        .into_response()
+}
+
+async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str) -> Response {
+    let user_id = match state.user_repo.get_id_by_did(did).await {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            return ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did)))
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error looking up user: {:?}", e);
+            return ApiError::InternalError(Some("Database error".into())).into_response();
+        }
+    };
+
+    let block_cid_bytes = match state
+        .repo_repo
+        .get_user_block_cids_since_rev(user_id, since)
+        .await
+    {
+        Ok(cids) => cids,
+        Err(e) => {
+            error!("DB error in get_repo_since: {:?}", e);
+            return ApiError::InternalError(Some("Database error".into())).into_response();
+        }
+    };
+
+    let block_cids: Vec<Cid> = block_cid_bytes
+        .iter()
+        .filter_map(|bytes| Cid::try_from(bytes.as_slice()).ok())
+        .collect();
+
+    let mut car_bytes = match encode_car_header(head_cid) {
+        Ok(h) => h,
+        Err(e) => {
+            return ApiError::InternalError(Some(format!("Failed to encode CAR header: {}", e)))
+                .into_response();
+        }
+    };
+
+    if block_cids.is_empty() {
+        return (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
+            car_bytes,
+        )
+            .into_response();
+    }
+
+    let blocks = match state.block_store.get_many(&block_cids).await {
+        Ok(b) => b,
+        Err(e) => {
+            error!("Block store error in get_repo_since: {:?}", e);
+            return ApiError::InternalError(Some("Failed to get blocks".into())).into_response();
+        }
+    };
+
+    blocks
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, block_opt)| block_opt.map(|block| (block_cids[i], block)))
+        .for_each(|(cid, block)| car_bytes.extend_from_slice(&encode_car_block(&cid, &block)));
+
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
+        car_bytes,
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct GetRecordQuery {
+    pub did: Did,
+    pub collection: String,
+    pub rkey: String,
+}
+
+pub async fn get_record(
+    State(state): State<AppState>,
+    Query(query): Query<GetRecordQuery>,
+) -> Response {
+    use jacquard_repo::commit::Commit;
+    use jacquard_repo::mst::Mst;
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    let did = query.did;
+    let account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+            .await
+        {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
+
+    let commit_cid_str = match account.repo_root_cid {
+        Some(cid) => cid,
+        None => {
+            return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
+        }
+    };
+    let Ok(commit_cid) = Cid::from_str(&commit_cid_str) else {
+        return ApiError::InternalError(Some("Invalid commit CID".into())).into_response();
+    };
+    let commit_bytes = match state.block_store.get(&commit_cid).await {
+        Ok(Some(b)) => b,
+        _ => {
+            return ApiError::InternalError(Some("Commit block not found".into())).into_response();
+        }
+    };
+    let Ok(commit) = Commit::from_cbor(&commit_bytes) else {
+        return ApiError::InternalError(Some("Failed to parse commit".into())).into_response();
+    };
+    let mst = Mst::load(Arc::new(state.block_store.clone()), commit.data, None);
+    let key = format!("{}/{}", query.collection, query.rkey);
+    let record_cid = match mst.get(&key).await {
+        Ok(Some(cid)) => cid,
+        Ok(None) => {
+            return ApiError::RecordNotFound.into_response();
+        }
+        Err(_) => {
+            return ApiError::InternalError(Some("Failed to lookup record".into())).into_response();
+        }
+    };
+    let record_block = match state.block_store.get(&record_cid).await {
+        Ok(Some(b)) => b,
+        _ => {
+            return ApiError::RecordNotFound.into_response();
+        }
+    };
+    let mut proof_blocks: BTreeMap<Cid, bytes::Bytes> = BTreeMap::new();
+    if mst.blocks_for_path(&key, &mut proof_blocks).await.is_err() {
+        return ApiError::InternalError(Some("Failed to build proof path".into())).into_response();
+    }
+    let header = match encode_car_header(&commit_cid) {
+        Ok(h) => h,
+        Err(e) => {
+            error!("Failed to encode CAR header: {}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+    let mut car_bytes = header;
+    car_bytes.extend_from_slice(&encode_car_block(&commit_cid, &commit_bytes));
+    proof_blocks
+        .iter()
+        .for_each(|(cid, data)| car_bytes.extend_from_slice(&encode_car_block(cid, data)));
+    car_bytes.extend_from_slice(&encode_car_block(&record_cid, &record_block));
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
+        car_bytes,
+    )
+        .into_response()
+}

@@ -6093,8 +6093,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "tranquil-api"
+version = "0.4.2"
+dependencies = [
+ "anyhow",
+ "axum",
+ "backon",
+ "base32",
+ "base64 0.22.1",
+ "bcrypt",
+ "bs58",
+ "bytes",
+ "chrono",
+ "cid",
+ "ed25519-dalek",
+ "futures",
+ "hex",
+ "http 1.4.0",
+ "infer",
+ "ipld-core",
+ "jacquard-common",
+ "jacquard-repo",
+ "k256",
+ "multibase",
+ "multihash",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_ipld_dagcbor",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "tranquil-config",
+ "tranquil-db",
+ "tranquil-db-traits",
+ "tranquil-lexicon",
+ "tranquil-pds",
+ "tranquil-scopes",
+ "tranquil-types",
+ "urlencoding",
+ "uuid",
+ "webauthn-rs",
+ "zip",
+]
+
+[[package]]
 name = "tranquil-auth"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "base32",
@@ -6117,7 +6165,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-cache"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6131,7 +6179,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-comms"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6146,7 +6194,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-config"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "confique",
  "serde",
@@ -6154,7 +6202,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-crypto"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -6170,7 +6218,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-db"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6187,7 +6235,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-db-traits"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6203,7 +6251,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-infra"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6214,7 +6262,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-lexicon"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "chrono",
  "hickory-resolver",
@@ -6232,7 +6280,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-oauth"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -6254,8 +6302,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "tranquil-oauth-server"
+version = "0.4.2"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "bcrypt",
+ "chrono",
+ "cid",
+ "hmac",
+ "http 1.4.0",
+ "jacquard-common",
+ "jacquard-repo",
+ "k256",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha2",
+ "subtle",
+ "tokio",
+ "tracing",
+ "tranquil-api",
+ "tranquil-config",
+ "tranquil-crypto",
+ "tranquil-db-traits",
+ "tranquil-pds",
+ "tranquil-types",
+ "urlencoding",
+ "uuid",
+ "webauthn-rs",
+]
+
+[[package]]
 name = "tranquil-pds"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -6272,9 +6353,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "cid",
- "clap",
  "ctor",
- "dotenvy",
  "ed25519-dalek",
  "futures",
  "futures-util",
@@ -6319,7 +6398,7 @@ dependencies = [
  "tower-http",
  "tower-layer",
  "tracing",
- "tracing-subscriber",
+ "tranquil-api",
  "tranquil-auth",
  "tranquil-cache",
  "tranquil-comms",
@@ -6329,10 +6408,12 @@ dependencies = [
  "tranquil-db-traits",
  "tranquil-lexicon",
  "tranquil-oauth",
+ "tranquil-oauth-server",
  "tranquil-repo",
  "tranquil-ripple",
  "tranquil-scopes",
  "tranquil-storage",
+ "tranquil-sync",
  "tranquil-types",
  "urlencoding",
  "uuid",
@@ -6343,7 +6424,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-repo"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "bytes",
  "cid",
@@ -6355,7 +6436,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-ripple"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "backon",
@@ -6380,7 +6461,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-scopes"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "axum",
  "futures",
@@ -6395,8 +6476,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "tranquil-server"
+version = "0.4.2"
+dependencies = [
+ "axum",
+ "clap",
+ "dotenvy",
+ "ed25519-dalek",
+ "hex",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "tranquil-api",
+ "tranquil-config",
+ "tranquil-oauth-server",
+ "tranquil-pds",
+ "tranquil-sync",
+]
+
+[[package]]
 name = "tranquil-storage"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -6412,8 +6513,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "tranquil-sync"
+version = "0.4.2"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bytes",
+ "chrono",
+ "cid",
+ "futures",
+ "ipld-core",
+ "jacquard-repo",
+ "serde",
+ "serde_ipld_dagcbor",
+ "tokio",
+ "tracing",
+ "tranquil-config",
+ "tranquil-db-traits",
+ "tranquil-pds",
+ "tranquil-types",
+]
+
+[[package]]
 name = "tranquil-types"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "chrono",
  "cid",
