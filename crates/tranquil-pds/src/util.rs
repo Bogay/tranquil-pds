@@ -89,6 +89,20 @@ pub fn get_header_str(
     headers.get(name).and_then(|h| h.to_str().ok())
 }
 
+pub fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+}
+
+pub fn generate_random_token() -> String {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let bytes: [u8; 32] = rand::thread_rng().r#gen();
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
 pub fn extract_client_ip(headers: &HeaderMap, addr: Option<SocketAddr>) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
         && let Ok(value) = forwarded.to_str()
@@ -183,10 +197,9 @@ pub fn json_to_ipld(value: &JsonValue) -> Ipld {
             }
             if let Some(JsonValue::String(b64)) = obj.get("$bytes")
                 && obj.len() == 1
+                && let Ok(bytes) = BASE64_STANDARD_INDIFFERENT.decode(b64)
             {
-                if let Ok(bytes) = BASE64_STANDARD_INDIFFERENT.decode(b64) {
-                    return Ipld::Bytes(bytes);
-                }
+                return Ipld::Bytes(bytes);
             }
             let map: BTreeMap<String, Ipld> = obj
                 .iter()

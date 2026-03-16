@@ -575,6 +575,10 @@
       "required": "필수",
       "rememberChoiceLabel": "이 앱에 대한 선택 기억하기",
       "scopes": {
+        "atproto": {
+          "name": "AT Protocol 액세스",
+          "description": "신원 확인 및 세션 설정"
+        },
         "atprotoWithGranular": {
           "name": "AT Protocol 액세스",
           "description": "AT Protocol 기본 범위 (권한은 아래 선택한 옵션에 의해 결정됨)"

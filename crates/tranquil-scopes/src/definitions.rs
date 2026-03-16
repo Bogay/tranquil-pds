@@ -33,15 +33,15 @@ pub struct ScopeDefinition {
     pub display_name: &'static str,
 }
 
-pub static SCOPE_DEFINITIONS: LazyLock<HashMap<&'static str, ScopeDefinition>> = LazyLock::new(
-    || {
+pub static SCOPE_DEFINITIONS: LazyLock<HashMap<&'static str, ScopeDefinition>> =
+    LazyLock::new(|| {
         let definitions = vec![
             ScopeDefinition {
                 scope: "atproto",
                 category: ScopeCategory::Core,
                 required: true,
-                description: "Full access to read, write, and manage this account (when no granular permissions are specified)",
-                display_name: "Full Account Access",
+                description: "Identity verification and session establishment",
+                display_name: "AT Protocol Access",
             },
             ScopeDefinition {
                 scope: "transition:generic",
@@ -109,8 +109,7 @@ pub static SCOPE_DEFINITIONS: LazyLock<HashMap<&'static str, ScopeDefinition>> =
         ];
 
         definitions.into_iter().map(|d| (d.scope, d)).collect()
-    },
-);
+    });
 
 #[allow(dead_code)]
 pub fn get_scope_definition(scope: &str) -> Option<&'static ScopeDefinition> {

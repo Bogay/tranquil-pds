@@ -575,6 +575,10 @@
       "required": "必須",
       "rememberChoiceLabel": "このアプリに対する選択を記憶する",
       "scopes": {
+        "atproto": {
+          "name": "AT Protocol アクセス",
+          "description": "本人確認とセッション確立"
+        },
         "atprotoWithGranular": {
           "name": "AT Protocol アクセス",
           "description": "AT Protocol 基本スコープ（権限は以下で選択したオプションによって決まります）"

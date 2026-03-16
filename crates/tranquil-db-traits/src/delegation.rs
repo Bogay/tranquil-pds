@@ -20,6 +20,7 @@ pub struct DelegationGrant {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DelegatedAccountInfo {
     pub did: Did,
     pub handle: Handle,
@@ -28,12 +29,14 @@ pub struct DelegatedAccountInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ControllerInfo {
     pub did: Did,
-    pub handle: Handle,
+    pub handle: Option<Handle>,
     pub granted_scopes: DbScope,
     pub granted_at: DateTime<Utc>,
     pub is_active: bool,
+    pub is_local: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +51,7 @@ pub enum DelegationActionType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AuditLogEntry {
     pub id: Uuid,
     pub delegated_did: Did,
@@ -55,7 +59,9 @@ pub struct AuditLogEntry {
     pub controller_did: Option<Did>,
     pub action_type: DelegationActionType,
     pub action_details: Option<serde_json::Value>,
+    #[serde(skip_serializing)]
     pub ip_address: Option<String>,
+    #[serde(skip_serializing)]
     pub user_agent: Option<String>,
     pub created_at: DateTime<Utc>,
 }
@@ -102,14 +108,7 @@ pub trait DelegationRepository: Send + Sync {
         controller_did: &Did,
     ) -> Result<Vec<DelegatedAccountInfo>, DbError>;
 
-    async fn get_active_controllers_for_account(
-        &self,
-        delegated_did: &Did,
-    ) -> Result<Vec<ControllerInfo>, DbError>;
-
     async fn count_active_controllers(&self, delegated_did: &Did) -> Result<i64, DbError>;
-
-    async fn has_any_controllers(&self, did: &Did) -> Result<bool, DbError>;
 
     async fn controls_any_accounts(&self, did: &Did) -> Result<bool, DbError>;
 
@@ -128,13 +127,6 @@ pub trait DelegationRepository: Send + Sync {
     async fn get_audit_log_for_account(
         &self,
         delegated_did: &Did,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<AuditLogEntry>, DbError>;
-
-    async fn get_audit_log_by_controller(
-        &self,
-        controller_did: &Did,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<AuditLogEntry>, DbError>;

@@ -19,13 +19,6 @@ use tranquil_pds::rate_limit::{
 };
 use tranquil_pds::state::AppState;
 
-fn generate_state() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    URL_SAFE_NO_PAD.encode(bytes)
-}
-
 fn generate_nonce() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 16];
@@ -129,7 +122,7 @@ pub async fn sso_initiate(
         }
     };
 
-    let sso_state = generate_state();
+    let sso_state = tranquil_pds::util::generate_random_token();
     let nonce = generate_nonce();
     let redirect_uri = SsoConfig::get_redirect_uri();
 
@@ -1323,7 +1316,7 @@ pub async fn complete_registration(
                 refresh_expires_at: refresh_meta.expires_at,
                 login_type: tranquil_db_traits::LoginType::Modern,
                 mfa_verified: false,
-                scope: None,
+                scope: Some("transition:generic".to_string()),
                 controller_did: None,
                 app_password_name: None,
             };

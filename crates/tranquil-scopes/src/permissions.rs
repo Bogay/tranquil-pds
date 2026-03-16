@@ -24,8 +24,7 @@ impl ScopePermissions {
 
         let parsed = parse_scope_string(scope_str);
 
-        let has_atproto = parsed.iter().any(|p| matches!(p, ParsedScope::Atproto));
-        let mut has_transition_generic = parsed
+        let has_transition_generic = parsed
             .iter()
             .any(|p| matches!(p, ParsedScope::TransitionGeneric));
         let has_transition_chat = parsed
@@ -34,21 +33,6 @@ impl ScopePermissions {
         let has_transition_email = parsed
             .iter()
             .any(|p| matches!(p, ParsedScope::TransitionEmail));
-
-        let has_granular_scopes = parsed.iter().any(|p| {
-            matches!(
-                p,
-                ParsedScope::Repo(_)
-                    | ParsedScope::Blob(_)
-                    | ParsedScope::Rpc(_)
-                    | ParsedScope::Account(_)
-                    | ParsedScope::Identity(_)
-            )
-        });
-
-        if has_atproto && !has_granular_scopes {
-            has_transition_generic = true;
-        }
 
         Self {
             scopes,
@@ -347,13 +331,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_atproto_scope_allows_everything() {
+    fn test_atproto_scope_is_identity_only() {
         let perms = ScopePermissions::from_scope_string(Some("atproto"));
-        assert!(perms.has_full_access());
-        assert!(perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
-        assert!(perms.allows_blob("image/png"));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
-        assert!(perms.allows_account(AccountAttr::Email, AccountAction::Manage));
+        assert!(!perms.has_full_access());
+        assert!(!perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
+        assert!(!perms.allows_blob("image/png"));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+        assert!(!perms.allows_account(AccountAttr::Email, AccountAction::Manage));
     }
 
     #[test]
@@ -374,7 +358,9 @@ mod tests {
     #[test]
     fn test_empty_scope_defaults_to_atproto() {
         let perms = ScopePermissions::from_scope_string(None);
-        assert!(perms.has_full_access());
+        assert!(perms.has_scope("atproto"));
+        assert!(!perms.has_full_access());
+        assert!(!perms.allows_repo(RepoAction::Create, "any.collection"));
     }
 
     #[test]
@@ -491,8 +477,15 @@ mod tests {
     }
 
     #[test]
-    fn test_identity_scope_with_atproto() {
+    fn test_identity_scope_with_atproto_alone() {
         let perms = ScopePermissions::from_scope_string(Some("atproto"));
+        assert!(!perms.allows_identity(IdentityAttr::Handle));
+        assert!(!perms.allows_identity(IdentityAttr::Wildcard));
+    }
+
+    #[test]
+    fn test_transition_generic_grants_identity() {
+        let perms = ScopePermissions::from_scope_string(Some("transition:generic"));
         assert!(perms.allows_identity(IdentityAttr::Handle));
         assert!(perms.allows_identity(IdentityAttr::Wildcard));
     }
@@ -517,14 +510,14 @@ mod tests {
     }
 
     #[test]
-    fn test_atproto_alone_has_full_access() {
+    fn test_atproto_alone_grants_nothing() {
         let perms = ScopePermissions::from_scope_string(Some("atproto"));
-        assert!(perms.has_full_access());
-        assert!(perms.allows_repo(RepoAction::Create, "any.collection"));
-        assert!(perms.allows_repo(RepoAction::Delete, "any.collection"));
-        assert!(perms.allows_repo(RepoAction::Update, "any.collection"));
-        assert!(perms.allows_blob("image/png"));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+        assert!(!perms.has_full_access());
+        assert!(!perms.allows_repo(RepoAction::Create, "any.collection"));
+        assert!(!perms.allows_repo(RepoAction::Delete, "any.collection"));
+        assert!(!perms.allows_repo(RepoAction::Update, "any.collection"));
+        assert!(!perms.allows_blob("image/png"));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
     }
 
     #[test]

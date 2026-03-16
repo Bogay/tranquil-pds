@@ -83,7 +83,7 @@ async fn create_user_and_oauth_session(
             ("redirect_uri", redirect_uri),
             ("code_challenge", &code_challenge),
             ("code_challenge_method", "S256"),
-            ("scope", "atproto"),
+            ("scope", "atproto transition:generic"),
         ])
         .send()
         .await
@@ -122,7 +122,7 @@ async fn create_user_and_oauth_session(
         let consent_res = http_client
             .post(format!("{}/oauth/authorize/consent", url))
             .header("Content-Type", "application/json")
-            .json(&json!({"request_uri": request_uri, "approved_scopes": ["atproto"], "remember": false}))
+            .json(&json!({"request_uri": request_uri, "approved_scopes": ["atproto", "transition:generic"], "remember": false}))
             .send().await.expect("Consent request failed");
         assert_eq!(
             consent_res.status(),
@@ -631,7 +631,7 @@ async fn test_oauth_multiple_clients_same_user() {
         let consent_res = http_client
             .post(format!("{}/oauth/authorize/consent", url))
             .header("Content-Type", "application/json")
-            .json(&json!({"request_uri": request_uri1, "approved_scopes": ["atproto"], "remember": false}))
+            .json(&json!({"request_uri": request_uri1, "approved_scopes": ["atproto", "transition:generic"], "remember": false}))
             .send().await.unwrap();
         let consent_body: Value = consent_res.json().await.unwrap();
         location1 = consent_body["redirect_uri"].as_str().unwrap().to_string();
@@ -692,7 +692,7 @@ async fn test_oauth_multiple_clients_same_user() {
         let consent_res = http_client
             .post(format!("{}/oauth/authorize/consent", url))
             .header("Content-Type", "application/json")
-            .json(&json!({"request_uri": request_uri2, "approved_scopes": ["atproto"], "remember": false}))
+            .json(&json!({"request_uri": request_uri2, "approved_scopes": ["atproto", "transition:generic"], "remember": false}))
             .send().await.unwrap();
         let consent_body: Value = consent_res.json().await.unwrap();
         location2 = consent_body["redirect_uri"].as_str().unwrap().to_string();

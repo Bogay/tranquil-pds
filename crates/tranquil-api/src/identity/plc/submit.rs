@@ -2,7 +2,7 @@ use tranquil_pds::api::error::DbResultExt;
 use tranquil_pds::api::{ApiError, EmptyResponse};
 use tranquil_pds::auth::{Auth, Permissive};
 use tranquil_pds::circuit_breaker::with_circuit_breaker;
-use tranquil_pds::plc::{PlcClient, signing_key_to_did_key, validate_plc_operation};
+use tranquil_pds::plc::{signing_key_to_did_key, validate_plc_operation};
 use tranquil_pds::state::AppState;
 use axum::{
     Json,
@@ -120,7 +120,7 @@ pub async fn submit_plc_operation(
             ));
         }
     }
-    let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
+    let plc_client = state.plc_client();
     let operation_clone = input.operation.clone();
     let did_clone = did.clone();
     with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {

@@ -2,6 +2,7 @@ pub mod account;
 pub mod did;
 pub mod handle;
 pub mod plc;
+pub mod provision;
 
 pub use account::create_account;
 pub use did::{

@@ -4,7 +4,8 @@ COPY frontend/ ./
 RUN deno task build
 
 FROM rust:1.92-alpine AS builder
-RUN apk add --no-cache ca-certificates musl-dev pkgconfig openssl-dev openssl-libs-static
+RUN apk add --no-cache ca-certificates musl-dev pkgconfig openssl-dev openssl-libs-static mold clang
+ENV RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=mold"
 WORKDIR /app
 ARG SLIM="false"
 COPY Cargo.toml Cargo.lock ./

@@ -575,6 +575,10 @@
       "required": "Vaaditaan",
       "rememberChoiceLabel": "Muista valintani tälle sovellukselle",
       "scopes": {
+        "atproto": {
+          "name": "AT Protocol -käyttöoikeus",
+          "description": "Henkilöllisyyden varmennus ja istunnon muodostus"
+        },
         "atprotoWithGranular": {
           "name": "AT Protocol -käyttöoikeus",
           "description": "AT Protocol -peruslaajuus (oikeudet määräytyvät alla valittujen vaihtoehtojen mukaan)"

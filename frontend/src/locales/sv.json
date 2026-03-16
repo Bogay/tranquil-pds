@@ -575,6 +575,10 @@
       "required": "Krävs",
       "rememberChoiceLabel": "Kom ihåg mitt val för denna applikation",
       "scopes": {
+        "atproto": {
+          "name": "AT Protocol-åtkomst",
+          "description": "Identitetsverifiering och sessionsupprättande"
+        },
         "atprotoWithGranular": {
           "name": "AT Protocol-åtkomst",
           "description": "AT Protocol basomfattning (behörigheter bestäms av valda alternativ nedan)"

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) as \"count!\"\n            FROM account_delegations d\n            LEFT JOIN users u ON u.did = d.controller_did\n            WHERE d.delegated_did = $1\n              AND d.revoked_at IS NULL\n              AND (u.did IS NULL OR (u.deactivated_at IS NULL AND u.takedown_ref IS NULL))\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ff2ffeb1ea1c1375ff0edc4c9ce2f3cdeb92e2b0a72405ea0441b0340b177b96"
+}

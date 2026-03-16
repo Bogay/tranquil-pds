@@ -4,7 +4,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
 use hmac::Mac;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
 const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 300;
@@ -17,10 +17,7 @@ pub struct TokenClaims {
 }
 
 pub fn verify_pkce(code_challenge: &str, code_verifier: &str) -> Result<(), OAuthError> {
-    let mut hasher = Sha256::new();
-    hasher.update(code_verifier.as_bytes());
-    let hash = hasher.finalize();
-    let computed_challenge = URL_SAFE_NO_PAD.encode(hash);
+    let computed_challenge = tranquil_pds::oauth::compute_pkce_challenge(code_verifier);
     if !bool::from(
         computed_challenge
             .as_bytes()

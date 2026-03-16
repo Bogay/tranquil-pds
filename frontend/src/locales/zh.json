@@ -575,6 +575,10 @@
       "required": "必需",
       "rememberChoiceLabel": "记住对此应用的授权选择",
       "scopes": {
+        "atproto": {
+          "name": "AT Protocol 访问",
+          "description": "身份验证和会话建立"
+        },
         "atprotoWithGranular": {
           "name": "AT Protocol 访问",
           "description": "AT Protocol 基础范围（权限由下方选择的选项决定）"

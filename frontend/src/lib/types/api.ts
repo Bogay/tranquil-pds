@@ -570,10 +570,11 @@ export interface SsoLinkedAccount {
 
 export interface DelegationController {
   did: Did;
-  handle: Handle;
+  handle?: Handle;
   grantedScopes: ScopeSet;
   grantedAt: ISODateString;
   isActive: boolean;
+  isLocal: boolean;
 }
 
 export interface DelegationControlledAccount {

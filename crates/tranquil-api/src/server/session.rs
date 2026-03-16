@@ -708,7 +708,7 @@ pub async fn confirm_signup(
         refresh_expires_at: refresh_meta.expires_at,
         login_type: tranquil_db_traits::LoginType::Modern,
         mfa_verified: false,
-        scope: None,
+        scope: Some("transition:generic transition:chat.bsky".to_string()),
         controller_did: None,
         app_password_name: None,
     };

@@ -185,13 +185,17 @@ impl DelegationRepository for PostgresDelegationRepository {
         let rows = sqlx::query!(
             r#"
             SELECT
-                u.did,
-                u.handle,
+                d.controller_did,
+                u.handle as "handle?",
                 d.granted_scopes,
                 d.granted_at,
-                (u.deactivated_at IS NULL AND u.takedown_ref IS NULL) as "is_active!"
+                CASE WHEN u.did IS NOT NULL
+                     THEN u.deactivated_at IS NULL AND u.takedown_ref IS NULL
+                     ELSE true
+                END as "is_active!",
+                u.did IS NOT NULL as "is_local!"
             FROM account_delegations d
-            JOIN users u ON u.did = d.controller_did
+            LEFT JOIN users u ON u.did = d.controller_did
             WHERE d.delegated_did = $1 AND d.revoked_at IS NULL
             ORDER BY d.granted_at DESC
             "#,
@@ -204,11 +208,12 @@ impl DelegationRepository for PostgresDelegationRepository {
         Ok(rows
             .into_iter()
             .map(|r| ControllerInfo {
-                did: r.did.into(),
-                handle: r.handle.into(),
+                did: r.controller_did.into(),
+                handle: r.handle.map(Into::into),
                 granted_scopes: DbScope::from_db(r.granted_scopes),
                 granted_at: r.granted_at,
                 is_active: r.is_active,
+                is_local: r.is_local,
             })
             .collect())
     }
@@ -249,54 +254,15 @@ impl DelegationRepository for PostgresDelegationRepository {
             .collect())
     }
 
-    async fn get_active_controllers_for_account(
-        &self,
-        delegated_did: &Did,
-    ) -> Result<Vec<ControllerInfo>, DbError> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT
-                u.did,
-                u.handle,
-                d.granted_scopes,
-                d.granted_at,
-                true as "is_active!"
-            FROM account_delegations d
-            JOIN users u ON u.did = d.controller_did
-            WHERE d.delegated_did = $1
-              AND d.revoked_at IS NULL
-              AND u.deactivated_at IS NULL
-              AND u.takedown_ref IS NULL
-            ORDER BY d.granted_at DESC
-            "#,
-            delegated_did.as_str()
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(rows
-            .into_iter()
-            .map(|r| ControllerInfo {
-                did: r.did.into(),
-                handle: r.handle.into(),
-                granted_scopes: DbScope::from_db(r.granted_scopes),
-                granted_at: r.granted_at,
-                is_active: r.is_active,
-            })
-            .collect())
-    }
-
     async fn count_active_controllers(&self, delegated_did: &Did) -> Result<i64, DbError> {
         let count = sqlx::query_scalar!(
             r#"
             SELECT COUNT(*) as "count!"
             FROM account_delegations d
-            JOIN users u ON u.did = d.controller_did
+            LEFT JOIN users u ON u.did = d.controller_did
             WHERE d.delegated_did = $1
               AND d.revoked_at IS NULL
-              AND u.deactivated_at IS NULL
-              AND u.takedown_ref IS NULL
+              AND (u.did IS NULL OR (u.deactivated_at IS NULL AND u.takedown_ref IS NULL))
             "#,
             delegated_did.as_str()
         )
@@ -305,21 +271,6 @@ impl DelegationRepository for PostgresDelegationRepository {
         .map_err(map_sqlx_error)?;
 
         Ok(count)
-    }
-
-    async fn has_any_controllers(&self, did: &Did) -> Result<bool, DbError> {
-        let exists = sqlx::query_scalar!(
-            r#"SELECT EXISTS(
-                SELECT 1 FROM account_delegations
-                WHERE delegated_did = $1 AND revoked_at IS NULL
-            ) as "exists!""#,
-            did.as_str()
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(exists)
     }
 
     async fn controls_any_accounts(&self, did: &Did) -> Result<bool, DbError> {
@@ -395,53 +346,6 @@ impl DelegationRepository for PostgresDelegationRepository {
             LIMIT $2 OFFSET $3
             "#,
             delegated_did.as_str(),
-            limit,
-            offset
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(rows
-            .into_iter()
-            .map(|r| AuditLogEntry {
-                id: r.id,
-                delegated_did: r.delegated_did.into(),
-                actor_did: r.actor_did.into(),
-                controller_did: r.controller_did.map(Into::into),
-                action_type: r.action_type.into(),
-                action_details: r.action_details,
-                ip_address: r.ip_address,
-                user_agent: r.user_agent,
-                created_at: r.created_at,
-            })
-            .collect())
-    }
-
-    async fn get_audit_log_by_controller(
-        &self,
-        controller_did: &Did,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<AuditLogEntry>, DbError> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT
-                id,
-                delegated_did,
-                actor_did,
-                controller_did,
-                action_type as "action_type: PgDelegationActionType",
-                action_details,
-                ip_address,
-                user_agent,
-                created_at
-            FROM delegation_audit_log
-            WHERE controller_did = $1
-            ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
-            "#,
-            controller_did.as_str(),
             limit,
             offset
         )

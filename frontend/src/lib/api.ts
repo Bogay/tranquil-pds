@@ -326,7 +326,7 @@ function _castDelegationController(raw: unknown): DelegationController {
   const c = raw as Record<string, unknown>;
   return {
     did: unsafeAsDid(c.did as string),
-    handle: unsafeAsHandle(c.handle as string),
+    handle: c.handle ? unsafeAsHandle(c.handle as string) : undefined,
     grantedScopes: unsafeAsScopeSet(
       (c.granted_scopes ?? c.grantedScopes) as string,
     ),
@@ -334,6 +334,7 @@ function _castDelegationController(raw: unknown): DelegationController {
       (c.granted_at ?? c.grantedAt ?? c.added_at) as string,
     ),
     isActive: (c.is_active ?? c.isActive ?? true) as boolean,
+    isLocal: (c.is_local ?? c.isLocal ?? true) as boolean,
   };
 }
 
@@ -1469,6 +1470,19 @@ export const api = {
     Result<{ presets: DelegationScopePreset[] }, ApiError>
   > {
     return xrpcResult("_delegation.getScopePresets");
+  },
+
+  resolveController(
+    identifier: string,
+  ): Promise<
+    Result<
+      { did: string; handle?: string; pdsUrl?: string; isLocal: boolean },
+      ApiError
+    >
+  > {
+    return xrpcResult("_delegation.resolveController", {
+      params: { identifier },
+    });
   },
 
   addDelegationController(

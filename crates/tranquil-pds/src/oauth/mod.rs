@@ -1,3 +1,4 @@
+pub mod client;
 pub mod db;
 pub mod scopes;
 pub mod verify;
@@ -16,7 +17,7 @@ pub use tranquil_oauth::{
     OAuthError, ParResponse, Prompt, ProtectedResourceMetadata, RefreshToken, RefreshTokenState,
     RequestData, RequestId, ResponseMode, ResponseType, SessionId, TokenData, TokenId,
     TokenRequest, TokenResponse, compute_access_token_hash, compute_jwk_thumbprint,
-    verify_client_auth,
+    compute_pkce_challenge, verify_client_auth,
 };
 
 pub use scopes::{AccountAction, AccountAttr, RepoAction, ScopeError, ScopePermissions};

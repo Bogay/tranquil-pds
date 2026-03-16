@@ -798,3 +798,38 @@ pub enum CommsType {
     PasskeyRecovery,
     MigrationVerification,
 }
+
+pub mod did_doc {
+    pub fn extract_pds_endpoint(doc: &serde_json::Value) -> Option<String> {
+        doc.get("service")
+            .and_then(|s| s.as_array())
+            .and_then(|services| {
+                services.iter().find_map(|svc| {
+                    let id = svc.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                    let svc_type = svc.get("type").and_then(|v| v.as_str()).unwrap_or_default();
+                    if (id == "#atproto_pds" || id.ends_with("#atproto_pds"))
+                        && svc_type == "AtprotoPersonalDataServer"
+                    {
+                        svc.get("serviceEndpoint")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+            })
+    }
+
+    pub fn extract_handle(doc: &serde_json::Value) -> Option<String> {
+        doc.get("alsoKnownAs")
+            .and_then(|a| a.as_array())
+            .and_then(|aliases| {
+                aliases.iter().find_map(|alias| {
+                    alias
+                        .as_str()
+                        .and_then(|s| s.strip_prefix("at://"))
+                        .map(|h| h.to_string())
+                })
+            })
+    }
+}

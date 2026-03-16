@@ -1,4 +1,4 @@
-use tranquil_pds::delegation::{intersect_scopes, scopes::validate_delegation_scopes};
+use tranquil_pds::delegation::{ValidatedDelegationScope, intersect_scopes};
 use tranquil_pds::oauth::scopes::{
     AccountAction, IdentityAttr, ParsedScope, RepoAction, ScopePermissions, parse_scope,
     parse_scope_string,
@@ -140,10 +140,10 @@ fn test_multiple_scopes_parsing() {
 #[test]
 fn test_permissions_null_scope_defaults_atproto() {
     let perms = ScopePermissions::from_scope_string(None);
-    assert!(perms.has_full_access());
-    assert!(perms.allows_repo(RepoAction::Create, "any.collection"));
-    assert!(perms.allows_repo(RepoAction::Update, "any.collection"));
-    assert!(perms.allows_repo(RepoAction::Delete, "any.collection"));
+    assert!(!perms.has_full_access());
+    assert!(!perms.allows_repo(RepoAction::Create, "any.collection"));
+    assert!(!perms.allows_repo(RepoAction::Update, "any.collection"));
+    assert!(!perms.allows_repo(RepoAction::Delete, "any.collection"));
 }
 
 #[test]
@@ -177,12 +177,11 @@ fn test_permissions_rpc_lxm_wildcard_prefix() {
 }
 
 #[test]
-fn test_delegation_intersect_params_behavior() {
+fn test_delegation_intersect_mismatched_params_empty() {
     let result = intersect_scopes("repo:*?action=create", "repo:*?action=delete");
-
     assert!(
-        result.is_empty() || result.contains("repo:*"),
-        "Delegation intersection with different action params: '{}'",
+        result.is_empty(),
+        "Mismatched action params must produce empty intersection, got: '{}'",
         result
     );
 }
@@ -190,36 +189,39 @@ fn test_delegation_intersect_params_behavior() {
 #[test]
 fn test_delegation_intersect_wildcard_vs_specific() {
     let result = intersect_scopes("repo:app.bsky.feed.post?action=create", "repo:*");
-    assert!(result.contains("repo:"));
+    assert_eq!(
+        result, "repo:app.bsky.feed.post?action=create",
+        "Intersection must return the narrower requested scope, not the granted wildcard"
+    );
 }
 
 #[test]
 fn test_delegation_validate_known_prefixes() {
-    assert!(validate_delegation_scopes("atproto").is_ok());
-    assert!(validate_delegation_scopes("repo:*").is_ok());
-    assert!(validate_delegation_scopes("blob:*/*").is_ok());
-    assert!(validate_delegation_scopes("rpc:*").is_ok());
-    assert!(validate_delegation_scopes("account:email").is_ok());
-    assert!(validate_delegation_scopes("identity:handle").is_ok());
-    assert!(validate_delegation_scopes("transition:generic").is_ok());
+    assert!(ValidatedDelegationScope::new("atproto").is_ok());
+    assert!(ValidatedDelegationScope::new("repo:*").is_ok());
+    assert!(ValidatedDelegationScope::new("blob:*/*").is_ok());
+    assert!(ValidatedDelegationScope::new("rpc:*").is_ok());
+    assert!(ValidatedDelegationScope::new("account:email").is_ok());
+    assert!(ValidatedDelegationScope::new("identity:handle").is_ok());
+    assert!(ValidatedDelegationScope::new("transition:generic").is_ok());
 }
 
 #[test]
 fn test_delegation_validate_unknown_prefixes() {
-    assert!(validate_delegation_scopes("invalid:scope").is_err());
-    assert!(validate_delegation_scopes("custom:something").is_err());
-    assert!(validate_delegation_scopes("made:up").is_err());
+    assert!(ValidatedDelegationScope::new("invalid:scope").is_err());
+    assert!(ValidatedDelegationScope::new("custom:something").is_err());
+    assert!(ValidatedDelegationScope::new("made:up").is_err());
 }
 
 #[test]
 fn test_delegation_validate_empty() {
-    assert!(validate_delegation_scopes("").is_ok());
+    assert!(ValidatedDelegationScope::new("").is_ok());
 }
 
 #[test]
 fn test_delegation_validate_multiple() {
-    assert!(validate_delegation_scopes("atproto repo:* blob:*/*").is_ok());
-    assert!(validate_delegation_scopes("atproto invalid:scope").is_err());
+    assert!(ValidatedDelegationScope::new("atproto repo:* blob:*/*").is_ok());
+    assert!(ValidatedDelegationScope::new("atproto invalid:scope").is_err());
 }
 
 #[test]

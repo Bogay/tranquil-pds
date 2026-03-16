@@ -1,0 +1,3 @@
+ALTER TABLE account_delegations DROP CONSTRAINT account_delegations_controller_did_fkey;
+ALTER TABLE account_delegations DROP CONSTRAINT account_delegations_granted_by_fkey;
+ALTER TABLE app_passwords DROP CONSTRAINT app_passwords_created_by_controller_did_fkey;

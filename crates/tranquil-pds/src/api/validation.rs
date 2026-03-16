@@ -308,6 +308,31 @@ pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationErr
     validate_service_handle(handle, ReservedHandlePolicy::Reject)
 }
 
+pub fn resolve_handle_input(input: &str) -> Result<String, HandleValidationError> {
+    let available_domains = tranquil_config::get().server.available_user_domain_list();
+    let matched_domain = available_domains
+        .iter()
+        .filter(|d| input.ends_with(&format!(".{}", d)))
+        .max_by_key(|d| d.len());
+
+    if !input.contains('.') || matched_domain.is_some() {
+        let handle_to_validate = match matched_domain {
+            Some(domain) => input
+                .strip_suffix(&format!(".{}", domain))
+                .unwrap_or(input),
+            None => input,
+        };
+        let validated = validate_short_handle(handle_to_validate)?;
+        Ok(format!(
+            "{}.{}",
+            validated,
+            matched_domain.unwrap_or(&available_domains[0])
+        ))
+    } else {
+        validate_full_domain_handle(input)
+    }
+}
+
 pub fn validate_service_handle(
     handle: &str,
     reserved_policy: ReservedHandlePolicy,

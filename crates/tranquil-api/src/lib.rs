@@ -228,6 +228,7 @@ pub fn api_routes() -> axum::Router<AppState> {
         .route("/_delegation.getAuditLog", get(delegation::get_audit_log))
         .route("/_delegation.getScopePresets", get(delegation::get_scope_presets))
         .route("/_delegation.createDelegatedAccount", post(delegation::create_delegated_account))
+        .route("/_delegation.resolveController", get(delegation::resolve_controller))
         .route("/_backup.listBackups", get(backup::list_backups))
         .route("/_backup.getBackup", get(backup::get_backup))
         .route("/_backup.createBackup", post(backup::create_backup))

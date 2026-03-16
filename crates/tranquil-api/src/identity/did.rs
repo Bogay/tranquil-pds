@@ -813,7 +813,7 @@ pub async fn update_plc_handle(
     };
     let key_bytes = tranquil_pds::config::decrypt_key(&user_row.key_bytes, user_row.encryption_version)?;
     let signing_key = k256::ecdsa::SigningKey::from_slice(&key_bytes)?;
-    let plc_client = tranquil_pds::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
+    let plc_client = state.plc_client();
     let last_op = plc_client.get_last_op(did).await?;
     let new_also_known_as = vec![format!("at://{}", new_handle)];
     let update_op =

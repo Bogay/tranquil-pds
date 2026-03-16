@@ -569,9 +569,13 @@
       "required": "Required",
       "rememberChoiceLabel": "Remember my choice for this application",
       "scopes": {
+        "atproto": {
+          "name": "AT Protocol Access",
+          "description": "Identity verification and session establishment"
+        },
         "atprotoWithGranular": {
           "name": "AT Protocol Access",
-          "description": "AT Protocol baseline scope (permissions determined by selected options below)"
+          "description": "AT Protocol baseline (permissions determined by selected options below)"
         }
       },
       "unexpectedState": {
@@ -818,6 +822,7 @@
     "cannotAddControllers": "You cannot add controllers because this account controls other accounts. An account can either have controllers or control other accounts, but not both.",
     "addController": "Add Controller",
     "controllerDid": "Controller DID",
+    "controllerIdentifier": "Controller handle or DID",
     "accessLevel": "Access Level",
     "adding": "Adding...",
     "addControllerButton": "+ Add Controller",

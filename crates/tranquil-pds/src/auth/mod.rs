@@ -206,7 +206,7 @@ impl AuthenticatedUser {
             return ScopePermissions::from_scope_string(Some(scope));
         }
         if !self.is_oauth() {
-            return ScopePermissions::from_scope_string(Some("atproto"));
+            return ScopePermissions::from_scope_string(Some("transition:generic transition:chat.bsky"));
         }
         ScopePermissions::from_scope_string(self.scope.as_deref())
     }

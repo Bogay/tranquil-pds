@@ -65,6 +65,14 @@ pub fn oauth_routes() -> axum::Router<AppState> {
             "/delegation/totp",
             post(endpoints::delegation_totp_verify),
         )
+        .route(
+            "/delegation/callback",
+            get(endpoints::delegation_callback),
+        )
+        .route(
+            "/delegation/client-metadata",
+            get(endpoints::delegation_client_metadata),
+        )
         .route("/token", post(endpoints::token_endpoint))
         .route("/revoke", post(endpoints::revoke_token))
         .route("/introspect", post(endpoints::introspect_token))

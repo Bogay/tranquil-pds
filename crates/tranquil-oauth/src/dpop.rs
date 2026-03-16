@@ -385,6 +385,87 @@ pub fn compute_access_token_hash(access_token: &str) -> String {
     URL_SAFE_NO_PAD.encode(hash)
 }
 
+pub fn compute_pkce_challenge(verifier: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(verifier.as_bytes());
+    URL_SAFE_NO_PAD.encode(hasher.finalize())
+}
+
+pub fn es256_signing_key_to_jwk(key: &p256::ecdsa::SigningKey) -> Result<DPoPJwk, OAuthError> {
+    let point = key.verifying_key().to_encoded_point(false);
+    let x = URL_SAFE_NO_PAD.encode(
+        point
+            .x()
+            .ok_or_else(|| OAuthError::InvalidDpopProof("invalid EC key: missing x".into()))?,
+    );
+    let y = URL_SAFE_NO_PAD.encode(
+        point
+            .y()
+            .ok_or_else(|| OAuthError::InvalidDpopProof("invalid EC key: missing y".into()))?,
+    );
+    Ok(DPoPJwk {
+        kty: "EC".to_string(),
+        crv: Some("P-256".to_string()),
+        x: Some(x),
+        y: Some(y),
+    })
+}
+
+pub fn create_dpop_proof(
+    signing_key: &p256::ecdsa::SigningKey,
+    method: &str,
+    url: &str,
+    nonce: Option<&str>,
+    access_token_hash: Option<&str>,
+) -> Result<String, OAuthError> {
+    use p256::ecdsa::signature::Signer;
+
+    let jwk = es256_signing_key_to_jwk(signing_key)?;
+
+    let header = serde_json::json!({
+        "typ": "dpop+jwt",
+        "alg": "ES256",
+        "jwk": jwk
+    });
+
+    let jti = {
+        use rand::Rng;
+        let bytes: [u8; 16] = rand::thread_rng().r#gen();
+        URL_SAFE_NO_PAD.encode(bytes)
+    };
+
+    let mut payload = serde_json::json!({
+        "jti": jti,
+        "htm": method,
+        "htu": url,
+        "iat": Utc::now().timestamp()
+    });
+    if let Some(n) = nonce {
+        payload["nonce"] = serde_json::Value::String(n.to_string());
+    }
+    if let Some(ath) = access_token_hash {
+        payload["ath"] = serde_json::Value::String(ath.to_string());
+    }
+
+    let header_b64 = URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&header).map_err(|e| OAuthError::InvalidDpopProof(e.to_string()))?,
+    );
+    let payload_b64 = URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&payload).map_err(|e| OAuthError::InvalidDpopProof(e.to_string()))?,
+    );
+
+    let signing_input = format!("{}.{}", header_b64, payload_b64);
+    let signature: p256::ecdsa::Signature = signing_key.sign(signing_input.as_bytes());
+    let sig_b64 = URL_SAFE_NO_PAD.encode(signature.to_bytes());
+
+    Ok(format!("{}.{}.{}", header_b64, payload_b64, sig_b64))
+}
+
+pub fn compute_es256_jkt(signing_key: &p256::ecdsa::SigningKey) -> Result<String, OAuthError> {
+    let jwk = es256_signing_key_to_jwk(signing_key)?;
+    compute_jwk_thumbprint(&jwk)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

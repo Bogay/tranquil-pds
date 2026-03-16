@@ -1,8 +1,6 @@
 use super::did::verify_did_web;
 use tranquil_pds::api::error::ApiError;
-use tranquil_pds::repo_ops::create_signed_commit;
 use tranquil_pds::auth::{ServiceTokenVerifier, extract_auth_token_from_header, is_service_token};
-use tranquil_pds::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
 use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{Did, Handle, PlainPassword};
@@ -14,13 +12,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcrypt::{DEFAULT_COST, hash};
-use jacquard_common::types::{integer::LimitedU32, string::Tid};
-use jacquard_repo::{mst::Mst, storage::BlockStore};
 use k256::{SecretKey, ecdsa::SigningKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 #[derive(Deserialize)]
@@ -141,31 +136,9 @@ pub async fn create_account(
     }
 
     let cfg = tranquil_config::get();
-    let available_domains = cfg.server.available_user_domain_list();
-    let matched_domain = available_domains
-        .iter()
-        .filter(|d| input.handle.ends_with(&format!(".{}", d)))
-        .max_by_key(|d| d.len());
-
-    let validated_short_handle = if !input.handle.contains('.') || matched_domain.is_some() {
-        let handle_to_validate = match matched_domain {
-            Some(domain) => input
-                .handle
-                .strip_suffix(&format!(".{}", domain))
-                .unwrap_or(&input.handle),
-            None => &input.handle,
-        };
-        match tranquil_pds::api::validation::validate_short_handle(handle_to_validate) {
-            Ok(h) => h,
-            Err(e) => {
-                return ApiError::from(e).into_response();
-            }
-        }
-    } else {
-        match tranquil_pds::api::validation::validate_full_domain_handle(&input.handle) {
-            Ok(h) => h,
-            Err(e) => return ApiError::from(e).into_response(),
-        }
+    let handle = match tranquil_pds::api::validation::resolve_handle_input(&input.handle) {
+        Ok(h) => h,
+        Err(e) => return ApiError::from(e).into_response(),
     };
     let email: Option<String> = input
         .email
@@ -221,12 +194,6 @@ pub async fn create_account(
         })
     };
     let hostname = &cfg.server.hostname;
-    let pds_endpoint = format!("https://{}", hostname);
-    let handle = match matched_domain {
-        Some(domain) => format!("{}.{}", validated_short_handle, domain),
-        None if input.handle.contains('.') => validated_short_handle.clone(),
-        None => format!("{}.{}", validated_short_handle, &available_domains[0]),
-    };
     let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
         if let Some(signing_key_did) = &input.signing_key {
             match state
@@ -308,76 +275,17 @@ pub async fn create_account(
                     )
                     .into_response();
                 } else {
-                    let rotation_key = tranquil_config::get()
-                        .secrets
-                        .plc_rotation_key
-                        .clone()
-                        .unwrap_or_else(|| signing_key_to_did_key(&signing_key));
-                    let genesis_result = match create_genesis_operation(
-                        &signing_key,
-                        &rotation_key,
-                        &handle,
-                        &pds_endpoint,
-                    ) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            error!("Error creating PLC genesis operation: {:?}", e);
-                            return ApiError::InternalError(Some(
-                                "Failed to create PLC operation".into(),
-                            ))
-                            .into_response();
-                        }
-                    };
-                    let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
-                    if let Err(e) = plc_client
-                        .send_operation(&genesis_result.did, &genesis_result.signed_operation)
-                        .await
+                    match super::provision::submit_plc_genesis(&state, &signing_key, &handle).await
                     {
-                        error!("Failed to submit PLC genesis operation: {:?}", e);
-                        return ApiError::UpstreamErrorMsg(format!(
-                            "Failed to register DID with PLC directory: {}",
-                            e
-                        ))
-                        .into_response();
+                        Ok(did) => did,
+                        Err(e) => return e.into_response(),
                     }
-                    info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
-                    genesis_result.did
                 }
             } else {
-                let rotation_key = tranquil_config::get()
-                    .secrets
-                    .plc_rotation_key
-                    .clone()
-                    .unwrap_or_else(|| signing_key_to_did_key(&signing_key));
-                let genesis_result = match create_genesis_operation(
-                    &signing_key,
-                    &rotation_key,
-                    &handle,
-                    &pds_endpoint,
-                ) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!("Error creating PLC genesis operation: {:?}", e);
-                        return ApiError::InternalError(Some(
-                            "Failed to create PLC operation".into(),
-                        ))
-                        .into_response();
-                    }
-                };
-                let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
-                if let Err(e) = plc_client
-                    .send_operation(&genesis_result.did, &genesis_result.signed_operation)
-                    .await
-                {
-                    error!("Failed to submit PLC genesis operation: {:?}", e);
-                    return ApiError::UpstreamErrorMsg(format!(
-                        "Failed to register DID with PLC directory: {}",
-                        e
-                    ))
-                    .into_response();
+                match super::provision::submit_plc_genesis(&state, &signing_key, &handle).await {
+                    Ok(did) => did,
+                    Err(e) => return e.into_response(),
                 }
-                info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
-                genesis_result.did
             }
         }
     };
@@ -453,7 +361,7 @@ pub async fn create_account(
                     refresh_expires_at: refresh_meta.expires_at,
                     login_type: tranquil_db_traits::LoginType::Modern,
                     mfa_verified: false,
-                    scope: None,
+                    scope: Some("transition:generic transition:chat.bsky".to_string()),
                     controller_did: None,
                     app_password_name: None,
                 };
@@ -590,45 +498,23 @@ pub async fn create_account(
         None
     };
 
-    let encrypted_key_bytes = match tranquil_pds::config::encrypt_key(&secret_key_bytes) {
-        Ok(enc) => enc,
-        Err(e) => {
-            error!("Error encrypting user key: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    let mst = Mst::new(Arc::new(state.block_store.clone()));
-    let mst_root = match mst.persist().await {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Error persisting MST: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-    let rev = Tid::now(LimitedU32::MIN);
     let did_for_commit: Did = match did.parse() {
         Ok(d) => d,
         Err(_) => return ApiError::InternalError(Some("Invalid DID".into())).into_response(),
     };
-    let (commit_bytes, _sig) =
-        match create_signed_commit(&did_for_commit, mst_root, rev.as_ref(), None, &signing_key) {
-            Ok(result) => result,
-            Err(e) => {
-                error!("Error creating genesis commit: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-    let commit_cid = match state.block_store.put(&commit_bytes).await {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Error saving genesis commit: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
+    let repo = match super::provision::init_genesis_repo(
+        &state,
+        &did_for_commit,
+        &signing_key,
+        &secret_key_bytes,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return e.into_response(),
     };
-    let commit_cid_str = commit_cid.to_string();
-    let rev_str = rev.as_ref().to_string();
-    let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
+    let commit_cid_str = repo.commit_cid.to_string();
+    let rev_str = repo.repo_rev.clone();
 
     let birthdate_pref = if tranquil_config::get().server.age_assurance_override {
         Some(json!({
@@ -665,12 +551,12 @@ pub async fn create_account(
             .filter(|s| !s.is_empty())
             .map(|s| s.to_lowercase()),
         deactivated_at,
-        encrypted_key_bytes,
+        encrypted_key_bytes: repo.encrypted_key_bytes,
         encryption_version: tranquil_pds::config::ENCRYPTION_VERSION,
         reserved_key_id,
         commit_cid: commit_cid_str.clone(),
         repo_rev: rev_str.clone(),
-        genesis_block_cids,
+        genesis_block_cids: repo.genesis_block_cids,
         invite_code: if is_bootstrap {
             None
         } else {
@@ -718,8 +604,8 @@ pub async fn create_account(
         if let Err(e) = tranquil_pds::repo_ops::sequence_genesis_commit(
             &state,
             &did_for_commit,
-            &commit_cid,
-            &mst_root,
+            &repo.commit_cid,
+            &repo.mst_root_cid,
             &rev_str,
         )
         .await
@@ -730,7 +616,7 @@ pub async fn create_account(
             &state,
             &did_for_commit,
             &commit_cid_str,
-            Some(rev.as_ref()),
+            Some(&rev_str),
         )
         .await
         {
@@ -821,7 +707,7 @@ pub async fn create_account(
         refresh_expires_at: refresh_meta.expires_at,
         login_type: tranquil_db_traits::LoginType::Modern,
         mfa_verified: false,
-        scope: None,
+        scope: Some("transition:generic transition:chat.bsky".to_string()),
         controller_did: None,
         app_password_name: None,
     };

@@ -17,10 +17,11 @@
 
   interface Controller {
     did: Did
-    handle: Handle
+    handle?: Handle
     grantedScopes: ScopeSet
     grantedAt: string
     isActive: boolean
+    isLocal: boolean
   }
 
   interface ControlledAccount {
@@ -48,10 +49,72 @@
   let canControlAccounts = $derived(!hasControllers)
 
   let showAddController = $state(false)
-  let addControllerDid = $state('')
+  let addControllerIdentifier = $state('')
   let addControllerScopes = $state('atproto')
   let addingController = $state(false)
   let addControllerConfirmed = $state(false)
+  let resolvedController = $state<{ did: string; handle?: string; pdsUrl?: string; isLocal: boolean } | null>(null)
+  let resolving = $state(false)
+  let resolveError = $state('')
+
+  let typeaheadResults = $state<Array<{ did: string; handle: string; displayName?: string; avatar?: string }>>([])
+  let typeaheadTimeout: ReturnType<typeof setTimeout> | null = null
+  let showTypeahead = $state(false)
+
+  function onControllerInput(value: string) {
+    addControllerIdentifier = value
+    resolvedController = null
+    resolveError = ''
+
+    if (typeaheadTimeout) clearTimeout(typeaheadTimeout)
+
+    const trimmed = value.trim().replace(/^@/, '')
+    if (trimmed.startsWith('did:') || trimmed.length < 2) {
+      typeaheadResults = []
+      showTypeahead = false
+      return
+    }
+
+    typeaheadTimeout = setTimeout(async () => {
+      const resp = await fetch(
+        `https://public.api.bsky.app/xrpc/app.bsky.actor.searchActorsTypeahead?q=${encodeURIComponent(trimmed)}&limit=5`
+      )
+      if (resp.ok) {
+        const data = await resp.json()
+        typeaheadResults = (data.actors ?? []).map((a: Record<string, unknown>) => ({
+          did: a.did as string,
+          handle: a.handle as string,
+          displayName: a.displayName as string | undefined,
+          avatar: a.avatar as string | undefined,
+        }))
+        showTypeahead = typeaheadResults.length > 0
+      }
+    }, 200)
+  }
+
+  function selectTypeahead(actor: { did: string; handle: string }) {
+    addControllerIdentifier = actor.handle
+    showTypeahead = false
+    typeaheadResults = []
+    resolveControllerIdentifier()
+  }
+
+  async function resolveControllerIdentifier() {
+    const identifier = addControllerIdentifier.trim().replace(/^@/, '')
+    if (!identifier) return
+
+    resolving = true
+    resolveError = ''
+    resolvedController = null
+
+    const result = await api.resolveController(identifier)
+    if (result.ok) {
+      resolvedController = result.value
+    } else {
+      resolveError = $_('delegation.controllerNotFound')
+    }
+    resolving = false
+  }
 
   let showCreateDelegated = $state(false)
   let newDelegatedHandle = $state('')
@@ -77,7 +140,8 @@
         handle: c.handle,
         grantedScopes: c.grantedScopes,
         grantedAt: c.grantedAt,
-        isActive: c.isActive
+        isActive: c.isActive,
+        isLocal: c.isLocal
       }))
     }
   }
@@ -107,17 +171,18 @@
   }
 
   async function addController() {
-    if (!addControllerDid.trim()) return
+    if (!resolvedController) return
     addingController = true
 
-    const controllerDid = unsafeAsDid(addControllerDid.trim())
+    const controllerDid = unsafeAsDid(resolvedController.did)
     const scopes = unsafeAsScopeSet(addControllerScopes)
     const result = await api.addDelegationController(session.accessJwt, controllerDid, scopes)
     if (result.ok) {
       toast.success($_('delegation.controllerAdded'))
-      addControllerDid = ''
+      addControllerIdentifier = ''
       addControllerScopes = 'atproto'
       addControllerConfirmed = false
+      resolvedController = null
       showAddController = false
       await loadControllers()
     }
@@ -182,7 +247,7 @@
             <div class="item-card" class:inactive={!controller.isActive}>
               <div class="item-info">
                 <div class="item-header">
-                  <span class="item-handle">@{controller.handle || controller.did}</span>
+                  <span class="item-handle">{controller.handle ? `@${controller.handle}` : controller.did}</span>
                   <span class="badge scope">{getScopeLabel(controller.grantedScopes)}</span>
                   {#if !controller.isActive}
                     <span class="badge inactive">{$_('delegation.inactive')}</span>
@@ -227,15 +292,52 @@
             </ul>
           </div>
 
-          <div class="field">
-            <label for="controllerDid">{$_('delegation.controllerDid')}</label>
-            <input
-              id="controllerDid"
-              type="text"
-              bind:value={addControllerDid}
-              placeholder="did:plc:..."
-              disabled={addingController}
-            />
+          <div class="field controller-search">
+            <label for="controllerIdentifier">{$_('delegation.controllerIdentifier')}</label>
+            <div class="search-wrapper">
+              <input
+                id="controllerIdentifier"
+                type="text"
+                value={addControllerIdentifier}
+                oninput={(e) => onControllerInput((e.target as HTMLInputElement).value)}
+                onblur={() => { setTimeout(() => { showTypeahead = false }, 200) }}
+                onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); showTypeahead = false; resolveControllerIdentifier() } }}
+                placeholder="handle or did:plc:..."
+                disabled={addingController}
+              />
+              {#if showTypeahead && typeaheadResults.length > 0}
+                <div class="typeahead-dropdown">
+                  {#each typeaheadResults as actor}
+                    <button type="button" class="typeahead-item" onmousedown={() => selectTypeahead(actor)}>
+                      {#if actor.avatar}
+                        <img src={actor.avatar} alt="" class="typeahead-avatar" />
+                      {/if}
+                      <div class="typeahead-text">
+                        {#if actor.displayName}
+                          <span class="typeahead-name">{actor.displayName}</span>
+                        {/if}
+                        <span class="typeahead-handle">@{actor.handle}</span>
+                      </div>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+            {#if resolving}
+              <span class="resolve-status">{$_('common.loading')}</span>
+            {:else if resolveError}
+              <span class="resolve-status error">{resolveError}</span>
+            {:else if resolvedController}
+              <div class="resolved-info">
+                <span class="resolved-did">{resolvedController.did}</span>
+                {#if resolvedController.handle}
+                  <span class="resolved-handle">@{resolvedController.handle}</span>
+                {/if}
+                {#if !resolvedController.isLocal && resolvedController.pdsUrl}
+                  <span class="badge external">{new URL(resolvedController.pdsUrl).hostname}</span>
+                {/if}
+              </div>
+            {/if}
           </div>
           <div class="field">
             <label for="controllerScopes">{$_('delegation.accessLevel')}</label>
@@ -253,7 +355,7 @@
             <button type="button" class="ghost" onclick={() => { showAddController = false; addControllerConfirmed = false }} disabled={addingController}>
               {$_('common.cancel')}
             </button>
-            <button type="button" onclick={addController} disabled={addingController || !addControllerDid.trim() || !addControllerConfirmed}>
+            <button type="button" onclick={addController} disabled={addingController || !resolvedController || !addControllerConfirmed}>
               {addingController ? $_('delegation.adding') : $_('delegation.addController')}
             </button>
           </div>
@@ -634,6 +736,114 @@
     display: flex;
     gap: var(--space-3);
     justify-content: flex-end;
+  }
+
+  .controller-search {
+    position: relative;
+  }
+
+  .search-wrapper {
+    position: relative;
+  }
+
+  .typeahead-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    max-height: 240px;
+    overflow-y: auto;
+  }
+
+  .typeahead-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    color: var(--text-primary);
+  }
+
+  .typeahead-item:hover {
+    background: var(--bg-tertiary);
+  }
+
+  .typeahead-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .typeahead-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .typeahead-name {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .typeahead-handle {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .resolve-status {
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    margin-top: var(--space-1);
+  }
+
+  .resolve-status.error {
+    color: var(--error-text);
+  }
+
+  .resolved-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
+  }
+
+  .resolved-did {
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    word-break: break-all;
+  }
+
+  .resolved-handle {
+    color: var(--text-primary);
+    font-weight: var(--font-medium);
+  }
+
+  .badge.external {
+    background: var(--info-bg, var(--bg-tertiary));
+    color: var(--info-text, var(--text-secondary));
+    border: 1px solid var(--info-border, var(--border-color));
   }
 
   @media (max-width: 600px) {

@@ -2,7 +2,7 @@ use tranquil_pds::api::ApiError;
 use tranquil_pds::api::error::DbResultExt;
 use tranquil_pds::auth::{Auth, Permissive};
 use tranquil_pds::circuit_breaker::with_circuit_breaker;
-use tranquil_pds::plc::{PlcClient, PlcError, PlcService, ServiceType, create_update_op, sign_operation};
+use tranquil_pds::plc::{PlcError, PlcService, ServiceType, create_update_op, sign_operation};
 use tranquil_pds::state::AppState;
 use axum::{
     Json,
@@ -97,7 +97,7 @@ pub async fn sign_plc_operation(
         ApiError::InternalError(None)
     })?;
 
-    let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
+    let plc_client = state.plc_client();
     let did_clone = did.clone();
     let last_op = with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {
         plc_client.get_last_op(&did_clone).await

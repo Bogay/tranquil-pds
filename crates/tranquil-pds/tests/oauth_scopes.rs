@@ -131,7 +131,7 @@ async fn create_user_and_oauth_session_with_scope(
         let consent_res = http_client
             .post(format!("{}/oauth/authorize/consent", url))
             .header("Content-Type", "application/json")
-            .json(&json!({"request_uri": request_uri, "approved_scopes": ["atproto"], "remember": false}))
+            .json(&json!({"request_uri": request_uri, "approved_scopes": scope.split_whitespace().collect::<Vec<_>>(), "remember": false}))
             .send().await.expect("Consent request failed");
         assert_eq!(
             consent_res.status(),
@@ -178,7 +178,7 @@ async fn create_user_and_oauth_session_with_scope(
 }
 
 #[tokio::test]
-async fn test_atproto_scope_allows_full_access() {
+async fn test_atproto_scope_denies_repo_writes() {
     let url = base_url().await;
     let http_client = client();
     let (session, _mock) = create_user_and_oauth_session_with_scope(
@@ -197,7 +197,7 @@ async fn test_atproto_scope_allows_full_access() {
             "collection": collection,
             "record": {
                 "$type": collection,
-                "text": "Full access post",
+                "text": "Should be denied",
                 "createdAt": Utc::now().to_rfc3339()
             }
         }))
@@ -207,59 +207,13 @@ async fn test_atproto_scope_allows_full_access() {
 
     assert_eq!(
         create_res.status(),
-        StatusCode::OK,
-        "atproto scope should allow creating records"
-    );
-    let create_body: Value = create_res.json().await.unwrap();
-    let rkey = create_body["uri"]
-        .as_str()
-        .unwrap()
-        .split('/')
-        .next_back()
-        .unwrap();
-
-    let put_res = http_client
-        .post(format!("{}/xrpc/com.atproto.repo.putRecord", url))
-        .bearer_auth(&session.access_token)
-        .json(&json!({
-            "repo": session.did,
-            "collection": collection,
-            "rkey": rkey,
-            "record": {
-                "$type": collection,
-                "text": "Updated post",
-                "createdAt": Utc::now().to_rfc3339()
-            }
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        put_res.status(),
-        StatusCode::OK,
-        "atproto scope should allow updating records"
-    );
-
-    let delete_res = http_client
-        .post(format!("{}/xrpc/com.atproto.repo.deleteRecord", url))
-        .bearer_auth(&session.access_token)
-        .json(&json!({
-            "repo": session.did,
-            "collection": collection,
-            "rkey": rkey
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        delete_res.status(),
-        StatusCode::OK,
-        "atproto scope should allow deleting records"
+        StatusCode::FORBIDDEN,
+        "atproto scope alone should deny creating records"
     );
 }
 
 #[tokio::test]
-async fn test_atproto_scope_allows_blob_upload() {
+async fn test_atproto_scope_denies_blob_upload() {
     let url = base_url().await;
     let http_client = client();
     let (session, _mock) = create_user_and_oauth_session_with_scope(
@@ -281,15 +235,13 @@ async fn test_atproto_scope_allows_blob_upload() {
 
     assert_eq!(
         upload_res.status(),
-        StatusCode::OK,
-        "atproto scope should allow blob upload"
+        StatusCode::FORBIDDEN,
+        "atproto scope alone should deny blob upload"
     );
-    let upload_body: Value = upload_res.json().await.unwrap();
-    assert!(upload_body["blob"]["ref"]["$link"].is_string());
 }
 
 #[tokio::test]
-async fn test_atproto_scope_allows_batch_writes() {
+async fn test_atproto_scope_denies_batch_writes() {
     let url = base_url().await;
     let http_client = client();
     let (session, _mock) = create_user_and_oauth_session_with_scope(
@@ -316,16 +268,6 @@ async fn test_atproto_scope_allows_batch_writes() {
                         "text": "Batch post 1",
                         "createdAt": now
                     }
-                },
-                {
-                    "$type": "com.atproto.repo.applyWrites#create",
-                    "collection": collection,
-                    "rkey": "batch-scope-2",
-                    "value": {
-                        "$type": collection,
-                        "text": "Batch post 2",
-                        "createdAt": now
-                    }
                 }
             ]
         }))
@@ -335,8 +277,8 @@ async fn test_atproto_scope_allows_batch_writes() {
 
     assert_eq!(
         apply_res.status(),
-        StatusCode::OK,
-        "atproto scope should allow batch writes"
+        StatusCode::FORBIDDEN,
+        "atproto scope alone should deny batch writes"
     );
 }
 

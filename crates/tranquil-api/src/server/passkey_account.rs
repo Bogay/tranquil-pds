@@ -114,31 +114,9 @@ pub async fn create_passkey_account(
 
     let cfg = tranquil_config::get();
     let hostname = &cfg.server.hostname;
-    let available_domains = cfg.server.available_user_domain_list();
-    let matched_domain = available_domains
-        .iter()
-        .filter(|d| input.handle.ends_with(&format!(".{}", d)))
-        .max_by_key(|d| d.len());
-
-    let handle = if !input.handle.contains('.') || matched_domain.is_some() {
-        let handle_to_validate = match matched_domain {
-            Some(domain) => input
-                .handle
-                .strip_suffix(&format!(".{}", domain))
-                .unwrap_or(&input.handle),
-            None => &input.handle,
-        };
-        match tranquil_pds::api::validation::validate_short_handle(handle_to_validate) {
-            Ok(h) => format!("{}.{}", h, matched_domain.unwrap_or(&available_domains[0])),
-            Err(_) => {
-                return ApiError::InvalidHandle(None).into_response();
-            }
-        }
-    } else {
-        match tranquil_pds::api::validation::validate_full_domain_handle(&input.handle) {
-            Ok(h) => h,
-            Err(_) => return ApiError::InvalidHandle(None).into_response(),
-        }
+    let handle = match tranquil_pds::api::validation::resolve_handle_input(&input.handle) {
+        Ok(h) => h,
+        Err(_) => return ApiError::InvalidHandle(None).into_response(),
     };
 
     let email = input
@@ -558,7 +536,7 @@ pub async fn create_passkey_account(
                     refresh_expires_at: refresh_expires,
                     login_type: tranquil_db::LoginType::Modern,
                     mfa_verified: false,
-                    scope: None,
+                    scope: Some("transition:generic".to_string()),
                     controller_did: None,
                     app_password_name: None,
                 };

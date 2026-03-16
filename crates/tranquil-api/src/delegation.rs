@@ -1,9 +1,9 @@
+use crate::identity::provision::{create_plc_did, init_genesis_repo};
 use tranquil_pds::api::error::ApiError;
-use tranquil_pds::repo_ops::create_signed_commit;
 use tranquil_pds::auth::{Active, Auth};
 use tranquil_pds::delegation::{
     DelegationActionType, SCOPE_PRESETS, ValidatedDelegationScope, verify_can_add_controllers,
-    verify_can_be_controller, verify_can_control_accounts,
+    verify_can_control_accounts,
 };
 use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
 use tranquil_pds::state::AppState;
@@ -14,27 +14,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use jacquard_common::types::{integer::LimitedU32, string::Tid};
-use jacquard_repo::{mst::Mst, storage::BlockStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::Arc;
 use tracing::{error, info, warn};
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ControllerInfo {
-    pub did: Did,
-    pub handle: Handle,
-    pub granted_scopes: String,
-    pub granted_at: chrono::DateTime<chrono::Utc>,
-    pub is_active: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ListControllersResponse {
-    pub controllers: Vec<ControllerInfo>,
-}
 
 pub async fn list_controllers(
     State(state): State<AppState>,
@@ -54,19 +36,23 @@ pub async fn list_controllers(
         }
     };
 
-    Ok(Json(ListControllersResponse {
-        controllers: controllers
-            .into_iter()
-            .map(|c| ControllerInfo {
-                did: c.did,
-                handle: c.handle,
-                granted_scopes: c.granted_scopes.into_string(),
-                granted_at: c.granted_at,
-                is_active: c.is_active,
-            })
-            .collect(),
-    })
-    .into_response())
+    let resolve_futures = controllers.into_iter().map(|mut c| {
+        let did_resolver = state.did_resolver.clone();
+        async move {
+            if c.handle.is_none() {
+                c.handle = did_resolver
+                    .resolve_did_document(c.did.as_str())
+                    .await
+                    .and_then(|doc| tranquil_types::did_doc::extract_handle(&doc))
+                    .map(|h| h.into());
+            }
+            c
+        }
+    });
+
+    let controllers = futures::future::join_all(resolve_futures).await;
+
+    Ok(Json(serde_json::json!({ "controllers": controllers })).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,16 +66,39 @@ pub async fn add_controller(
     auth: Auth<Active>,
     Json(input): Json<AddControllerInput>,
 ) -> Result<Response, ApiError> {
-    let controller_exists = state
-        .user_repo
-        .get_by_did(&input.controller_did)
+    let resolved = tranquil_pds::delegation::resolve_identity(&state, &input.controller_did)
         .await
-        .ok()
-        .flatten()
-        .is_some();
+        .ok_or(ApiError::ControllerNotFound)?;
 
-    if !controller_exists {
-        return Ok(ApiError::ControllerNotFound.into_response());
+    if !resolved.is_local {
+        if let Some(ref pds_url) = resolved.pds_url {
+            if !pds_url.starts_with("https://") {
+                return Ok(
+                    ApiError::InvalidDelegation("Controller PDS must use HTTPS".into())
+                        .into_response(),
+                );
+            }
+            match state
+                .cross_pds_oauth
+                .check_remote_is_delegated(pds_url, input.controller_did.as_str())
+                .await
+            {
+                Some(true) => {
+                    return Ok(ApiError::InvalidDelegation(
+                        "Cannot add a delegated account from another PDS as a controller".into(),
+                    )
+                    .into_response());
+                }
+                Some(false) => {}
+                None => {
+                    warn!(
+                        controller = %input.controller_did,
+                        pds = %pds_url,
+                        "Could not verify remote controller delegation status"
+                    );
+                }
+            }
+        }
     }
 
     let can_add = match verify_can_add_controllers(&state, &auth).await {
@@ -97,16 +106,19 @@ pub async fn add_controller(
         Err(response) => return Ok(response),
     };
 
-    let can_be_controller = match verify_can_be_controller(&state, &input.controller_did).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+    if resolved.is_local {
+        if state.delegation_repo.is_delegated_account(&input.controller_did).await.unwrap_or(false) {
+            return Ok(ApiError::InvalidDelegation(
+                "Cannot add a controlled account as a controller".into(),
+            ).into_response());
+        }
+    }
 
     match state
         .delegation_repo
         .create_delegation(
             can_add.did(),
-            can_be_controller.did(),
+            &input.controller_did,
             &input.granted_scopes,
             can_add.did(),
         )
@@ -118,10 +130,11 @@ pub async fn add_controller(
                 .log_delegation_action(
                     can_add.did(),
                     can_add.did(),
-                    Some(can_be_controller.did()),
+                    Some(&input.controller_did),
                     DelegationActionType::GrantCreated,
                     Some(serde_json::json!({
-                        "granted_scopes": input.granted_scopes.as_str()
+                        "granted_scopes": input.granted_scopes.as_str(),
+                        "is_local": resolved.is_local
                     })),
                     None,
                     None,
@@ -256,20 +269,6 @@ pub async fn update_controller_scopes(
     }
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DelegatedAccountInfo {
-    pub did: Did,
-    pub handle: Handle,
-    pub granted_scopes: String,
-    pub granted_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ListControlledAccountsResponse {
-    pub accounts: Vec<DelegatedAccountInfo>,
-}
-
 pub async fn list_controlled_accounts(
     State(state): State<AppState>,
     auth: Auth<Active>,
@@ -289,18 +288,7 @@ pub async fn list_controlled_accounts(
         }
     };
 
-    Ok(Json(ListControlledAccountsResponse {
-        accounts: accounts
-            .into_iter()
-            .map(|a| DelegatedAccountInfo {
-                did: a.did,
-                handle: a.handle,
-                granted_scopes: a.granted_scopes.into_string(),
-                granted_at: a.granted_at,
-            })
-            .collect(),
-    })
-    .into_response())
+    Ok(Json(serde_json::json!({ "accounts": accounts })).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -313,24 +301,6 @@ pub struct AuditLogParams {
 
 fn default_limit() -> i64 {
     50
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuditLogEntry {
-    pub id: String,
-    pub delegated_did: Did,
-    pub actor_did: Did,
-    pub controller_did: Option<Did>,
-    pub action_type: String,
-    pub action_details: Option<serde_json::Value>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct GetAuditLogResponse {
-    pub entries: Vec<AuditLogEntry>,
-    pub total: i64,
 }
 
 pub async fn get_audit_log(
@@ -361,50 +331,11 @@ pub async fn get_audit_log(
         .await
         .unwrap_or_default();
 
-    Ok(Json(GetAuditLogResponse {
-        entries: entries
-            .into_iter()
-            .map(|e| AuditLogEntry {
-                id: e.id.to_string(),
-                delegated_did: e.delegated_did,
-                actor_did: e.actor_did,
-                controller_did: e.controller_did,
-                action_type: format!("{:?}", e.action_type),
-                action_details: e.action_details,
-                created_at: e.created_at,
-            })
-            .collect(),
-        total,
-    })
-    .into_response())
-}
-
-#[derive(Debug, Serialize)]
-pub struct ScopePresetInfo {
-    pub name: &'static str,
-    pub label: &'static str,
-    pub description: &'static str,
-    pub scopes: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-pub struct GetScopePresetsResponse {
-    pub presets: Vec<ScopePresetInfo>,
+    Ok(Json(serde_json::json!({ "entries": entries, "total": total })).into_response())
 }
 
 pub async fn get_scope_presets() -> Response {
-    Json(GetScopePresetsResponse {
-        presets: SCOPE_PRESETS
-            .iter()
-            .map(|p| ScopePresetInfo {
-                name: p.name,
-                label: p.label,
-                description: p.description,
-                scopes: p.scopes,
-            })
-            .collect(),
-    })
-    .into_response()
+    Json(serde_json::json!({ "presets": SCOPE_PRESETS })).into_response()
 }
 
 #[derive(Debug, Deserialize)]
@@ -434,29 +365,11 @@ pub async fn create_delegated_account(
         Err(response) => return Ok(response),
     };
 
-    let hostname = &tranquil_config::get().server.hostname;
-    let available_domains = tranquil_config::get().server.available_user_domain_list();
-    let matched_domain = available_domains
-        .iter()
-        .filter(|d| input.handle.ends_with(&format!(".{}", d)))
-        .max_by_key(|d| d.len());
-
-    let handle = if !input.handle.contains('.') || matched_domain.is_some() {
-        let handle_to_validate = match matched_domain {
-            Some(domain) => input
-                .handle
-                .strip_suffix(&format!(".{}", domain))
-                .unwrap_or(&input.handle),
-            None => &input.handle,
-        };
-        match tranquil_pds::api::validation::validate_short_handle(handle_to_validate) {
-            Ok(h) => format!("{}.{}", h, matched_domain.unwrap_or(&available_domains[0])),
-            Err(e) => {
-                return Ok(ApiError::InvalidRequest(e.to_string()).into_response());
-            }
+    let handle = match tranquil_pds::api::validation::resolve_handle_input(&input.handle) {
+        Ok(h) => h,
+        Err(e) => {
+            return Ok(ApiError::InvalidRequest(e.to_string()).into_response());
         }
-    } else {
-        input.handle.to_lowercase()
     };
 
     let email = input
@@ -483,96 +396,15 @@ pub async fn create_delegated_account(
         None
     };
 
-    use k256::ecdsa::SigningKey;
-    use rand::rngs::OsRng;
-
-    let pds_endpoint = format!("https://{}", hostname);
-    let secret_key = k256::SecretKey::random(&mut OsRng);
-    let secret_key_bytes = secret_key.to_bytes().to_vec();
-
-    let signing_key = match SigningKey::from_slice(&secret_key_bytes) {
-        Ok(k) => k,
-        Err(e) => {
-            error!("Error creating signing key: {:?}", e);
-            return Ok(ApiError::InternalError(None).into_response());
-        }
-    };
-
-    let rotation_key = tranquil_config::get()
-        .secrets
-        .plc_rotation_key
-        .clone()
-        .unwrap_or_else(|| tranquil_pds::plc::signing_key_to_did_key(&signing_key));
-
-    let genesis_result = match tranquil_pds::plc::create_genesis_operation(
-        &signing_key,
-        &rotation_key,
-        &handle,
-        &pds_endpoint,
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            error!("Error creating PLC genesis operation: {:?}", e);
-            return Ok(
-                ApiError::InternalError(Some("Failed to create PLC operation".into()))
-                    .into_response(),
-            );
-        }
-    };
-
-    let plc_client = tranquil_pds::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
-    if let Err(e) = plc_client
-        .send_operation(&genesis_result.did, &genesis_result.signed_operation)
-        .await
-    {
-        error!("Failed to submit PLC genesis operation: {:?}", e);
-        return Ok(ApiError::UpstreamErrorMsg(format!(
-            "Failed to register DID with PLC directory: {}",
-            e
-        ))
-        .into_response());
-    }
-
-    let did: Did = genesis_result
-        .did
-        .parse()
-        .map_err(|_| ApiError::InternalError(Some("PLC genesis returned invalid DID".into())))?;
+    let plc = create_plc_did(&state, &handle).await.map_err(|e| {
+        tracing::error!("PLC DID creation failed: {:?}", e);
+        e
+    })?;
+    let did = plc.did;
     let handle: Handle = handle.parse().map_err(|_| ApiError::InvalidHandle(None))?;
     info!(did = %did, handle = %handle, controller = %can_control.did(), "Created DID for delegated account");
 
-    let encrypted_key_bytes = match tranquil_pds::config::encrypt_key(&secret_key_bytes) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            error!("Error encrypting signing key: {:?}", e);
-            return Ok(ApiError::InternalError(None).into_response());
-        }
-    };
-
-    let mst = Mst::new(Arc::new(state.block_store.clone()));
-    let mst_root = match mst.persist().await {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Error persisting MST: {:?}", e);
-            return Ok(ApiError::InternalError(None).into_response());
-        }
-    };
-    let rev = Tid::now(LimitedU32::MIN);
-    let (commit_bytes, _sig) =
-        match create_signed_commit(&did, mst_root, rev.as_ref(), None, &signing_key) {
-            Ok(result) => result,
-            Err(e) => {
-                error!("Error creating genesis commit: {:?}", e);
-                return Ok(ApiError::InternalError(None).into_response());
-            }
-        };
-    let commit_cid: cid::Cid = match state.block_store.put(&commit_bytes).await {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Error saving genesis commit: {:?}", e);
-            return Ok(ApiError::InternalError(None).into_response());
-        }
-    };
-    let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
+    let repo = init_genesis_repo(&state, &did, &plc.signing_key, &plc.signing_key_bytes).await?;
 
     let create_input = tranquil_db_traits::CreateDelegatedAccountInput {
         handle: handle.clone(),
@@ -580,11 +412,11 @@ pub async fn create_delegated_account(
         did: did.clone(),
         controller_did: can_control.did().clone(),
         controller_scopes: input.controller_scopes.as_str().to_string(),
-        encrypted_key_bytes,
+        encrypted_key_bytes: repo.encrypted_key_bytes,
         encryption_version: tranquil_pds::config::ENCRYPTION_VERSION,
-        commit_cid: commit_cid.to_string(),
-        repo_rev: rev.as_ref().to_string(),
-        genesis_block_cids,
+        commit_cid: repo.commit_cid.to_string(),
+        repo_rev: repo.repo_rev.clone(),
+        genesis_block_cids: repo.genesis_block_cids,
         invite_code: input.invite_code.clone(),
     };
 
@@ -666,3 +498,40 @@ pub async fn create_delegated_account(
 
     Ok(Json(CreateDelegatedAccountResponse { did, handle }).into_response())
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ResolveControllerParams {
+    pub identifier: String,
+}
+
+pub async fn resolve_controller(
+    State(state): State<AppState>,
+    Query(params): Query<ResolveControllerParams>,
+) -> Result<Response, ApiError> {
+    let identifier = params.identifier.trim().trim_start_matches('@');
+
+    let did: Did = if identifier.starts_with("did:") {
+        identifier.parse().map_err(|_| ApiError::ControllerNotFound)?
+    } else {
+        let local_handle: Option<Handle> = identifier.parse().ok();
+        let local_user = match local_handle {
+            Some(ref h) => state.user_repo.get_by_handle(h).await.ok().flatten(),
+            None => None,
+        };
+        match local_user {
+            Some(user) => user.did,
+            None => tranquil_pds::handle::resolve_handle(identifier)
+                .await
+                .map_err(|_| ApiError::ControllerNotFound)?
+                .parse()
+                .map_err(|_| ApiError::ControllerNotFound)?,
+        }
+    };
+
+    let resolved = tranquil_pds::delegation::resolve_identity(&state, &did)
+        .await
+        .ok_or(ApiError::ControllerNotFound)?;
+
+    Ok(Json(resolved).into_response())
+}
+

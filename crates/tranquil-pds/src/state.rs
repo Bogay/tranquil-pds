@@ -3,6 +3,8 @@ use crate::auth::webauthn::WebAuthnConfig;
 use crate::cache::{Cache, DistributedRateLimiter, create_cache};
 use crate::circuit_breaker::CircuitBreakers;
 use crate::config::AuthConfig;
+use crate::oauth::client::CrossPdsOAuthClient;
+use crate::plc::PlcClient;
 use crate::rate_limit::RateLimiters;
 use crate::repo::PostgresBlockStore;
 use crate::repo_write_lock::RepoWriteLocks;
@@ -57,6 +59,7 @@ pub struct AppState {
     pub sso_repo: Arc<dyn SsoRepository>,
     pub sso_manager: SsoManager,
     pub webauthn_config: Arc<WebAuthnConfig>,
+    pub cross_pds_oauth: Arc<CrossPdsOAuthClient>,
     pub shutdown: CancellationToken,
     pub bootstrap_invite_code: Option<String>,
 }
@@ -204,6 +207,10 @@ impl RateLimitKind {
 }
 
 impl AppState {
+    pub fn plc_client(&self) -> PlcClient {
+        PlcClient::with_cache(None, Some(self.cache.clone()))
+    }
+
     pub async fn new(shutdown: CancellationToken) -> Result<Self, Box<dyn Error>> {
         let cfg = tranquil_config::get();
         let database_url = &cfg.database.url;
@@ -272,6 +279,7 @@ impl AppState {
         let circuit_breakers = Arc::new(CircuitBreakers::new());
         let (cache, distributed_rate_limiter) = create_cache(shutdown.clone()).await;
         let did_resolver = Arc::new(DidResolver::new());
+        let cross_pds_oauth = Arc::new(CrossPdsOAuthClient::new(cache.clone()));
         let sso_config = SsoConfig::init();
         let sso_manager = SsoManager::from_config(sso_config);
         let webauthn_config = Arc::new(
@@ -302,6 +310,7 @@ impl AppState {
             cache,
             distributed_rate_limiter,
             did_resolver,
+            cross_pds_oauth,
             sso_manager,
             webauthn_config,
             shutdown,
