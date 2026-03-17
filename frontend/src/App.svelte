@@ -91,7 +91,7 @@
     '/comms',
     '/repo',
     '/controllers',
-    '/delegation-audit',
+
     '/invite-codes',
     '/did-document',
     '/admin',

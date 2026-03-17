@@ -124,7 +124,6 @@
   "dashboard": {
     "title": "ダッシュボード",
     "accountManager": "アカウント管理",
-    "navDelegationAudit": "委任監査",
     "switchAccount": "アカウント切替",
     "addAnotherAccount": "別のアカウントを追加",
     "signOut": "@{handle} からサインアウト",
@@ -834,7 +833,6 @@
     "actionAccountAction": "アカウントアクション",
     "previous": "前へ",
     "next": "次へ",
-    "refresh": "更新",
     "adding": "追加中...",
     "accessLevel": "アクセスレベル",
     "addControllerButton": "+ コントローラーを追加",
@@ -848,6 +846,7 @@
     "cannotAddControllers": "他のアカウントを管理しているため、コントローラーを追加できません。アカウントはコントローラーを持つか、他のアカウントを管理するかのいずれかのみ可能です。",
     "cannotControlAccounts": "このアカウントにはコントローラーがいるため、他のアカウントを管理できません。アカウントはコントローラーを持つか、他のアカウントを管理するかのいずれかのみ可能です。",
     "controlledAccountsDesc": "あなたが代わりに操作できるアカウント",
+    "controlledAccountsLocalOnly": "このPDS上のアカウントのみ表示されます。別のPDSがコントローラーアクセスを個別に付与している場合があります",
     "controllerAdded": "コントローラーを追加しました",
     "controllerDid": "コントローラーDID",
     "controllerRemoved": "コントローラーを削除しました",
@@ -860,12 +859,10 @@
     "inactive": "非アクティブ",
     "remove": "削除",
     "removeConfirm": "このコントローラーを削除しますか？",
-    "viewAuditLog": "監査ログを表示",
     "yourAccessLevel": "あなたのアクセスレベル",
     "accountCreated": "委任アカウントを作成しました: {handle}",
     "noAuditEntries": "監査エントリなし",
     "target": "対象",
-    "pageInfo": "{start} - {end} / {total}",
     "failedToLoadAudit": "監査ログの読み込みに失敗しました"
   },
   "actAs": {

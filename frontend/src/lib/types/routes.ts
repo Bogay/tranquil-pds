@@ -9,7 +9,7 @@ export const routes = {
   comms: "/comms",
   repo: "/repo",
   controllers: "/controllers",
-  delegationAudit: "/delegation-audit",
+
   actAs: "/act-as",
   didDocument: "/did-document",
   migrate: "/migrate",

@@ -255,11 +255,6 @@
     flex-shrink: 0;
   }
 
-  .danger-text {
-    color: var(--error-text);
-    flex-shrink: 0;
-  }
-
   .code-meta {
     display: flex;
     gap: var(--space-4);

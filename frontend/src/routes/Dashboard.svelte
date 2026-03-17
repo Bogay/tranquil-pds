@@ -24,9 +24,8 @@
   import InviteCodesContent from '../components/dashboard/InviteCodesContent.svelte'
   import DidDocumentContent from '../components/dashboard/DidDocumentContent.svelte'
   import AdminContent from '../components/dashboard/AdminContent.svelte'
-  import DelegationAuditContent from '../components/dashboard/DelegationAuditContent.svelte'
 
-  type Section = 'settings' | 'security' | 'sessions' | 'app-passwords' | 'comms' | 'repo' | 'controllers' | 'delegation-audit' | 'invite-codes' | 'did-document' | 'admin'
+  type Section = 'settings' | 'security' | 'sessions' | 'app-passwords' | 'comms' | 'repo' | 'controllers' | 'invite-codes' | 'did-document' | 'admin'
 
   const auth = $derived(getAuthState())
   let dropdownOpen = $state(false)
@@ -72,7 +71,7 @@
       '/comms': 'comms',
       '/repo': 'repo',
       '/controllers': 'controllers',
-      '/delegation-audit': 'delegation-audit',
+
       '/invite-codes': 'invite-codes',
       '/did-document': 'did-document',
       '/admin': 'admin',
@@ -147,7 +146,7 @@
     'comms': '/comms',
     'repo': '/repo',
     'controllers': '/controllers',
-    'delegation-audit': '/delegation-audit',
+
     'invite-codes': '/invite-codes',
     'did-document': '/did-document',
     'admin': '/admin',
@@ -176,7 +175,7 @@
     { id: 'comms', label: $_('dashboard.navComms'), show: session?.accountKind !== 'migrated' },
     { id: 'repo', label: $_('dashboard.navRepo'), show: session?.accountKind !== 'migrated' },
     { id: 'controllers', label: $_('dashboard.navDelegation'), show: session?.accountKind !== 'migrated' },
-    { id: 'delegation-audit', label: $_('dashboard.navDelegationAudit'), show: session?.accountKind !== 'migrated' },
+
     { id: 'invite-codes', label: $_('dashboard.navInviteCodes'), show: inviteCodesEnabled && (session?.isAdmin ?? false) && session?.accountKind !== 'migrated' },
     { id: 'did-document', label: $_('dashboard.navDidDocument'), show: isPdsHostedDidWeb || session?.accountKind === 'migrated', highlight: session?.accountKind === 'migrated' ? 'migrated' : 'did-web' },
     { id: 'admin', label: $_('dashboard.navAdmin'), show: session?.isAdmin ?? false, highlight: 'admin' },
@@ -303,8 +302,7 @@
           <RepoContent {session} />
         {:else if currentSection === 'controllers'}
           <ControllersContent {session} />
-        {:else if currentSection === 'delegation-audit'}
-          <DelegationAuditContent {session} />
+
         {:else if currentSection === 'invite-codes'}
           <InviteCodesContent {session} />
         {:else if currentSection === 'did-document'}

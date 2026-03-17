@@ -6,7 +6,7 @@
     disabled?: boolean
     placeholder?: string
     id?: string
-    autocomplete?: string
+    autocomplete?: HTMLInputElement['autocomplete']
     onInput: (value: string) => void
     onDomainChange: (domain: string) => void
   }

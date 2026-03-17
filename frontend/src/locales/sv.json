@@ -124,7 +124,6 @@
   "dashboard": {
     "title": "Kontrollpanel",
     "accountManager": "Kontohantering",
-    "navDelegationAudit": "Delegeringsgranskning",
     "switchAccount": "Byt konto",
     "addAnotherAccount": "Lägg till ett annat konto",
     "signOut": "Logga ut @{handle}",
@@ -834,7 +833,6 @@
     "actionAccountAction": "Kontoåtgärd",
     "previous": "Föregående",
     "next": "Nästa",
-    "refresh": "Uppdatera",
     "adding": "Lägger till...",
     "accessLevel": "Åtkomstnivå",
     "addControllerButton": "+ Lägg till kontrollant",
@@ -848,6 +846,7 @@
     "cannotAddControllers": "Du kan inte lägga till kontrollanter eftersom detta konto kontrollerar andra konton. Ett konto kan antingen ha kontrollanter eller kontrollera andra konton, men inte båda.",
     "cannotControlAccounts": "Du kan inte kontrollera andra konton eftersom detta konto har kontrollanter. Ett konto kan antingen ha kontrollanter eller kontrollera andra konton, men inte båda.",
     "controlledAccountsDesc": "Konton du kan agera för",
+    "controlledAccountsLocalOnly": "Endast konton på denna PDS visas. En annan PDS kan ha beviljat dig kontrollåtkomst separat",
     "controllerAdded": "Kontrollant tillagd",
     "controllerDid": "Kontrollant-DID",
     "controllerRemoved": "Kontrollant borttagen",
@@ -860,12 +859,10 @@
     "inactive": "Inaktiv",
     "remove": "Ta bort",
     "removeConfirm": "Vill du ta bort denna kontrollant?",
-    "viewAuditLog": "Visa granskningslogg",
     "yourAccessLevel": "Din åtkomstnivå",
     "accountCreated": "Skapade delegerat konto: {handle}",
     "noAuditEntries": "Inga granskningsposter",
     "target": "Mål",
-    "pageInfo": "{start} - {end} av {total}",
     "failedToLoadAudit": "Kunde inte ladda granskningslogg"
   },
   "actAs": {

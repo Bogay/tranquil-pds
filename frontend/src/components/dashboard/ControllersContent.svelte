@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { _ } from '../../lib/i18n'
   import { api } from '../../lib/api'
   import { toast } from '../../lib/toast.svelte'
   import { formatDateTime } from '../../lib/date'
-  import { routes, getFullUrl } from '../../lib/router.svelte'
-  import type { Session, DelegationController, DelegationControlledAccount, DelegationScopePreset } from '../../lib/types/api'
+  import type { Session, DelegationController, DelegationControlledAccount, DelegationScopePreset, DelegationAuditEntry } from '../../lib/types/api'
   import { unsafeAsDid, unsafeAsScopeSet, unsafeAsHandle, unsafeAsEmail } from '../../lib/types/branded'
   import type { Did, Handle, ScopeSet } from '../../lib/types/branded'
+  import LoadMoreSentinel from '../LoadMoreSentinel.svelte'
 
   interface Props {
     session: Session
@@ -123,7 +123,8 @@
   let creatingDelegated = $state(false)
 
   onMount(async () => {
-    await loadData()
+    await Promise.all([loadData(), loadAuditLog()])
+    pollInterval = setInterval(pollAuditLog, 15_000)
   })
 
   async function loadData() {
@@ -227,6 +228,126 @@
     if ((scopes as string) === '') return $_('delegation.scopeViewer')
     return $_('delegation.scopeCustom')
   }
+
+  interface AuditEntry {
+    id: string
+    delegatedDid: string
+    actorDid: string
+    actionType: string
+    actionDetails: Record<string, unknown> | null
+    createdAt: string
+  }
+
+  let auditLoading = $state(true)
+  let auditLoadingMore = $state(false)
+  let auditEntries = $state<AuditEntry[]>([])
+  let auditHasMore = $state(true)
+  let auditOffset = $state(0)
+  const auditLimit = 20
+  let pollInterval: ReturnType<typeof setInterval> | null = null
+
+  onDestroy(() => {
+    if (pollInterval) clearInterval(pollInterval)
+  })
+
+  async function loadAuditLog() {
+    auditLoading = true
+    auditOffset = 0
+    try {
+      const result = await api.getDelegationAuditLog(session.accessJwt, auditLimit, 0)
+      if (result.ok && result.value) {
+        const rawEntries = Array.isArray(result.value.entries) ? result.value.entries : []
+        auditEntries = rawEntries.map(mapAuditEntry)
+        const total = result.value.total ?? 0
+        auditHasMore = auditEntries.length < total
+        auditOffset = auditEntries.length
+      } else {
+        auditEntries = []
+        auditHasMore = false
+      }
+    } catch {
+      toast.error($_('delegation.failedToLoadAudit'))
+      auditEntries = []
+      auditHasMore = false
+    } finally {
+      auditLoading = false
+    }
+  }
+
+  async function pollAuditLog() {
+    try {
+      const result = await api.getDelegationAuditLog(session.accessJwt, auditLimit, 0)
+      if (result.ok && result.value) {
+        const rawEntries = Array.isArray(result.value.entries) ? result.value.entries : []
+        const latest = rawEntries.map(mapAuditEntry)
+        if (latest.length > 0 && (auditEntries.length === 0 || latest[0].id !== auditEntries[0].id)) {
+          auditEntries = latest
+          const total = result.value.total ?? 0
+          auditHasMore = auditEntries.length < total
+          auditOffset = auditEntries.length
+        }
+      } else if (result.ok === false) {
+        if (pollInterval) { clearInterval(pollInterval); pollInterval = null }
+      }
+    } catch {
+      if (pollInterval) { clearInterval(pollInterval); pollInterval = null }
+    }
+  }
+
+  async function loadMoreAuditEntries() {
+    if (auditLoadingMore || !auditHasMore) return
+    auditLoadingMore = true
+    try {
+      const result = await api.getDelegationAuditLog(session.accessJwt, auditLimit, auditOffset)
+      if (result.ok && result.value) {
+        const rawEntries = Array.isArray(result.value.entries) ? result.value.entries : []
+        const newEntries = rawEntries.map(mapAuditEntry)
+        auditEntries = [...auditEntries, ...newEntries]
+        const total = result.value.total ?? 0
+        auditHasMore = auditEntries.length < total
+        auditOffset = auditEntries.length
+      }
+    } catch {
+      toast.error($_('delegation.failedToLoadAudit'))
+    } finally {
+      auditLoadingMore = false
+    }
+  }
+
+  function mapAuditEntry(e: DelegationAuditEntry): AuditEntry {
+    const parsed: Record<string, unknown> | null = e.details
+      ? (() => { try { return JSON.parse(e.details!) as Record<string, unknown> } catch { return null } })()
+      : null
+    return {
+      id: e.id,
+      delegatedDid: e.target_did ?? '',
+      actorDid: e.actor_did,
+      actionType: e.action,
+      actionDetails: parsed,
+      createdAt: e.created_at,
+    }
+  }
+
+  function formatActionType(type: string): string {
+    const labels: Record<string, string> = {
+      'GrantCreated': $_('delegation.actionGrantCreated'),
+      'GrantRevoked': $_('delegation.actionGrantRevoked'),
+      'ScopesModified': $_('delegation.actionScopesModified'),
+      'TokenIssued': $_('delegation.actionTokenIssued'),
+      'RepoWrite': $_('delegation.actionRepoWrite'),
+      'BlobUpload': $_('delegation.actionBlobUpload'),
+      'AccountAction': $_('delegation.actionAccountAction'),
+    }
+    return labels[type] || type
+  }
+
+  function formatActionDetails(details: Record<string, unknown> | null): string {
+    if (!details) return ''
+    return Object.entries(details)
+      .map(([key, value]) => `${key.replace(/_/g, ' ')}: ${JSON.stringify(value)}`)
+      .join(', ')
+  }
+
 </script>
 
 <div class="controllers">
@@ -454,6 +575,10 @@
           {$_('delegation.createDelegatedAccountButton')}
         </button>
       {/if}
+
+      <div class="constraint-notice">
+        <p>{$_('delegation.controlledAccountsLocalOnly')}</p>
+      </div>
     </section>
 
     <section class="section">
@@ -461,7 +586,43 @@
         <h3>{$_('delegation.auditLog')}</h3>
         <p class="section-description">{$_('delegation.auditLogDesc')}</p>
       </div>
-      <a href={getFullUrl(routes.delegationAudit)} class="btn-link">{$_('delegation.viewAuditLog')}</a>
+
+      {#if auditLoading}
+        <div class="loading">{$_('common.loading')}</div>
+      {:else if auditEntries.length === 0}
+        <p class="empty">{$_('delegation.noAuditEntries')}</p>
+      {:else}
+        <div class="audit-entries">
+          {#each auditEntries as entry}
+            <div class="audit-entry">
+              <div class="audit-entry-header">
+                <span class="action-type">{formatActionType(entry.actionType)}</span>
+                <span class="audit-entry-date">{formatDateTime(entry.createdAt)}</span>
+              </div>
+              <div class="audit-entry-details">
+                <div class="detail">
+                  <span class="label">{$_('delegation.actor')}</span>
+                  <span class="value did">{entry.actorDid}</span>
+                </div>
+                {#if entry.delegatedDid}
+                  <div class="detail">
+                    <span class="label">{$_('delegation.target')}</span>
+                    <span class="value did">{entry.delegatedDid}</span>
+                  </div>
+                {/if}
+                {#if entry.actionDetails}
+                  <div class="detail">
+                    <span class="label">{$_('delegation.details')}</span>
+                    <span class="value audit-details-value">{formatActionDetails(entry.actionDetails)}</span>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        <LoadMoreSentinel hasMore={auditHasMore} loading={auditLoadingMore} onLoadMore={loadMoreAuditEntries} />
+      {/if}
     </section>
   {/if}
 </div>
@@ -505,6 +666,7 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     padding: var(--space-4);
+    margin-top: var(--space-4);
   }
 
   .constraint-notice p {
@@ -846,6 +1008,52 @@
     border: 1px solid var(--info-border, var(--border-color));
   }
 
+  .audit-entries {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .audit-entry {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+  }
+
+  .audit-entry-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-3);
+  }
+
+  .action-type {
+    font-weight: var(--font-medium);
+    padding: var(--space-1) var(--space-2);
+    background: var(--accent);
+    color: var(--text-inverse);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+  }
+
+  .audit-entry-date {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+  }
+
+  .audit-entry-details {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .audit-details-value {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    word-break: break-word;
+  }
+
   @media (max-width: 600px) {
     .item-card {
       flex-direction: column;
@@ -860,6 +1068,19 @@
     .item-actions a {
       width: 100%;
       text-align: center;
+    }
+
+    .audit-entry-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: var(--space-2);
+    }
+
+    .audit-entry-details .value.did {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 60vw;
     }
   }
 </style>

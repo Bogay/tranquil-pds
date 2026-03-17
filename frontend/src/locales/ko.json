@@ -124,7 +124,6 @@
   "dashboard": {
     "title": "대시보드",
     "accountManager": "계정 관리",
-    "navDelegationAudit": "위임 감사",
     "switchAccount": "계정 전환",
     "addAnotherAccount": "다른 계정 추가",
     "signOut": "@{handle} 로그아웃",
@@ -834,7 +833,6 @@
     "actionAccountAction": "계정 작업",
     "previous": "이전",
     "next": "다음",
-    "refresh": "새로고침",
     "adding": "추가 중...",
     "accessLevel": "액세스 수준",
     "addControllerButton": "+ 컨트롤러 추가",
@@ -848,6 +846,7 @@
     "cannotAddControllers": "다른 계정을 관리하고 있어 컨트롤러를 추가할 수 없습니다. 계정은 컨트롤러를 가지거나 다른 계정을 관리할 수 있지만 둘 다는 불가능합니다.",
     "cannotControlAccounts": "이 계정에 컨트롤러가 있어 다른 계정을 관리할 수 없습니다. 계정은 컨트롤러를 가지거나 다른 계정을 관리할 수 있지만 둘 다는 불가능합니다.",
     "controlledAccountsDesc": "귀하가 대신 작업할 수 있는 계정",
+    "controlledAccountsLocalOnly": "이 PDS의 계정만 표시됩니다. 다른 PDS에서 별도로 컨트롤러 액세스를 부여했을 수 있습니다",
     "controllerAdded": "컨트롤러가 추가되었습니다",
     "controllerDid": "컨트롤러 DID",
     "controllerRemoved": "컨트롤러가 제거되었습니다",
@@ -860,12 +859,10 @@
     "inactive": "비활성",
     "remove": "제거",
     "removeConfirm": "이 컨트롤러를 제거하시겠습니까?",
-    "viewAuditLog": "감사 로그 보기",
     "yourAccessLevel": "귀하의 액세스 수준",
     "accountCreated": "위임 계정이 생성되었습니다: {handle}",
     "noAuditEntries": "감사 항목 없음",
     "target": "대상",
-    "pageInfo": "{start} - {end} / {total}",
     "failedToLoadAudit": "감사 로그 로딩 실패"
   },
   "actAs": {

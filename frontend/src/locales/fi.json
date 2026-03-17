@@ -124,7 +124,6 @@
   "dashboard": {
     "title": "Hallintapaneeli",
     "accountManager": "Tilinhallinta",
-    "navDelegationAudit": "Delegointiloki",
     "switchAccount": "Vaihda tiliä",
     "addAnotherAccount": "Lisää toinen tili",
     "signOut": "Kirjaudu ulos @{handle}",
@@ -835,6 +834,7 @@
     "controllerRemoved": "Hallinnoija poistettu",
     "controlledAccounts": "Hallinnoidut tilit",
     "controlledAccountsDesc": "Tilit, joiden puolesta voit toimia",
+    "controlledAccountsLocalOnly": "Vain tämän PDS:n tilit näytetään. Toinen PDS on voinut myöntää sinulle ohjausoikeuden erikseen",
     "noControlledAccounts": "Sinulla ei ole pääsyä delegoituihin tileihin.",
     "actAs": "Toimi käyttäjänä",
     "cannotControlAccounts": "Et voi hallinnoida muita tilejä, koska tällä tilillä on hallinnoijia. Tili voi joko olla hallinnoija tai hallinnoidaan, mutta ei molempia.",
@@ -847,7 +847,6 @@
     "accountCreated": "Delegoitu tili luotu: {handle}",
     "auditLog": "Tapahtumaloki",
     "auditLogDesc": "Näytä kaikki delegointitoiminta",
-    "viewAuditLog": "Näytä tapahtumaloki",
     "scopeOwner": "Omistaja",
     "scopeViewer": "Katsoja",
     "scopeCustom": "Mukautettu",
@@ -855,7 +854,6 @@
     "details": "Tiedot",
     "previous": "Edellinen",
     "next": "Seuraava",
-    "refresh": "Päivitä",
     "actionGrantCreated": "Oikeus luotu",
     "actionGrantRevoked": "Oikeus peruttu",
     "actionScopesModified": "Oikeuksia muokattu",
@@ -865,7 +863,6 @@
     "actionAccountAction": "Tilitoiminto",
     "noAuditEntries": "Ei lokimerkintöjä",
     "target": "Kohde",
-    "pageInfo": "{start} - {end} / {total}",
     "failedToLoadAudit": "Lokin lataus epäonnistui"
   },
   "actAs": {

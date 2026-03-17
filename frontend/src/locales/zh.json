@@ -124,7 +124,6 @@
   "dashboard": {
     "title": "控制台",
     "accountManager": "账户管理",
-    "navDelegationAudit": "委托审计",
     "switchAccount": "切换账户",
     "addAnotherAccount": "添加其他账户",
     "signOut": "退出 @{handle}",
@@ -835,7 +834,6 @@
     "actionAccountAction": "账户操作",
     "previous": "上一页",
     "next": "下一页",
-    "refresh": "刷新",
     "adding": "添加中...",
     "accessLevel": "访问级别",
     "addControllerButton": "+ 添加控制者",
@@ -849,6 +847,7 @@
     "cannotAddControllers": "因为此账户正在控制其他账户，所以无法添加控制者。账户只能拥有控制者或控制其他账户，不能同时两者兼备。",
     "cannotControlAccounts": "因为此账户有控制者，所以无法控制其他账户。账户只能拥有控制者或控制其他账户，不能同时两者兼备。",
     "controlledAccountsDesc": "您可以代理操作的账户",
+    "controlledAccountsLocalOnly": "仅显示此PDS上的账户。其他PDS可能已单独授予您控制者访问权限",
     "controllerAdded": "控制者已添加",
     "controllerDid": "控制者 DID",
     "controllerRemoved": "控制者已移除",
@@ -861,11 +860,9 @@
     "inactive": "未激活",
     "remove": "移除",
     "removeConfirm": "确定要移除此控制者吗？",
-    "viewAuditLog": "查看审计日志",
     "yourAccessLevel": "您的访问级别",
     "noAuditEntries": "无审计记录",
     "target": "目标",
-    "pageInfo": "{start} - {end} / {total}",
     "failedToLoadAudit": "加载审计日志失败"
   },
   "actAs": {
