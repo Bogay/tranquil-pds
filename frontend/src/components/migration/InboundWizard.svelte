@@ -4,7 +4,6 @@
   import { getErrorMessage } from '../../lib/migration/types'
   import { base64UrlEncode, prepareWebAuthnCreationOptions } from '../../lib/migration/atproto-client'
   import { _ } from '../../lib/i18n'
-  import '../../styles/migration.css'
   import ErrorStep from './ErrorStep.svelte'
   import SuccessStep from './SuccessStep.svelte'
   import ChooseHandleStep from './ChooseHandleStep.svelte'
@@ -418,7 +417,7 @@
       {/if}
 
       <form onsubmit={handleSourceHandleSubmit}>
-        <div class="field">
+        <div>
           <label for="source-handle">{$_('migration.inbound.sourceAuth.handle')}</label>
           <input
             id="source-handle"
@@ -595,7 +594,7 @@
       </div>
 
       <form onsubmit={submitPlcToken}>
-        <div class="field">
+        <div>
           <label for="plc-token">{$_('migration.inbound.plcToken.tokenLabel')}</label>
           <input
             id="plc-token"
@@ -713,34 +712,3 @@
     <ErrorStep error={flow.state.error} onStartOver={onBack} />
   {/if}
 </div>
-
-<style>
-  .resume-info {
-    margin-bottom: var(--space-5);
-  }
-  .resume-info h3 {
-    margin: 0 0 var(--space-3) 0;
-    font-size: var(--text-base);
-  }
-  .resume-details {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-  .resume-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: var(--text-sm);
-  }
-  .resume-row .label {
-    color: var(--text-secondary);
-  }
-  .resume-row .value {
-    font-weight: var(--font-medium);
-  }
-  .resume-note {
-    margin-top: var(--space-3);
-    font-size: var(--text-sm);
-    font-style: italic;
-  }
-</style>

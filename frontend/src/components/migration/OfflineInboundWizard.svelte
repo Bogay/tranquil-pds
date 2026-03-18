@@ -4,7 +4,6 @@
   import { getErrorMessage } from '../../lib/migration/types'
   import { base64UrlEncode, prepareWebAuthnCreationOptions } from '../../lib/migration/atproto-client'
   import { _ } from '../../lib/i18n'
-  import '../../styles/migration.css'
   import ErrorStep from './ErrorStep.svelte'
   import SuccessStep from './SuccessStep.svelte'
   import ChooseHandleStep from './ChooseHandleStep.svelte'

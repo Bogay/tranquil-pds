@@ -129,7 +129,7 @@
     {/if}
 
     <form onsubmit={handleSubmit}>
-      <div class="field">
+      <div>
         <label for="verification-code">Verification Code</label>
         <input
           id="verification-code"
@@ -154,40 +154,3 @@
     </form>
   {/if}
 </div>
-
-<style>
-  .verification-step {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .info-text {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .info-text.waiting {
-    font-size: var(--text-sm);
-  }
-
-  .info-text code {
-    font-family: var(--font-mono, monospace);
-    background: var(--bg-secondary);
-    padding: 0.1em 0.3em;
-    border-radius: var(--radius-sm);
-  }
-
-  .code-input {
-    font-family: var(--font-mono, monospace);
-    font-size: var(--text-base);
-    letter-spacing: 0.05em;
-  }
-
-  .hint {
-    display: block;
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin-top: var(--space-1);
-  }
-</style>

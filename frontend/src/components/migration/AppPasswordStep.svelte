@@ -53,34 +53,3 @@
     </button>
   </div>
 </div>
-
-<style>
-  .app-password-display {
-    background: var(--bg-card);
-    border: 2px solid var(--accent);
-    border-radius: var(--radius-xl);
-    padding: var(--space-6);
-    text-align: center;
-    margin: var(--space-4) 0;
-  }
-  .app-password-label {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin-bottom: var(--space-4);
-  }
-  .app-password-code {
-    display: block;
-    font-size: var(--text-xl);
-    font-family: ui-monospace, monospace;
-    letter-spacing: 0.1em;
-    padding: var(--space-5);
-    background: var(--bg-input);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-4);
-    user-select: all;
-  }
-  .copy-btn {
-    padding: var(--space-3) var(--space-5);
-    font-size: var(--text-sm);
-  }
-</style>

@@ -48,13 +48,3 @@
     </button>
   </div>
 </div>
-
-<style>
-  .passkey-section {
-    margin-top: 16px;
-  }
-  .passkey-section button {
-    width: 100%;
-    margin-top: 12px;
-  }
-</style>

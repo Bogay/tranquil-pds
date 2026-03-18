@@ -39,7 +39,7 @@
   {/if}
 
   <form onsubmit={onSubmit}>
-    <div class="field">
+    <div>
       <label for="email-verify-token">{$_('migration.inbound.emailVerify.tokenLabel')}</label>
       <input
         id="email-verify-token"
