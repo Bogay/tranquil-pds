@@ -401,7 +401,7 @@
   {/if}
 
   <form onsubmit={handleSubmit}>
-    <div class="field">
+    <div>
       <label for="username">{$_('register.handle')}</label>
       <input
         id="username"
@@ -425,7 +425,7 @@
               disabled={submitting || ssoLoading !== null}
             >
               {#if ssoLoading === provider.provider}
-                <span class="spinner sm"></span>
+                <span>{$_('common.loading')}</span>
               {:else}
                 <SsoIcon provider={provider.icon} size={20} />
               {/if}
@@ -445,7 +445,7 @@
           <h3>{$_('oauth.login.signInWithPasskey')}</h3>
           <button
             type="button"
-            class="passkey-btn"
+            style="width: 100%"
             class:passkey-unavailable={!hasPasskeys || checkingSecurityStatus || !securityStatusChecked}
             onclick={handlePasskeyLogin}
             disabled={submitting || !hasPasskeys || !username || checkingSecurityStatus || !securityStatusChecked}
@@ -494,7 +494,7 @@
               <span>{$_('oauth.login.rememberDevice')}</span>
             </label>
 
-            <button type="submit" class="submit-btn" disabled={submitting || !username || !password}>
+            <button type="submit" disabled={submitting || !username || !password}>
               {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
             </button>
           </div>
@@ -502,13 +502,13 @@
       </div>
 
       <div class="cancel-row">
-        <button type="button" class="cancel-btn-subtle" onclick={handleCancel} disabled={submitting}>
+        <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
           {$_('common.cancel')}
         </button>
       </div>
     {:else}
       {#if hasPassword || !securityStatusChecked}
-        <div class="field">
+        <div>
           <label for="password">{$_('oauth.login.password')}</label>
           <input
             id="password"
@@ -526,14 +526,14 @@
         </label>
 
         <div class="actions">
-          <button type="submit" class="submit-btn" disabled={submitting || !username || !password}>
+          <button type="submit" disabled={submitting || !username || !password}>
             {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
           </button>
         </div>
       {/if}
 
       <div class="cancel-row">
-        <button type="button" class="cancel-btn-subtle" onclick={handleCancel} disabled={submitting}>
+        <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
           {$_('common.cancel')}
         </button>
       </div>
@@ -544,286 +544,3 @@
     <a href={getFullUrl(routes.resetPassword)}>{$_('login.forgotPassword')}</a> &middot; <a href={getFullUrl(routes.requestPasskeyRecovery)}>{$_('login.lostPasskey')}</a>
   </p>
 </div>
-
-<style>
-  .help-links {
-    text-align: center;
-    margin-top: var(--space-4);
-    font-size: var(--text-sm);
-  }
-
-  .help-links a {
-    color: var(--accent);
-    text-decoration: none;
-  }
-
-  .help-links a:hover {
-    text-decoration: underline;
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .auth-methods {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-5);
-    margin-top: var(--space-4);
-  }
-
-  @media (min-width: 600px) {
-    .auth-methods {
-      grid-template-columns: 1fr auto 1fr;
-      align-items: start;
-    }
-  }
-
-  .auth-methods.single-method {
-    grid-template-columns: 1fr;
-  }
-
-  @media (min-width: 600px) {
-    .auth-methods.single-method {
-      grid-template-columns: 1fr;
-      max-width: 400px;
-      margin: var(--space-4) auto 0;
-    }
-  }
-
-  .passkey-method,
-  .password-method {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding: var(--space-5);
-    background: var(--bg-secondary);
-    border-radius: var(--radius-xl);
-  }
-
-  .passkey-method h3,
-  .password-method h3 {
-    margin: 0;
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-
-  .method-divider {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    font-size: var(--text-sm);
-  }
-
-  @media (min-width: 600px) {
-    .method-divider {
-      flex-direction: column;
-      padding: 0 var(--space-3);
-    }
-
-    .method-divider::before,
-    .method-divider::after {
-      content: '';
-      width: 1px;
-      height: var(--space-6);
-      background: var(--border-color);
-    }
-
-    .method-divider span {
-      writing-mode: vertical-rl;
-      text-orientation: mixed;
-      transform: rotate(180deg);
-      padding: var(--space-2) 0;
-    }
-  }
-
-  @media (max-width: 599px) {
-    .method-divider {
-      gap: var(--space-4);
-    }
-
-    .method-divider::before,
-    .method-divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: var(--border-color);
-    }
-  }
-
-  .remember-device {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    cursor: pointer;
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-  }
-
-  .remember-device input {
-    width: 16px;
-    height: 16px;
-  }
-
-  .actions {
-    display: flex;
-    gap: var(--space-4);
-    margin-top: var(--space-2);
-  }
-
-  .actions button {
-    flex: 1;
-  }
-
-  .cancel-row {
-    display: flex;
-    justify-content: center;
-    margin-top: var(--space-4);
-  }
-
-  .cancel-btn-subtle {
-    padding: var(--space-2) var(--space-4);
-    background: transparent;
-    color: var(--text-muted);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    cursor: pointer;
-    transition: color var(--transition-fast);
-  }
-
-  .cancel-btn-subtle:hover:not(:disabled) {
-    color: var(--text-secondary);
-  }
-
-  .cancel-btn-subtle:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .submit-btn {
-    background: var(--accent);
-    color: var(--text-inverse);
-  }
-
-  .submit-btn:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  .passkey-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    width: 100%;
-    padding: var(--space-3);
-    background: var(--accent);
-    color: var(--text-inverse);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    cursor: pointer;
-    transition: background-color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
-  }
-
-  .passkey-btn:hover:not(:disabled) {
-    background: var(--accent-hover);
-    border-color: var(--accent-hover);
-  }
-
-  .passkey-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .passkey-btn.passkey-unavailable {
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    border-color: var(--border-color);
-  }
-
-  .passkey-icon {
-    width: 20px;
-    height: 20px;
-  }
-
-  .passkey-text {
-    flex: 1;
-    text-align: left;
-  }
-
-  .sso-section {
-    margin-top: var(--space-6);
-  }
-
-  .sso-section-top {
-    margin-top: var(--space-4);
-    margin-bottom: 0;
-  }
-
-  .sso-section-top .sso-divider {
-    margin-top: var(--space-5);
-    margin-bottom: 0;
-  }
-
-  .sso-divider {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    margin-bottom: var(--space-4);
-    color: var(--text-muted);
-    font-size: var(--text-sm);
-  }
-
-  .sso-divider::before,
-  .sso-divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border-color);
-  }
-
-  .sso-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-3);
-    justify-content: center;
-  }
-
-  .sso-btn {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-4);
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    cursor: pointer;
-    transition: background-color var(--transition-fast), border-color var(--transition-fast);
-  }
-
-  .sso-btn-prominent {
-    padding: var(--space-3) var(--space-5);
-    font-size: var(--text-base);
-    font-weight: var(--font-medium);
-  }
-
-  .sso-btn:hover:not(:disabled) {
-    background: var(--bg-tertiary);
-    border-color: var(--accent);
-  }
-
-  .sso-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-</style>

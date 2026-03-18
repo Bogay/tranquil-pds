@@ -308,10 +308,7 @@
 
 <div class="oauth-register-container">
   {#if loadingServerInfo}
-    <div class="loading">
-      <div class="spinner"></div>
-      <p>{$_('common.loading')}</p>
-    </div>
+    <div class="loading"></div>
   {:else if flow}
     <header class="page-header">
       <h1>{$_('oauth.register.title')}</h1>
@@ -345,7 +342,7 @@
       <div class="split-layout">
         <div class="form-section">
           <form onsubmit={handleInfoSubmit}>
-        <div class="field">
+        <div>
           <label for="handle">{$_('register.handle')}</label>
           <HandleInput
             value={flow.info.handle}
@@ -484,7 +481,7 @@
         </fieldset>
 
         {#if serverInfo?.inviteCodeRequired}
-          <div class="field">
+          <div>
             <label for="invite-code">{$_('register.inviteCode')} <span class="required">*</span></label>
             <input
               id="invite-code"
@@ -504,10 +501,10 @@
         </div>
 
         <div class="secondary-actions">
-          <button type="button" class="link-btn" onclick={goToLogin}>
+          <button type="button" class="link" onclick={goToLogin}>
             {$_('oauth.register.haveAccount')}
           </button>
-          <button type="button" class="link-btn" onclick={handleCancel}>
+          <button type="button" class="link" onclick={handleCancel}>
             {$_('common.cancel')}
           </button>
         </div>
@@ -540,7 +537,6 @@
 
     {:else if flow.state.step === 'creating'}
       <div class="creating">
-        <div class="spinner"></div>
         <p>{$_('registerPasskey.creatingAccount')}</p>
       </div>
 
@@ -582,203 +578,8 @@
 
     {:else if flow.state.step === 'activating'}
       <div class="creating">
-        <div class="spinner"></div>
         <p>{$_('registerPasskey.activatingAccount')}</p>
       </div>
     {/if}
   {/if}
 </div>
-
-<style>
-  .oauth-register-container {
-    max-width: var(--width-lg);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  .loading, .creating {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-4);
-    padding: var(--space-8);
-  }
-
-  .loading p, .creating p {
-    color: var(--text-secondary);
-  }
-
-  .page-header {
-    margin-bottom: var(--space-6);
-  }
-
-  .page-header h1 {
-    margin: 0 0 var(--space-2) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .form-section {
-    min-width: 0;
-  }
-
-  .form-links {
-    margin-top: var(--space-6);
-  }
-
-  .link-text {
-    text-align: center;
-    color: var(--text-secondary);
-  }
-
-  .link-text a {
-    color: var(--accent);
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-  }
-
-  input, select {
-    padding: var(--space-3);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    background: var(--bg-input);
-    color: var(--text-primary);
-  }
-
-  input:focus, select:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
-  .hint {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    margin: var(--space-1) 0 0 0;
-  }
-
-  .error {
-    padding: var(--space-3);
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-md);
-    color: var(--error-text);
-    margin-bottom: var(--space-4);
-  }
-
-  .actions {
-    display: flex;
-    gap: var(--space-4);
-    margin-top: var(--space-2);
-  }
-
-  button.primary {
-    flex: 1;
-    padding: var(--space-3);
-    background: var(--accent);
-    color: var(--text-inverse);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    cursor: pointer;
-    transition: background-color var(--transition-fast);
-  }
-
-  button.primary:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  button.primary:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .secondary-actions {
-    display: flex;
-    justify-content: center;
-    gap: var(--space-4);
-    margin-top: var(--space-4);
-  }
-
-  .link-btn {
-    background: none;
-    border: none;
-    color: var(--accent);
-    cursor: pointer;
-    font-size: var(--text-sm);
-    padding: var(--space-2);
-  }
-
-  .link-btn:hover {
-    text-decoration: underline;
-  }
-
-  .contact-fields {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .required {
-    color: var(--error-text);
-  }
-
-  .passkey-step {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .passkey-step h2 {
-    margin: 0;
-  }
-
-  .passkey-step p {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  fieldset {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-  }
-
-  legend {
-    padding: 0 var(--space-2);
-    font-weight: var(--font-medium);
-  }
-
-  .spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--border-color);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-</style>

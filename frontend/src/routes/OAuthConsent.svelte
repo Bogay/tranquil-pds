@@ -49,8 +49,6 @@
   }
 
   let loading = $state(true)
-  let showSpinner = $state(false)
-  let loadingTimer: ReturnType<typeof setTimeout> | null = null
   let error = $state<string | null>(null)
   let submitting = $state(false)
   let consentData = $state<ConsentData | null>(null)
@@ -140,11 +138,6 @@
       error = $_('oauth.error.genericError')
     } finally {
       loading = false
-      showSpinner = false
-      if (loadingTimer) {
-        clearTimeout(loadingTimer)
-        loadingTimer = null
-      }
     }
   }
 
@@ -252,17 +245,7 @@
   }
 
   $effect(() => {
-    loadingTimer = setTimeout(() => {
-      if (loading) {
-        showSpinner = true
-      }
-    }, 5000)
     fetchConsentData()
-    return () => {
-      if (loadingTimer) {
-        clearTimeout(loadingTimer)
-      }
-    }
   })
 
   let scopeGroups = $derived(consentData ? groupScopesByCategory(consentData.scopes) : [])
@@ -297,16 +280,7 @@
 
 <div class="consent-container">
   {#if loading}
-    <div class="loading">
-      {#if showSpinner}
-        <div class="loading-content">
-          <div class="spinner"></div>
-          <p>{$_('common.loading')}</p>
-        </div>
-      {:else}
-        <p style="color: var(--text-muted); font-size: 0.875rem;">Loading consent data...</p>
-      {/if}
-    </div>
+    <div class="loading"></div>
   {:else if error}
     <div class="error-container">
       <h1>{$_('oauth.error.title')}</h1>
@@ -421,10 +395,10 @@
     </div>
 
     <div class="actions">
-      <button type="button" class="deny-btn" onclick={handleDeny} disabled={submitting}>
+      <button type="button" class="cancel" onclick={handleDeny} disabled={submitting}>
         {$_('oauth.consent.deny')}
       </button>
-      <button type="button" class="approve-btn" onclick={submitConsent} disabled={submitting}>
+      <button type="button" onclick={submitConsent} disabled={submitting}>
         {submitting ? $_('oauth.consent.authorizing') : $_('oauth.consent.authorize')}
       </button>
     </div>
@@ -443,371 +417,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  .consent-container {
-    max-width: var(--width-lg);
-    margin: var(--space-7) auto;
-    padding: var(--space-7);
-  }
-
-  .loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 200px;
-    color: var(--text-secondary);
-  }
-
-  .loading-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-4);
-  }
-
-  .loading-content p {
-    margin: 0;
-    color: var(--text-secondary);
-  }
-
-  .error-container {
-    text-align: center;
-    max-width: var(--width-sm);
-    margin: 0 auto;
-  }
-
-  .error {
-    padding: var(--space-3);
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-md);
-    color: var(--error-text);
-    margin-bottom: var(--space-4);
-  }
-
-  .client-panel {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .permissions-panel {
-    min-width: 0;
-  }
-
-  .client-info {
-    text-align: center;
-    padding: var(--space-6);
-    background: var(--bg-secondary);
-    border-radius: var(--radius-xl);
-  }
-
-  @media (min-width: 800px) {
-    .client-info {
-      text-align: left;
-    }
-  }
-
-  .client-logo {
-    width: 64px;
-    height: 64px;
-    border-radius: var(--radius-xl);
-    margin-bottom: var(--space-4);
-  }
-
-  .client-info h1 {
-    margin: 0 0 var(--space-1) 0;
-    font-size: var(--text-xl);
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .client-link {
-    display: inline-block;
-    margin-top: var(--space-2);
-    font-size: var(--text-sm);
-    color: var(--accent);
-    text-decoration: none;
-  }
-
-  .client-link:hover {
-    text-decoration: underline;
-  }
-
-  .account-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    padding: var(--space-4);
-    background: var(--bg-secondary);
-    border-radius: var(--radius-xl);
-    margin-bottom: var(--space-6);
-  }
-
-  .account-info .label {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .account-info .did {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    word-break: break-all;
-  }
-
-  .account-info .handle {
-    font-size: var(--text-base);
-    font-weight: var(--font-medium);
-    color: var(--text-primary);
-  }
-
-  .delegation-badge {
-    display: inline-block;
-    padding: var(--space-1) var(--space-2);
-    background: var(--accent);
-    color: var(--text-inverse);
-    border-radius: var(--radius-md);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: var(--space-3);
-  }
-
-  .delegation-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .delegation-info .info-row {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .delegation-info .handle {
-    font-weight: var(--font-medium);
-    color: var(--text-primary);
-  }
-
-  .level-badge {
-    display: inline-block;
-    padding: 2px var(--space-2);
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-  }
-
-  .level-badge.level-owner {
-    background: var(--success-bg);
-    color: var(--success-text);
-  }
-
-  .level-badge.level-admin {
-    background: var(--accent);
-    color: var(--text-inverse);
-  }
-
-  .level-badge.level-editor {
-    background: var(--warning-bg);
-    color: var(--warning-text);
-  }
-
-  .level-badge.level-viewer {
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-  }
-
-  .permissions-notice {
-    margin-top: var(--space-3);
-    padding: var(--space-3);
-    background: var(--warning-bg);
-    border: 1px solid var(--warning-border);
-    border-radius: var(--radius-md);
-  }
-
-  .notice-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-weight: var(--font-semibold);
-    color: var(--warning-text);
-    margin-bottom: var(--space-2);
-  }
-
-  .notice-header svg {
-    flex-shrink: 0;
-  }
-
-  .notice-text {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--warning-text);
-    line-height: 1.5;
-  }
-
-  .scopes-section {
-    margin-bottom: var(--space-6);
-  }
-
-  .scopes-section h2 {
-    font-size: var(--text-base);
-    margin: 0 0 var(--space-4) 0;
-    color: var(--text-secondary);
-  }
-
-  .scope-group {
-    margin-bottom: var(--space-4);
-  }
-
-  .category-title {
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--text-primary);
-    margin: 0 0 var(--space-2) 0;
-    padding-bottom: var(--space-1);
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  .scope-item {
-    display: flex;
-    gap: var(--space-3);
-    padding: var(--space-3);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    margin-bottom: var(--space-2);
-    cursor: pointer;
-    transition: border-color var(--transition-fast);
-    overflow: hidden;
-  }
-
-  .scope-item:hover:not(.required) {
-    border-color: var(--accent);
-  }
-
-  .scope-item.required {
-    background: var(--bg-secondary);
-  }
-
-  .scope-item.read-only {
-    background: var(--bg-secondary);
-    border-style: dashed;
-  }
-
-  .scope-item input[type="checkbox"] {
-    flex-shrink: 0;
-    width: 18px;
-    height: 18px;
-    margin-top: 2px;
-  }
-
-  .scope-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    overflow: hidden;
-  }
-
-  .scope-name {
-    font-weight: var(--font-medium);
-    color: var(--text-primary);
-    word-break: break-all;
-  }
-
-  .scope-description {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    word-break: break-all;
-  }
-
-  .required-badge {
-    display: inline-block;
-    font-size: 0.625rem;
-    padding: 2px var(--space-2);
-    background: var(--warning-bg);
-    color: var(--warning-text);
-    border-radius: var(--radius-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-top: var(--space-1);
-    width: fit-content;
-  }
-
-  .remember-choice {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin-top: var(--space-5);
-    cursor: pointer;
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-  }
-
-  .remember-choice input {
-    width: 16px;
-    height: 16px;
-  }
-
-  .actions {
-    display: flex;
-    gap: var(--space-4);
-    margin-top: var(--space-6);
-  }
-
-  @media (min-width: 800px) {
-    .actions {
-      max-width: 400px;
-      margin-left: auto;
-    }
-  }
-
-  .actions button {
-    flex: 1;
-    padding: var(--space-3);
-    border: none;
-    border-radius: var(--radius-lg);
-    font-size: var(--text-base);
-    font-weight: var(--font-medium);
-    cursor: pointer;
-    transition: background-color var(--transition-fast);
-  }
-
-  .actions button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .deny-btn {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-  }
-
-  .deny-btn:hover:not(:disabled) {
-    background: var(--error-bg);
-    border-color: var(--error-border);
-    color: var(--error-text);
-  }
-
-  .approve-btn {
-    background: var(--accent);
-    color: var(--text-inverse);
-  }
-
-  .approve-btn:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-</style>
