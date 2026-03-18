@@ -1,0 +1,23 @@
+when:
+  - event: ["push"]
+    branches: main
+
+engine: nixery
+
+dependencies:
+  nixpkgs:
+    - podman
+
+steps:
+  - name: Create podman config
+    command: |
+      mkdir -p ~/.config/containers
+      echo "unqualified-search-registries = [\"docker.io\"]" >> ~/.config/containers/registries.conf
+
+  - name: Build image
+    command: |
+      podman build . -t tranquil-pds:latest -t "tranquil-pds:$TANGLED_COMMIT_SHA"
+
+  - name: Publish image
+    command: |
+      podman push --creds "$ATCR_USERNAME:$ATCR_PASSWORD" tranquil-pds:latest atcr.io/tranquild-pds/tranquil
