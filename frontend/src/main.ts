@@ -1,4 +1,7 @@
 import "./styles/base.css";
+import "./styles/pages.css";
+import "./styles/dashboard.css";
+import "./styles/migration.css";
 import App from "./App.svelte";
 import { mount } from "svelte";
 

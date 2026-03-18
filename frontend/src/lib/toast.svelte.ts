@@ -5,7 +5,6 @@ export interface Toast {
   type: ToastType;
   message: string;
   duration: number;
-  dismissing?: boolean;
 }
 
 let nextId = 0;
@@ -33,14 +32,7 @@ export function showToast(
 }
 
 export function dismissToast(id: number): void {
-  const toast = toasts.find((t) => t.id === id);
-  if (!toast || toast.dismissing) return;
-
-  toasts = toasts.map((t) => t.id === id ? { ...t, dismissing: true } : t);
-
-  setTimeout(() => {
-    toasts = toasts.filter((t) => t.id !== id);
-  }, 150);
+  toasts = toasts.filter((t) => t.id !== id);
 }
 
 export function clearAllToasts(): void {

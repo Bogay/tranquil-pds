@@ -149,10 +149,10 @@ describe("OAuth Registration Flow", () => {
 
       const Register = (await import("../routes/Register.svelte"))
         .default;
-      render(Register);
+      const { container } = render(Register);
 
       await waitFor(() => {
-        expect(screen.getByText(/loading/i)).toBeInTheDocument();
+        expect(container.querySelector(".loading")).toBeInTheDocument();
       });
     });
 

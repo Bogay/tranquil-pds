@@ -25,14 +25,13 @@
   import RegisterPassword from './routes/RegisterPassword.svelte'
   import ActAs from './routes/ActAs.svelte'
   import Migration from './routes/Migration.svelte'
+  import UiTest from './routes/UiTest.svelte'
   import { _ } from './lib/i18n'
   initI18n()
 
   const auth = $derived(getAuthState())
 
   let oauthCallbackPending = $state(hasOAuthCallback())
-  let showSpinner = $state(false)
-  let loadingTimer: ReturnType<typeof setTimeout> | null = null
 
   function hasOAuthCallback(): boolean {
     if (window.location.pathname === '/app/migrate') {
@@ -43,27 +42,13 @@
   }
 
   $effect(() => {
-    loadingTimer = setTimeout(() => {
-      showSpinner = true
-    }, 5000)
-
     initServerConfig()
     initAuth().then(({ oauthLoginCompleted }) => {
       if (oauthLoginCompleted) {
         navigate('/dashboard', { replace: true })
       }
       oauthCallbackPending = false
-      if (loadingTimer) {
-        clearTimeout(loadingTimer)
-        loadingTimer = null
-      }
     })
-
-    return () => {
-      if (loadingTimer) {
-        clearTimeout(loadingTimer)
-      }
-    }
   })
 
   const isLoading = $derived(
@@ -142,6 +127,8 @@
         return ActAs
       case '/migrate':
         return Migration
+      case '/ui-test':
+        return UiTest
       default:
         return Login
     }
@@ -154,41 +141,9 @@
 
 <main>
   {#if isLoading}
-    <div class="loading">
-      {#if showSpinner}
-        <div class="loading-content">
-          <div class="spinner"></div>
-          <p>{$_('common.loading')}</p>
-        </div>
-      {/if}
-    </div>
+    <div class="loading"></div>
   {:else}
     <CurrentComponent />
   {/if}
 </main>
 <Toast />
-
-<style>
-  main {
-    min-height: 100vh;
-  }
-
-  .loading {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .loading-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-4);
-  }
-
-  .loading-content p {
-    margin: 0;
-    color: var(--text-secondary);
-  }
-</style>
