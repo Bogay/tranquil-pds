@@ -382,7 +382,7 @@
         {#if emailUpdateAuthorized}
           <p class="hint success">{$_('settings.emailUpdateAuthorized')}</p>
         {:else}
-          <div class="field">
+          <div>
             <label for="email-token">{$_('settings.verificationCode')}</label>
             <input
               id="email-token"
@@ -394,7 +394,7 @@
             <p class="hint">{$_('settings.emailTokenHint')}</p>
           </div>
         {/if}
-        <div class="field">
+        <div>
           <label for="new-email">{$_('settings.newEmail')}</label>
           <input
             id="new-email"
@@ -420,7 +420,7 @@
       </form>
     {:else}
       <form onsubmit={(e) => { e.preventDefault(); handleRequestEmailUpdate() }}>
-        <div class="field">
+        <div>
           <label for="new-email">{$_('settings.newEmail')}</label>
           <input
             id="new-email"
@@ -472,7 +472,7 @@
           </div>
         </div>
         <form onsubmit={handleUpdateHandle}>
-          <div class="field">
+          <div>
             <label for="new-handle-byo">{$_('settings.yourDomain')}</label>
             <input id="new-handle-byo" type="text" bind:value={newHandle} placeholder={$_('settings.yourDomainPlaceholder')} disabled={handleLoading} required />
           </div>
@@ -483,7 +483,7 @@
       </div>
     {:else}
       <form onsubmit={handleUpdateHandle}>
-        <div class="field">
+        <div>
           <label for="new-handle">{$_('settings.newHandle')}</label>
           <HandleInput
             id="new-handle"
@@ -529,10 +529,10 @@
                 <span class="backup-size">{formatBytes(backup.sizeBytes)}</span>
               </div>
               <div class="backup-item-actions">
-                <button class="small" onclick={() => handleDownloadBackup(backup.id, backup.repoRev)}>
+                <button class="sm" onclick={() => handleDownloadBackup(backup.id, backup.repoRev)}>
                   {$_('settings.backups.download')}
                 </button>
-                <button class="small danger" onclick={() => handleDeleteBackup(backup.id)}>
+                <button class="sm danger-outline" onclick={() => handleDeleteBackup(backup.id)}>
                   {$_('settings.backups.delete')}
                 </button>
               </div>
@@ -586,7 +586,7 @@
     <p class="warning-text">{$_('settings.deleteWarning')}</p>
     {#if deleteTokenSent}
       <form onsubmit={handleConfirmDelete}>
-        <div class="field">
+        <div>
           <label for="delete-token">{$_('settings.confirmationCode')}</label>
           <input
             id="delete-token"
@@ -597,7 +597,7 @@
             required
           />
         </div>
-        <div class="field">
+        <div>
           <label for="delete-password">{$_('settings.yourPassword')}</label>
           <input
             id="delete-password"
@@ -624,303 +624,3 @@
     {/if}
   </section>
 </div>
-
-<style>
-  .settings {
-    max-width: var(--width-lg);
-  }
-
-  section {
-    background: var(--bg-secondary);
-    padding: var(--space-5);
-    border-radius: var(--radius-lg);
-    margin-bottom: var(--space-5);
-  }
-
-  section h3 {
-    margin: 0 0 var(--space-3) 0;
-    font-size: var(--text-base);
-  }
-
-  .current {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .language-select {
-    width: 100%;
-  }
-
-  .field {
-    margin-bottom: var(--space-3);
-  }
-
-  .field label {
-    display: block;
-    margin-bottom: var(--space-1);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-  }
-
-  .actions {
-    display: flex;
-    gap: var(--space-2);
-    margin-top: var(--space-3);
-  }
-
-  .tabs {
-    display: flex;
-    gap: var(--space-1);
-    margin-bottom: var(--space-4);
-  }
-
-  .tab {
-    flex: 1;
-    padding: var(--space-2) var(--space-4);
-    background: transparent;
-    border: 1px solid var(--border-color);
-    cursor: pointer;
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-  }
-
-  .tab:first-child {
-    border-radius: var(--radius-md) 0 0 var(--radius-md);
-  }
-
-  .tab:last-child {
-    border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  }
-
-  .tab.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--text-inverse);
-  }
-
-  .loading,
-  .empty {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin-bottom: var(--space-4);
-  }
-
-  .backup-list {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 var(--space-4) 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .backup-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-3);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-  }
-
-  .backup-info {
-    display: flex;
-    gap: var(--space-3);
-    font-size: var(--text-sm);
-  }
-
-  .backup-date {
-    font-weight: var(--font-medium);
-  }
-
-  .backup-size {
-    color: var(--text-secondary);
-  }
-
-  .backup-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--space-4);
-    gap: var(--space-3);
-    flex-wrap: wrap;
-  }
-
-  .backup-toggle {
-    margin-bottom: var(--space-3);
-  }
-
-  .backup-toggle .toggle-label {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    cursor: pointer;
-    font-size: var(--text-sm);
-    white-space: nowrap;
-  }
-
-  .backup-toggle .toggle-label input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-  }
-
-  .backup-item-actions {
-    display: flex;
-    gap: var(--space-2);
-  }
-
-  .restore-section {
-    margin-top: var(--space-5);
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--border-color);
-  }
-
-  .restore-section h4 {
-    margin: 0 0 var(--space-2) 0;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-  }
-
-  .restore-section .hint {
-    margin-bottom: var(--space-3);
-  }
-
-  .restore-form {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .restore-form input[type="file"] {
-    flex: 1;
-    min-width: 200px;
-  }
-
-  .restore-preview {
-    margin-top: var(--space-2);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .restore-preview .file-name {
-    font-weight: var(--font-medium);
-    color: var(--text-primary);
-  }
-
-  .export-buttons {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  button.small {
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-  }
-
-  .danger-zone {
-    border: 1px solid var(--error-border);
-  }
-
-  .danger-zone h3 {
-    color: var(--error-text);
-  }
-
-  .warning-text {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin: 0 0 var(--space-4) 0;
-  }
-
-  button.danger {
-    background: var(--error-text);
-    border: 1px solid var(--error-text);
-    color: white;
-  }
-
-  button.danger:hover:not(:disabled) {
-    background: var(--error-border);
-  }
-
-  button.danger:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .hint {
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-    margin: var(--space-1) 0 0 0;
-  }
-
-  .hint.warning {
-    color: var(--warning-text);
-  }
-
-  .hint.success {
-    color: var(--success-text);
-    background: var(--success-bg);
-    padding: var(--space-2);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-3);
-  }
-
-  .byo-handle {
-    margin-top: var(--space-3);
-  }
-
-  .verification-info {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
-    margin-bottom: var(--space-4);
-  }
-
-  .verification-info h4 {
-    margin: 0 0 var(--space-2) 0;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-  }
-
-  .verification-info h5 {
-    margin: var(--space-3) 0 var(--space-1) 0;
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    color: var(--text-secondary);
-  }
-
-  .verification-info p {
-    margin: var(--space-1) 0;
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-  }
-
-  .method {
-    margin-top: var(--space-3);
-    padding-top: var(--space-3);
-    border-top: 1px solid var(--border-color);
-  }
-
-  .method:first-of-type {
-    margin-top: var(--space-2);
-    padding-top: 0;
-    border-top: none;
-  }
-
-  code.record {
-    display: block;
-    background: var(--bg-input);
-    padding: var(--space-2);
-    border-radius: var(--radius-md);
-    font-size: var(--text-xs);
-    word-break: break-all;
-    margin: var(--space-1) 0;
-  }
-</style>
