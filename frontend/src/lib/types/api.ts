@@ -88,37 +88,12 @@ type SessionBase = {
 
 export type Session = SessionBase & ContactState & AccountState;
 
-export function hasEmail(
-  session: Session,
-): session is Session & { email: EmailAddress } {
-  return session.contactKind === "email" ||
-    (session.contactKind === "channel" && session.email !== undefined);
-}
-
 export function getSessionEmail(session: Session): EmailAddress | undefined {
   return session.contactKind === "email"
     ? session.email
     : session.contactKind === "channel"
     ? session.email
     : undefined;
-}
-
-export function isEmailVerified(session: Session): boolean {
-  return session.contactKind === "email"
-    ? session.emailConfirmed
-    : session.contactKind === "channel"
-    ? session.preferredChannelVerified
-    : false;
-}
-
-export function isMigrated(
-  session: Session,
-): session is Session & { accountKind: "migrated" } {
-  return session.accountKind === "migrated";
-}
-
-export function isDeactivated(session: Session): boolean {
-  return session.accountKind === "deactivated";
 }
 
 export function isActive(session: Session): boolean {
@@ -208,17 +183,6 @@ export interface ConfirmSignupResult {
   preferredChannelVerified?: boolean;
 }
 
-export interface ListAppPasswordsResponse {
-  passwords: AppPassword[];
-}
-
-export interface AccountInviteCodesResponse {
-  codes: InviteCodeInfo[];
-}
-
-export interface CreateInviteCodeResponse {
-  code: InviteCodeBrand;
-}
 
 export interface ServerLinks {
   privacyPolicy?: string;
@@ -317,9 +281,6 @@ export interface ListSessionsResponse {
   sessions: SessionInfo[];
 }
 
-export interface RevokeAllSessionsResponse {
-  revokedCount: number;
-}
 
 export interface AccountSearchResult {
   did: Did;

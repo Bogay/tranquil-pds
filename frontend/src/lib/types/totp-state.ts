@@ -61,18 +61,6 @@ export function finish(_state: TotpBackup): TotpIdle {
   return idleState;
 }
 
-export function isIdle(state: TotpSetupState): state is TotpIdle {
-  return state.step === "idle";
-}
-
-export function isQr(state: TotpSetupState): state is TotpQr {
-  return state.step === "qr";
-}
-
-export function isVerify(state: TotpSetupState): state is TotpVerify {
-  return state.step === "verify";
-}
-
 export function isBackup(state: TotpSetupState): state is TotpBackup {
   return state.step === "backup";
 }
