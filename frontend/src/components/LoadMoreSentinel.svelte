@@ -33,18 +33,3 @@
     {/if}
   </div>
 {/if}
-
-<style>
-  .load-more-sentinel {
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-top: var(--space-4);
-  }
-
-  .loading-indicator {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-  }
-</style>

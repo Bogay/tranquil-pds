@@ -47,25 +47,3 @@
     <span class="domain-suffix">.{domains[0]}</span>
   {/if}
 </div>
-
-<style>
-  .handle-input-group {
-    display: flex;
-    gap: var(--space-2);
-    align-items: center;
-  }
-
-  .handle-input-group input {
-    flex: 1;
-  }
-
-  .handle-input-group select {
-    width: auto;
-  }
-
-  .domain-suffix {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    white-space: nowrap;
-  }
-</style>

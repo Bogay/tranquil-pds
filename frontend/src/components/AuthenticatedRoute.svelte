@@ -32,28 +32,5 @@
 {#if auth.kind === 'authenticated'}
   {@render children({ session: auth.session, client: createAuthenticatedClient(auth.session) })}
 {:else}
-  <div class="loading-container"><div class="loading-spinner"></div></div>
+  <div class="loading-container"></div>
 {/if}
-
-<style>
-  .loading-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 200px;
-    padding: var(--space-7);
-  }
-
-  .loading-spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--border-color);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-</style>

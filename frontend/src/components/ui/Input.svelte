@@ -19,7 +19,7 @@
   let inputId = $derived(id || fallbackId)
 </script>
 
-<div class="field">
+<div>
   {#if label}
     <label for={inputId}>{label}</label>
   {/if}
@@ -30,14 +30,3 @@
     <span class="hint">{hint}</span>
   {/if}
 </div>
-
-<style>
-  .has-error {
-    border-color: var(--error-text);
-  }
-
-  .has-error:focus {
-    border-color: var(--error-text);
-    box-shadow: 0 0 0 2px var(--error-bg);
-  }
-</style>

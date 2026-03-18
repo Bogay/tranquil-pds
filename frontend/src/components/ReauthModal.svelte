@@ -148,7 +148,7 @@
       {/if}
 
       {#if availableMethods.length > 1}
-        <div class="method-tabs">
+        <div class="tabs">
           {#if availableMethods.includes('password')}
             <button
               class="tab"
@@ -182,7 +182,7 @@
       <div class="modal-content">
         {#if activeMethod === 'password'}
           <form onsubmit={handlePasswordSubmit}>
-            <div class="field">
+            <div>
               <label for="reauth-password">{$_('reauth.password')}</label>
               <input
                 id="reauth-password"
@@ -198,7 +198,7 @@
           </form>
         {:else if activeMethod === 'totp'}
           <form onsubmit={handleTotpSubmit}>
-            <div class="field">
+            <div>
               <label for="reauth-totp">{$_('reauth.authenticatorCode')}</label>
               <input
                 id="reauth-totp"
@@ -232,111 +232,3 @@
     </div>
   </div>
 {/if}
-
-<style>
-  .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: var(--overlay-bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: var(--z-modal);
-  }
-
-  .modal {
-    background: var(--bg-card);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-lg);
-    max-width: var(--width-sm);
-    width: 90%;
-    max-height: 90vh;
-    overflow-y: auto;
-  }
-
-  .modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-4) var(--space-6);
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  .modal-header h2 {
-    margin: 0;
-    font-size: var(--text-lg);
-  }
-
-  .close-btn {
-    background: none;
-    border: none;
-    font-size: var(--text-xl);
-    cursor: pointer;
-    color: var(--text-secondary);
-    padding: 0;
-    line-height: 1;
-  }
-
-  .close-btn:hover {
-    color: var(--text-primary);
-  }
-
-  .error-message {
-    margin: var(--space-4) var(--space-6) 0;
-    padding: var(--space-3);
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-md);
-    color: var(--error-text);
-    font-size: var(--text-sm);
-  }
-
-  .method-tabs {
-    display: flex;
-    gap: var(--space-2);
-    padding: var(--space-4) var(--space-6) 0;
-  }
-
-  .tab {
-    flex: 1;
-    padding: var(--space-2) var(--space-4);
-    background: var(--bg-input);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-  }
-
-  .tab:hover {
-    background: var(--bg-secondary);
-  }
-
-  .tab.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--text-inverse);
-  }
-
-  .modal-content {
-    padding: var(--space-6);
-  }
-
-  .modal-content .field {
-    margin-bottom: var(--space-4);
-  }
-
-  .passkey-auth {
-    text-align: center;
-  }
-
-  .modal-content button:not(.tab) {
-    width: 100%;
-  }
-
-  .modal-footer {
-    padding: 0 var(--space-6) var(--space-6);
-    display: flex;
-    justify-content: flex-end;
-  }
-</style>
