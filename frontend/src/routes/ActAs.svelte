@@ -139,7 +139,7 @@
         {/if}
 
         <div class="actions">
-          <button class="back-btn" onclick={goBack}>
+          <button class="secondary" onclick={goBack}>
             {$_('actAs.backToControllers')}
           </button>
         </div>
@@ -148,53 +148,3 @@
   {/snippet}
 </AuthenticatedRoute>
 
-<style>
-  .page {
-    max-width: var(--width-md);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  .loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 200px;
-    color: var(--text-secondary);
-  }
-
-  header {
-    margin-bottom: var(--space-6);
-  }
-
-  h1 {
-    margin: 0;
-  }
-
-  .message.error {
-    padding: var(--space-3);
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-md);
-    color: var(--error-text);
-    margin-bottom: var(--space-4);
-  }
-
-  .actions {
-    margin-top: var(--space-4);
-  }
-
-  .back-btn {
-    padding: var(--space-3) var(--space-5);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--text-primary);
-    cursor: pointer;
-  }
-
-  .back-btn:hover {
-    background: var(--bg-card);
-    border-color: var(--accent);
-  }
-</style>

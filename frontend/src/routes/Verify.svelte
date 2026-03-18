@@ -343,7 +343,7 @@
       {/if}
 
       <form onsubmit={(e) => { e.preventDefault(); handleEmailUpdate(); }}>
-        <div class="field">
+        <div>
           <label for="new-email">{$_('verify.newEmailLabel')}</label>
           <input
             id="new-email"
@@ -357,7 +357,7 @@
         </div>
 
         {#if !tokenFromUrl}
-          <div class="field">
+          <div>
             <label for="verification-code">{$_('verify.codeLabel')}</label>
             <input
               id="verification-code"
@@ -395,7 +395,7 @@
     {/if}
 
     <form onsubmit={(e) => { e.preventDefault(); handleTokenVerification(); }}>
-      <div class="field">
+      <div>
         <label for="identifier">{$_('verify.identifierLabel')}</label>
         <input
           id="identifier"
@@ -409,7 +409,7 @@
         <p class="field-help">{$_('verify.identifierHelp')}</p>
       </div>
 
-      <div class="field">
+      <div>
         <label for="verification-code">{$_('verify.codeLabel')}</label>
         <input
           id="verification-code"
@@ -474,7 +474,7 @@
       </div>
     {:else}
       <form onsubmit={(e) => { e.preventDefault(); handleSignupVerification(e); }}>
-        <div class="field">
+        <div>
           <label for="verification-code">{$_('verify.codeLabel')}</label>
           <input
             id="verification-code"
@@ -515,136 +515,3 @@
   {/if}
 </div>
 
-<style>
-  .verify-page {
-    max-width: var(--width-sm);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  h1 {
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-4) 0;
-  }
-
-  .handle-info {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-6) 0;
-  }
-
-  .info-text {
-    color: var(--text-secondary);
-    margin: var(--space-4) 0 var(--space-6) 0;
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .field-help {
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-    margin: var(--space-1) 0 0 0;
-  }
-
-  .token-input {
-    font-family: var(--font-mono);
-    letter-spacing: 0.05em;
-  }
-
-  .form-actions {
-    display: flex;
-    gap: var(--space-4);
-    margin-top: var(--space-4);
-  }
-
-  .link-text {
-    text-align: center;
-    margin-top: var(--space-6);
-    font-size: var(--text-sm);
-  }
-
-  .link-text a {
-    color: var(--text-secondary);
-  }
-
-  .actions {
-    display: flex;
-    gap: var(--space-4);
-  }
-
-  .btn {
-    flex: 1;
-    display: inline-block;
-    padding: var(--space-4);
-    background: var(--accent);
-    color: var(--text-inverse);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    font-weight: var(--font-medium);
-    cursor: pointer;
-    text-decoration: none;
-    text-align: center;
-  }
-
-  .btn:hover {
-    background: var(--accent-hover);
-    text-decoration: none;
-  }
-
-  .btn.secondary {
-    background: transparent;
-    color: var(--accent);
-    border: 1px solid var(--accent);
-  }
-
-  .btn.secondary:hover {
-    background: var(--accent);
-    color: var(--text-inverse);
-  }
-
-  .success-container,
-  .loading-container {
-    text-align: center;
-  }
-
-  .success-container .actions {
-    justify-content: center;
-    margin-top: var(--space-6);
-  }
-
-  .success-container .btn {
-    flex: none;
-    padding: var(--space-4) var(--space-8);
-  }
-
-  .bot-hint {
-    padding: var(--space-4);
-    background: var(--bg-secondary);
-    border-radius: var(--radius-md);
-  }
-
-  .bot-hint p {
-    margin: 0;
-  }
-
-  .bot-hint .manual-text {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin-top: var(--space-1);
-  }
-
-  .bot-hint .waiting-text {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin-top: var(--space-2);
-  }
-</style>

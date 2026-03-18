@@ -329,10 +329,7 @@
 
 <div class="page">
   {#if loadingServerInfo}
-    <div class="loading">
-      <div class="spinner"></div>
-      <p>{$_('common.loading')}</p>
-    </div>
+    <div class="loading"></div>
   {:else if flow}
     <header class="page-header">
       <h1>{$_('oauth.register.title')}</h1>
@@ -360,7 +357,7 @@
       <AccountTypeSwitcher active="passkey" {ssoAvailable} oauthRequestUri={getRequestUriFromUrl()} />
 
       <form class="register-form" onsubmit={handleInfoSubmit}>
-        <div class="field">
+        <div>
           <label for="handle">{$_('register.handle')}</label>
           <HandleInput
             value={flow.info.handle}
@@ -384,7 +381,7 @@
           {/if}
         </div>
 
-        <div class="field">
+        <div>
           <label for="verification-channel">{$_('register.verificationMethod')}</label>
           <select id="verification-channel" bind:value={flow.info.verificationChannel} disabled={flow.state.submitting}>
             <option value="email">{channelLabel('email')}</option>
@@ -401,7 +398,7 @@
         </div>
 
         {#if flow.info.verificationChannel === 'email'}
-          <div class="field">
+          <div>
             <label for="email">{$_('register.emailAddress')}</label>
             <input
               id="email"
@@ -413,7 +410,7 @@
             />
           </div>
         {:else if flow.info.verificationChannel === 'discord'}
-          <div class="field">
+          <div>
             <label for="discord-username">{$_('register.discordUsername')}</label>
             <input
               id="discord-username"
@@ -425,7 +422,7 @@
             />
           </div>
         {:else if flow.info.verificationChannel === 'telegram'}
-          <div class="field">
+          <div>
             <label for="telegram-username">{$_('register.telegramUsername')}</label>
             <input
               id="telegram-username"
@@ -437,7 +434,7 @@
             />
           </div>
         {:else if flow.info.verificationChannel === 'signal'}
-          <div class="field">
+          <div>
             <label for="signal-number">{$_('register.signalUsername')}</label>
             <input
               id="signal-number"
@@ -496,7 +493,7 @@
         {/if}
 
         {#if flow.info.didType === 'web-external'}
-          <div class="field">
+          <div>
             <label for="external-did">{$_('registerPasskey.externalDid')}</label>
             <input id="external-did" type="text" bind:value={flow.info.externalDid} placeholder={$_('registerPasskey.externalDidPlaceholder')} disabled={flow.state.submitting} required />
             <p class="hint">{$_('registerPasskey.externalDidHint')} <code>https://{flow.info.externalDid ? flow.extractDomain(flow.info.externalDid) : 'yourdomain.com'}/.well-known/did.json</code></p>
@@ -504,7 +501,7 @@
         {/if}
 
         {#if serverInfo?.inviteCodeRequired}
-          <div class="field">
+          <div>
             <label for="invite-code">{$_('register.inviteCode')}</label>
             <input
               id="invite-code"
@@ -535,7 +532,6 @@
 
     {:else if flow.state.step === 'creating'}
       <div class="loading">
-        <div class="spinner md"></div>
         <p>{$_('registerPasskey.creatingAccount')}</p>
       </div>
 
@@ -577,111 +573,8 @@
 
     {:else if flow.state.step === 'activating'}
       <div class="loading">
-        <div class="spinner md"></div>
         <p>{$_('registerPasskey.activatingAccount')}</p>
       </div>
     {/if}
   {/if}
 </div>
-
-<style>
-  .register-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    max-width: 500px;
-  }
-
-  .identity-section {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-    margin: 0;
-    margin-top: var(--space-5);
-  }
-
-  .identity-section legend {
-    font-weight: var(--font-medium);
-    font-size: var(--text-sm);
-    padding: 0 var(--space-2);
-  }
-
-  .radio-group {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .radio-label {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
-    cursor: pointer;
-  }
-
-  .radio-label.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .radio-label input {
-    margin-top: 2px;
-  }
-
-  .radio-content {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .radio-hint {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-  }
-
-  .radio-hint.disabled-hint {
-    color: var(--text-muted);
-  }
-
-  .warning-box {
-    padding: var(--space-4);
-    background: var(--warning-bg);
-    border: 1px solid var(--warning-border);
-    border-radius: var(--radius-md);
-  }
-
-  .warning-box ul {
-    margin: var(--space-2) 0 0 0;
-    padding-left: var(--space-5);
-  }
-
-  .warning-box li {
-    margin-top: var(--space-2);
-  }
-
-  .form-actions {
-    display: flex;
-    gap: var(--space-4);
-    margin-top: var(--space-5);
-  }
-
-  .form-actions .primary {
-    flex: 1;
-  }
-
-  .passkey-step {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    max-width: 500px;
-  }
-
-  .passkey-step h2 {
-    margin: 0;
-  }
-
-  .passkey-step p {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-</style>

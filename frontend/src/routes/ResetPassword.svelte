@@ -85,7 +85,7 @@
     <p class="subtitle">{$_('resetPassword.subtitle')}</p>
 
     <form onsubmit={handleReset}>
-      <div class="field">
+      <div>
         <label for="token">{$_('resetPassword.code')}</label>
         <input
           id="token"
@@ -96,7 +96,7 @@
           required
         />
       </div>
-      <div class="field">
+      <div>
         <label for="new-password">{$_('resetPassword.newPassword')}</label>
         <input
           id="new-password"
@@ -108,7 +108,7 @@
           minlength="8"
         />
       </div>
-      <div class="field">
+      <div>
         <label for="confirm-password">{$_('resetPassword.confirmPassword')}</label>
         <input
           id="confirm-password"
@@ -131,7 +131,7 @@
     <p class="subtitle">{$_('resetPassword.forgotSubtitle')}</p>
 
     <form onsubmit={handleRequestReset}>
-      <div class="field">
+      <div>
         <label for="email">{$_('resetPassword.handleOrEmail')}</label>
         <input
           id="email"
@@ -153,35 +153,3 @@
   </p>
 </div>
 
-<style>
-  .reset-page {
-    max-width: var(--width-sm);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  h1 {
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-7) 0;
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .link-text {
-    text-align: center;
-    margin-top: var(--space-6);
-    color: var(--text-secondary);
-  }
-
-  .link-text a {
-    color: var(--accent);
-  }
-</style>

@@ -332,10 +332,7 @@
 
 <div class="page">
   {#if loading}
-    <div class="loading">
-      <div class="spinner md"></div>
-      <p>{$_('common.loading')}</p>
-    </div>
+    <div class="loading"></div>
   {:else if error && !pending}
     <div class="error-container">
       <div class="error-icon">!</div>
@@ -397,7 +394,7 @@
     <div class="split-layout sidebar-right">
       <div class="form-section">
         <form onsubmit={handleSubmit}>
-          <div class="field">
+          <div>
             <label for="handle">{$_('sso_register.handle_label')}</label>
             <HandleInput
               value={handle}
@@ -551,7 +548,7 @@
           </fieldset>
 
           {#if serverInfo?.inviteCodeRequired}
-            <div class="field">
+            <div>
               <label for="invite-code">{$_('register.inviteCode')} <span class="required">{$_('register.inviteCodeRequired')}</span></label>
               <input
                 id="invite-code"
@@ -582,19 +579,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .provider-info {
-    margin-bottom: var(--space-6);
-  }
-
-  button[type="submit"] {
-    margin-top: var(--space-3);
-  }
-</style>

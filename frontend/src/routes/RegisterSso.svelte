@@ -148,9 +148,7 @@
   <AccountTypeSwitcher active="sso" ssoAvailable={providers.length > 0} oauthRequestUri={getRequestUriFromUrl()} />
 
   {#if loading}
-    <div class="loading">
-      <div class="spinner md"></div>
-    </div>
+    <div class="loading"></div>
   {:else if providers.length === 0}
     <div class="no-providers">
       <p>{$_('register.noSsoProviders')}</p>
@@ -184,63 +182,3 @@
     </button>
   </div>
 </div>
-
-<style>
-  .no-providers {
-    text-align: center;
-    padding: var(--space-8);
-    color: var(--text-secondary);
-  }
-
-  .provider-list {
-    max-width: var(--width-md);
-  }
-
-  .provider-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-3);
-  }
-
-  @media (min-width: 500px) {
-    .provider-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  .provider-button {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-4);
-    background: var(--bg-card);
-    border: 1px solid var(--border-dark);
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    transition: all var(--transition-normal);
-    font-size: var(--text-base);
-    font-weight: var(--font-medium);
-    color: var(--text-primary);
-    text-align: left;
-    width: 100%;
-  }
-
-  .provider-button:hover:not(:disabled) {
-    background: var(--bg-secondary);
-    border-color: var(--accent);
-  }
-
-  .provider-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .provider-button .provider-name {
-    flex: 1;
-  }
-
-  .form-actions {
-    margin-top: var(--space-5);
-    max-width: var(--width-md);
-  }
-</style>

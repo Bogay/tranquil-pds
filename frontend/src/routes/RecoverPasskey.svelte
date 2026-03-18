@@ -97,7 +97,7 @@
     {/if}
 
     <form onsubmit={handleSubmit}>
-      <div class="field">
+      <div>
         <label for="new-password">{$_('recoverPasskey.newPassword')}</label>
         <input
           id="new-password"
@@ -110,7 +110,7 @@
         />
       </div>
 
-      <div class="field">
+      <div>
         <label for="confirm-password">{$_('recoverPasskey.confirmPassword')}</label>
         <input
           id="confirm-password"
@@ -134,69 +134,3 @@
   {/if}
 </div>
 
-<style>
-  .recover-page {
-    max-width: var(--width-sm);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  h1 {
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-7) 0;
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .info-box {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: var(--space-5);
-    font-size: var(--text-sm);
-  }
-
-  .info-box strong {
-    display: block;
-    margin-bottom: var(--space-3);
-  }
-
-  .info-box p {
-    margin: 0;
-    color: var(--text-secondary);
-  }
-
-  .error-message {
-    color: var(--text-secondary);
-    margin-bottom: var(--space-6);
-  }
-
-  .success-content {
-    text-align: center;
-  }
-
-  .success-icon {
-    font-size: var(--text-4xl);
-    color: var(--success-text);
-    margin-bottom: var(--space-4);
-  }
-
-  .success-message {
-    color: var(--text-secondary);
-    margin-bottom: var(--space-3);
-  }
-
-  .next-steps {
-    color: var(--text-muted);
-    font-size: var(--text-sm);
-    margin-bottom: var(--space-6);
-  }
-</style>

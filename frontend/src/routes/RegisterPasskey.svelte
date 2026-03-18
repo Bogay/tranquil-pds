@@ -21,31 +21,7 @@
     <a href="/app/login">{$_('register.signIn')}</a>
   {:else}
     <div class="loading-content">
-      <div class="spinner"></div>
       <p>{$_('common.loading')}</p>
     </div>
   {/if}
 </div>
-
-<style>
-  .register-redirect {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-4);
-  }
-
-  .loading-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-4);
-  }
-
-  .loading-content p {
-    margin: 0;
-    color: var(--text-secondary);
-  }
-</style>

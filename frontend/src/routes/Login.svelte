@@ -126,7 +126,7 @@
     {/if}
 
     <form onsubmit={(e) => { e.preventDefault(); handleVerification(e); }}>
-      <div class="field">
+      <div>
         <label for="verification-code">{$_('verification.codeLabel')}</label>
         <input
           id="verification-code"
@@ -192,7 +192,7 @@
         <p class="or-divider">{$_('login.signInToAnother')}</p>
       {/if}
 
-      <button type="button" class="oauth-btn" onclick={handleOAuthLogin} disabled={submitting || loading}>
+      <button type="button" class="lg" style="width: 100%" onclick={handleOAuthLogin} disabled={submitting || loading}>
         {submitting ? $_('login.redirecting') : $_('login.button')}
       </button>
 
@@ -209,170 +209,3 @@
   {/if}
 </div>
 
-<style>
-  .login-page {
-    max-width: var(--width-lg);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  .page-header {
-    margin-bottom: var(--space-6);
-    text-align: center;
-  }
-
-  h1 {
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .login-content {
-    max-width: var(--width-md);
-    margin: 0 auto;
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    max-width: var(--width-sm);
-    margin: 0 auto;
-  }
-
-  .actions {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    margin-top: var(--space-3);
-  }
-
-  @media (min-width: 600px) {
-    .actions {
-      flex-direction: row;
-    }
-
-    .actions button {
-      flex: 1;
-    }
-  }
-
-  .oauth-btn {
-    width: 100%;
-    padding: var(--space-5);
-    font-size: var(--text-lg);
-  }
-
-  .forgot-links {
-    margin-top: var(--space-4);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    text-align: center;
-  }
-
-  .forgot-links a {
-    color: var(--accent);
-  }
-
-  .separator {
-    margin: 0 var(--space-2);
-  }
-
-  .link-text {
-    margin-top: var(--space-6);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    text-align: center;
-  }
-
-  .link-text a {
-    color: var(--accent);
-  }
-
-  .saved-accounts {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    margin-bottom: var(--space-5);
-  }
-
-  .saved-accounts.grid {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  @media (min-width: 700px) {
-    .saved-accounts.grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  .account-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-5);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-xl);
-    cursor: pointer;
-    transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
-  }
-
-  .account-item:hover:not(.disabled) {
-    border-color: var(--accent);
-    box-shadow: var(--shadow-md);
-  }
-
-  .account-item.disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .account-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    min-width: 0;
-  }
-
-  .account-handle {
-    font-weight: var(--font-medium);
-    color: var(--text-primary);
-  }
-
-  .account-did {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .forget-btn {
-    flex-shrink: 0;
-    padding: var(--space-2) var(--space-3);
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: var(--text-xl);
-    line-height: 1;
-    border-radius: var(--radius-md);
-  }
-
-  .forget-btn:hover {
-    background: var(--error-bg);
-    color: var(--error-text);
-  }
-
-  .or-divider {
-    text-align: center;
-    color: var(--text-muted);
-    font-size: var(--text-sm);
-    margin: var(--space-5) 0;
-  }
-</style>
