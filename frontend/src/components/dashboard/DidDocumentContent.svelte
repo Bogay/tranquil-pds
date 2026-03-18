@@ -150,7 +150,7 @@
                 </div>
                 <code class="item-key">{vm.publicKeyMultibase}</code>
               </div>
-              <button type="button" class="remove-btn" onclick={() => removeVerificationMethod(vm.id)}>
+              <button type="button" class="sm danger-outline" onclick={() => removeVerificationMethod(vm.id)}>
                 {$_('didEditor.removeKey')}
               </button>
             </li>
@@ -194,7 +194,7 @@
           {#each alsoKnownAs as handle}
             <li class="list-item">
               <span class="item-handle">{handle}</span>
-              <button type="button" class="remove-btn" onclick={() => removeHandle(handle)}>
+              <button type="button" class="sm danger-outline" onclick={() => removeHandle(handle)}>
                 {$_('didEditor.removeHandle')}
               </button>
             </li>
@@ -245,171 +245,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  .did-editor {
-    max-width: var(--width-lg);
-  }
-
-  .loading,
-  .empty {
-    color: var(--text-secondary);
-    padding: var(--space-4);
-  }
-
-  section {
-    background: var(--bg-secondary);
-    padding: var(--space-5);
-    border-radius: var(--radius-lg);
-    margin-bottom: var(--space-5);
-  }
-
-  section h3 {
-    margin: 0 0 var(--space-2) 0;
-    font-size: var(--text-base);
-  }
-
-  .help-section {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-  }
-
-  .help-text {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin: 0;
-    line-height: 1.5;
-  }
-
-  .description {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin: 0 0 var(--space-4) 0;
-  }
-
-  .list {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 var(--space-4) 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .list-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding: var(--space-3);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    gap: var(--space-3);
-  }
-
-  .item-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    min-width: 0;
-  }
-
-  .item-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .item-id {
-    font-weight: var(--font-medium);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-  }
-
-  .item-type {
-    font-size: var(--text-xs);
-    padding: var(--space-1) var(--space-2);
-    background: var(--accent);
-    color: var(--text-inverse);
-    border-radius: var(--radius-sm);
-  }
-
-  .item-key {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-    word-break: break-all;
-  }
-
-  .item-handle {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-  }
-
-  .remove-btn {
-    flex-shrink: 0;
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-    background: transparent;
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-  }
-
-  .remove-btn:hover {
-    background: var(--error-bg);
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .field label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--text-secondary);
-  }
-
-  .add-form {
-    display: grid;
-    grid-template-columns: 1fr 2fr auto;
-    gap: var(--space-3);
-    align-items: end;
-  }
-
-  .add-form.single {
-    grid-template-columns: 1fr auto;
-  }
-
-  .preview-section pre {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-    overflow-x: auto;
-    font-size: var(--text-xs);
-    font-family: var(--font-mono);
-  }
-
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  @media (max-width: 600px) {
-    .add-form {
-      grid-template-columns: 1fr;
-    }
-
-    .list-item {
-      flex-direction: column;
-    }
-
-    .remove-btn {
-      width: 100%;
-    }
-  }
-</style>

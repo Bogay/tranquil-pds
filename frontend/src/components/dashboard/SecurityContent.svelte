@@ -631,8 +631,8 @@
                 {#if editingPasskeyId === passkey.id}
                   <div class="passkey-edit">
                     <input type="text" bind:value={editPasskeyName} placeholder={$_('security.passkeyName')} />
-                    <button type="button" class="small" onclick={handleSavePasskeyName}>{$_('common.save')}</button>
-                    <button type="button" class="small secondary" onclick={cancelEditPasskey}>{$_('common.cancel')}</button>
+                    <button type="button" class="sm" onclick={handleSavePasskeyName}>{$_('common.save')}</button>
+                    <button type="button" class="sm secondary" onclick={cancelEditPasskey}>{$_('common.cancel')}</button>
                   </div>
                 {:else}
                   <div class="passkey-info">
@@ -645,9 +645,9 @@
                     </span>
                   </div>
                   <div class="passkey-actions">
-                    <button type="button" class="small secondary" onclick={() => startEditPasskey(passkey)}>{$_('security.rename')}</button>
+                    <button type="button" class="sm secondary" onclick={() => startEditPasskey(passkey)}>{$_('security.rename')}</button>
                     {#if hasPassword || passkeys.length > 1}
-                      <button type="button" class="small danger" onclick={() => handleDeletePasskey(passkey.id)}>{$_('security.deletePasskey')}</button>
+                      <button type="button" class="sm danger-outline" onclick={() => handleDeletePasskey(passkey.id)}>{$_('security.deletePasskey')}</button>
                     {/if}
                   </div>
                 {/if}
@@ -690,7 +690,7 @@
             <form class="inline-form" onsubmit={handleRegenerateBackupCodes}>
               <h4>{$_('security.regenerateBackupCodes')}</h4>
               <p class="warning-text">{$_('security.regenerateConfirm')}</p>
-              <div class="field">
+              <div>
                 <label for="regen-password">{$_('security.password')}</label>
                 <input
                   id="regen-password"
@@ -701,7 +701,7 @@
                   required
                 />
               </div>
-              <div class="field">
+              <div>
                 <label for="regen-code">{$_('security.totpCode')}</label>
                 <input
                   id="regen-code"
@@ -729,7 +729,7 @@
             <form class="inline-form danger-form" onsubmit={handleDisableTotp}>
               <h4>{$_('security.disableTotp')}</h4>
               <p class="warning-text">{$_('security.disableTotpWarning')}</p>
-              <div class="field">
+              <div>
                 <label for="disable-password">{$_('security.password')}</label>
                 <input
                   id="disable-password"
@@ -740,7 +740,7 @@
                   required
                 />
               </div>
-              <div class="field">
+              <div>
                 <label for="disable-code">{$_('security.totpCode')}</label>
                 <input
                   id="disable-code"
@@ -833,7 +833,7 @@
           {#if showChangePasswordForm}
             <form class="inline-form" onsubmit={handleChangePassword}>
               <h4>{$_('security.changePassword')}</h4>
-              <div class="field">
+              <div>
                 <label for="current-password">{$_('security.currentPassword')}</label>
                 <input
                   id="current-password"
@@ -844,7 +844,7 @@
                   required
                 />
               </div>
-              <div class="field">
+              <div>
                 <label for="new-password">{$_('security.newPassword')}</label>
                 <input
                   id="new-password"
@@ -856,7 +856,7 @@
                   minlength="8"
                 />
               </div>
-              <div class="field">
+              <div>
                 <label for="confirm-password">{$_('security.confirmPassword')}</label>
                 <input
                   id="confirm-password"
@@ -902,7 +902,7 @@
           {:else}
             <form class="inline-form" onsubmit={handleSetPassword}>
               <h4>{$_('security.setPassword')}</h4>
-              <div class="field">
+              <div>
                 <label for="set-new-password">{$_('security.newPassword')}</label>
                 <input
                   id="set-new-password"
@@ -914,7 +914,7 @@
                   minlength="8"
                 />
               </div>
-              <div class="field">
+              <div>
                 <label for="set-confirm-password">{$_('security.confirmPassword')}</label>
                 <input
                   id="set-confirm-password"
@@ -958,7 +958,7 @@
                   </div>
                   <button
                     type="button"
-                    class="small danger"
+                    class="sm danger-outline"
                     onclick={() => handleUnlinkAccount(account.id)}
                     disabled={unlinkingId === account.id}
                   >
@@ -1064,7 +1064,7 @@
                   </div>
                 {:else}
                   <span class="device-name">{device.friendlyName || parseUserAgent(device.userAgent)}</span>
-                  <button type="button" class="icon-btn" onclick={() => startEditDevice(device)} title={$_('security.rename')}>
+                  <button type="button" class="icon" onclick={() => startEditDevice(device)} title={$_('security.rename')}>
                     &#9998;
                   </button>
                 {/if}
@@ -1109,620 +1109,3 @@
   onSuccess={handleReauthSuccess}
   onCancel={handleReauthCancel}
 />
-
-<style>
-  .security {
-    max-width: var(--width-lg);
-  }
-
-  .loading {
-    color: var(--text-secondary);
-    padding: var(--space-4);
-  }
-
-  section {
-    background: var(--bg-secondary);
-    padding: var(--space-5);
-    border-radius: var(--radius-lg);
-    margin-bottom: var(--space-5);
-  }
-
-  section h3 {
-    margin: 0 0 var(--space-4) 0;
-    font-size: var(--text-base);
-  }
-
-  .status {
-    display: block;
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    margin-bottom: var(--space-4);
-    width: fit-content;
-  }
-
-  .status.success {
-    background: var(--success-bg);
-    color: var(--success-text);
-  }
-
-  .status.warning {
-    background: var(--warning-bg);
-    color: var(--warning-text);
-  }
-
-  .status.info {
-    background: var(--accent-muted);
-    color: var(--accent);
-  }
-
-  .passkey-list {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 var(--space-4) 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .passkey-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-3);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    gap: var(--space-3);
-  }
-
-  .passkey-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    min-width: 0;
-  }
-
-  .passkey-name {
-    font-weight: var(--font-medium);
-  }
-
-  .passkey-meta {
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-  }
-
-  .passkey-actions {
-    display: flex;
-    gap: var(--space-2);
-    flex-shrink: 0;
-  }
-
-  .passkey-edit {
-    display: flex;
-    gap: var(--space-2);
-    align-items: center;
-    width: 100%;
-  }
-
-  .passkey-edit input {
-    flex: 1;
-  }
-
-  .add-passkey {
-    display: flex;
-    gap: var(--space-2);
-    margin-top: var(--space-4);
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--border-color);
-  }
-
-  .add-passkey input {
-    flex: 1;
-  }
-
-  .password-actions {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .remove-password-form {
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
-  }
-
-  .remove-password-form .warning-text {
-    color: var(--error-text);
-    font-size: var(--text-sm);
-    margin: 0 0 var(--space-4) 0;
-  }
-
-  .remove-password-form .actions {
-    display: flex;
-    gap: var(--space-2);
-  }
-
-  button.small {
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-  }
-
-  button.small.danger {
-    background: transparent;
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-  }
-
-  button.small.danger:hover {
-    background: var(--error-bg);
-  }
-
-  .setup-step {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-  }
-
-  .setup-step p {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin: 0 0 var(--space-4) 0;
-  }
-
-  .setup-step h4 {
-    margin: 0 0 var(--space-2) 0;
-  }
-
-  .qr-container {
-    display: flex;
-    justify-content: center;
-    margin: var(--space-4) 0;
-  }
-
-  .qr-code {
-    width: 180px;
-    height: 180px;
-    image-rendering: pixelated;
-  }
-
-  .manual-entry {
-    margin-bottom: var(--space-4);
-    font-size: var(--text-sm);
-  }
-
-  .manual-entry summary {
-    cursor: pointer;
-    color: var(--accent);
-  }
-
-  .secret-code {
-    display: block;
-    margin-top: var(--space-2);
-    padding: var(--space-2);
-    background: var(--bg-input);
-    border-radius: var(--radius-md);
-    word-break: break-all;
-    font-size: var(--text-xs);
-  }
-
-  .code-input {
-    font-size: var(--text-xl);
-    letter-spacing: 0.3em;
-    text-align: center;
-    max-width: 180px;
-    margin: 0 auto var(--space-4) auto;
-    display: block;
-  }
-
-  .actions {
-    display: flex;
-    gap: var(--space-2);
-    margin-top: var(--space-4);
-  }
-
-  .warning-text {
-    color: var(--error-text);
-    font-size: var(--text-sm);
-    margin-bottom: var(--space-4);
-  }
-
-  .backup-codes {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--space-2);
-    margin-bottom: var(--space-4);
-  }
-
-  .backup-code {
-    padding: var(--space-2);
-    background: var(--bg-input);
-    border-radius: var(--radius-md);
-    text-align: center;
-    font-size: var(--text-sm);
-    font-family: var(--font-mono);
-  }
-
-  .totp-actions {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .inline-form {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-    margin-top: var(--space-4);
-  }
-
-  .inline-form.danger-form {
-    border-color: var(--error-border);
-  }
-
-  .inline-form h4 {
-    margin: 0 0 var(--space-3) 0;
-    font-size: var(--text-base);
-  }
-
-  .field {
-    margin-bottom: var(--space-3);
-  }
-
-  .field label {
-    display: block;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    margin-bottom: var(--space-1);
-  }
-
-  .field input {
-    width: 100%;
-  }
-
-  .danger-outline {
-    background: transparent;
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-  }
-
-  .danger-outline:hover {
-    background: var(--error-bg);
-  }
-
-  button.danger {
-    background: var(--error-text);
-    border: 1px solid var(--error-text);
-    color: white;
-  }
-
-  button.danger:hover:not(:disabled) {
-    background: var(--error-border);
-  }
-
-  .empty {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin-bottom: var(--space-4);
-  }
-
-  .sso-list {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 var(--space-4) 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .sso-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-3);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    gap: var(--space-3);
-  }
-
-  .sso-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .sso-provider {
-    font-weight: var(--font-medium);
-  }
-
-  .sso-id {
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-  }
-
-  .sso-meta {
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-  }
-
-  .sso-providers {
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--border-color);
-  }
-
-  .sso-providers h4 {
-    margin: 0 0 var(--space-3) 0;
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-  }
-
-  .provider-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  .provider-btn {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-4);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    color: var(--text-primary);
-  }
-
-  .provider-btn:hover:not(:disabled) {
-    border-color: var(--accent);
-  }
-
-  .provider-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .linked-badge {
-    font-size: var(--text-xs);
-    padding: var(--space-1) var(--space-2);
-    background: var(--success-bg);
-    color: var(--success-text);
-    border-radius: var(--radius-sm);
-  }
-
-  .section-description {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin: 0 0 var(--space-4) 0;
-  }
-
-  .toggle-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-3);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-4);
-  }
-
-  .toggle-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .toggle-label {
-    font-weight: var(--font-medium);
-  }
-
-  .toggle-description {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-  }
-
-  .toggle-button {
-    position: relative;
-    width: 52px;
-    height: 28px;
-    padding: 0;
-    background: var(--border-color);
-    border: none;
-    border-radius: 14px;
-    cursor: pointer;
-    transition: background 0.2s ease;
-    flex-shrink: 0;
-  }
-
-  .toggle-button.on {
-    background: var(--accent);
-  }
-
-  .toggle-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .toggle-slider {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 24px;
-    height: 24px;
-    background: white;
-    border-radius: 50%;
-    transition: transform 0.2s ease;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  }
-
-  .toggle-button.on .toggle-slider {
-    transform: translateX(24px);
-  }
-
-  .warning-box {
-    background: var(--warning-bg);
-    border: 1px solid var(--warning-border);
-    border-radius: var(--radius-md);
-    padding: var(--space-3);
-    margin-bottom: var(--space-4);
-  }
-
-  .warning-box strong {
-    color: var(--warning-text);
-    font-size: var(--text-sm);
-  }
-
-  .info-box {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: var(--space-3);
-  }
-
-  .info-box strong {
-    font-size: var(--text-sm);
-    display: block;
-    margin-bottom: var(--space-1);
-  }
-
-  .info-box p {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .empty-hint {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin: 0;
-  }
-
-  .hint-text {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin: var(--space-2) 0 0 0;
-  }
-
-  .device-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .device-card {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-  }
-
-  .device-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex: 1;
-    min-width: 0;
-  }
-
-  .device-name {
-    font-weight: var(--font-medium);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .edit-name-input {
-    flex: 1;
-    padding: var(--space-2);
-    font-size: var(--text-sm);
-    min-width: 0;
-  }
-
-  .edit-actions {
-    display: flex;
-    gap: var(--space-2);
-    flex-shrink: 0;
-  }
-
-  .icon-btn {
-    background: none;
-    border: none;
-    padding: var(--space-1);
-    cursor: pointer;
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-  }
-
-  .icon-btn:hover {
-    color: var(--accent);
-  }
-
-  .device-details {
-    display: flex;
-    gap: var(--space-3);
-    flex-shrink: 0;
-  }
-
-  .device-details .detail {
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-    white-space: nowrap;
-  }
-
-  .device-details .expiring-soon {
-    color: var(--warning-text);
-  }
-
-  button.danger-outline {
-    background: transparent;
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-  }
-
-  button.danger-outline:hover {
-    background: var(--error-bg);
-  }
-
-  @media (max-width: 500px) {
-    .passkey-item {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .passkey-actions {
-      width: 100%;
-    }
-
-    .passkey-actions button {
-      flex: 1;
-    }
-
-    .add-passkey {
-      flex-direction: column;
-    }
-
-    .device-card {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .device-details {
-      flex-direction: column;
-      gap: var(--space-1);
-    }
-
-    .device-card > button {
-      width: 100%;
-    }
-  }
-</style>

@@ -127,7 +127,7 @@
           </div>
           <button
             type="button"
-            class="revoke-btn"
+            class="sm secondary"
             class:danger={!s.isCurrent}
             onclick={() => revokeSession(s.id, s.isCurrent)}
           >
@@ -137,176 +137,10 @@
       {/each}
     </div>
     <div class="actions-bar">
-      <button type="button" class="refresh-btn" onclick={loadSessions}>{$_('common.refresh')}</button>
+      <button type="button" class="sm tertiary" onclick={loadSessions}>{$_('common.refresh')}</button>
       {#if sessions.filter(s => !s.isCurrent).length > 0}
-        <button type="button" class="revoke-all-btn" onclick={revokeAllSessions}>{$_('sessions.revokeAll')}</button>
+        <button type="button" class="sm danger-outline" onclick={revokeAllSessions}>{$_('sessions.revokeAll')}</button>
       {/if}
     </div>
   {/if}
 </div>
-
-<style>
-  .sessions {
-    max-width: var(--width-lg);
-  }
-
-  .loading,
-  .empty {
-    color: var(--text-secondary);
-    padding: var(--space-6);
-    text-align: center;
-  }
-
-  .sessions-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .session-card {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-xl);
-    padding: var(--space-4);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-4);
-  }
-
-  .session-card.current {
-    border-color: var(--accent);
-    background: var(--bg-card);
-  }
-
-  .session-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .session-header {
-    margin-bottom: var(--space-2);
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .client-name {
-    font-weight: var(--font-medium);
-    color: var(--text-primary);
-  }
-
-  .badge {
-    display: inline-block;
-    padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-md);
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-  }
-
-  .badge.current {
-    background: var(--accent);
-    color: var(--text-inverse);
-  }
-
-  .badge.type {
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-  }
-
-  .badge.type.oauth {
-    background: var(--success-bg);
-    color: var(--success-text);
-    border-color: var(--success-border);
-  }
-
-  .session-details {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .detail {
-    font-size: var(--text-sm);
-  }
-
-  .detail .label {
-    color: var(--text-secondary);
-    margin-right: var(--space-2);
-  }
-
-  .detail .value {
-    color: var(--text-primary);
-  }
-
-  .revoke-btn {
-    flex-shrink: 0;
-    padding: var(--space-2) var(--space-4);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--text-primary);
-    cursor: pointer;
-    font-size: var(--text-sm);
-  }
-
-  .revoke-btn:hover {
-    background: var(--bg-card);
-  }
-
-  .revoke-btn.danger {
-    border-color: var(--error-text);
-    color: var(--error-text);
-  }
-
-  .revoke-btn.danger:hover {
-    background: var(--error-bg);
-  }
-
-  .actions-bar {
-    margin-top: var(--space-4);
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .refresh-btn {
-    padding: var(--space-2) var(--space-4);
-    background: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    color: var(--text-primary);
-  }
-
-  .refresh-btn:hover {
-    background: var(--bg-card);
-    border-color: var(--accent);
-  }
-
-  .revoke-all-btn {
-    padding: var(--space-2) var(--space-4);
-    background: transparent;
-    border: 1px solid var(--error-text);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    color: var(--error-text);
-  }
-
-  .revoke-all-btn:hover {
-    background: var(--error-bg);
-  }
-
-  @media (max-width: 500px) {
-    .session-card {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .revoke-btn {
-      width: 100%;
-    }
-  }
-</style>
