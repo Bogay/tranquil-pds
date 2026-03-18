@@ -158,7 +158,7 @@
     {/if}
 
     <form onsubmit={handleSubmit}>
-      <div class="field">
+      <div>
         <label for="controller-identifier">{$_('oauthDelegation.controllerHandle')}</label>
         <input
           id="controller-identifier"
@@ -172,125 +172,13 @@
       </div>
 
       <div class="actions">
-        <button type="button" class="cancel-btn" onclick={handleCancel} disabled={submitting}>
+        <button type="button" class="cancel" onclick={handleCancel} disabled={submitting}>
           {$_('common.cancel')}
         </button>
-        <button type="submit" class="submit-btn" disabled={submitting || !controllerIdentifier.trim()}>
+        <button type="submit" disabled={submitting || !controllerIdentifier.trim()}>
           {submitting ? $_('oauthDelegation.checking') : $_('common.continue')}
         </button>
       </div>
     </form>
   {/if}
 </div>
-
-<style>
-  .delegation-container {
-    max-width: var(--width-md);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  .loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 200px;
-    color: var(--text-secondary);
-  }
-
-  .page-header {
-    margin-bottom: var(--space-6);
-  }
-
-  h1 {
-    margin: 0 0 var(--space-2) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0;
-    line-height: 1.6;
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-  }
-
-  input[type="text"] {
-    padding: var(--space-3);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    background: var(--bg-input);
-    color: var(--text-primary);
-  }
-
-  input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
-  .error {
-    padding: var(--space-3);
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-md);
-    color: var(--error-text);
-    margin-bottom: var(--space-4);
-  }
-
-  .actions {
-    display: flex;
-    gap: var(--space-4);
-    margin-top: var(--space-2);
-  }
-
-  .actions button {
-    flex: 1;
-    padding: var(--space-3);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    cursor: pointer;
-    transition: background-color var(--transition-fast);
-  }
-
-  .actions button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .cancel-btn {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-  }
-
-  .cancel-btn:hover:not(:disabled) {
-    background: var(--error-bg);
-    border-color: var(--error-border);
-    color: var(--error-text);
-  }
-
-  .submit-btn {
-    background: var(--accent);
-    color: var(--text-inverse);
-  }
-
-  .submit-btn:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-</style>

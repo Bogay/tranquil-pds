@@ -48,36 +48,3 @@
     </button>
   </div>
 </div>
-
-<style>
-  h1 {
-    margin: 0 0 var(--space-6) 0;
-    color: var(--error-text);
-  }
-
-  .error-box {
-    padding: var(--space-6);
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-xl);
-    margin-bottom: var(--space-6);
-  }
-
-  .error-code {
-    font-family: var(--font-mono);
-    font-size: var(--text-base);
-    color: var(--error-text);
-    margin-bottom: var(--space-2);
-  }
-
-  .error-description {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-  }
-
-  .actions {
-    display: flex;
-    gap: var(--space-3);
-    justify-content: center;
-  }
-</style>

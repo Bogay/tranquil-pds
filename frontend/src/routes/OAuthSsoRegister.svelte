@@ -292,10 +292,7 @@
 
 <div class="sso-register-container">
   {#if loading}
-    <div class="loading">
-      <div class="spinner"></div>
-      <p>{$_('common.loading')}</p>
-    </div>
+    <div class="loading"></div>
   {:else if error && !pending}
     <div class="error-container">
       <div class="error-icon">!</div>
@@ -324,7 +321,7 @@
     <div class="split-layout sidebar-right">
       <div class="form-section">
         <form onsubmit={handleSubmit}>
-          <div class="field">
+          <div>
             <label for="handle">{$_('sso_register.handle_label')}</label>
             <HandleInput
               value={handle}
@@ -478,7 +475,7 @@
           </fieldset>
 
           {#if serverInfo?.inviteCodeRequired}
-            <div class="field">
+            <div>
               <label for="invite-code">{$_('register.inviteCode')} <span class="required">{$_('register.inviteCodeRequired')}</span></label>
               <input
                 id="invite-code"
@@ -509,179 +506,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  .sso-register-container {
-    max-width: var(--width-lg);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  .loading {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-4);
-    padding: var(--space-8);
-  }
-
-  .loading p {
-    color: var(--text-secondary);
-  }
-
-  .error-container {
-    text-align: center;
-    padding: var(--space-8);
-  }
-
-  .error-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: var(--error-text);
-    color: var(--text-inverse);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-    font-weight: bold;
-    margin: 0 auto var(--space-4);
-  }
-
-  .error-container h2 {
-    margin-bottom: var(--space-2);
-  }
-
-  .error-container p {
-    color: var(--text-secondary);
-    margin-bottom: var(--space-6);
-  }
-
-  .back-link {
-    color: var(--accent);
-    text-decoration: none;
-  }
-
-  .back-link:hover {
-    text-decoration: underline;
-  }
-
-  .page-header {
-    margin-bottom: var(--space-6);
-  }
-
-  .page-header h1 {
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .form-section {
-    min-width: 0;
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .contact-fields {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .contact-fields .field {
-    margin-bottom: 0;
-  }
-
-  .hint.success {
-    color: var(--success-text);
-  }
-
-  .hint.error {
-    color: var(--error-text);
-  }
-
-  .info-panel {
-    background: var(--bg-secondary);
-    border-radius: var(--radius-xl);
-    padding: var(--space-6);
-  }
-
-  .info-panel h3 {
-    margin: 0 0 var(--space-4) 0;
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-  }
-
-  .info-list {
-    margin: 0;
-    padding-left: var(--space-5);
-  }
-
-  .info-list li {
-    margin-bottom: var(--space-2);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: var(--leading-relaxed);
-  }
-
-  .info-list li:last-child {
-    margin-bottom: 0;
-  }
-
-  .provider-info {
-    margin-bottom: var(--space-6);
-  }
-
-  .provider-badge {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-4);
-    background: var(--bg-secondary);
-    border-radius: var(--radius-md);
-  }
-
-  .provider-details {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .provider-name {
-    font-weight: var(--font-semibold);
-  }
-
-  .provider-username {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-  }
-
-  .required {
-    color: var(--error-text);
-  }
-
-  button[type="submit"] {
-    margin-top: var(--space-3);
-  }
-
-  .spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--border-color);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-</style>

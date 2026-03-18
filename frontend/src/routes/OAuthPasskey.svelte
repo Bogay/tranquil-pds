@@ -127,119 +127,18 @@
   <div class="passkey-status">
     {#if loading}
       <div class="loading-indicator">
-        <div class="spinner"></div>
         <p>{t('oauth.passkey.waiting')}</p>
       </div>
     {:else}
-      <button type="button" class="passkey-btn" onclick={startPasskeyAuth} disabled={loading}>
+      <button type="button" style="width: 100%" onclick={startPasskeyAuth} disabled={loading}>
         {t('oauth.passkey.title')}
       </button>
     {/if}
   </div>
 
   <div class="actions">
-    <button type="button" class="cancel-btn" onclick={handleCancel} disabled={loading}>
+    <button type="button" class="secondary" onclick={handleCancel} disabled={loading}>
       {t('common.cancel')}
     </button>
   </div>
 </div>
-
-<style>
-  .oauth-passkey-container {
-    max-width: 400px;
-    margin: 4rem auto;
-    padding: 2rem;
-    text-align: center;
-  }
-
-  h1 {
-    margin: 0 0 1.5rem 0;
-  }
-
-  .error {
-    padding: 0.75rem;
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: 4px;
-    color: var(--error-text);
-    margin-bottom: 1.5rem;
-    text-align: left;
-  }
-
-  .passkey-status {
-    padding: 2rem;
-    background: var(--bg-secondary);
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
-  }
-
-  .loading-indicator {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1rem;
-  }
-
-  .spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid var(--border-color);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  .loading-indicator p {
-    margin: 0;
-    color: var(--text-secondary);
-  }
-
-  .passkey-btn {
-    width: 100%;
-    padding: 1rem;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: background-color 0.15s;
-  }
-
-  .passkey-btn:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  .passkey-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .actions {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 1.5rem;
-  }
-
-  .cancel-btn {
-    padding: 0.75rem 2rem;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: background-color 0.15s;
-  }
-
-  .cancel-btn:hover:not(:disabled) {
-    background: var(--error-bg);
-    border-color: var(--error-border);
-    color: var(--error-text);
-  }
-
-  .cancel-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-</style>
