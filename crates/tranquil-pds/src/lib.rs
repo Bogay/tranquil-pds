@@ -100,7 +100,7 @@ pub fn app_with_routes(state: AppState, external: ExternalRoutes) -> Router {
         .layer(DefaultBodyLimit::max(
             tranquil_config::get().server.max_blob_size as usize,
         ))
-        .layer(axum::middleware::map_response(rewrite_422_to_400))
+        .layer(axum::middleware::map_response(rewrite_extractor_errors))
         .layer(middleware::from_fn(metrics::metrics_middleware))
         .layer(
             CorsLayer::new()
@@ -150,8 +150,24 @@ pub fn app_with_routes(state: AppState, external: ExternalRoutes) -> Router {
     router
 }
 
-async fn rewrite_422_to_400(response: axum::response::Response) -> axum::response::Response {
-    if response.status() != StatusCode::UNPROCESSABLE_ENTITY {
+fn is_plain_text(headers: &http::HeaderMap) -> bool {
+    headers
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.starts_with("text/plain"))
+}
+
+fn should_rewrite_to_xrpc_error(response: &axum::response::Response) -> bool {
+    match response.status() {
+        StatusCode::UNPROCESSABLE_ENTITY => true,
+        StatusCode::BAD_REQUEST => is_plain_text(response.headers()),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => is_plain_text(response.headers()),
+        _ => false,
+    }
+}
+
+async fn rewrite_extractor_errors(response: axum::response::Response) -> axum::response::Response {
+    if !should_rewrite_to_xrpc_error(&response) {
         return response;
     }
     let (mut parts, body) = response.into_parts();
@@ -173,11 +189,11 @@ async fn rewrite_422_to_400(response: axum::response::Response) -> axum::respons
         .unwrap_or_else(|| {
             String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| "Invalid request body".into())
         });
-    let message = humanize_json_error(&raw);
+    let message = humanize_extraction_error(&raw);
 
     parts.status = StatusCode::BAD_REQUEST;
     parts.headers.remove(http::header::CONTENT_LENGTH);
-    let error_name = classify_deserialization_error(&raw);
+    let error_name = classify_extraction_error(&raw);
     let new_body = json!({
         "error": error_name,
         "message": message
@@ -188,7 +204,7 @@ async fn rewrite_422_to_400(response: axum::response::Response) -> axum::respons
     )
 }
 
-fn humanize_json_error(raw: &str) -> String {
+fn humanize_extraction_error(raw: &str) -> String {
     if raw.contains("missing field") {
         raw.split("missing field `")
             .nth(1)
@@ -201,14 +217,21 @@ fn humanize_json_error(raw: &str) -> String {
         "Invalid JSON syntax".to_string()
     } else if raw.contains("Content-Type") || raw.contains("content type") {
         "Content-Type must be application/json".to_string()
+    } else if raw.contains("Failed to parse") || raw.contains("expected ident") {
+        "Invalid JSON in request body".to_string()
+    } else if raw.contains("Failed to deserialize query string") {
+        raw.strip_prefix("Failed to deserialize query string: ")
+            .map(|rest| format!("Invalid query parameter: {}", rest))
+            .unwrap_or_else(|| "Invalid query parameters".into())
     } else {
         raw.to_string()
     }
 }
 
-fn classify_deserialization_error(raw: &str) -> &'static str {
+fn classify_extraction_error(raw: &str) -> &'static str {
     match raw {
         s if s.contains("invalid handle") => "InvalidHandle",
+        s if s.contains("invalid CID") || s.contains("invalid cid") => "InvalidRequest",
         _ => "InvalidRequest",
     }
 }

@@ -86,6 +86,18 @@ import type {
 
 const API_BASE = "/xrpc";
 
+const STATUS_FALLBACK_MESSAGE: Record<number, string> = {
+  400: "Bad request",
+  401: "Authentication required",
+  403: "Forbidden",
+  404: "Not found",
+  429: "Rate limit exceeded",
+  500: "Internal server error",
+  502: "Bad gateway",
+  503: "Service unavailable",
+  504: "Gateway timeout",
+};
+
 export class ApiError extends Error {
   public did?: Did;
   public reauthMethods?: string[];
@@ -96,7 +108,7 @@ export class ApiError extends Error {
     did?: string,
     reauthMethods?: string[],
   ) {
-    super(message);
+    super(message ?? STATUS_FALLBACK_MESSAGE[status] ?? "Request failed");
     this.name = "ApiError";
     this.did = did ? unsafeAsDid(did) : undefined;
     this.reauthMethods = reauthMethods;

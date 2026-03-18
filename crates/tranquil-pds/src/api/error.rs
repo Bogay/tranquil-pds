@@ -9,8 +9,7 @@ use std::borrow::Cow;
 #[derive(Debug, Serialize)]
 struct ErrorBody<'a> {
     error: Cow<'a, str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    message: Option<String>,
+    message: String,
 }
 
 #[derive(Debug)]
@@ -214,7 +213,7 @@ impl ApiError {
     }
     fn error_name(&self) -> Cow<'static, str> {
         match self {
-            Self::InternalError(_) | Self::DatabaseError => Cow::Borrowed("InternalError"),
+            Self::InternalError(_) | Self::DatabaseError => Cow::Borrowed("InternalServerError"),
             Self::UpstreamFailure | Self::UpstreamUnavailable(_) | Self::UpstreamErrorMsg(_) => {
                 Cow::Borrowed("UpstreamError")
             }
@@ -313,22 +312,47 @@ impl ApiError {
             Self::LegacyLoginBlocked => Cow::Borrowed("MfaRequired"),
         }
     }
-    fn message(&self) -> Option<String> {
+    fn message(&self) -> String {
         match self {
-            Self::InternalError(msg)
-            | Self::AuthenticationFailed(msg)
-            | Self::InvalidToken(msg)
-            | Self::ExpiredToken(msg)
-            | Self::OAuthExpiredToken(msg)
-            | Self::RepoNotFound(msg)
-            | Self::BlobNotFound(msg)
-            | Self::InvalidHandle(msg)
-            | Self::HandleNotAvailable(msg)
-            | Self::InvalidSwap(msg)
-            | Self::InsufficientScope(msg)
-            | Self::InvalidCode(msg)
-            | Self::RateLimitExceeded(msg)
-            | Self::ServiceUnavailable(msg) => msg.clone(),
+            Self::InternalError(msg) => msg
+                .clone()
+                .unwrap_or_else(|| "Internal Server Error".into()),
+            Self::AuthenticationFailed(msg) => msg
+                .clone()
+                .unwrap_or_else(|| "Authentication failed".into()),
+            Self::InvalidToken(msg) => {
+                msg.clone().unwrap_or_else(|| "Invalid token".into())
+            }
+            Self::ExpiredToken(msg) | Self::OAuthExpiredToken(msg) => {
+                msg.clone().unwrap_or_else(|| "Token has expired".into())
+            }
+            Self::RepoNotFound(msg) => msg
+                .clone()
+                .unwrap_or_else(|| "Repository not found".into()),
+            Self::BlobNotFound(msg) => {
+                msg.clone().unwrap_or_else(|| "Blob not found".into())
+            }
+            Self::InvalidHandle(msg) => {
+                msg.clone().unwrap_or_else(|| "Invalid handle".into())
+            }
+            Self::HandleNotAvailable(msg) => msg
+                .clone()
+                .unwrap_or_else(|| "Handle not available".into()),
+            Self::InvalidSwap(msg) => {
+                msg.clone().unwrap_or_else(|| "Invalid swap".into())
+            }
+            Self::InsufficientScope(msg) => msg
+                .clone()
+                .unwrap_or_else(|| "Insufficient scope".into()),
+            Self::InvalidCode(msg) => {
+                msg.clone().unwrap_or_else(|| "Invalid code".into())
+            }
+            Self::RateLimitExceeded(msg) => msg
+                .clone()
+                .unwrap_or_else(|| "Rate limit exceeded".into()),
+            Self::ServiceUnavailable(msg) => msg
+                .clone()
+                .unwrap_or_else(|| "Service temporarily unavailable".into()),
             Self::InvalidRequest(msg)
             | Self::UpstreamUnavailable(msg)
             | Self::InvalidPassword(msg)
@@ -336,109 +360,117 @@ impl ApiError {
             | Self::InvalidRecord(msg)
             | Self::NotFoundMsg(msg)
             | Self::UpstreamErrorMsg(msg)
-            | Self::PayloadTooLarge(msg) => Some(msg.clone()),
-            Self::AccountMigrated => Some(
-                "Account has been migrated to another PDS. Repo operations are not allowed."
-                    .to_string(),
-            ),
-            Self::AccountNotVerified => Some(
-                "You must verify at least one notification channel before creating records"
-                    .to_string(),
-            ),
-            Self::NoPasskeys => {
-                Some("No passkeys registered for this account".to_string())
+            | Self::PayloadTooLarge(msg)
+            | Self::InvalidScopes(msg)
+            | Self::InvalidDelegation(msg)
+            | Self::AuthorizationError(msg)
+            | Self::InvalidDid(msg) => msg.clone(),
+            Self::UpstreamError { message, .. } => message
+                .clone()
+                .unwrap_or_else(|| "Upstream error".into()),
+            Self::DatabaseError => "Internal Server Error".into(),
+            Self::AuthenticationRequired => "Authentication required".into(),
+            Self::TokenRequired => "Authentication token required".into(),
+            Self::AccountDeactivated => "Account is deactivated".into(),
+            Self::AccountTakedown => "Account has been taken down".into(),
+            Self::AccountNotFound => "Account not found".into(),
+            Self::RecordNotFound => "Record not found".into(),
+            Self::Forbidden => "Forbidden".into(),
+            Self::InvitesDisabled => "Invite codes are disabled on this server".into(),
+            Self::InvalidCollection => "Invalid collection".into(),
+            Self::InvalidChannel => "Invalid notification channel".into(),
+            Self::TotpAlreadyEnabled => "TOTP is already enabled".into(),
+            Self::TotpNotEnabled => "TOTP is not enabled".into(),
+            Self::DuplicateAppPassword => "An app password with this name already exists".into(),
+            Self::AppPasswordNotFound => "App password not found".into(),
+            Self::SessionNotFound => "Session not found".into(),
+            Self::UpstreamFailure => "Upstream service failed".into(),
+            Self::RepoTakendown => "Repository has been taken down".into(),
+            Self::RepoDeactivated => "Repository is deactivated".into(),
+            Self::AccountMigrated => {
+                "Account has been migrated to another PDS. Repo operations are not allowed.".into()
             }
-            Self::NoChallengeInProgress => Some(
-                "No passkey authentication in progress or challenge expired".to_string(),
-            ),
-            Self::InvalidCredential => Some("Failed to parse credential response".to_string()),
-            Self::NoRegistrationInProgress => Some(
-                "No registration in progress. Call startPasskeyRegistration first.".to_string(),
-            ),
-            Self::RegistrationFailed => {
-                Some("Failed to verify passkey registration".to_string())
+            Self::AccountNotVerified => {
+                "You must verify at least one notification channel before creating records".into()
             }
-            Self::PasskeyNotFound => Some("Passkey not found".to_string()),
-            Self::InvalidId => Some("Invalid ID format".to_string()),
-            Self::InvalidScopes(msg) | Self::InvalidDelegation(msg) => Some(msg.clone()),
-            Self::ControllerNotFound => Some("Controller account not found".to_string()),
+            Self::NoPasskeys => "No passkeys registered for this account".into(),
+            Self::NoChallengeInProgress => {
+                "No passkey authentication in progress or challenge expired".into()
+            }
+            Self::InvalidCredential => "Failed to parse credential response".into(),
+            Self::NoRegistrationInProgress => {
+                "No registration in progress. Call startPasskeyRegistration first.".into()
+            }
+            Self::RegistrationFailed => "Failed to verify passkey registration".into(),
+            Self::PasskeyNotFound => "Passkey not found".into(),
+            Self::InvalidId => "Invalid ID format".into(),
+            Self::ControllerNotFound => "Controller account not found".into(),
             Self::DelegationNotFound => {
-                Some("No active delegation found for this controller".to_string())
+                "No active delegation found for this controller".into()
             }
             Self::InviteCodeRequired => {
-                Some("An invite code is required to create an account".to_string())
+                "An invite code is required to create an account".into()
             }
-            Self::RepoNotReady => Some("Repository not ready".to_string()),
-            Self::PasskeyCounterAnomaly => Some(
-                "Authentication failed: security key counter anomaly detected. This may indicate a cloned key.".to_string(),
-            ),
-            Self::MfaVerificationRequired => Some(
-                "This sensitive operation requires MFA verification".to_string(),
-            ),
-            Self::DeviceNotFound => Some("Device not found".to_string()),
-            Self::NoEmail => Some("Recipient has no email address".to_string()),
-            Self::AuthorizationError(msg) | Self::InvalidDid(msg) => Some(msg.clone()),
+            Self::RepoNotReady => "Repository not ready".into(),
+            Self::PasskeyCounterAnomaly => {
+                "Authentication failed: security key counter anomaly detected. This may indicate a cloned key.".into()
+            }
+            Self::MfaVerificationRequired => {
+                "This sensitive operation requires MFA verification".into()
+            }
+            Self::DeviceNotFound => "Device not found".into(),
+            Self::NoEmail => "Recipient has no email address".into(),
             Self::InvalidSigningKey => {
-                Some("Signing key not found, already used, or expired".to_string())
+                "Signing key not found, already used, or expired".into()
             }
-            Self::SetupExpired => {
-                Some("Setup has already been completed or expired".to_string())
-            }
-            Self::InvalidAccount => {
-                Some("This account is not a passkey-only account".to_string())
-            }
-            Self::InvalidRecoveryLink => Some("Invalid recovery link".to_string()),
-            Self::RecoveryLinkExpired => Some("Recovery link has expired".to_string()),
-            Self::MissingEmail => {
-                Some("Email is required when using email verification".to_string())
-            }
+            Self::SetupExpired => "Setup has already been completed or expired".into(),
+            Self::InvalidAccount => "This account is not a passkey-only account".into(),
+            Self::InvalidRecoveryLink => "Invalid recovery link".into(),
+            Self::RecoveryLinkExpired => "Recovery link has expired".into(),
+            Self::MissingEmail => "Email is required when using email verification".into(),
             Self::MissingDiscordId => {
-                Some("Discord ID is required when using Discord verification".to_string())
+                "Discord ID is required when using Discord verification".into()
             }
             Self::MissingTelegramUsername => {
-                Some("Telegram username is required when using Telegram verification".to_string())
+                "Telegram username is required when using Telegram verification".into()
             }
             Self::MissingSignalNumber => {
-                Some("Signal username is required when using Signal verification".to_string())
+                "Signal username is required when using Signal verification".into()
             }
-            Self::InvalidVerificationChannel => Some("Invalid verification channel".to_string()),
+            Self::InvalidVerificationChannel => "Invalid verification channel".into(),
             Self::SelfHostedDidWebDisabled => {
-                Some("Self-hosted did:web accounts are disabled on this server".to_string())
+                "Self-hosted did:web accounts are disabled on this server".into()
             }
-            Self::AccountAlreadyExists => Some("Account already exists".to_string()),
-            Self::HandleNotFound => Some("Unable to resolve handle".to_string()),
-            Self::SubjectNotFound => Some("Subject not found".to_string()),
-            Self::SsoProviderNotFound => Some("Unknown SSO provider".to_string()),
-            Self::SsoProviderNotEnabled => Some("SSO provider is not enabled".to_string()),
-            Self::SsoInvalidAction => {
-                Some("Action must be login, link, or register".to_string())
-            }
+            Self::AccountAlreadyExists => "Account already exists".into(),
+            Self::HandleNotFound => "Unable to resolve handle".into(),
+            Self::SubjectNotFound => "Subject not found".into(),
+            Self::SsoProviderNotFound => "Unknown SSO provider".into(),
+            Self::SsoProviderNotEnabled => "SSO provider is not enabled".into(),
+            Self::SsoInvalidAction => "Action must be login, link, or register".into(),
             Self::SsoNotAuthenticated => {
-                Some("Must be authenticated to link SSO account".to_string())
+                "Must be authenticated to link SSO account".into()
             }
-            Self::SsoSessionExpired => Some("SSO session expired or invalid".to_string()),
+            Self::SsoSessionExpired => "SSO session expired or invalid".into(),
             Self::SsoAlreadyLinked => {
-                Some("This SSO account is already linked to a different user".to_string())
+                "This SSO account is already linked to a different user".into()
             }
-            Self::SsoLinkNotFound => Some("Linked account not found".to_string()),
+            Self::SsoLinkNotFound => "Linked account not found".into(),
             Self::IdentifierMismatch => {
-                Some("The identifier does not match the verification token".to_string())
+                "The identifier does not match the verification token".into()
             }
-            Self::UpstreamError { message, .. } => message.clone(),
-            Self::UpstreamTimeout => Some("Upstream service timed out".to_string()),
-            Self::AdminRequired => Some("This action requires admin privileges".to_string()),
-            Self::EmailTaken => Some("This email address is already registered".to_string()),
-            Self::HandleTaken => Some("This handle is already taken".to_string()),
-            Self::InvalidEmail => Some("Please provide a valid email address".to_string()),
-            Self::InvalidInviteCode => Some("The invite code provided is invalid".to_string()),
-            Self::DuplicateCreate => Some("Account creation failed: duplicate request".to_string()),
-            Self::LegacyLoginBlocked => Some(
-                "This account requires MFA. Please use an OAuth client that supports TOTP verification.".to_string(),
-            ),
+            Self::UpstreamTimeout => "Upstream service timed out".into(),
+            Self::AdminRequired => "This action requires admin privileges".into(),
+            Self::EmailTaken => "This email address is already registered".into(),
+            Self::HandleTaken => "This handle is already taken".into(),
+            Self::InvalidEmail => "Please provide a valid email address".into(),
+            Self::InvalidInviteCode => "The invite code provided is invalid".into(),
+            Self::DuplicateCreate => "Account creation failed: duplicate request".into(),
+            Self::LegacyLoginBlocked => {
+                "This account requires MFA. Please use an OAuth client that supports TOTP verification.".into()
+            }
             Self::AuthFactorTokenRequired => {
-                Some("A sign in code has been sent to your email address".to_string())
+                "A sign-in code has been sent to your email address".into()
             }
-            _ => None,
         }
     }
     pub fn from_upstream_response(status: StatusCode, body: &[u8]) -> Self {

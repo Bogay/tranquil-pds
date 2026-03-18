@@ -10,7 +10,7 @@ use axum::{
     body::Bytes,
     extract::{RawQuery, Request, State},
     handler::Handler,
-    http::{HeaderMap, Method, StatusCode},
+    http::{HeaderMap, Method},
     response::{IntoResponse, Response},
 };
 use futures_util::future::Either;
@@ -335,7 +335,7 @@ async fn proxy_handler(
                 Ok(b) => b,
                 Err(e) => {
                     error!("Error reading proxy response body: {:?}", e);
-                    return (StatusCode::BAD_GATEWAY, "Error reading upstream response")
+                    return ApiError::UpstreamUnavailable("Error reading upstream response".into())
                         .into_response();
                 }
             };
@@ -350,16 +350,16 @@ async fn proxy_handler(
                 Ok(r) => r,
                 Err(e) => {
                     error!("Error building proxy response: {:?}", e);
-                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
+                    ApiError::InternalError(None).into_response()
                 }
             }
         }
         Err(e) => {
             error!("Error sending proxy request: {:?}", e);
             if e.is_timeout() {
-                (StatusCode::GATEWAY_TIMEOUT, "Upstream Timeout").into_response()
+                ApiError::UpstreamTimeout.into_response()
             } else {
-                (StatusCode::BAD_GATEWAY, "Upstream Error").into_response()
+                ApiError::UpstreamFailure.into_response()
             }
         }
     }
