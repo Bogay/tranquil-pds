@@ -1,10 +1,3 @@
-use tranquil_pds::api::EmptyResponse;
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::auth::{Auth, NotTakendown, Permissive, require_legacy_session_mfa};
-use tranquil_pds::cache::Cache;
-use tranquil_pds::plc::PlcClient;
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::PlainPassword;
 use axum::{
     Json,
     extract::State,
@@ -23,6 +16,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{error, info, warn};
+use tranquil_pds::api::EmptyResponse;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::auth::{Auth, NotTakendown, Permissive, require_legacy_session_mfa};
+use tranquil_pds::cache::Cache;
+use tranquil_pds::plc::PlcClient;
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::PlainPassword;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -365,7 +365,10 @@ pub async fn activate_account(
                 did
             );
             if let Some(ref h) = handle {
-                let _ = state.cache.delete(&tranquil_pds::cache_keys::handle_key(h)).await;
+                let _ = state
+                    .cache
+                    .delete(&tranquil_pds::cache_keys::handle_key(h))
+                    .await;
             }
             let _ = state
                 .cache
@@ -404,12 +407,9 @@ pub async fn activate_account(
                 did, handle
             );
             let handle_typed = handle.clone();
-            if let Err(e) = tranquil_pds::repo_ops::sequence_identity_event(
-                &state,
-                &did,
-                handle_typed.as_ref(),
-            )
-            .await
+            if let Err(e) =
+                tranquil_pds::repo_ops::sequence_identity_event(&state, &did, handle_typed.as_ref())
+                    .await
             {
                 warn!(
                     "[MIGRATION] activateAccount: Failed to sequence identity event for activation: {}",
@@ -507,7 +507,10 @@ pub async fn deactivate_account(
     match result {
         Ok(true) => {
             if let Some(ref h) = handle {
-                let _ = state.cache.delete(&tranquil_pds::cache_keys::handle_key(h)).await;
+                let _ = state
+                    .cache
+                    .delete(&tranquil_pds::cache_keys::handle_key(h))
+                    .await;
             }
             if let Err(e) = tranquil_pds::repo_ops::sequence_account_event(
                 &state,

@@ -1,7 +1,3 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::state::AppState;
-use tranquil_pds::sync::car::{encode_car_block, encode_car_header};
-use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
 use axum::{
     Json,
     extract::{Query, State},
@@ -13,15 +9,18 @@ use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::state::AppState;
+use tranquil_pds::sync::car::{encode_car_block, encode_car_header};
+use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
 use tranquil_types::Did;
 
 const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
 
 async fn check_admin_or_self(state: &AppState, headers: &HeaderMap, did: &Did) -> bool {
-    let extracted = match tranquil_pds::auth::extract_auth_token_from_header(tranquil_pds::util::get_header_str(
-        headers,
-        axum::http::header::AUTHORIZATION,
-    )) {
+    let extracted = match tranquil_pds::auth::extract_auth_token_from_header(
+        tranquil_pds::util::get_header_str(headers, axum::http::header::AUTHORIZATION),
+    ) {
         Some(t) => t,
         None => return false,
     };

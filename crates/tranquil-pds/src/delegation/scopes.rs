@@ -214,8 +214,10 @@ mod tests {
 
     #[test]
     fn test_intersect_granted_with_params_covers_requested_no_params() {
-        let result =
-            intersect_scopes("repo:app.bsky.feed.post", "repo:*?action=create&action=delete");
+        let result = intersect_scopes(
+            "repo:app.bsky.feed.post",
+            "repo:*?action=create&action=delete",
+        );
         assert_eq!(result, "repo:app.bsky.feed.post");
     }
 
@@ -231,16 +233,16 @@ mod tests {
     #[test]
     fn test_scope_covers_base_only() {
         assert!(scope_covers("repo:*", "repo:app.bsky.feed.post"));
-        assert!(scope_covers("repo:*", "repo:app.bsky.feed.post?action=create"));
+        assert!(scope_covers(
+            "repo:*",
+            "repo:app.bsky.feed.post?action=create"
+        ));
         assert!(!scope_covers("blob:*/*", "repo:app.bsky.feed.post"));
     }
 
     #[test]
     fn test_scope_covers_params() {
-        assert!(scope_covers(
-            "repo:*?action=create",
-            "repo:*?action=create"
-        ));
+        assert!(scope_covers("repo:*?action=create", "repo:*?action=create"));
         assert!(!scope_covers(
             "repo:*?action=create",
             "repo:*?action=delete"

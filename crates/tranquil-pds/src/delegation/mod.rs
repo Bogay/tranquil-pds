@@ -2,8 +2,7 @@ pub mod roles;
 pub mod scopes;
 
 pub use roles::{
-    CanAddControllers, CanControlAccounts, verify_can_add_controllers,
-    verify_can_control_accounts,
+    CanAddControllers, CanControlAccounts, verify_can_add_controllers, verify_can_control_accounts,
 };
 pub use scopes::{
     InvalidDelegationScopeError, SCOPE_PRESETS, ScopePreset, ValidatedDelegationScope,

@@ -44,7 +44,7 @@ sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pds TO tranquil_pds;"
 ## Create blob storage directories
 
 ```bash
-mkdir -p /var/lib/tranquil/blobs /var/lib/tranquil/backups
+mkdir -p /var/lib/tranquil/blobs
 ```
 
 We'll set ownership after creating the service user.

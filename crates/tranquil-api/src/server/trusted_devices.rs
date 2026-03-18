@@ -1,5 +1,3 @@
-use tranquil_pds::api::SuccessResponse;
-use tranquil_pds::api::error::{ApiError, DbResultExt};
 use axum::{
     Json,
     extract::State,
@@ -9,6 +7,8 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 use tranquil_db_traits::OAuthRepository;
+use tranquil_pds::api::SuccessResponse;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_types::DeviceId;
 
 use tranquil_pds::auth::{Active, Auth};

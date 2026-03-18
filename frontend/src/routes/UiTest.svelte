@@ -7,7 +7,7 @@
 
   let inputValue = $state('')
   let inputError = $state('')
-  let inputDisabled = $state(false)
+  let inputDisabled = $state('')
 
   const serverConfig = getServerConfigState()
 

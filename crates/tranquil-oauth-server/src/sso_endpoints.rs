@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use tranquil_db_traits::{SsoAction, SsoProviderType};
 use tranquil_types::RequestId;
 
-use tranquil_pds::sso::SsoConfig;
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::auth::extractor::extract_auth_token_from_header;
 use tranquil_pds::auth::{generate_app_password, validate_bearer_token_cached};
@@ -17,6 +16,7 @@ use tranquil_pds::rate_limit::{
     AccountCreationLimit, RateLimited, SsoCallbackLimit, SsoInitiateLimit, SsoUnlinkLimit,
     check_user_rate_limit_with_message,
 };
+use tranquil_pds::sso::SsoConfig;
 use tranquil_pds::state::AppState;
 
 fn generate_nonce() -> String {
@@ -1048,7 +1048,8 @@ pub async fn complete_registration(
                 }
             };
 
-            let plc_client = tranquil_pds::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
+            let plc_client =
+                tranquil_pds::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
             if let Err(e) = plc_client
                 .send_operation(&genesis_result.did, &genesis_result.signed_operation)
                 .await
@@ -1291,14 +1292,14 @@ pub async fn complete_registration(
                 }
             };
 
-            let access_meta = match tranquil_pds::auth::create_access_token_with_metadata(&did, &key_bytes)
-            {
-                Ok(m) => m,
-                Err(e) => {
-                    tracing::error!("Failed to create access token: {:?}", e);
-                    return Err(ApiError::InternalError(None));
-                }
-            };
+            let access_meta =
+                match tranquil_pds::auth::create_access_token_with_metadata(&did, &key_bytes) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::error!("Failed to create access token: {:?}", e);
+                        return Err(ApiError::InternalError(None));
+                    }
+                };
             let refresh_meta =
                 match tranquil_pds::auth::create_refresh_token_with_metadata(&did, &key_bytes) {
                     Ok(m) => m,

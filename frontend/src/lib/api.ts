@@ -33,7 +33,6 @@ import type {
   ContactState,
   CreateAccountParams,
   CreateAccountResult,
-  CreateBackupResponse,
   CreatedAppPassword,
   CreateRecordResponse,
   DelegationAuditEntry,
@@ -48,7 +47,6 @@ import type {
   GetInviteCodesResponse,
   InviteCodeInfo,
   LegacyLoginPreference,
-  ListBackupsResponse,
   ListPasskeysResponse,
   ListRecordsResponse,
   ListReposResponse,
@@ -72,7 +70,6 @@ import type {
   ServerDescription,
   ServerStats,
   Session,
-  SetBackupEnabledResponse,
   SsoLinkedAccount,
   StartPasskeyRegistrationResponse,
   SuccessResponse,
@@ -1287,49 +1284,6 @@ export const api = {
     return res.arrayBuffer();
   },
 
-  listBackups(token: AccessToken): Promise<ListBackupsResponse> {
-    return xrpc("_backup.listBackups", { token });
-  },
-
-  async getBackup(token: AccessToken, id: string): Promise<Blob> {
-    const url = `${API_BASE}/_backup.getBackup?id=${encodeURIComponent(id)}`;
-    const res = await authenticatedFetch(url, { token });
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({
-        error: "Unknown",
-        message: res.statusText,
-      }));
-      throw new ApiError(res.status, errData.error, errData.message);
-    }
-    return res.blob();
-  },
-
-  createBackup(token: AccessToken): Promise<CreateBackupResponse> {
-    return xrpc("_backup.createBackup", {
-      method: "POST",
-      token,
-    });
-  },
-
-  async deleteBackup(token: AccessToken, id: string): Promise<void> {
-    await xrpc("_backup.deleteBackup", {
-      method: "POST",
-      token,
-      params: { id },
-    });
-  },
-
-  setBackupEnabled(
-    token: AccessToken,
-    enabled: boolean,
-  ): Promise<SetBackupEnabledResponse> {
-    return xrpc("_backup.setEnabled", {
-      method: "POST",
-      token,
-      body: { enabled },
-    });
-  },
-
   async importRepo(token: AccessToken, car: Uint8Array): Promise<void> {
     const res = await authenticatedFetch(
       `${API_BASE}/com.atproto.repo.importRepo`,
@@ -1542,19 +1496,6 @@ export const api = {
     });
   },
 
-  async exportBlobs(token: AccessToken): Promise<Blob> {
-    const res = await authenticatedFetch(`${API_BASE}/_backup.exportBlobs`, {
-      token,
-    });
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({
-        error: "Unknown",
-        message: res.statusText,
-      }));
-      throw new ApiError(res.status, errData.error, errData.message);
-    }
-    return res.blob();
-  },
 };
 
 export const typedApi = {
@@ -1779,21 +1720,6 @@ export const typedApi = {
 
   getServerStats(token: AccessToken): Promise<Result<ServerStats, ApiError>> {
     return xrpcResult("_admin.getServerStats", { token });
-  },
-
-  listBackups(
-    token: AccessToken,
-  ): Promise<Result<ListBackupsResponse, ApiError>> {
-    return xrpcResult("_backup.listBackups", { token });
-  },
-
-  createBackup(
-    token: AccessToken,
-  ): Promise<Result<CreateBackupResponse, ApiError>> {
-    return xrpcResult("_backup.createBackup", {
-      method: "POST",
-      token,
-    });
   },
 
   getDidDocument(token: AccessToken): Promise<Result<DidDocument, ApiError>> {
@@ -2047,28 +1973,6 @@ export const typedApi = {
     return xrpcResult<void>("com.atproto.server.activateAccount", {
       method: "POST",
       token,
-    });
-  },
-
-  setBackupEnabled(
-    token: AccessToken,
-    enabled: boolean,
-  ): Promise<Result<SetBackupEnabledResponse, ApiError>> {
-    return xrpcResult("_backup.setEnabled", {
-      method: "POST",
-      token,
-      body: { enabled },
-    });
-  },
-
-  deleteBackup(
-    token: AccessToken,
-    id: string,
-  ): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>("_backup.deleteBackup", {
-      method: "POST",
-      token,
-      params: { id },
     });
   },
 

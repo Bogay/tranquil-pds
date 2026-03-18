@@ -12,7 +12,6 @@ The container image expects:
 - A TOML config file mounted at `/etc/tranquil-pds/config.toml` (or passed via `--config`)
 - `DATABASE_URL` - postgres connection string
 - `BLOB_STORAGE_PATH` - path to blob storage (mount a PV here)
-- `BACKUP_STORAGE_PATH` - path for repo backups (optional but recommended)
 - `PDS_HOSTNAME` - your PDS hostname (without protocol)
 - `JWT_SECRET`, `DPOP_SECRET`, `MASTER_KEY` - generate with `openssl rand -base64 48`
 - `CRAWLERS` - typically `https://bsky.network`

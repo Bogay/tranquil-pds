@@ -1,6 +1,3 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::state::AppState;
-use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
 use axum::{
     Json,
     body::Body,
@@ -11,6 +8,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::state::AppState;
+use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
 use tranquil_types::{CidLink, Did};
 
 #[derive(Deserialize)]

@@ -5,9 +5,6 @@ pub mod import;
 pub mod util;
 pub mod verify;
 
-#[cfg(test)]
-mod verify_tests;
-
 pub use firehose::SequencedEvent;
 pub use util::{
     RepoAccessLevel, RepoAccount, RepoAvailabilityError, assert_repo_availability,

@@ -29,13 +29,7 @@ pub mod util;
 pub mod validation;
 
 use api::proxy::XrpcProxyLayer;
-use axum::{
-    Json, Router,
-    extract::DefaultBodyLimit,
-    http::Method,
-    middleware,
-    routing::get,
-};
+use axum::{Json, Router, extract::DefaultBodyLimit, http::Method, middleware, routing::get};
 use http::StatusCode;
 use serde_json::json;
 use state::AppState;

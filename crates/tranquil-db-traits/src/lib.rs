@@ -1,5 +1,4 @@
 mod backlink;
-mod backup;
 mod blob;
 mod channel_verification;
 mod delegation;
@@ -15,10 +14,6 @@ mod sso;
 mod user;
 
 pub use backlink::{Backlink, BacklinkPath, BacklinkRepository};
-pub use backup::{
-    BackupForDeletion, BackupRepository, BackupRow, BackupStorageInfo, BlobExportInfo,
-    OldBackupInfo, UserBackupInfo,
-};
 pub use blob::{BlobForExport, BlobMetadata, BlobRepository, BlobWithTakedown, MissingBlobInfo};
 pub use channel_verification::ChannelVerificationStatus;
 pub use delegation::{

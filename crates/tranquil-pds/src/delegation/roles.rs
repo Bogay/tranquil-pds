@@ -81,4 +81,3 @@ pub async fn verify_can_control_accounts<'a>(
         _tag: PhantomData,
     })
 }
-

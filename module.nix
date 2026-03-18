@@ -37,7 +37,7 @@ in {
     dataDir = mkOption {
       type = types.str;
       default = "/var/lib/tranquil-pds";
-      description = "Working directory for tranquil-pds. Also expected to be used for data (blobs, backups)";
+      description = "Working directory for tranquil-pds. Also expected to be used for data (blobs)";
     };
 
     environmentFiles = mkOption {
@@ -116,14 +116,6 @@ in {
             };
           };
 
-          backup = {
-            path = mkOption {
-              type = types.path;
-              default = "/var/lib/tranquil-pds/backups";
-              description = "Directory for storing backups";
-            };
-          };
-
           email = {
             sendmail_path = mkOption {
               type = types.path;
@@ -189,7 +181,6 @@ in {
             [
               cfg.dataDir
               cfg.settings.storage.path
-              cfg.settings.backup.path
             ]
             (_: {
               d = {
@@ -242,7 +233,6 @@ in {
 
             ReadWritePaths = [
               cfg.settings.storage.path
-              cfg.settings.backup.path
             ];
           };
         };

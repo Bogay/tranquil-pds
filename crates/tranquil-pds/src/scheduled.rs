@@ -10,13 +10,13 @@ use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use tranquil_db_traits::{
-    BackupRepository, BlobRepository, BrokenGenesisCommit, RepoRepository, SequenceNumber,
-    SsoRepository, UserRepository,
+    BlobRepository, BrokenGenesisCommit, RepoRepository, SequenceNumber, SsoRepository,
+    UserRepository,
 };
 use tranquil_types::{AtUri, CidLink, Did};
 
 use crate::repo::PostgresBlockStore;
-use crate::storage::{BackupStorage, BlobStorage, backup_interval_secs, backup_retention_count};
+use crate::storage::BlobStorage;
 use crate::sync::car::encode_car_header;
 
 #[derive(Debug)]
@@ -571,194 +571,6 @@ async fn delete_account_data(
     Ok(())
 }
 
-pub async fn start_backup_tasks(
-    repo_repo: Arc<dyn RepoRepository>,
-    backup_repo: Arc<dyn BackupRepository>,
-    block_store: PostgresBlockStore,
-    backup_storage: Arc<dyn BackupStorage>,
-    shutdown: CancellationToken,
-) {
-    let backup_interval = Duration::from_secs(backup_interval_secs());
-
-    info!(
-        interval_secs = backup_interval.as_secs(),
-        retention_count = backup_retention_count(),
-        "Starting backup service"
-    );
-
-    let mut ticker = interval(backup_interval);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-    loop {
-        tokio::select! {
-            _ = shutdown.cancelled() => {
-                info!("Backup service shutting down");
-                break;
-            }
-            _ = ticker.tick() => {
-                if let Err(e) = process_scheduled_backups(
-                    repo_repo.as_ref(),
-                    backup_repo.as_ref(),
-                    &block_store,
-                    backup_storage.as_ref(),
-                ).await {
-                    error!("Error processing scheduled backups: {}", e);
-                }
-            }
-        }
-    }
-}
-
-struct BackupResult {
-    did: Did,
-    repo_rev: String,
-    size_bytes: i64,
-    block_count: i32,
-    user_id: uuid::Uuid,
-}
-
-enum BackupOutcome {
-    Success(BackupResult),
-    Skipped(Did, &'static str),
-    Failed(Did, String),
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn process_single_backup(
-    repo_repo: &dyn RepoRepository,
-    backup_repo: &dyn BackupRepository,
-    block_store: &PostgresBlockStore,
-    backup_storage: &dyn BackupStorage,
-    user_id: uuid::Uuid,
-    did: Did,
-    repo_root_cid: String,
-    repo_rev: Option<String>,
-) -> BackupOutcome {
-    let repo_rev = match repo_rev {
-        Some(rev) => rev,
-        None => return BackupOutcome::Skipped(did, "no repo_rev"),
-    };
-
-    let head_cid = match Cid::from_str(&repo_root_cid) {
-        Ok(c) => c,
-        Err(_) => return BackupOutcome::Skipped(did, "invalid repo_root_cid"),
-    };
-
-    let car_bytes = match generate_full_backup(repo_repo, block_store, user_id, &head_cid).await {
-        Ok(bytes) => bytes,
-        Err(e) => return BackupOutcome::Failed(did, format!("CAR generation: {}", e)),
-    };
-
-    let block_count = count_car_blocks(&car_bytes);
-    let size_bytes = i64::try_from(car_bytes.len()).unwrap_or(i64::MAX);
-
-    let storage_key = match backup_storage
-        .put_backup(did.as_str(), &repo_rev, &car_bytes)
-        .await
-    {
-        Ok(key) => key,
-        Err(e) => return BackupOutcome::Failed(did, format!("S3 upload: {}", e)),
-    };
-
-    if let Err(e) = backup_repo
-        .insert_backup(
-            user_id,
-            &storage_key,
-            &repo_root_cid,
-            &repo_rev,
-            block_count,
-            size_bytes,
-        )
-        .await
-    {
-        if let Err(rollback_err) = backup_storage.delete_backup(&storage_key).await {
-            error!(
-                did = %did,
-                storage_key = %storage_key,
-                error = %rollback_err,
-                "Failed to rollback orphaned backup from S3"
-            );
-        }
-        return BackupOutcome::Failed(did, format!("DB insert: {:?}", e));
-    }
-
-    BackupOutcome::Success(BackupResult {
-        did,
-        repo_rev,
-        size_bytes,
-        block_count,
-        user_id,
-    })
-}
-
-async fn process_scheduled_backups(
-    repo_repo: &dyn RepoRepository,
-    backup_repo: &dyn BackupRepository,
-    block_store: &PostgresBlockStore,
-    backup_storage: &dyn BackupStorage,
-) -> anyhow::Result<()> {
-    let interval_secs = i64::try_from(backup_interval_secs()).unwrap_or(i64::MAX);
-    let retention = backup_retention_count();
-
-    let users_needing_backup = backup_repo
-        .get_users_needing_backup(interval_secs, 50)
-        .await
-        .context("DB error fetching users for backup")?;
-
-    if users_needing_backup.is_empty() {
-        debug!("No accounts need backup");
-        return Ok(());
-    }
-
-    info!(
-        count = users_needing_backup.len(),
-        "Processing scheduled backups"
-    );
-
-    let results = futures::future::join_all(users_needing_backup.into_iter().map(|user| {
-        process_single_backup(
-            repo_repo,
-            backup_repo,
-            block_store,
-            backup_storage,
-            user.id,
-            user.did,
-            user.repo_root_cid.to_string(),
-            user.repo_rev,
-        )
-    }))
-    .await;
-
-    futures::future::join_all(results.into_iter().map(|outcome| async move {
-        match outcome {
-            BackupOutcome::Success(result) => {
-                info!(
-                    did = %result.did,
-                    rev = %result.repo_rev,
-                    size_bytes = result.size_bytes,
-                    block_count = result.block_count,
-                    "Created backup"
-                );
-                if let Err(e) =
-                    cleanup_old_backups(backup_repo, backup_storage, result.user_id, retention)
-                        .await
-                {
-                    warn!(did = %result.did, error = %e, "Failed to cleanup old backups");
-                }
-            }
-            BackupOutcome::Skipped(did, reason) => {
-                warn!(did = %did, reason = reason, "Skipped backup");
-            }
-            BackupOutcome::Failed(did, error) => {
-                warn!(did = %did, error = %error, "Failed backup");
-            }
-        }
-    }))
-    .await;
-
-    Ok(())
-}
-
 pub async fn generate_repo_car(
     block_store: &PostgresBlockStore,
     head_cid: &Cid,
@@ -771,7 +583,7 @@ pub async fn generate_repo_car(
         .filter_map(|b| match Cid::try_from(b.as_slice()) {
             Ok(cid) => Some(cid),
             Err(e) => {
-                tracing::warn!(error = %e, "skipping unparseable CID in backup generation");
+                tracing::warn!(error = %e, "skipping unparseable CID in CAR generation");
                 None
             }
         })
@@ -830,106 +642,4 @@ pub async fn generate_repo_car_from_user_blocks(
     let actual_head_cid = Cid::from_str(&repo_root_cid_str).context("Invalid repo_root_cid")?;
 
     generate_repo_car(block_store, &actual_head_cid).await
-}
-
-pub async fn generate_full_backup(
-    repo_repo: &dyn tranquil_db_traits::RepoRepository,
-    block_store: &PostgresBlockStore,
-    user_id: uuid::Uuid,
-    head_cid: &Cid,
-) -> anyhow::Result<Vec<u8>> {
-    generate_repo_car_from_user_blocks(repo_repo, block_store, user_id, head_cid).await
-}
-
-pub fn count_car_blocks(car_bytes: &[u8]) -> i32 {
-    let mut count: i32 = 0;
-    let mut pos: usize = 0;
-
-    if let Some((header_len, header_varint_len)) = read_varint(&car_bytes[pos..]) {
-        let Some(header_size) = usize::try_from(header_len).ok() else {
-            return 0;
-        };
-        let Some(next_pos) = header_varint_len
-            .checked_add(header_size)
-            .and_then(|skip| pos.checked_add(skip))
-        else {
-            return 0;
-        };
-        pos = next_pos;
-    } else {
-        return 0;
-    }
-
-    while pos < car_bytes.len() {
-        if let Some((block_len, varint_len)) = read_varint(&car_bytes[pos..]) {
-            let Some(block_size) = usize::try_from(block_len).ok() else {
-                break;
-            };
-            let Some(next_pos) = varint_len
-                .checked_add(block_size)
-                .and_then(|skip| pos.checked_add(skip))
-            else {
-                break;
-            };
-            pos = next_pos;
-            count = count.saturating_add(1);
-        } else {
-            break;
-        }
-    }
-
-    count
-}
-
-fn read_varint(data: &[u8]) -> Option<(u64, usize)> {
-    let mut value: u64 = 0;
-    let mut shift = 0;
-    let mut pos = 0;
-
-    while pos < data.len() && pos < 10 {
-        let byte = data[pos];
-        value |= ((byte & 0x7f) as u64) << shift;
-        pos += 1;
-        if byte & 0x80 == 0 {
-            return Some((value, pos));
-        }
-        shift += 7;
-    }
-
-    None
-}
-
-async fn cleanup_old_backups(
-    backup_repo: &dyn BackupRepository,
-    backup_storage: &dyn BackupStorage,
-    user_id: uuid::Uuid,
-    retention_count: u32,
-) -> anyhow::Result<()> {
-    let old_backups = backup_repo
-        .get_old_backups(user_id, i64::from(retention_count))
-        .await
-        .context("DB error fetching old backups")?;
-
-    let results = futures::future::join_all(old_backups.into_iter().map(|backup| async move {
-        match backup_storage.delete_backup(&backup.storage_key).await {
-            Ok(()) => backup_repo
-                .delete_backup(backup.id)
-                .await
-                .with_context(|| format!("DB delete failed for {}", backup.storage_key)),
-            Err(e) => {
-                warn!(
-                    storage_key = %backup.storage_key,
-                    error = %e,
-                    "Failed to delete old backup from storage, skipping DB cleanup to avoid orphan"
-                );
-                Ok(())
-            }
-        }
-    }))
-    .await;
-
-    results
-        .into_iter()
-        .find_map(|r| r.err())
-        .map_or(Ok(()), Err)
 }

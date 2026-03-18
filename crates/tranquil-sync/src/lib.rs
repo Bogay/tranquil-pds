@@ -29,10 +29,7 @@ pub fn sync_routes() -> axum::Router<AppState> {
         .route("/com.atproto.sync.getBlocks", get(get_blocks))
         .route("/com.atproto.sync.getRepo", get(get_repo))
         .route("/com.atproto.sync.getRecord", get(get_record))
-        .route(
-            "/com.atproto.sync.subscribeRepos",
-            get(subscribe_repos),
-        )
+        .route("/com.atproto.sync.subscribeRepos", get(subscribe_repos))
         .route("/com.atproto.sync.getHead", get(get_head))
         .route("/com.atproto.sync.getCheckout", get(get_checkout))
 }

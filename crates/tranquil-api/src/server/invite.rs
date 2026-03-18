@@ -1,8 +1,3 @@
-use tranquil_pds::api::ApiError;
-use tranquil_pds::api::error::DbResultExt;
-use tranquil_pds::auth::{Admin, Auth, NotTakendown};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::Did;
 use axum::{
     Json,
     extract::State,
@@ -11,6 +6,11 @@ use axum::{
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use tranquil_pds::api::ApiError;
+use tranquil_pds::api::error::DbResultExt;
+use tranquil_pds::auth::{Admin, Auth, NotTakendown};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::Did;
 
 const BASE32_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
 

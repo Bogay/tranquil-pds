@@ -110,7 +110,7 @@ apt install -y podman
 
 ```bash
 mkdir -p /etc/containers/systemd
-mkdir -p /srv/tranquil-pds/{postgres,blobs,backups,certs,acme,config}
+mkdir -p /srv/tranquil-pds/{postgres,blobs,certs,acme,config}
 ```
 
 ## Create a configuration file
@@ -254,7 +254,7 @@ rc-service podman start
 
 ```sh
 mkdir -p /srv/tranquil-pds/{data,config}
-mkdir -p /srv/tranquil-pds/data/{postgres,blobs,backups,certs,acme}
+mkdir -p /srv/tranquil-pds/data/{postgres,blobs,certs,acme}
 ```
 
 ## Clone the repo and build images

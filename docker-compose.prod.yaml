@@ -10,7 +10,6 @@ services:
     volumes:
       - ./config.toml:/etc/tranquil-pds/config.toml:ro
       - blob_data:/var/lib/tranquil/blobs
-      - backup_data:/var/lib/tranquil/backups
     depends_on:
       db:
         condition: service_healthy
@@ -95,6 +94,5 @@ services:
 volumes:
   postgres_data:
   blob_data:
-  backup_data:
   prometheus_data:
   acme_challenge:

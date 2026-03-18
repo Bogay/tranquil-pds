@@ -37,25 +37,6 @@ pub trait BlobStorage: Send + Sync {
     async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError>;
 }
 
-#[async_trait]
-pub trait BackupStorage: Send + Sync {
-    async fn put_backup(&self, did: &str, rev: &str, data: &[u8]) -> Result<String, StorageError>;
-    async fn get_backup(&self, storage_key: &str) -> Result<Bytes, StorageError>;
-    async fn delete_backup(&self, storage_key: &str) -> Result<(), StorageError>;
-}
-
-pub fn backup_retention_count() -> u32 {
-    tranquil_config::try_get()
-        .map(|c| c.backup.retention_count)
-        .unwrap_or(7)
-}
-
-pub fn backup_interval_secs() -> u64 {
-    tranquil_config::try_get()
-        .map(|c| c.backup.interval_secs)
-        .unwrap_or(86400)
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum CacheError {
     #[error("Cache connection error: {0}")]

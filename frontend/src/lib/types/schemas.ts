@@ -276,27 +276,6 @@ export const searchAccountsResponseSchema = z.object({
   accounts: z.array(accountInfoSchema),
 });
 
-export const backupInfoSchema = z.object({
-  id: z.string(),
-  repoRev: z.string(),
-  repoRootCid: cid,
-  blockCount: z.number(),
-  sizeBytes: z.number(),
-  createdAt: isoDate,
-});
-
-export const listBackupsResponseSchema = z.object({
-  backups: z.array(backupInfoSchema),
-  backupEnabled: z.boolean(),
-});
-
-export const createBackupResponseSchema = z.object({
-  id: z.string(),
-  repoRev: z.string(),
-  sizeBytes: z.number(),
-  blockCount: z.number(),
-});
-
 export type ValidatedSession = z.infer<typeof sessionSchema>;
 export type ValidatedServerDescription = z.infer<
   typeof serverDescriptionSchema
@@ -347,11 +326,4 @@ export type ValidatedLegacyLoginPreference = z.infer<
 export type ValidatedAccountInfo = z.infer<typeof accountInfoSchema>;
 export type ValidatedSearchAccountsResponse = z.infer<
   typeof searchAccountsResponseSchema
->;
-export type ValidatedBackupInfo = z.infer<typeof backupInfoSchema>;
-export type ValidatedListBackupsResponse = z.infer<
-  typeof listBackupsResponseSchema
->;
-export type ValidatedCreateBackupResponse = z.infer<
-  typeof createBackupResponseSchema
 >;

@@ -1,7 +1,3 @@
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::auth::{Admin, Auth};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle};
 use axum::{
     Json,
     extract::{Query, RawQuery, State},
@@ -10,6 +6,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::auth::{Admin, Auth};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::{Did, Handle};
 
 #[derive(Deserialize)]
 pub struct GetAccountInfoParams {
@@ -196,10 +196,11 @@ pub async fn get_account_infos(
     _auth: Auth<Admin>,
     RawQuery(raw_query): RawQuery,
 ) -> Result<Response, ApiError> {
-    let dids: Vec<String> = tranquil_pds::util::parse_repeated_query_param(raw_query.as_deref(), "dids")
-        .into_iter()
-        .filter(|d| !d.is_empty())
-        .collect();
+    let dids: Vec<String> =
+        tranquil_pds::util::parse_repeated_query_param(raw_query.as_deref(), "dids")
+            .into_iter()
+            .filter(|d| !d.is_empty())
+            .collect();
 
     if dids.is_empty() {
         return Err(ApiError::InvalidRequest("dids is required".into()));

@@ -1,10 +1,3 @@
-use tranquil_pds::auth::{Active, Auth};
-use tranquil_pds::delegation::DelegationActionType;
-use tranquil_pds::oauth::client::{build_client_metadata, delegation_oauth_urls};
-use tranquil_pds::rate_limit::{LoginLimit, OAuthRateLimited, TotpVerifyLimit};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::PlainPassword;
-use tranquil_pds::util::extract_client_ip;
 use axum::{
     Json,
     extract::{Query, State},
@@ -12,7 +5,14 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use serde::{Deserialize, Serialize};
+use tranquil_pds::auth::{Active, Auth};
+use tranquil_pds::delegation::DelegationActionType;
 use tranquil_pds::oauth::RequestData;
+use tranquil_pds::oauth::client::{build_client_metadata, delegation_oauth_urls};
+use tranquil_pds::rate_limit::{LoginLimit, OAuthRateLimited, TotpVerifyLimit};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::PlainPassword;
+use tranquil_pds::util::extract_client_ip;
 use tranquil_types::did_doc::{extract_handle, extract_pds_endpoint};
 use tranquil_types::{Did, RequestId};
 
@@ -534,7 +534,10 @@ pub async fn delegation_callback(
     let delegated_did = &auth_state.delegated_did;
     let controller_did = &auth_state.controller_did;
 
-    if let Err(_) = get_delegation_grant(&state, delegated_did, controller_did).await {
+    if get_delegation_grant(&state, delegated_did, controller_did)
+        .await
+        .is_err()
+    {
         tracing::warn!(
             "Delegation grant revoked during cross-PDS auth: {} -> {}",
             controller_did,

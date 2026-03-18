@@ -1,8 +1,3 @@
-use tranquil_pds::api::EmptyResponse;
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::auth::{Admin, Auth};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle, PlainPassword};
 use axum::{
     Json,
     extract::State,
@@ -10,6 +5,11 @@ use axum::{
 };
 use serde::Deserialize;
 use tracing::{error, warn};
+use tranquil_pds::api::EmptyResponse;
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::auth::{Admin, Auth};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::{Did, Handle, PlainPassword};
 
 #[derive(Deserialize)]
 pub struct UpdateAccountEmailInput {

@@ -1,20 +1,9 @@
 use super::validation::validate_record_with_status;
 use super::validation_mode::{ValidationMode, deserialize_validation_mode};
-use tranquil_pds::api::error::ApiError;
 use crate::repo::record::utils::{
     CommitParams, RecordOp, commit_and_log, extract_backlinks, extract_blob_cids,
     get_current_root_cid,
 };
-use tranquil_pds::auth::{
-    Active, Auth, AuthSource, RepoScopeAction, ScopeVerified, VerifyScope, require_not_migrated,
-    require_verified_or_delegated,
-};
-use tranquil_pds::cid_types::CommitCid;
-use tranquil_pds::delegation::DelegationActionType;
-use tranquil_pds::repo::tracking::TrackingBlockStore;
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
-use tranquil_pds::validation::ValidationStatus;
 use axum::{
     Json,
     extract::State,
@@ -28,6 +17,17 @@ use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::auth::{
+    Active, Auth, AuthSource, RepoScopeAction, ScopeVerified, VerifyScope, require_not_migrated,
+    require_verified_or_delegated,
+};
+use tranquil_pds::cid_types::CommitCid;
+use tranquil_pds::delegation::DelegationActionType;
+use tranquil_pds::repo::tracking::TrackingBlockStore;
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
+use tranquil_pds::validation::ValidationStatus;
 use uuid::Uuid;
 
 pub struct RepoWriteAuth {

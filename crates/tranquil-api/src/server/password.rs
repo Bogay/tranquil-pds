@@ -1,3 +1,12 @@
+use axum::{
+    Json,
+    extract::State,
+    response::{IntoResponse, Response},
+};
+use bcrypt::{DEFAULT_COST, hash};
+use chrono::{Duration, Utc};
+use serde::Deserialize;
+use tracing::{error, info, warn};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::api::{EmptyResponse, HasPasswordResponse, SuccessResponse};
 use tranquil_pds::auth::{
@@ -8,15 +17,6 @@ use tranquil_pds::rate_limit::{PasswordResetLimit, RateLimited, ResetPasswordLim
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::PlainPassword;
 use tranquil_pds::validation::validate_password;
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
-use bcrypt::{DEFAULT_COST, hash};
-use chrono::{Duration, Utc};
-use serde::Deserialize;
-use tracing::{error, info, warn};
 
 fn generate_reset_code() -> String {
     tranquil_pds::util::generate_token_code()

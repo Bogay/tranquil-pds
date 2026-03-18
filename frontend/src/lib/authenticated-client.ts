@@ -50,7 +50,6 @@ export interface AuthenticatedClient {
     Result<{ entries: DelegationAuditEntry[]; total: number }, ApiError>
   >;
 
-  exportBlobs(): Promise<Blob>;
 }
 
 export function createAuthenticatedClient(
@@ -76,8 +75,6 @@ export function createAuthenticatedClient(
       api.createDelegatedAccount(token, handle, email, controllerScopes),
     getDelegationAuditLog: (limit, offset) =>
       api.getDelegationAuditLog(token, limit, offset),
-
-    exportBlobs: () => api.exportBlobs(token),
   };
 }
 

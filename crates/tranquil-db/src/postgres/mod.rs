@@ -1,5 +1,4 @@
 mod backlink;
-mod backup;
 mod blob;
 mod delegation;
 mod event_notifier;
@@ -14,7 +13,6 @@ use sqlx::PgPool;
 use std::sync::Arc;
 
 pub use backlink::PostgresBacklinkRepository;
-pub use backup::PostgresBackupRepository;
 pub use blob::PostgresBlobRepository;
 pub use delegation::PostgresDelegationRepository;
 pub use event_notifier::PostgresRepoEventNotifier;
@@ -24,9 +22,8 @@ pub use repo::PostgresRepoRepository;
 pub use session::PostgresSessionRepository;
 pub use sso::PostgresSsoRepository;
 use tranquil_db_traits::{
-    BacklinkRepository, BackupRepository, BlobRepository, DelegationRepository, InfraRepository,
-    OAuthRepository, RepoEventNotifier, RepoRepository, SessionRepository, SsoRepository,
-    UserRepository,
+    BacklinkRepository, BlobRepository, DelegationRepository, InfraRepository, OAuthRepository,
+    RepoEventNotifier, RepoRepository, SessionRepository, SsoRepository, UserRepository,
 };
 pub use user::PostgresUserRepository;
 
@@ -39,7 +36,6 @@ pub struct PostgresRepositories {
     pub repo: Arc<dyn RepoRepository>,
     pub blob: Arc<dyn BlobRepository>,
     pub infra: Arc<dyn InfraRepository>,
-    pub backup: Arc<dyn BackupRepository>,
     pub backlink: Arc<dyn BacklinkRepository>,
     pub sso: Arc<dyn SsoRepository>,
     pub event_notifier: Arc<dyn RepoEventNotifier>,
@@ -56,7 +52,6 @@ impl PostgresRepositories {
             repo: Arc::new(PostgresRepoRepository::new(pool.clone())),
             blob: Arc::new(PostgresBlobRepository::new(pool.clone())),
             infra: Arc::new(PostgresInfraRepository::new(pool.clone())),
-            backup: Arc::new(PostgresBackupRepository::new(pool.clone())),
             backlink: Arc::new(PostgresBacklinkRepository::new(pool.clone())),
             sso: Arc::new(PostgresSsoRepository::new(pool.clone())),
             event_notifier: Arc::new(PostgresRepoEventNotifier::new(pool)),

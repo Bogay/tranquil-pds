@@ -134,26 +134,6 @@ async fn test_complete_user_journey_signup_to_deletion() {
         .expect("Edit post failed");
     assert_eq!(edit_res.status(), StatusCode::OK);
 
-    let backup_res = client
-        .post(format!("{}/xrpc/_backup.createBackup", base))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("Backup creation failed");
-    assert_eq!(backup_res.status(), StatusCode::OK);
-    let backup_body: Value = backup_res.json().await.unwrap();
-    let backup_id = backup_body["id"].as_str().unwrap();
-
-    let download_res = client
-        .get(format!("{}/xrpc/_backup.getBackup?id={}", base, backup_id))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("Backup download failed");
-    assert_eq!(download_res.status(), StatusCode::OK);
-    let backup_bytes = download_res.bytes().await.unwrap();
-    assert!(backup_bytes.len() > 100, "Backup should have content");
-
     let delete_res = client
         .post(format!("{}/xrpc/com.atproto.server.deleteSession", base))
         .bearer_auth(&jwt)
@@ -1188,89 +1168,6 @@ async fn test_backup_restore_workflow() {
         .await
         .unwrap();
     assert_eq!(profile_res.status(), StatusCode::OK);
-
-    let backup1_res = client
-        .post(format!("{}/xrpc/_backup.createBackup", base))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("Backup 1 failed");
-    assert_eq!(backup1_res.status(), StatusCode::OK);
-    let backup1: Value = backup1_res.json().await.unwrap();
-    let backup1_id = backup1["id"].as_str().unwrap();
-    let backup1_rev = backup1["repoRev"].as_str().unwrap();
-
-    create_post(&client, &did, &jwt, "Post 4 after first backup").await;
-    create_post(&client, &did, &jwt, "Post 5 after first backup").await;
-
-    let backup2_res = client
-        .post(format!("{}/xrpc/_backup.createBackup", base))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("Backup 2 failed");
-    assert_eq!(backup2_res.status(), StatusCode::OK);
-    let backup2: Value = backup2_res.json().await.unwrap();
-    let backup2_id = backup2["id"].as_str().unwrap();
-    let backup2_rev = backup2["repoRev"].as_str().unwrap();
-
-    assert_ne!(
-        backup1_rev, backup2_rev,
-        "Backups should have different revs"
-    );
-
-    let list_res = client
-        .get(format!("{}/xrpc/_backup.listBackups", base))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("List backups failed");
-    let list_body: Value = list_res.json().await.unwrap();
-    let backups = list_body["backups"].as_array().unwrap();
-    assert_eq!(backups.len(), 2, "Should have 2 backups");
-
-    let download1 = client
-        .get(format!("{}/xrpc/_backup.getBackup?id={}", base, backup1_id))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("Download backup 1 failed");
-    assert_eq!(download1.status(), StatusCode::OK);
-    let backup1_bytes = download1.bytes().await.unwrap();
-
-    let download2 = client
-        .get(format!("{}/xrpc/_backup.getBackup?id={}", base, backup2_id))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("Download backup 2 failed");
-    assert_eq!(download2.status(), StatusCode::OK);
-    let backup2_bytes = download2.bytes().await.unwrap();
-
-    assert!(
-        backup2_bytes.len() > backup1_bytes.len(),
-        "Second backup should be larger (more posts)"
-    );
-
-    let delete_old = client
-        .post(format!(
-            "{}/xrpc/_backup.deleteBackup?id={}",
-            base, backup1_id
-        ))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("Delete backup failed");
-    assert_eq!(delete_old.status(), StatusCode::OK);
-
-    let final_list = client
-        .get(format!("{}/xrpc/_backup.listBackups", base))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .unwrap();
-    let final_body: Value = final_list.json().await.unwrap();
-    assert_eq!(final_body["backups"].as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]

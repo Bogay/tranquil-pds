@@ -1,10 +1,10 @@
-use tranquil_pds::rate_limit::{HandleVerificationLimit, RateLimited};
-use tranquil_pds::types::{Did, Handle};
 use axum::{
     Json,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
+use tranquil_pds::rate_limit::{HandleVerificationLimit, RateLimited};
+use tranquil_pds::types::{Did, Handle};
 
 #[derive(Deserialize)]
 pub struct VerifyHandleOwnershipInput {

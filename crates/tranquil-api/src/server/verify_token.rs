@@ -1,15 +1,15 @@
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::comms::comms_repo;
-use tranquil_pds::types::Did;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::comms::comms_repo;
+use tranquil_pds::types::Did;
 
+use tranquil_db_traits::CommsChannel;
 use tranquil_pds::auth::verification_token::{
     VerificationPurpose, normalize_token_input, verify_token_signature,
 };
 use tranquil_pds::state::AppState;
-use tranquil_db_traits::CommsChannel;
 
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]

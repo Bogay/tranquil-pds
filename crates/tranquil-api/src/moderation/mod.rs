@@ -1,7 +1,3 @@
-use tranquil_pds::api::ApiError;
-use tranquil_pds::api::proxy_client::{is_ssrf_safe, proxy_client};
-use tranquil_pds::auth::{AnyUser, Auth};
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -11,6 +7,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::{error, info};
+use tranquil_pds::api::ApiError;
+use tranquil_pds::api::proxy_client::{is_ssrf_safe, proxy_client};
+use tranquil_pds::auth::{AnyUser, Auth};
+use tranquil_pds::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReportReasonType {

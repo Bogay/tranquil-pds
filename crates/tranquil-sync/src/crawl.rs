@@ -1,5 +1,3 @@
-use tranquil_pds::api::EmptyResponse;
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::{Query, State},
@@ -7,6 +5,8 @@ use axum::{
 };
 use serde::Deserialize;
 use tracing::info;
+use tranquil_pds::api::EmptyResponse;
+use tranquil_pds::state::AppState;
 
 #[derive(Deserialize)]
 pub struct NotifyOfUpdateParams {

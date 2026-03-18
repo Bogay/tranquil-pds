@@ -1,5 +1,4 @@
 use crate::circuit_breaker::CircuitBreaker;
-use tranquil_db_traits::SequencedEvent;
 use reqwest::Client;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,6 +7,7 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use tranquil_db_traits::RepoEventType;
+use tranquil_db_traits::SequencedEvent;
 
 const NOTIFY_THRESHOLD_SECS: u64 = 20 * 60;
 

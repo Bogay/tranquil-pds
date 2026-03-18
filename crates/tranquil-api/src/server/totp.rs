@@ -1,3 +1,10 @@
+use axum::{
+    Json,
+    extract::State,
+    response::{IntoResponse, Response},
+};
+use serde::{Deserialize, Serialize};
+use tracing::{error, info, warn};
 use tranquil_pds::api::EmptyResponse;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{
@@ -9,13 +16,6 @@ use tranquil_pds::auth::{
 use tranquil_pds::rate_limit::{TotpVerifyLimit, check_user_rate_limit_with_message};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::PlainPassword;
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
-use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
 
 const ENCRYPTION_VERSION: i32 = 1;
 

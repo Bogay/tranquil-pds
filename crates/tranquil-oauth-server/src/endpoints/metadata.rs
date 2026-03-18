@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 
 use crate::jwks::{JwkSet, create_jwk_set};
-use tranquil_pds::state::AppState;
 use axum::{Json, extract::State};
 use http::{HeaderName, header};
 use serde::{Deserialize, Serialize};
+use tranquil_pds::state::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProtectedResourceMetadata {
@@ -129,8 +129,8 @@ pub async fn oauth_authorization_server(
 }
 
 pub async fn oauth_jwks(State(_state): State<AppState>) -> Json<JwkSet> {
-    use tranquil_pds::config::AuthConfig;
     use crate::jwks::Jwk;
+    use tranquil_pds::config::AuthConfig;
     let config = AuthConfig::get();
     let server_key = Jwk {
         kty: "EC".to_string(),

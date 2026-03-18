@@ -1,7 +1,3 @@
-use tranquil_pds::api::EmptyResponse;
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::auth::{Active, Auth, require_legacy_session_mfa, require_reauth_window};
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -10,6 +6,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use tranquil_db_traits::WebauthnChallengeType;
+use tranquil_pds::api::EmptyResponse;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::auth::{Active, Auth, require_legacy_session_mfa, require_reauth_window};
+use tranquil_pds::state::AppState;
 use webauthn_rs::prelude::*;
 
 #[derive(Deserialize)]

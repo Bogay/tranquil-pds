@@ -11,13 +11,11 @@ import type {
 import {
   accountInfoSchema,
   appPasswordSchema,
-  createBackupResponseSchema,
   createdAppPasswordSchema,
   createRecordResponseSchema,
   didDocumentSchema,
   enableTotpResponseSchema,
   legacyLoginPreferenceSchema,
-  listBackupsResponseSchema,
   listPasskeysResponseSchema,
   listRecordsResponseSchema,
   listSessionsResponseSchema,
@@ -37,13 +35,11 @@ import {
   totpStatusSchema,
   type ValidatedAccountInfo,
   type ValidatedAppPassword,
-  type ValidatedCreateBackupResponse,
   type ValidatedCreatedAppPassword,
   type ValidatedCreateRecordResponse,
   type ValidatedDidDocument,
   type ValidatedEnableTotpResponse,
   type ValidatedLegacyLoginPreference,
-  type ValidatedListBackupsResponse,
   type ValidatedListPasskeysResponse,
   type ValidatedListRecordsResponse,
   type ValidatedListSessionsResponse,
@@ -439,24 +435,6 @@ export const validatedApi = {
     );
   },
 
-  listBackups(
-    token: AccessToken,
-  ): Promise<Result<ValidatedListBackupsResponse, ApiError | ValidationError>> {
-    return xrpcValidated("_backup.listBackups", listBackupsResponseSchema, {
-      token,
-    });
-  },
-
-  createBackup(
-    token: AccessToken,
-  ): Promise<
-    Result<ValidatedCreateBackupResponse, ApiError | ValidationError>
-  > {
-    return xrpcValidated("_backup.createBackup", createBackupResponseSchema, {
-      method: "POST",
-      token,
-    });
-  },
 };
 
 export { ValidationError };

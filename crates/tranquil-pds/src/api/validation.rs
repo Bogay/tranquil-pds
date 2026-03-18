@@ -317,9 +317,7 @@ pub fn resolve_handle_input(input: &str) -> Result<String, HandleValidationError
 
     if !input.contains('.') || matched_domain.is_some() {
         let handle_to_validate = match matched_domain {
-            Some(domain) => input
-                .strip_suffix(&format!(".{}", domain))
-                .unwrap_or(input),
+            Some(domain) => input.strip_suffix(&format!(".{}", domain)).unwrap_or(input),
             None => input,
         };
         let validated = validate_short_handle(handle_to_validate)?;

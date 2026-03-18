@@ -1,4 +1,3 @@
-use tranquil_pds::state::AppState;
 use axum::{
     body::Body,
     extract::State,
@@ -7,6 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tracing::error;
+use tranquil_pds::state::AppState;
 
 pub async fn get_logo(State(state): State<AppState>) -> Response {
     let logo_cid = match state.infra_repo.get_server_config("logo_cid").await {

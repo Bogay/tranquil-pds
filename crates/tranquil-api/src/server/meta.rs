@@ -1,8 +1,8 @@
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use serde_json::json;
 use tranquil_pds::BUILD_VERSION;
 use tranquil_pds::state::AppState;
 use tranquil_pds::util::{discord_app_id, discord_bot_username, telegram_bot_username};
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use serde_json::json;
 
 fn get_available_comms_channels() -> Vec<tranquil_db_traits::CommsChannel> {
     use tranquil_db_traits::CommsChannel;

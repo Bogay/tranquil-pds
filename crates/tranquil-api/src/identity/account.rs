@@ -1,10 +1,4 @@
 use super::did::verify_did_web;
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::auth::{ServiceTokenVerifier, extract_auth_token_from_header, is_service_token};
-use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle, PlainPassword};
-use tranquil_pds::validation::validate_password;
 use axum::{
     Json,
     extract::State,
@@ -17,6 +11,12 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::auth::{ServiceTokenVerifier, extract_auth_token_from_header, is_service_token};
+use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::{Did, Handle, PlainPassword};
+use tranquil_pds::validation::validate_password;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -335,14 +335,16 @@ pub async fn create_account(
                         .into_response();
                     }
                 };
-                let access_meta =
-                    match tranquil_pds::auth::create_access_token_with_metadata(&did, &secret_key_bytes) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            error!("Error creating access token: {:?}", e);
-                            return ApiError::InternalError(None).into_response();
-                        }
-                    };
+                let access_meta = match tranquil_pds::auth::create_access_token_with_metadata(
+                    &did,
+                    &secret_key_bytes,
+                ) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        error!("Error creating access token: {:?}", e);
+                        return ApiError::InternalError(None).into_response();
+                    }
+                };
                 let refresh_meta = match tranquil_pds::auth::create_refresh_token_with_metadata(
                     &did,
                     &secret_key_bytes,
@@ -646,8 +648,9 @@ pub async fn create_account(
                 verification_channel,
                 recipient,
             );
-            let formatted_token =
-                tranquil_pds::auth::verification_token::format_token_for_display(&verification_token);
+            let formatted_token = tranquil_pds::auth::verification_token::format_token_for_display(
+                &verification_token,
+            );
             if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
                 state.user_repo.as_ref(),
                 state.infra_repo.as_ref(),
@@ -666,9 +669,12 @@ pub async fn create_account(
             }
         }
     } else if let Some(ref user_email) = email {
-        let token =
-            tranquil_pds::auth::verification_token::generate_migration_token(&did_for_commit, user_email);
-        let formatted_token = tranquil_pds::auth::verification_token::format_token_for_display(&token);
+        let token = tranquil_pds::auth::verification_token::generate_migration_token(
+            &did_for_commit,
+            user_email,
+        );
+        let formatted_token =
+            tranquil_pds::auth::verification_token::format_token_for_display(&token);
         if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_migration_verification(
             state.user_repo.as_ref(),
             state.infra_repo.as_ref(),
@@ -683,14 +689,14 @@ pub async fn create_account(
         }
     }
 
-    let access_meta = match tranquil_pds::auth::create_access_token_with_metadata(&did, &secret_key_bytes)
-    {
-        Ok(m) => m,
-        Err(e) => {
-            error!("createAccount: Error creating access token: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let access_meta =
+        match tranquil_pds::auth::create_access_token_with_metadata(&did, &secret_key_bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                error!("createAccount: Error creating access token: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
     let refresh_meta =
         match tranquil_pds::auth::create_refresh_token_with_metadata(&did, &secret_key_bytes) {
             Ok(m) => m,

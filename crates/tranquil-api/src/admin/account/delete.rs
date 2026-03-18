@@ -1,8 +1,3 @@
-use tranquil_pds::api::EmptyResponse;
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::auth::{Admin, Auth};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::Did;
 use axum::{
     Json,
     extract::State,
@@ -10,6 +5,11 @@ use axum::{
 };
 use serde::Deserialize;
 use tracing::warn;
+use tranquil_pds::api::EmptyResponse;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::auth::{Admin, Auth};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::Did;
 
 #[derive(Deserialize)]
 pub struct DeleteAccountInput {

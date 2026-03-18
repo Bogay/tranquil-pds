@@ -1,6 +1,3 @@
-use tranquil_pds::api::SuccessResponse;
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::auth::NormalizedLoginIdentifier;
 use axum::{
     Json,
     extract::State,
@@ -17,11 +14,14 @@ use serde_json::json;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use tranquil_db_traits::WebauthnChallengeType;
+use tranquil_pds::api::SuccessResponse;
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::auth::NormalizedLoginIdentifier;
 use uuid::Uuid;
 
-use tranquil_pds::repo_ops::create_signed_commit;
 use tranquil_pds::auth::{ServiceTokenVerifier, generate_app_password, is_service_token};
 use tranquil_pds::rate_limit::{AccountCreationLimit, PasswordResetLimit, RateLimited};
+use tranquil_pds::repo_ops::create_signed_commit;
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{Did, Handle, PlainPassword};
 use tranquil_pds::validation::validate_password;
@@ -324,7 +324,8 @@ pub async fn create_passkey_account(
                     }
                 };
 
-                let plc_client = tranquil_pds::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
+                let plc_client =
+                    tranquil_pds::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
                 if let Err(e) = plc_client
                     .send_operation(&genesis_result.did, &genesis_result.signed_operation)
                     .await
@@ -465,12 +466,9 @@ pub async fn create_passkey_account(
     let user_id = create_result.user_id;
 
     if !is_byod_did_web {
-        if let Err(e) = tranquil_pds::repo_ops::sequence_identity_event(
-            &state,
-            &did_typed,
-            Some(&handle_typed),
-        )
-        .await
+        if let Err(e) =
+            tranquil_pds::repo_ops::sequence_identity_event(&state, &did_typed, Some(&handle_typed))
+                .await
         {
             warn!("Failed to sequence identity event for {}: {}", did, e);
         }

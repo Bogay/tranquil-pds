@@ -1,8 +1,3 @@
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::api::{EmptyResponse, TokenRequiredResponse, VerifiedResponse};
-use tranquil_pds::auth::{Auth, NotTakendown};
-use tranquil_pds::rate_limit::{EmailUpdateLimit, RateLimited, VerificationCheckLimit};
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -16,6 +11,11 @@ use std::time::Duration;
 use subtle::ConstantTimeEq;
 use tracing::{error, info, warn};
 use tranquil_db_traits::CommsChannel;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::api::{EmptyResponse, TokenRequiredResponse, VerifiedResponse};
+use tranquil_pds::auth::{Auth, NotTakendown};
+use tranquil_pds::rate_limit::{EmailUpdateLimit, RateLimited, VerificationCheckLimit};
+use tranquil_pds::state::AppState;
 
 const EMAIL_UPDATE_TTL: Duration = Duration::from_secs(30 * 60);
 
@@ -470,7 +470,9 @@ pub async fn authorize_email_update(
         }
     };
 
-    if token_data.purpose != tranquil_pds::auth::verification_token::VerificationPurpose::ChannelUpdate {
+    if token_data.purpose
+        != tranquil_pds::auth::verification_token::VerificationPurpose::ChannelUpdate
+    {
         warn!(
             "authorize_email_update: wrong purpose: {:?}",
             token_data.purpose

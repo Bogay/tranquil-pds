@@ -1,13 +1,4 @@
 use crate::identity::provision::{create_plc_did, init_genesis_repo};
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::auth::{Active, Auth};
-use tranquil_pds::delegation::{
-    DelegationActionType, SCOPE_PRESETS, ValidatedDelegationScope, verify_can_add_controllers,
-    verify_can_control_accounts,
-};
-use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle};
 use axum::{
     Json,
     extract::{Query, State},
@@ -17,6 +8,15 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::auth::{Active, Auth};
+use tranquil_pds::delegation::{
+    DelegationActionType, SCOPE_PRESETS, ValidatedDelegationScope, verify_can_add_controllers,
+    verify_can_control_accounts,
+};
+use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::{Did, Handle};
 
 pub async fn list_controllers(
     State(state): State<AppState>,
@@ -70,33 +70,32 @@ pub async fn add_controller(
         .await
         .ok_or(ApiError::ControllerNotFound)?;
 
-    if !resolved.is_local {
-        if let Some(ref pds_url) = resolved.pds_url {
-            if !pds_url.starts_with("https://") {
-                return Ok(
-                    ApiError::InvalidDelegation("Controller PDS must use HTTPS".into())
-                        .into_response(),
-                );
+    if !resolved.is_local
+        && let Some(ref pds_url) = resolved.pds_url
+    {
+        if !pds_url.starts_with("https://") {
+            return Ok(
+                ApiError::InvalidDelegation("Controller PDS must use HTTPS".into()).into_response(),
+            );
+        }
+        match state
+            .cross_pds_oauth
+            .check_remote_is_delegated(pds_url, input.controller_did.as_str())
+            .await
+        {
+            Some(true) => {
+                return Ok(ApiError::InvalidDelegation(
+                    "Cannot add a delegated account from another PDS as a controller".into(),
+                )
+                .into_response());
             }
-            match state
-                .cross_pds_oauth
-                .check_remote_is_delegated(pds_url, input.controller_did.as_str())
-                .await
-            {
-                Some(true) => {
-                    return Ok(ApiError::InvalidDelegation(
-                        "Cannot add a delegated account from another PDS as a controller".into(),
-                    )
-                    .into_response());
-                }
-                Some(false) => {}
-                None => {
-                    warn!(
-                        controller = %input.controller_did,
-                        pds = %pds_url,
-                        "Could not verify remote controller delegation status"
-                    );
-                }
+            Some(false) => {}
+            None => {
+                warn!(
+                    controller = %input.controller_did,
+                    pds = %pds_url,
+                    "Could not verify remote controller delegation status"
+                );
             }
         }
     }
@@ -106,12 +105,17 @@ pub async fn add_controller(
         Err(response) => return Ok(response),
     };
 
-    if resolved.is_local {
-        if state.delegation_repo.is_delegated_account(&input.controller_did).await.unwrap_or(false) {
-            return Ok(ApiError::InvalidDelegation(
-                "Cannot add a controlled account as a controller".into(),
-            ).into_response());
-        }
+    if resolved.is_local
+        && state
+            .delegation_repo
+            .is_delegated_account(&input.controller_did)
+            .await
+            .unwrap_or(false)
+    {
+        return Ok(ApiError::InvalidDelegation(
+            "Cannot add a controlled account as a controller".into(),
+        )
+        .into_response());
     }
 
     match state
@@ -511,7 +515,9 @@ pub async fn resolve_controller(
     let identifier = params.identifier.trim().trim_start_matches('@');
 
     let did: Did = if identifier.starts_with("did:") {
-        identifier.parse().map_err(|_| ApiError::ControllerNotFound)?
+        identifier
+            .parse()
+            .map_err(|_| ApiError::ControllerNotFound)?
     } else {
         let local_handle: Option<Handle> = identifier.parse().ok();
         let local_user = match local_handle {
@@ -534,4 +540,3 @@ pub async fn resolve_controller(
 
     Ok(Json(resolved).into_response())
 }
-

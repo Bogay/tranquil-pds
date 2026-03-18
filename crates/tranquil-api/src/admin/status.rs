@@ -1,7 +1,3 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::auth::{Admin, Auth};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::{CidLink, Did};
 use axum::{
     Json,
     extract::{Query, State},
@@ -11,6 +7,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::auth::{Admin, Auth};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::{CidLink, Did};
 
 #[derive(Deserialize)]
 pub struct GetSubjectStatusParams {

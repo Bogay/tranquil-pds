@@ -1,7 +1,3 @@
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::auth::{Admin, Auth};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle};
 use axum::{
     Json,
     extract::{Query, State},
@@ -9,6 +5,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::auth::{Admin, Auth};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::{Did, Handle};
 
 #[derive(Deserialize)]
 pub struct SearchAccountsParams {

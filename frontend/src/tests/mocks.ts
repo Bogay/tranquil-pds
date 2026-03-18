@@ -367,10 +367,6 @@ export function setupDefaultMocks(): void {
     "com.atproto.repo.listRecords",
     () => jsonResponse({ records: [] }),
   );
-  mockEndpoint(
-    "_backup.listBackups",
-    () => jsonResponse({ backups: [] }),
-  );
 }
 export function setupAuthenticatedUser(
   sessionOverrides?: Partial<Session>,

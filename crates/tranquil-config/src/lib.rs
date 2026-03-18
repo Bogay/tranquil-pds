@@ -109,9 +109,6 @@ pub struct TranquilConfig {
     pub storage: StorageConfig,
 
     #[config(nested)]
-    pub backup: BackupConfig,
-
-    #[config(nested)]
     pub cache: CacheConfig,
 
     #[config(nested)]
@@ -231,27 +228,6 @@ impl TranquilConfig {
                 errors.push(format!(
                     "storage.backend must be \"filesystem\" or \"s3\", got \"{other}\""
                 ));
-            }
-        }
-
-        // -- backup storage ---------------------------------------------------
-        if self.backup.enabled {
-            match self.backup.backend.as_str() {
-                "s3" => {
-                    if self.backup.s3_bucket.is_none() {
-                        errors.push(
-                            "backup.backend is \"s3\" but backup.s3_bucket \
-                             (BACKUP_S3_BUCKET) is not set"
-                                .to_string(),
-                        );
-                    }
-                }
-                "filesystem" => {}
-                other => {
-                    errors.push(format!(
-                        "backup.backend must be \"filesystem\" or \"s3\", got \"{other}\""
-                    ));
-                }
             }
         }
 
@@ -602,33 +578,6 @@ pub struct StorageConfig {
     /// Custom S3 endpoint URL (for MinIO, R2, etc.).
     #[config(env = "S3_ENDPOINT")]
     pub s3_endpoint: Option<String>,
-}
-
-#[derive(Debug, Config)]
-pub struct BackupConfig {
-    /// Enable automatic backups.
-    #[config(env = "BACKUP_ENABLED", default = true)]
-    pub enabled: bool,
-
-    /// Backup storage backend: `filesystem` or `s3`.
-    #[config(env = "BACKUP_STORAGE_BACKEND", default = "filesystem")]
-    pub backend: String,
-
-    /// Path on disk for the filesystem backup backend.
-    #[config(env = "BACKUP_STORAGE_PATH", default = "/var/lib/tranquil-pds/backups")]
-    pub path: String,
-
-    /// S3 bucket name for backups.
-    #[config(env = "BACKUP_S3_BUCKET")]
-    pub s3_bucket: Option<String>,
-
-    /// Number of backup revisions to keep per account.
-    #[config(env = "BACKUP_RETENTION_COUNT", default = 7)]
-    pub retention_count: u32,
-
-    /// Seconds between backup runs.
-    #[config(env = "BACKUP_INTERVAL_SECS", default = 86400)]
-    pub interval_secs: u64,
 }
 
 #[derive(Debug, Config)]

@@ -1,8 +1,8 @@
-use tranquil_pds::state::AppState;
-use tranquil_pds::sync::firehose::SequencedEvent;
 use std::sync::atomic::{AtomicI64, Ordering};
 use tracing::{debug, error, info, warn};
 use tranquil_db_traits::SequenceNumber;
+use tranquil_pds::state::AppState;
+use tranquil_pds::sync::firehose::SequencedEvent;
 
 static LAST_BROADCAST_SEQ: AtomicI64 = AtomicI64::new(0);
 

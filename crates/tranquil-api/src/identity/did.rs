@@ -1,12 +1,3 @@
-use tranquil_pds::api::{ApiError, DidResponse, EmptyResponse};
-use tranquil_pds::auth::{Auth, NotTakendown};
-use tranquil_pds::plc::signing_key_to_did_key;
-use tranquil_pds::rate_limit::{
-    HandleUpdateDailyLimit, HandleUpdateLimit, check_user_rate_limit_with_message,
-};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::Handle;
-use tranquil_pds::util::get_header_str;
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -19,6 +10,15 @@ use k256::elliptic_curve::sec1::ToEncodedPoint;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
+use tranquil_pds::api::{ApiError, DidResponse, EmptyResponse};
+use tranquil_pds::auth::{Auth, NotTakendown};
+use tranquil_pds::plc::signing_key_to_did_key;
+use tranquil_pds::rate_limit::{
+    HandleUpdateDailyLimit, HandleUpdateLimit, check_user_rate_limit_with_message,
+};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::Handle;
+use tranquil_pds::util::get_header_str;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -503,7 +503,8 @@ pub async fn verify_did_web(
         ))?;
     let pds_endpoint = format!("https://{}", hostname);
     let has_valid_service = services.iter().any(|s| {
-        s["type"] == tranquil_pds::plc::ServiceType::Pds.as_str() && s["serviceEndpoint"] == pds_endpoint
+        s["type"] == tranquil_pds::plc::ServiceType::Pds.as_str()
+            && s["serviceEndpoint"] == pds_endpoint
     });
     if !has_valid_service {
         return Err(DidWebVerifyError::PdsNotListed(pds_endpoint));
@@ -811,7 +812,8 @@ pub async fn update_plc_handle(
         Some(r) => r,
         None => return Ok(()),
     };
-    let key_bytes = tranquil_pds::config::decrypt_key(&user_row.key_bytes, user_row.encryption_version)?;
+    let key_bytes =
+        tranquil_pds::config::decrypt_key(&user_row.key_bytes, user_row.encryption_version)?;
     let signing_key = k256::ecdsa::SigningKey::from_slice(&key_bytes)?;
     let plc_client = state.plc_client();
     let last_op = plc_client.get_last_op(did).await?;

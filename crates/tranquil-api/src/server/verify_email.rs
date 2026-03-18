@@ -1,8 +1,8 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::types::Did;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::types::Did;
 
 use tranquil_pds::state::AppState;
 

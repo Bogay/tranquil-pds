@@ -72,8 +72,6 @@ pub enum ApiError {
     InvalidDelegation(String),
     DelegationNotFound,
     InviteCodeRequired,
-    BackupNotFound,
-    BackupsDisabled,
     RepoNotReady,
     DeviceNotFound,
     NoEmail,
@@ -124,7 +122,7 @@ impl ApiError {
             Self::UpstreamFailure | Self::UpstreamUnavailable(_) | Self::UpstreamErrorMsg(_) => {
                 StatusCode::BAD_GATEWAY
             }
-            Self::ServiceUnavailable(_) | Self::BackupsDisabled => StatusCode::SERVICE_UNAVAILABLE,
+            Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::UpstreamTimeout => StatusCode::GATEWAY_TIMEOUT,
             Self::UpstreamError { status, .. } => *status,
             Self::AuthenticationRequired
@@ -155,7 +153,6 @@ impl ApiError {
             | Self::DeviceNotFound
             | Self::ControllerNotFound
             | Self::DelegationNotFound
-            | Self::BackupNotFound
             | Self::InvalidRecoveryLink
             | Self::HandleNotFound
             | Self::SubjectNotFound
@@ -283,8 +280,6 @@ impl ApiError {
             Self::InvalidDelegation(_) => Cow::Borrowed("InvalidDelegation"),
             Self::DelegationNotFound => Cow::Borrowed("DelegationNotFound"),
             Self::InviteCodeRequired => Cow::Borrowed("InviteCodeRequired"),
-            Self::BackupNotFound => Cow::Borrowed("BackupNotFound"),
-            Self::BackupsDisabled => Cow::Borrowed("BackupsDisabled"),
             Self::RepoNotReady => Cow::Borrowed("RepoNotReady"),
             Self::MfaVerificationRequired => Cow::Borrowed("MfaVerificationRequired"),
             Self::RateLimitExceeded(_) => Cow::Borrowed("RateLimitExceeded"),
@@ -373,9 +368,7 @@ impl ApiError {
             Self::InviteCodeRequired => {
                 Some("An invite code is required to create an account".to_string())
             }
-            Self::BackupNotFound => Some("Backup not found".to_string()),
-            Self::BackupsDisabled => Some("Backup storage not configured".to_string()),
-            Self::RepoNotReady => Some("Repository not ready for backup".to_string()),
+            Self::RepoNotReady => Some("Repository not ready".to_string()),
             Self::PasskeyCounterAnomaly => Some(
                 "Authentication failed: security key counter anomaly detected. This may indicate a cloned key.".to_string(),
             ),

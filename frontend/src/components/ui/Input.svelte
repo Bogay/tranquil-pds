@@ -5,6 +5,7 @@
     label?: string
     hint?: string
     error?: string
+    value?: string
   }
 
   let {
@@ -12,6 +13,7 @@
     hint,
     error,
     id,
+    value = $bindable(''),
     ...rest
   }: Props = $props()
 
@@ -23,7 +25,7 @@
   {#if label}
     <label for={inputId}>{label}</label>
   {/if}
-  <input id={inputId} class:has-error={!!error} {...rest} />
+  <input id={inputId} class:has-error={!!error} bind:value {...rest} />
   {#if error}
     <span class="hint error">{error}</span>
   {:else if hint}

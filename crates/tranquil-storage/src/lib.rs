@@ -1,7 +1,4 @@
-pub use tranquil_infra::{
-    BackupStorage, BlobStorage, StorageError, StreamUploadResult, backup_interval_secs,
-    backup_retention_count,
-};
+pub use tranquil_infra::{BlobStorage, StorageError, StreamUploadResult};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -159,70 +156,6 @@ mod s3 {
                     Client::from_conf(s3_config)
                 },
             )
-    }
-
-    pub struct S3BackupStorage {
-        client: Client,
-        bucket: String,
-    }
-
-    impl S3BackupStorage {
-        pub async fn new() -> Option<Self> {
-            let bucket = tranquil_config::get().backup.s3_bucket.clone()?;
-            let client = create_s3_client().await;
-            Some(Self { client, bucket })
-        }
-    }
-
-    #[async_trait]
-    impl BackupStorage for S3BackupStorage {
-        async fn put_backup(
-            &self,
-            did: &str,
-            rev: &str,
-            data: &[u8],
-        ) -> Result<String, StorageError> {
-            let key = format!("{}/{}.car", did, rev);
-            self.client
-                .put_object()
-                .bucket(&self.bucket)
-                .key(&key)
-                .body(ByteStream::from(Bytes::copy_from_slice(data)))
-                .send()
-                .await
-                .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-            Ok(key)
-        }
-
-        async fn get_backup(&self, storage_key: &str) -> Result<Bytes, StorageError> {
-            let resp = self
-                .client
-                .get_object()
-                .bucket(&self.bucket)
-                .key(storage_key)
-                .send()
-                .await
-                .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-            resp.body
-                .collect()
-                .await
-                .map(|agg| agg.into_bytes())
-                .map_err(|e| StorageError::Backend(e.to_string()))
-        }
-
-        async fn delete_backup(&self, storage_key: &str) -> Result<(), StorageError> {
-            self.client
-                .delete_object()
-                .bucket(&self.bucket)
-                .key(storage_key)
-                .send()
-                .await
-                .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-            Ok(())
-        }
     }
 
     #[async_trait]
@@ -488,7 +421,7 @@ mod s3 {
 }
 
 #[cfg(feature = "s3")]
-pub use s3::{S3BackupStorage, S3BlobStorage};
+pub use s3::S3BlobStorage;
 
 pub struct FilesystemBlobStorage {
     base_path: PathBuf,
@@ -634,69 +567,6 @@ impl BlobStorage for FilesystemBlobStorage {
     }
 }
 
-pub struct FilesystemBackupStorage {
-    base_path: PathBuf,
-    tmp_path: PathBuf,
-}
-
-impl FilesystemBackupStorage {
-    pub async fn new(base_path: impl Into<PathBuf>) -> Result<Self, StorageError> {
-        let base_path = base_path.into();
-        let tmp_path = base_path.join(".tmp");
-        tokio::fs::create_dir_all(&base_path).await?;
-        tokio::fs::create_dir_all(&tmp_path).await?;
-        cleanup_orphaned_tmp_files(&tmp_path).await;
-        Ok(Self {
-            base_path,
-            tmp_path,
-        })
-    }
-
-    fn resolve_path(&self, key: &str) -> Result<PathBuf, StorageError> {
-        validate_key(key)?;
-        Ok(self.base_path.join(key))
-    }
-}
-
-#[async_trait]
-impl BackupStorage for FilesystemBackupStorage {
-    async fn put_backup(&self, did: &str, rev: &str, data: &[u8]) -> Result<String, StorageError> {
-        use tokio::io::AsyncWriteExt;
-
-        let key = format!("{}/{}.car", did, rev);
-        let final_path = self.resolve_path(&key)?;
-        ensure_parent_dir(&final_path).await?;
-
-        let tmp_file_name = uuid::Uuid::new_v4().to_string();
-        let tmp_path = self.tmp_path.join(&tmp_file_name);
-
-        let mut file = tokio::fs::File::create(&tmp_path).await?;
-        file.write_all(data).await?;
-        file.sync_all().await?;
-        drop(file);
-
-        rename_with_fallback(&tmp_path, &final_path).await?;
-        Ok(key)
-    }
-
-    async fn get_backup(&self, storage_key: &str) -> Result<Bytes, StorageError> {
-        let path = self.resolve_path(storage_key)?;
-        tokio::fs::read(&path)
-            .await
-            .map(Bytes::from)
-            .map_err(map_io_not_found(storage_key))
-    }
-
-    async fn delete_backup(&self, storage_key: &str) -> Result<(), StorageError> {
-        let path = self.resolve_path(storage_key)?;
-        tokio::fs::remove_file(&path).await.or_else(|e| {
-            (e.kind() == std::io::ErrorKind::NotFound)
-                .then_some(())
-                .ok_or(StorageError::Io(e))
-        })
-    }
-}
-
 pub async fn create_blob_storage() -> Arc<dyn BlobStorage> {
     let cfg = tranquil_config::get();
     let backend = &cfg.storage.backend;
@@ -727,60 +597,6 @@ pub async fn create_blob_storage() -> Arc<dyn BlobStorage> {
                     );
                 })
                 .pipe(Arc::new)
-        }
-    }
-}
-
-pub async fn create_backup_storage() -> Option<Arc<dyn BackupStorage>> {
-    let cfg = tranquil_config::get();
-
-    if !cfg.backup.enabled {
-        tracing::info!("Backup storage disabled via config");
-        return None;
-    }
-
-    let backend = &cfg.backup.backend;
-
-    match backend.as_str() {
-        #[cfg(feature = "s3")]
-        "s3" => S3BackupStorage::new().await.map_or_else(
-            || {
-                tracing::error!(
-                    "BACKUP_STORAGE_BACKEND=s3 but BACKUP_S3_BUCKET is not set. \
-                     Backups will be disabled."
-                );
-                None
-            },
-            |storage| {
-                tracing::info!("Initialized S3 backup storage");
-                Some(Arc::new(storage) as Arc<dyn BackupStorage>)
-            },
-        ),
-        #[cfg(not(feature = "s3"))]
-        "s3" => {
-            tracing::error!(
-                "BACKUP_STORAGE_BACKEND=s3 but binary was compiled without s3 feature. \
-                 Backups will be disabled."
-            );
-            None
-        }
-        _ => {
-            let path = cfg.backup.path.clone();
-            FilesystemBackupStorage::new(path).await.map_or_else(
-                |e| {
-                    tracing::error!(
-                        "Failed to initialize filesystem backup storage: {}. \
-                     Set BACKUP_STORAGE_PATH to a valid directory path. \
-                     Backups will be disabled.",
-                        e
-                    );
-                    None
-                },
-                |storage| {
-                    tracing::info!("Initialized filesystem backup storage");
-                    Some(Arc::new(storage) as Arc<dyn BackupStorage>)
-                },
-            )
         }
     }
 }

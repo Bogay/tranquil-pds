@@ -210,6 +210,27 @@ pub fn json_to_ipld(value: &JsonValue) -> Ipld {
     }
 }
 
+pub(crate) fn gen_invite_random_token() -> String {
+    let mut rng = rand::thread_rng();
+    let chars: Vec<char> = BASE32_ALPHABET.chars().collect();
+    let gen_segment = |rng: &mut rand::rngs::ThreadRng, len: usize| -> String {
+        (0..len)
+            .map(|_| chars[rng.gen_range(0..chars.len())])
+            .collect()
+    };
+    format!("{}-{}", gen_segment(&mut rng, 5), gen_segment(&mut rng, 5))
+}
+
+pub fn gen_invite_code() -> String {
+    let hostname = &tranquil_config::get().server.hostname;
+    let hostname_prefix = hostname.replace('.', "-");
+    format!("{}-{}", hostname_prefix, gen_invite_random_token())
+}
+
+pub fn is_self_hosted_did_web_enabled() -> bool {
+    tranquil_config::get().server.enable_pds_hosted_did_web
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,25 +568,4 @@ mod tests {
             "https://example.com/oauth/token"
         );
     }
-}
-
-pub(crate) fn gen_invite_random_token() -> String {
-    let mut rng = rand::thread_rng();
-    let chars: Vec<char> = BASE32_ALPHABET.chars().collect();
-    let gen_segment = |rng: &mut rand::rngs::ThreadRng, len: usize| -> String {
-        (0..len)
-            .map(|_| chars[rng.gen_range(0..chars.len())])
-            .collect()
-    };
-    format!("{}-{}", gen_segment(&mut rng, 5), gen_segment(&mut rng, 5))
-}
-
-pub fn gen_invite_code() -> String {
-    let hostname = &tranquil_config::get().server.hostname;
-    let hostname_prefix = hostname.replace('.', "-");
-    format!("{}-{}", hostname_prefix, gen_invite_random_token())
-}
-
-pub fn is_self_hosted_did_web_enabled() -> bool {
-    tranquil_config::get().server.enable_pds_hosted_did_web
 }

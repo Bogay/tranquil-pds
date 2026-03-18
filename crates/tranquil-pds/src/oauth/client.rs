@@ -93,19 +93,18 @@ impl CrossPdsOAuthClient {
         state_key: &str,
     ) -> Result<CrossPdsAuthState, CrossPdsError> {
         let cache_key = format!("cross_pds_state:{}", state_key);
-        let encrypted_bytes = self
-            .cache
-            .get_bytes(&cache_key)
-            .await
-            .ok_or_else(|| CrossPdsError::TokenExchangeFailed("auth state expired or not found".into()))?;
+        let encrypted_bytes = self.cache.get_bytes(&cache_key).await.ok_or_else(|| {
+            CrossPdsError::TokenExchangeFailed("auth state expired or not found".into())
+        })?;
         let _ = self.cache.delete(&cache_key).await;
-        let decrypted = crate::config::decrypt_key(
-            &encrypted_bytes,
-            Some(crate::config::ENCRYPTION_VERSION),
-        )
-        .map_err(|e| CrossPdsError::TokenExchangeFailed(format!("decrypt auth state: {}", e)))?;
-        serde_json::from_slice(&decrypted)
-            .map_err(|e| CrossPdsError::TokenExchangeFailed(format!("deserialize auth state: {}", e)))
+        let decrypted =
+            crate::config::decrypt_key(&encrypted_bytes, Some(crate::config::ENCRYPTION_VERSION))
+                .map_err(|e| {
+                CrossPdsError::TokenExchangeFailed(format!("decrypt auth state: {}", e))
+            })?;
+        serde_json::from_slice(&decrypted).map_err(|e| {
+            CrossPdsError::TokenExchangeFailed(format!("deserialize auth state: {}", e))
+        })
     }
 
     pub async fn check_remote_is_delegated(&self, pds_url: &str, did: &str) -> Option<bool> {
@@ -142,19 +141,34 @@ impl CrossPdsOAuthClient {
                 .map_err(|e| format!("{:?}", e))
         };
 
-        let resp = self.http.post(url).header("DPoP", &make_proof(None)?).form(params)
-            .send().await.map_err(|e| e.to_string())?;
+        let resp = self
+            .http
+            .post(url)
+            .header("DPoP", &make_proof(None)?)
+            .form(params)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
 
-        let nonce = resp.headers().get("dpop-nonce")
-            .and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+        let nonce = resp
+            .headers()
+            .get("dpop-nonce")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
         let needs_retry = matches!(
             resp.status(),
             reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::UNAUTHORIZED
         );
 
         if needs_retry && nonce.is_some() {
-            return self.http.post(url).header("DPoP", &make_proof(nonce.as_deref())?)
-                .form(params).send().await.map_err(|e| e.to_string());
+            return self
+                .http
+                .post(url)
+                .header("DPoP", &make_proof(nonce.as_deref())?)
+                .form(params)
+                .send()
+                .await
+                .map_err(|e| e.to_string());
         }
         Ok(resp)
     }

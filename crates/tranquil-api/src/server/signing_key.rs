@@ -1,5 +1,3 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -10,6 +8,8 @@ use chrono::{Duration, Utc};
 use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::state::AppState;
 
 const SECP256K1_MULTICODEC_PREFIX: [u8; 2] = [0xe7, 0x01];
 

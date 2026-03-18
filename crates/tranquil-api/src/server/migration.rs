@@ -1,7 +1,3 @@
-use tranquil_pds::api::ApiError;
-use tranquil_pds::api::error::DbResultExt;
-use tranquil_pds::auth::{Active, Auth};
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -10,6 +6,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tranquil_pds::api::ApiError;
+use tranquil_pds::api::error::DbResultExt;
+use tranquil_pds::auth::{Active, Auth};
+use tranquil_pds::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -209,11 +209,13 @@ async fn build_did_document(state: &AppState, did: &tranquil_pds::types::Did) ->
         .flatten();
 
     let public_key_multibase = match key_info {
-        Some(info) => match tranquil_pds::config::decrypt_key(&info.key_bytes, info.encryption_version) {
-            Ok(key_bytes) => crate::identity::did::get_public_key_multibase(&key_bytes)
-                .unwrap_or_else(|_| "error".to_string()),
-            Err(_) => "error".to_string(),
-        },
+        Some(info) => {
+            match tranquil_pds::config::decrypt_key(&info.key_bytes, info.encryption_version) {
+                Ok(key_bytes) => crate::identity::did::get_public_key_multibase(&key_bytes)
+                    .unwrap_or_else(|_| "error".to_string()),
+                Err(_) => "error".to_string(),
+            }
+        }
         None => "error".to_string(),
     };
 

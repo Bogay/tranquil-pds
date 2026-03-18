@@ -122,7 +122,6 @@ pkgs.testers.nixosTest {
 
     with subtest("data directories exist"):
         server.succeed("test -d /var/lib/tranquil-pds/blobs")
-        server.succeed("test -d /var/lib/tranquil-pds/backups")
 
     with subtest("postgres database created"):
         server.succeed("sudo -u tranquil-pds psql -d tranquil-pds -c 'SELECT 1'")

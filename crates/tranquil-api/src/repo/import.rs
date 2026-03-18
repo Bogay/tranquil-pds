@@ -1,11 +1,3 @@
-use tranquil_pds::api::EmptyResponse;
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::repo_ops::create_signed_commit;
-use tranquil_pds::auth::{Auth, NotTakendown};
-use tranquil_pds::state::AppState;
-use tranquil_pds::sync::import::{ImportError, apply_import, parse_car};
-use tranquil_pds::sync::verify::CarVerifier;
-use tranquil_pds::types::Did;
 use axum::{
     body::Bytes,
     extract::State,
@@ -16,6 +8,14 @@ use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
+use tranquil_pds::api::EmptyResponse;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::auth::{Auth, NotTakendown};
+use tranquil_pds::repo_ops::create_signed_commit;
+use tranquil_pds::state::AppState;
+use tranquil_pds::sync::import::{ImportError, apply_import, parse_car};
+use tranquil_pds::sync::verify::CarVerifier;
+use tranquil_pds::types::Did;
 use tranquil_types::{AtUri, CidLink};
 
 pub async fn import_repo(
@@ -266,9 +266,9 @@ pub async fn import_repo(
             let key_bytes =
                 tranquil_pds::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
                     .map_err(|e| {
-                        error!("Failed to decrypt signing key: {}", e);
-                        ApiError::InternalError(None)
-                    })?;
+                    error!("Failed to decrypt signing key: {}", e);
+                    ApiError::InternalError(None)
+                })?;
             let signing_key = SigningKey::from_slice(&key_bytes).map_err(|e| {
                 error!("Invalid signing key: {:?}", e);
                 ApiError::InternalError(None)

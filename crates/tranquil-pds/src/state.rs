@@ -9,8 +9,7 @@ use crate::rate_limit::RateLimiters;
 use crate::repo::PostgresBlockStore;
 use crate::repo_write_lock::RepoWriteLocks;
 use crate::sso::{SsoConfig, SsoManager};
-use crate::storage::{BackupStorage, BlobStorage, create_backup_storage, create_blob_storage};
-use tranquil_db_traits::SequencedEvent;
+use crate::storage::{BlobStorage, create_blob_storage};
 use sqlx::PgPool;
 use std::error::Error;
 use std::sync::Arc;
@@ -18,10 +17,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tranquil_db::{
-    BacklinkRepository, BackupRepository, BlobRepository, DelegationRepository, InfraRepository,
-    OAuthRepository, PostgresRepositories, RepoEventNotifier, RepoRepository, SessionRepository,
-    SsoRepository, UserRepository,
+    BacklinkRepository, BlobRepository, DelegationRepository, InfraRepository, OAuthRepository,
+    PostgresRepositories, RepoEventNotifier, RepoRepository, SessionRepository, SsoRepository,
+    UserRepository,
 };
+use tranquil_db_traits::SequencedEvent;
 
 static RATE_LIMITING_DISABLED: AtomicBool = AtomicBool::new(false);
 
@@ -43,12 +43,10 @@ pub struct AppState {
     pub repo_repo: Arc<dyn RepoRepository>,
     pub blob_repo: Arc<dyn BlobRepository>,
     pub infra_repo: Arc<dyn InfraRepository>,
-    pub backup_repo: Arc<dyn BackupRepository>,
     pub backlink_repo: Arc<dyn BacklinkRepository>,
     pub event_notifier: Arc<dyn RepoEventNotifier>,
     pub block_store: PostgresBlockStore,
     pub blob_store: Arc<dyn BlobStorage>,
-    pub backup_storage: Option<Arc<dyn BackupStorage>>,
     pub firehose_tx: broadcast::Sender<SequencedEvent>,
     pub rate_limiters: Arc<RateLimiters>,
     pub repo_write_locks: Arc<RepoWriteLocks>,
@@ -269,7 +267,6 @@ impl AppState {
         let repos = Arc::new(PostgresRepositories::new(db.clone()));
         let block_store = PostgresBlockStore::new(db);
         let blob_store = create_blob_storage().await;
-        let backup_storage = create_backup_storage().await;
 
         let firehose_buffer_size = tranquil_config::get().firehose.buffer_size;
 
@@ -295,14 +292,12 @@ impl AppState {
             repo_repo: repos.repo.clone(),
             blob_repo: repos.blob.clone(),
             infra_repo: repos.infra.clone(),
-            backup_repo: repos.backup.clone(),
             backlink_repo: repos.backlink.clone(),
             event_notifier: repos.event_notifier.clone(),
             sso_repo: repos.sso.clone(),
             repos,
             block_store,
             blob_store,
-            backup_storage,
             firehose_tx,
             rate_limiters,
             repo_write_locks,

@@ -1,9 +1,3 @@
-use tranquil_pds::api::error::DbResultExt;
-use tranquil_pds::api::{ApiError, EmptyResponse};
-use tranquil_pds::auth::{Auth, Permissive};
-use tranquil_pds::circuit_breaker::with_circuit_breaker;
-use tranquil_pds::plc::{signing_key_to_did_key, validate_plc_operation};
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -13,6 +7,12 @@ use k256::ecdsa::SigningKey;
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{error, info, warn};
+use tranquil_pds::api::error::DbResultExt;
+use tranquil_pds::api::{ApiError, EmptyResponse};
+use tranquil_pds::auth::{Auth, Permissive};
+use tranquil_pds::circuit_breaker::with_circuit_breaker;
+use tranquil_pds::plc::{signing_key_to_did_key, validate_plc_operation};
+use tranquil_pds::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct SubmitPlcOperationInput {
@@ -57,11 +57,13 @@ pub async fn submit_plc_operation(
         .log_db_err("fetching user key")?
         .ok_or_else(|| ApiError::InternalError(Some("User signing key not found".into())))?;
 
-    let key_bytes = tranquil_pds::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
-        .map_err(|e| {
-            error!("Failed to decrypt user key: {}", e);
-            ApiError::InternalError(None)
-        })?;
+    let key_bytes =
+        tranquil_pds::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version).map_err(
+            |e| {
+                error!("Failed to decrypt user key: {}", e);
+                ApiError::InternalError(None)
+            },
+        )?;
 
     let signing_key = SigningKey::from_slice(&key_bytes).map_err(|e| {
         error!("Failed to create signing key: {:?}", e);

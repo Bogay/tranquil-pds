@@ -13,10 +13,10 @@ use tranquil_db_traits::OAuthRepository;
 pub mod account_verified;
 pub mod email_token;
 pub mod extractor;
-pub mod reauth;
 pub mod legacy_2fa;
 pub mod login_identifier;
 pub mod mfa_verified;
+pub mod reauth;
 pub mod scope_check;
 pub mod scope_verified;
 pub mod service;
@@ -206,7 +206,9 @@ impl AuthenticatedUser {
             return ScopePermissions::from_scope_string(Some(scope));
         }
         if !self.is_oauth() {
-            return ScopePermissions::from_scope_string(Some("transition:generic transition:chat.bsky"));
+            return ScopePermissions::from_scope_string(Some(
+                "transition:generic transition:chat.bsky",
+            ));
         }
         ScopePermissions::from_scope_string(self.scope.as_deref())
     }

@@ -2315,11 +2315,6 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query!("DELETE FROM account_backups WHERE user_id = $1", user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
-
         sqlx::query!(
             "DELETE FROM account_deletion_requests WHERE did = $1",
             did.as_str()

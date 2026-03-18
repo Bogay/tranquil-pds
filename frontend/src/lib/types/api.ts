@@ -495,31 +495,6 @@ export interface VerifyTokenResponse {
   channel: VerificationChannel;
 }
 
-export interface BackupInfo {
-  id: string;
-  repoRev: string;
-  repoRootCid: Cid;
-  blockCount: number;
-  sizeBytes: number;
-  createdAt: ISODateString;
-}
-
-export interface ListBackupsResponse {
-  backups: BackupInfo[];
-  backupEnabled: boolean;
-}
-
-export interface CreateBackupResponse {
-  id: string;
-  repoRev: string;
-  sizeBytes: number;
-  blockCount: number;
-}
-
-export interface SetBackupEnabledResponse {
-  enabled: boolean;
-}
-
 export interface EmailUpdateResponse {
   tokenRequired: boolean;
 }

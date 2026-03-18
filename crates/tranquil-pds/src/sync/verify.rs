@@ -130,7 +130,10 @@ impl CarVerifier {
             .ok_or(VerifyError::NoSigningKey)
     }
 
-    pub(crate) async fn resolve_did_document(&self, did: &Did) -> Result<DidDocument<'static>, VerifyError> {
+    pub(crate) async fn resolve_did_document(
+        &self,
+        did: &Did,
+    ) -> Result<DidDocument<'static>, VerifyError> {
         let did_str = did.as_str();
         if did_str.starts_with("did:plc:") {
             self.resolve_plc_did(did_str).await

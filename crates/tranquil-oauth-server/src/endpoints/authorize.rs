@@ -1,16 +1,3 @@
-use tranquil_pds::auth::{BareLoginIdentifier, NormalizedLoginIdentifier};
-use tranquil_pds::comms::comms_repo::enqueue_2fa_code;
-use tranquil_pds::oauth::{
-    AuthFlow, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, Prompt, SessionId,
-    db::should_show_consent, scopes::expand_include_scopes,
-};
-use tranquil_pds::rate_limit::{
-    OAuthAuthorizeLimit, OAuthRateLimited, OAuthRegisterCompleteLimit, TotpVerifyLimit,
-    check_user_rate_limit,
-};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle, PlainPassword};
-use tranquil_pds::util::extract_client_ip;
 use axum::{
     Json,
     extract::{Query, State},
@@ -24,6 +11,19 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tranquil_db_traits::{ScopePreference, WebauthnChallengeType};
+use tranquil_pds::auth::{BareLoginIdentifier, NormalizedLoginIdentifier};
+use tranquil_pds::comms::comms_repo::enqueue_2fa_code;
+use tranquil_pds::oauth::{
+    AuthFlow, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, Prompt, SessionId,
+    db::should_show_consent, scopes::expand_include_scopes,
+};
+use tranquil_pds::rate_limit::{
+    OAuthAuthorizeLimit, OAuthRateLimited, OAuthRegisterCompleteLimit, TotpVerifyLimit,
+    check_user_rate_limit,
+};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::{Did, Handle, PlainPassword};
+use tranquil_pds::util::extract_client_ip;
 use tranquil_types::{AuthorizationCode, ClientId, DeviceId as DeviceIdType, RequestId};
 use urlencoding::encode as url_encode;
 
@@ -95,7 +95,9 @@ fn extract_device_cookie(headers: &HeaderMap) -> Option<tranquil_types::DeviceId
             cookie_str.split(';').map(|c| c.trim()).find_map(|cookie| {
                 cookie
                     .strip_prefix(&format!("{}=", DEVICE_COOKIE_NAME))
-                    .and_then(|value| tranquil_pds::config::AuthConfig::get().verify_device_cookie(value))
+                    .and_then(|value| {
+                        tranquil_pds::config::AuthConfig::get().verify_device_cookie(value)
+                    })
                     .map(tranquil_types::DeviceId::new)
             })
         })
@@ -109,7 +111,8 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
 }
 
 fn make_device_cookie(device_id: &tranquil_types::DeviceId) -> String {
-    let signed_value = tranquil_pds::config::AuthConfig::get().sign_device_cookie(device_id.as_str());
+    let signed_value =
+        tranquil_pds::config::AuthConfig::get().sign_device_cookie(device_id.as_str());
     format!(
         "{}={}; Path=/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=31536000",
         DEVICE_COOKIE_NAME, signed_value
@@ -665,8 +668,9 @@ pub async fn authorize_post(
 
         if device_is_trusted {
             if let Some(ref dev_id) = device_cookie {
-                let _ = tranquil_api::server::extend_device_trust(state.oauth_repo.as_ref(), dev_id)
-                    .await;
+                let _ =
+                    tranquil_api::server::extend_device_trust(state.oauth_repo.as_ref(), dev_id)
+                        .await;
             }
         } else {
             if state
@@ -1413,7 +1417,10 @@ pub async fn consent_get(
     };
 
     let effective_scope_str = if let Some(ref grant) = delegation_grant {
-        tranquil_pds::delegation::intersect_scopes(requested_scope_str, grant.granted_scopes.as_str())
+        tranquil_pds::delegation::intersect_scopes(
+            requested_scope_str,
+            grant.granted_scopes.as_str(),
+        )
     } else {
         requested_scope_str.to_string()
     };
@@ -1622,7 +1629,10 @@ pub async fn consent_post(
     };
 
     let effective_scope_str = if let Some(ref grant) = delegation_grant {
-        tranquil_pds::delegation::intersect_scopes(original_scope_str, grant.granted_scopes.as_str())
+        tranquil_pds::delegation::intersect_scopes(
+            original_scope_str,
+            grant.granted_scopes.as_str(),
+        )
     } else {
         original_scope_str.to_string()
     };
@@ -2011,7 +2021,8 @@ pub async fn authorize_2fa_post(
             .oauth_repo
             .upsert_account_device(&did, &trust_device_id)
             .await;
-        let _ = tranquil_api::server::trust_device(state.oauth_repo.as_ref(), &trust_device_id).await;
+        let _ =
+            tranquil_api::server::trust_device(state.oauth_repo.as_ref(), &trust_device_id).await;
     }
     let requested_scope_str = request_data
         .parameters
@@ -3132,8 +3143,9 @@ pub async fn authorize_passkey_finish(
 
         if device_is_trusted {
             if let Some(ref dev_id) = device_cookie {
-                let _ = tranquil_api::server::extend_device_trust(state.oauth_repo.as_ref(), dev_id)
-                    .await;
+                let _ =
+                    tranquil_api::server::extend_device_trust(state.oauth_repo.as_ref(), dev_id)
+                        .await;
             }
         } else {
             let user = match state.user_repo.get_2fa_status_by_did(&did).await {

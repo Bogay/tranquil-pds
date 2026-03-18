@@ -31,7 +31,6 @@
           selectedDomain = info.availableUserDomains[0]
         }
       } catch {}
-      loadBackups()
     }
     init()
     return () => stopEmailPolling()
@@ -167,7 +166,6 @@
   }
 
   let exportLoading = $state(false)
-  let exportBlobsLoading = $state(false)
 
   async function handleExportRepo() {
     exportLoading = true
@@ -188,136 +186,6 @@
     } finally {
       exportLoading = false
     }
-  }
-
-  async function handleExportBlobs() {
-    exportBlobsLoading = true
-    try {
-      const blob = await api.exportBlobs(session.accessJwt)
-      if (blob.size === 0) {
-        toast.success($_('settings.messages.noBlobsToExport'))
-        return
-      }
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${session.handle}-blobs.zip`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      toast.success($_('settings.messages.blobsExported'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : $_('settings.messages.exportFailed'))
-    } finally {
-      exportBlobsLoading = false
-    }
-  }
-
-  interface BackupInfo {
-    id: string
-    repoRev: string
-    sizeBytes: number
-    createdAt: string
-  }
-  let backups = $state<BackupInfo[]>([])
-  let backupEnabled = $state(true)
-  let backupsLoading = $state(false)
-  let createBackupLoading = $state(false)
-  let restoreFile = $state<File | null>(null)
-  let restoreLoading = $state(false)
-
-  async function loadBackups() {
-    backupsLoading = true
-    try {
-      const result = await api.listBackups(session.accessJwt)
-      backups = result.backups
-      backupEnabled = result.backupEnabled
-    } catch {}
-    backupsLoading = false
-  }
-
-  async function handleCreateBackup() {
-    createBackupLoading = true
-    try {
-      await api.createBackup(session.accessJwt)
-      await loadBackups()
-      toast.success($_('settings.backups.created'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.createFailed'))
-    } finally {
-      createBackupLoading = false
-    }
-  }
-
-  async function handleDownloadBackup(id: string, rev: string) {
-    try {
-      const blob = await api.getBackup(session.accessJwt, id)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${session.handle}-${rev}.car`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.downloadFailed'))
-    }
-  }
-
-  function handleRestoreFileChange(e: Event) {
-    const input = e.target as HTMLInputElement
-    if (input.files && input.files[0]) {
-      restoreFile = input.files[0]
-    }
-  }
-
-  async function handleRestore() {
-    if (!restoreFile) return
-    restoreLoading = true
-    try {
-      const buffer = await restoreFile.arrayBuffer()
-      const car = new Uint8Array(buffer)
-      await api.importRepo(session.accessJwt, car)
-      toast.success($_('settings.backups.restored'))
-      restoreFile = null
-      await loadBackups()
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.restoreFailed'))
-    } finally {
-      restoreLoading = false
-    }
-  }
-
-  async function handleToggleBackup() {
-    const newEnabled = !backupEnabled
-    backupsLoading = true
-    try {
-      await api.setBackupEnabled(session.accessJwt, newEnabled)
-      backupEnabled = newEnabled
-      toast.success(newEnabled ? $_('settings.backups.enabled') : $_('settings.backups.disabled'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.toggleFailed'))
-    } finally {
-      backupsLoading = false
-    }
-  }
-
-  async function handleDeleteBackup(id: string) {
-    try {
-      await api.deleteBackup(session.accessJwt, id)
-      await loadBackups()
-      toast.success($_('settings.backups.deleted'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.deleteFailed'))
-    }
-  }
-
-  function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
   let deleteLoading = $state(false)
@@ -505,80 +373,9 @@
 
   <section>
     <h3>{$_('settings.exportData')}</h3>
-    <div class="export-buttons">
-      <button onclick={handleExportRepo} disabled={exportLoading}>
-        {exportLoading ? $_('settings.exporting') : $_('settings.downloadRepo')}
-      </button>
-      <button class="secondary" onclick={handleExportBlobs} disabled={exportBlobsLoading}>
-        {exportBlobsLoading ? $_('settings.exporting') : $_('settings.downloadBlobs')}
-      </button>
-    </div>
-  </section>
-
-  <section>
-    <h3>{$_('settings.backups.title')}</h3>
-    {#if backupsLoading}
-      <div class="loading">{$_('common.loading')}</div>
-    {:else}
-      {#if backups.length > 0}
-        <ul class="backup-list">
-          {#each backups as backup}
-            <li class="backup-item">
-              <div class="backup-info">
-                <span class="backup-date">{formatDate(backup.createdAt)}</span>
-                <span class="backup-size">{formatBytes(backup.sizeBytes)}</span>
-              </div>
-              <div class="backup-item-actions">
-                <button class="sm" onclick={() => handleDownloadBackup(backup.id, backup.repoRev)}>
-                  {$_('settings.backups.download')}
-                </button>
-                <button class="sm danger-outline" onclick={() => handleDeleteBackup(backup.id)}>
-                  {$_('settings.backups.delete')}
-                </button>
-              </div>
-            </li>
-          {/each}
-        </ul>
-      {:else}
-        <p class="empty">{$_('settings.backups.noBackups')}</p>
-      {/if}
-      <div class="backup-toggle">
-        <label class="toggle-label">
-          <input type="checkbox" checked={backupEnabled} onchange={handleToggleBackup} disabled={backupsLoading} />
-          {$_('settings.backups.autoBackup')}
-        </label>
-      </div>
-      <div class="backup-actions">
-        <button onclick={handleCreateBackup} disabled={createBackupLoading || !backupEnabled}>
-          {createBackupLoading ? $_('common.creating') : $_('settings.backups.createNow')}
-        </button>
-      </div>
-
-      <div class="restore-section">
-        <h4>{$_('settings.backups.restoreTitle')}</h4>
-        <p class="hint">{$_('settings.backups.restoreHint')}</p>
-        <div class="restore-form">
-          <input
-            type="file"
-            accept=".car"
-            onchange={handleRestoreFileChange}
-            disabled={restoreLoading}
-          />
-          <button
-            onclick={handleRestore}
-            disabled={restoreLoading || !restoreFile}
-          >
-            {restoreLoading ? $_('settings.backups.restoring') : $_('settings.backups.restore')}
-          </button>
-        </div>
-        {#if restoreFile}
-          <div class="restore-preview">
-            <span class="file-name">{$_('settings.backups.selectedFile')}: {restoreFile.name}</span>
-            <span class="file-size">({formatBytes(restoreFile.size)})</span>
-          </div>
-        {/if}
-      </div>
-    {/if}
+    <button onclick={handleExportRepo} disabled={exportLoading}>
+      {exportLoading ? $_('settings.exporting') : $_('settings.downloadRepo')}
+    </button>
   </section>
 
   <section class="danger-zone">

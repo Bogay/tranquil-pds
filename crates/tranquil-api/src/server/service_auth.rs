@@ -1,7 +1,3 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::auth::extractor::{Auth, Permissive};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::Did;
 use axum::{
     Json,
     extract::{Query, State},
@@ -12,6 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::LazyLock;
 use tracing::{error, info, warn};
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::auth::extractor::{Auth, Permissive};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::Did;
 use tranquil_types::Nsid;
 
 static CREATE_ACCOUNT_NSID: LazyLock<Nsid> =
@@ -75,7 +75,10 @@ pub async fn get_service_auth(
             match state.user_repo.get_user_info_by_did(&auth.did).await {
                 Ok(Some(info)) => match info.key_bytes {
                     Some(key_bytes_enc) => {
-                        match tranquil_pds::config::decrypt_key(&key_bytes_enc, info.encryption_version) {
+                        match tranquil_pds::config::decrypt_key(
+                            &key_bytes_enc,
+                            info.encryption_version,
+                        ) {
                             Ok(key) => key,
                             Err(e) => {
                                 error!(error = ?e, "Failed to decrypt user key for service auth");

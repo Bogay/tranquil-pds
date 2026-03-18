@@ -1,5 +1,5 @@
-use tranquil_pds::oauth::OAuthError;
 use serde::{Deserialize, Serialize};
+use tranquil_pds::oauth::OAuthError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GrantType {

@@ -1,12 +1,12 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::auth::{Admin, Auth};
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::auth::{Admin, Auth};
+use tranquil_pds::state::AppState;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

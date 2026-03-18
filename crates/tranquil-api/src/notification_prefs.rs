@@ -1,6 +1,3 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::auth::{Active, Auth};
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -10,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
 use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType};
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::auth::{Active, Auth};
+use tranquil_pds::state::AppState;
 use tranquil_types::Did;
 
 #[derive(Serialize)]
@@ -141,8 +141,9 @@ pub async fn request_channel_verification(
     identifier: &str,
     handle: Option<&str>,
 ) -> Result<String, ApiError> {
-    let token =
-        tranquil_pds::auth::verification_token::generate_channel_update_token(did, channel, identifier);
+    let token = tranquil_pds::auth::verification_token::generate_channel_update_token(
+        did, channel, identifier,
+    );
     let formatted_token = tranquil_pds::auth::verification_token::format_token_for_display(&token);
 
     match channel {

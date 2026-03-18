@@ -1,6 +1,3 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::state::AppState;
-use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability, get_account_with_status};
 use axum::{
     Json,
     extract::{Query, State},
@@ -14,6 +11,11 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tracing::error;
 use tranquil_db_traits::AccountStatus;
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::state::AppState;
+use tranquil_pds::sync::util::{
+    RepoAccessLevel, assert_repo_availability, get_account_with_status,
+};
 use tranquil_types::Did;
 
 async fn get_rev_from_commit(state: &AppState, cid_str: &str) -> Option<String> {

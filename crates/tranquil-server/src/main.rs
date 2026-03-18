@@ -11,7 +11,7 @@ use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender
 use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
 use tranquil_pds::scheduled::{
     backfill_genesis_commit_blocks, backfill_record_blobs, backfill_repo_rev, backfill_user_blocks,
-    start_backup_tasks, start_scheduled_tasks,
+    start_scheduled_tasks,
 };
 use tranquil_pds::state::AppState;
 
@@ -233,20 +233,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let backup_handle = if let Some(backup_storage) = state.backup_storage.clone() {
-        info!("Backup service enabled");
-        Some(tokio::spawn(start_backup_tasks(
-            state.repo_repo.clone(),
-            state.backup_repo.clone(),
-            state.block_store.clone(),
-            backup_storage,
-            shutdown.clone(),
-        )))
-    } else {
-        warn!("Backup service disabled (BACKUP_S3_BUCKET not set or BACKUP_ENABLED=false)");
-        None
-    };
-
     let scheduled_handle = tokio::spawn(start_scheduled_tasks(
         state.user_repo.clone(),
         state.blob_repo.clone(),
@@ -307,10 +293,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     comms_handle.await.ok();
 
     if let Some(handle) = crawlers_handle {
-        handle.await.ok();
-    }
-
-    if let Some(handle) = backup_handle {
         handle.await.ok();
     }
 

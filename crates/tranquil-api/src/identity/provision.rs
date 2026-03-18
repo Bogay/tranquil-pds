@@ -1,11 +1,11 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::repo_ops::create_signed_commit;
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::Did;
 use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::{mst::Mst, storage::BlockStore};
 use k256::ecdsa::SigningKey;
 use std::sync::Arc;
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::repo_ops::create_signed_commit;
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::Did;
 
 pub struct PlcDidResult {
     pub did: Did,
@@ -50,12 +50,16 @@ pub async fn submit_plc_genesis(
         .clone()
         .unwrap_or_else(|| tranquil_pds::plc::signing_key_to_did_key(signing_key));
 
-    let genesis_result =
-        tranquil_pds::plc::create_genesis_operation(signing_key, &rotation_key, handle, &pds_endpoint)
-            .map_err(|e| {
-                tracing::error!("Error creating PLC genesis operation: {:?}", e);
-                ApiError::InternalError(Some("Failed to create PLC operation".into()))
-            })?;
+    let genesis_result = tranquil_pds::plc::create_genesis_operation(
+        signing_key,
+        &rotation_key,
+        handle,
+        &pds_endpoint,
+    )
+    .map_err(|e| {
+        tracing::error!("Error creating PLC genesis operation: {:?}", e);
+        ApiError::InternalError(Some("Failed to create PLC operation".into()))
+    })?;
 
     state
         .plc_client()
@@ -84,10 +88,11 @@ pub async fn init_genesis_repo(
     signing_key: &SigningKey,
     signing_key_bytes: &[u8],
 ) -> Result<GenesisRepo, ApiError> {
-    let encrypted_key_bytes = tranquil_pds::config::encrypt_key(signing_key_bytes).map_err(|e| {
-        tracing::error!("Error encrypting signing key: {:?}", e);
-        ApiError::InternalError(None)
-    })?;
+    let encrypted_key_bytes =
+        tranquil_pds::config::encrypt_key(signing_key_bytes).map_err(|e| {
+            tracing::error!("Error encrypting signing key: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
     let mst = Mst::new(Arc::new(state.block_store.clone()));
     let mst_root = mst.persist().await.map_err(|e| {

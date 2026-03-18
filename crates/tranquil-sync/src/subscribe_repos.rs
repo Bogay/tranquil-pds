@@ -1,10 +1,3 @@
-use tranquil_pds::state::AppState;
-use tranquil_pds::sync::firehose::SequencedEvent;
-use tranquil_pds::sync::frame::{ErrorFrameName, InfoFrameName};
-use tranquil_pds::sync::util::{
-    format_error_frame, format_event_for_sending, format_event_with_prefetched_blocks,
-    format_info_frame, prefetch_blocks_for_events,
-};
 use axum::{
     extract::{Query, State, ws::Message, ws::WebSocket, ws::WebSocketUpgrade},
     response::Response,
@@ -15,6 +8,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{error, info, warn};
 use tranquil_db_traits::SequenceNumber;
+use tranquil_pds::state::AppState;
+use tranquil_pds::sync::firehose::SequencedEvent;
+use tranquil_pds::sync::frame::{ErrorFrameName, InfoFrameName};
+use tranquil_pds::sync::util::{
+    format_error_frame, format_event_for_sending, format_event_with_prefetched_blocks,
+    format_info_frame, prefetch_blocks_for_events,
+};
 
 const BACKFILL_BATCH_SIZE: i64 = 1000;
 

@@ -1,5 +1,3 @@
-use tranquil_pds::auth::{AccountRequirement, extract_auth_token_from_header, validate_token_with_dpop};
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -7,6 +5,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde_json::json;
+use tranquil_pds::auth::{
+    AccountRequirement, extract_auth_token_from_header, validate_token_with_dpop,
+};
+use tranquil_pds::state::AppState;
 
 pub async fn get_state(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let created_at = get_account_created_at(&state, &headers).await;

@@ -1,12 +1,3 @@
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::api::{EmptyResponse, SuccessResponse};
-use tranquil_pds::auth::{
-    Active, Auth, NormalizedLoginIdentifier, Permissive, require_legacy_session_mfa,
-    require_reauth_window,
-};
-use tranquil_pds::rate_limit::{LoginLimit, RateLimited, RefreshSessionLimit};
-use tranquil_pds::state::AppState;
-use tranquil_pds::types::{AccountState, Did, Handle, PlainPassword};
 use axum::{
     Json,
     extract::State,
@@ -18,6 +9,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
 use tranquil_db_traits::{SessionId, TokenFamilyId};
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::api::{EmptyResponse, SuccessResponse};
+use tranquil_pds::auth::{
+    Active, Auth, NormalizedLoginIdentifier, Permissive, require_legacy_session_mfa,
+    require_reauth_window,
+};
+use tranquil_pds::rate_limit::{LoginLimit, RateLimited, RefreshSessionLimit};
+use tranquil_pds::state::AppState;
+use tranquil_pds::types::{AccountState, Did, Handle, PlainPassword};
 use tranquil_types::TokenId;
 
 fn full_handle(stored_handle: &str, _pds_hostname: &str) -> String {
@@ -93,7 +93,8 @@ pub async fn create_session(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let key_bytes = match tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version) {
+    let key_bytes = match tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version)
+    {
         Ok(k) => k,
         Err(e) => {
             error!("Failed to decrypt user key: {:?}", e);
@@ -203,7 +204,8 @@ pub async fn create_session(
             .await
             {
                 error!("Failed to send 2FA code: {:?}", e);
-                tranquil_pds::auth::legacy_2fa::clear_challenge(state.cache.as_ref(), &row.did).await;
+                tranquil_pds::auth::legacy_2fa::clear_challenge(state.cache.as_ref(), &row.did)
+                    .await;
                 return ApiError::InternalError(Some(
                     "Failed to send verification code. Please try again.".into(),
                 ))
@@ -261,13 +263,14 @@ pub async fn create_session(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let refresh_meta = match tranquil_pds::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
-        Ok(m) => m,
-        Err(e) => {
-            error!("Failed to create refresh token: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let refresh_meta =
+        match tranquil_pds::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Failed to create refresh token: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
     let did_for_doc = row.did.clone();
     let did_resolver = state.did_resolver.clone();
     let session_data = tranquil_db_traits::SessionTokenCreate {
@@ -406,10 +409,9 @@ pub async fn delete_session(
     headers: axum::http::HeaderMap,
     _auth: Auth<Active>,
 ) -> Result<Response, ApiError> {
-    let extracted = tranquil_pds::auth::extract_auth_token_from_header(tranquil_pds::util::get_header_str(
-        &headers,
-        http::header::AUTHORIZATION,
-    ))
+    let extracted = tranquil_pds::auth::extract_auth_token_from_header(
+        tranquil_pds::util::get_header_str(&headers, http::header::AUTHORIZATION),
+    )
     .ok_or(ApiError::AuthenticationRequired)?;
     let jti = tranquil_pds::auth::get_jti_from_token(&extracted.token)
         .map_err(|_| ApiError::AuthenticationFailed(None))?;
@@ -432,10 +434,9 @@ pub async fn refresh_session(
     _rate_limit: RateLimited<RefreshSessionLimit>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let extracted = match tranquil_pds::auth::extract_auth_token_from_header(tranquil_pds::util::get_header_str(
-        &headers,
-        http::header::AUTHORIZATION,
-    )) {
+    let extracted = match tranquil_pds::auth::extract_auth_token_from_header(
+        tranquil_pds::util::get_header_str(&headers, http::header::AUTHORIZATION),
+    ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
@@ -500,14 +501,16 @@ pub async fn refresh_session(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let new_refresh_meta =
-        match tranquil_pds::auth::create_refresh_token_with_metadata(&session_row.did, &key_bytes) {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to create refresh token: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+    let new_refresh_meta = match tranquil_pds::auth::create_refresh_token_with_metadata(
+        &session_row.did,
+        &key_bytes,
+    ) {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to create refresh token: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
     let refresh_data = tranquil_db_traits::SessionRefreshData {
         old_refresh_jti: refresh_jti.clone(),
         session_id: session_row.id,
@@ -668,7 +671,8 @@ pub async fn confirm_signup(
         }
     }
 
-    let key_bytes = match tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version) {
+    let key_bytes = match tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version)
+    {
         Ok(k) => k,
         Err(e) => {
             error!("Failed to decrypt user key: {:?}", e);
@@ -676,20 +680,22 @@ pub async fn confirm_signup(
         }
     };
 
-    let access_meta = match tranquil_pds::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
-        Ok(m) => m,
-        Err(e) => {
-            error!("Failed to create access token: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-    let refresh_meta = match tranquil_pds::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
-        Ok(m) => m,
-        Err(e) => {
-            error!("Failed to create refresh token: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let access_meta =
+        match tranquil_pds::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Failed to create access token: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
+    let refresh_meta =
+        match tranquil_pds::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Failed to create refresh token: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
 
     if let Err(e) = state
         .user_repo
@@ -855,8 +861,11 @@ pub async fn resend_verification(
         tranquil_db_traits::CommsChannel::Signal => row.signal_username.clone().unwrap_or_default(),
     };
 
-    let verification_token =
-        tranquil_pds::auth::verification_token::generate_signup_token(&input.did, row.channel, &recipient);
+    let verification_token = tranquil_pds::auth::verification_token::generate_signup_token(
+        &input.did,
+        row.channel,
+        &recipient,
+    );
     let formatted_token =
         tranquil_pds::auth::verification_token::format_token_for_display(&verification_token);
 

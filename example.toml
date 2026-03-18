@@ -180,47 +180,6 @@
 # Can also be specified via environment variable `S3_ENDPOINT`.
 #s3_endpoint =
 
-[backup]
-# Enable automatic backups.
-#
-# Can also be specified via environment variable `BACKUP_ENABLED`.
-#
-# Default value: true
-#enabled = true
-
-# Backup storage backend: `filesystem` or `s3`.
-#
-# Can also be specified via environment variable `BACKUP_STORAGE_BACKEND`.
-#
-# Default value: "filesystem"
-#backend = "filesystem"
-
-# Path on disk for the filesystem backup backend.
-#
-# Can also be specified via environment variable `BACKUP_STORAGE_PATH`.
-#
-# Default value: "/var/lib/tranquil-pds/backups"
-#path = "/var/lib/tranquil-pds/backups"
-
-# S3 bucket name for backups.
-#
-# Can also be specified via environment variable `BACKUP_S3_BUCKET`.
-#s3_bucket =
-
-# Number of backup revisions to keep per account.
-#
-# Can also be specified via environment variable `BACKUP_RETENTION_COUNT`.
-#
-# Default value: 7
-#retention_count = 7
-
-# Seconds between backup runs.
-#
-# Can also be specified via environment variable `BACKUP_INTERVAL_SECS`.
-#
-# Default value: 86400
-#interval_secs = 86400
-
 [cache]
 # Cache backend: `ripple` (default, built-in gossip) or `valkey`.
 #

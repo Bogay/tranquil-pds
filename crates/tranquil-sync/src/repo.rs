@@ -1,8 +1,3 @@
-use tranquil_pds::api::error::ApiError;
-use tranquil_pds::scheduled::generate_repo_car_from_user_blocks;
-use tranquil_pds::state::AppState;
-use tranquil_pds::sync::car::{encode_car_block, encode_car_header};
-use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
 use axum::{
     extract::{Query, RawQuery, State},
     http::StatusCode,
@@ -13,6 +8,11 @@ use jacquard_repo::storage::BlockStore;
 use serde::Deserialize;
 use std::str::FromStr;
 use tracing::error;
+use tranquil_pds::api::error::ApiError;
+use tranquil_pds::scheduled::generate_repo_car_from_user_blocks;
+use tranquil_pds::state::AppState;
+use tranquil_pds::sync::car::{encode_car_block, encode_car_header};
+use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
 use tranquil_types::Did;
 
 struct GetBlocksParams {

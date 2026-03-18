@@ -72,7 +72,7 @@ if [[ -f /etc/tranquil-pds/tranquil-pds.env ]] || [[ -d /opt/tranquil-pds ]] || 
             echo "  - PostgreSQL database 'pds' and all data"
             echo "  - All Tranquil PDS configuration and credentials"
             echo "  - All source code in /opt/tranquil-pds"
-            echo "  - All blobs and backups in /var/lib/tranquil/"
+            echo "  - All blobs in /var/lib/tranquil/"
             echo ""
             read -p "Type 'NUKE' to confirm: " CONFIRM_NUKE
             if [[ "$CONFIRM_NUKE" == "NUKE" ]]; then
@@ -195,7 +195,7 @@ sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pds TO tranquil_pds;"
 log_success "postgres configured"
 
 log_info "Creating blob storage directories..."
-mkdir -p /var/lib/tranquil/blobs /var/lib/tranquil/backups
+mkdir -p /var/lib/tranquil/blobs
 log_success "Blob storage directories created"
 
 log_info "Installing rust..."
@@ -302,7 +302,6 @@ DATABASE_URL=postgres://tranquil_pds:${DB_PASSWORD}@localhost:5432/pds
 DATABASE_MAX_CONNECTIONS=100
 DATABASE_MIN_CONNECTIONS=10
 BLOB_STORAGE_PATH=/var/lib/tranquil/blobs
-BACKUP_STORAGE_PATH=/var/lib/tranquil/backups
 JWT_SECRET=${JWT_SECRET}
 DPOP_SECRET=${DPOP_SECRET}
 MASTER_KEY=${MASTER_KEY}
@@ -501,7 +500,6 @@ echo "  DB password: ${DB_PASSWORD}"
 echo ""
 echo "Data locations:"
 echo "  Blobs:   /var/lib/tranquil/blobs"
-echo "  Backups: /var/lib/tranquil/backups"
 echo ""
 echo "Commands:"
 echo "  journalctl -u tranquil-pds -f    # logs"

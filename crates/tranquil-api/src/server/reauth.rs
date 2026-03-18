@@ -1,4 +1,3 @@
-use tranquil_pds::api::error::{ApiError, DbResultExt};
 use axum::{
     Json,
     extract::State,
@@ -9,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use tranquil_db_traits::{SessionRepository, UserRepository, WebauthnChallengeType};
+use tranquil_pds::api::error::{ApiError, DbResultExt};
 
 use tranquil_pds::auth::{Active, Auth};
 use tranquil_pds::rate_limit::{TotpVerifyLimit, check_user_rate_limit_with_message};
@@ -125,8 +125,7 @@ pub async fn reauth_totp(
     .await?;
 
     let valid =
-        crate::server::totp::verify_totp_or_backup_for_user(&state, &auth.did, &input.code)
-            .await;
+        crate::server::totp::verify_totp_or_backup_for_user(&state, &auth.did, &input.code).await;
 
     if !valid {
         warn!(did = %&auth.did, "Re-auth failed: invalid TOTP code");

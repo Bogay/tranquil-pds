@@ -1,9 +1,3 @@
-use tranquil_pds::api::EmptyResponse;
-use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::auth::{Auth, NotTakendown, Permissive, generate_app_password};
-use tranquil_pds::delegation::{DelegationActionType, intersect_scopes};
-use tranquil_pds::rate_limit::{AppPasswordLimit, RateLimited};
-use tranquil_pds::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -13,6 +7,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
 use tranquil_db_traits::AppPasswordCreate;
+use tranquil_pds::api::EmptyResponse;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
+use tranquil_pds::auth::{Auth, NotTakendown, Permissive, generate_app_password};
+use tranquil_pds::delegation::{DelegationActionType, intersect_scopes};
+use tranquil_pds::rate_limit::{AppPasswordLimit, RateLimited};
+use tranquil_pds::state::AppState;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
