@@ -1,8 +1,9 @@
 <script lang="ts">
   import type { OfflineInboundMigrationFlow } from '../../lib/migration'
   import type { AuthMethod, ServerDescription } from '../../lib/migration/types'
+  import { resolveVerificationIdentifier } from '../../lib/flows/migration-shared'
   import { getErrorMessage } from '../../lib/migration/types'
-  import { base64UrlEncode, prepareWebAuthnCreationOptions } from '../../lib/migration/atproto-client'
+  import { PasskeyCancelledError } from '../../lib/flows/perform-passkey-registration'
   import { _ } from '../../lib/i18n'
   import ErrorStep from './ErrorStep.svelte'
   import SuccessStep from './SuccessStep.svelte'
@@ -10,6 +11,9 @@
   import EmailVerifyStep from './EmailVerifyStep.svelte'
   import PasskeySetupStep from './PasskeySetupStep.svelte'
   import AppPasswordStep from './AppPasswordStep.svelte'
+  import StepIndicator from './StepIndicator.svelte'
+  import ProgressStep from './ProgressStep.svelte'
+  import ReviewStep from './ReviewStep.svelte'
 
   interface Props {
     flow: OfflineInboundMigrationFlow
@@ -24,13 +28,21 @@
   let understood = $state(false)
   let handleInput = $state('')
   let selectedDomain = $state('')
-  let handleAvailable = $state<boolean | null>(null)
-  let checkingHandle = $state(false)
   let validatingKey = $state(false)
   let keyValid = $state<boolean | null>(null)
   let fileInputRef = $state<HTMLInputElement | null>(null)
   let selectedAuthMethod = $state<AuthMethod>('password')
   let passkeyName = $state('')
+
+  function verificationIdentifier(): string {
+    return resolveVerificationIdentifier(
+      flow.state.verificationChannel,
+      flow.state.targetEmail,
+      flow.state.discordUsername,
+      flow.state.telegramUsername,
+      flow.state.signalUsername,
+    )
+  }
 
   let redirectTriggered = $state(false)
 
@@ -40,7 +52,6 @@
     }
     if (flow.state.step === 'choose-handle') {
       handleInput = ''
-      handleAvailable = null
     }
   })
 
@@ -55,8 +66,9 @@
 
   $effect(() => {
     if (flow.state.step === 'email-verify') {
+      const isBotChannel = flow.state.verificationChannel === 'telegram' || flow.state.verificationChannel === 'discord'
       const interval = setInterval(async () => {
-        if (flow.state.emailVerifyToken.trim()) return
+        if (!isBotChannel && flow.state.emailVerifyToken.trim()) return
         await flow.checkEmailVerifiedAndProceed()
       }, 3000)
       return () => clearInterval(interval)
@@ -145,25 +157,6 @@
     }
   }
 
-  async function checkHandle() {
-    if (!handleInput.trim()) return
-
-    const fullHandle = handleInput.includes('.')
-      ? handleInput
-      : `${handleInput}.${selectedDomain}`
-
-    checkingHandle = true
-    handleAvailable = null
-
-    try {
-      handleAvailable = await flow.checkHandleAvailability(fullHandle)
-    } catch {
-      handleAvailable = true
-    } finally {
-      checkingHandle = false
-    }
-  }
-
   function proceedToReview() {
     const fullHandle = handleInput.includes('.')
       ? handleInput
@@ -203,17 +196,12 @@
     flow.setError(null)
 
     try {
-      if (!window.PublicKeyCredential) {
-        throw new Error('Passkeys are not supported in this browser. Please use a modern browser with WebAuthn support.')
-      }
-
       await flow.registerPasskey(passkeyName || undefined)
     } catch (err) {
-      const message = getErrorMessage(err)
-      if (message.includes('cancelled') || message.includes('AbortError')) {
+      if (err instanceof PasskeyCancelledError || (err instanceof DOMException && err.name === 'NotAllowedError')) {
         flow.setError('Passkey registration was cancelled. Please try again.')
       } else {
-        flow.setError(message)
+        flow.setError(getErrorMessage(err))
       }
     } finally {
       loading = false
@@ -233,19 +221,7 @@
 </script>
 
 <div class="migration-wizard">
-  <div class="step-indicator">
-    {#each steps as _, i}
-      <div class="step" class:active={i === getCurrentStepIndex()} class:completed={i < getCurrentStepIndex()}>
-        <div class="step-dot">{i < getCurrentStepIndex() ? '✓' : i + 1}</div>
-      </div>
-      {#if i < steps.length - 1}
-        <div class="step-line" class:completed={i < getCurrentStepIndex()}></div>
-      {/if}
-    {/each}
-  </div>
-  <div class="current-step-label">
-    <strong>{steps[getCurrentStepIndex()]}</strong> · Step {getCurrentStepIndex() + 1} of {steps.length}
-  </div>
+  <StepIndicator steps={steps} currentIndex={getCurrentStepIndex()} />
 
   {#if flow.state.error}
     <div class="message error">{flow.state.error}</div>
@@ -401,13 +377,16 @@
     <ChooseHandleStep
       {handleInput}
       {selectedDomain}
-      {handleAvailable}
-      {checkingHandle}
       email={flow.state.targetEmail}
       password={flow.state.targetPassword}
       authMethod={selectedAuthMethod}
       inviteCode={flow.state.inviteCode}
       {serverInfo}
+      availableCommsChannels={serverInfo?.availableCommsChannels ?? ['email']}
+      verificationChannel={flow.state.verificationChannel}
+      discordUsername={flow.state.discordUsername}
+      telegramUsername={flow.state.telegramUsername}
+      signalUsername={flow.state.signalUsername}
       migratingFromLabel={$_('migration.offline.chooseHandle.migratingDid')}
       migratingFromValue={flow.state.userDid}
       {loading}
@@ -417,128 +396,78 @@
       existingHandleVerified={false}
       verifyingExistingHandle={false}
       existingHandleError={null}
+      checkAvailability={(h) => flow.checkHandleAvailability(h)}
       onHandleChange={(h) => handleInput = h}
       onDomainChange={(d) => selectedDomain = d}
-      onCheckHandle={checkHandle}
       onEmailChange={(e) => flow.setTargetEmail(e)}
       onPasswordChange={(p) => flow.setTargetPassword(p)}
       onAuthMethodChange={(m) => selectedAuthMethod = m}
       onInviteCodeChange={(c) => flow.setInviteCode(c)}
+      onVerificationChannelChange={(ch) => flow.updateField('verificationChannel', ch)}
+      onDiscordChange={(v) => flow.updateField('discordUsername', v)}
+      onTelegramChange={(v) => flow.updateField('telegramUsername', v)}
+      onSignalChange={(v) => flow.updateField('signalUsername', v)}
       onBack={() => flow.setStep('provide-rotation-key')}
       onContinue={proceedToReview}
     />
 
   {:else if flow.state.step === 'review'}
-    <div class="step-content">
-      <h2>{$_('migration.inbound.review.title')}</h2>
-      <p>{$_('migration.offline.review.desc')}</p>
-
-      <div class="review-card">
-        <div class="review-row">
-          <span class="label">{$_('migration.inbound.review.did')}:</span>
-          <span class="value mono">{flow.state.userDid}</span>
-        </div>
-        <div class="review-row">
-          <span class="label">{$_('migration.inbound.review.newHandle')}:</span>
-          <span class="value">{flow.state.targetHandle}</span>
-        </div>
-        <div class="review-row">
-          <span class="label">{$_('migration.offline.review.carFile')}:</span>
-          <span class="value">{flow.state.carFileName} ({(flow.state.carSizeBytes / 1024 / 1024).toFixed(2)} MB)</span>
-        </div>
-        <div class="review-row">
-          <span class="label">{$_('migration.offline.review.rotationKey')}:</span>
-          <span class="value mono">{flow.state.rotationKeyDidKey}</span>
-        </div>
-        <div class="review-row">
-          <span class="label">{$_('migration.inbound.review.targetPds')}:</span>
-          <span class="value">{window.location.origin}</span>
-        </div>
-        <div class="review-row">
-          <span class="label">{$_('migration.inbound.review.email')}:</span>
-          <span class="value">{flow.state.targetEmail}</span>
-        </div>
-        <div class="review-row">
-          <span class="label">{$_('migration.inbound.review.authentication')}:</span>
-          <span class="value">{flow.state.authMethod === 'passkey' ? $_('migration.inbound.review.authPasskey') : $_('migration.inbound.review.authPassword')}</span>
-        </div>
-      </div>
-
-      <div class="warning-box">
+    <ReviewStep
+      description={$_('migration.offline.review.desc')}
+      rows={[
+        { label: $_('migration.inbound.review.did'), value: flow.state.userDid, mono: true },
+        { label: $_('migration.inbound.review.newHandle'), value: flow.state.targetHandle },
+        { label: $_('migration.offline.review.carFile'), value: `${flow.state.carFileName} (${(flow.state.carSizeBytes / 1024 / 1024).toFixed(2)} MB)` },
+        { label: $_('migration.offline.review.rotationKey'), value: flow.state.rotationKeyDidKey, mono: true },
+        { label: $_('migration.inbound.review.targetPds'), value: window.location.origin },
+        { label: $_(`register.${flow.state.verificationChannel}`), value: verificationIdentifier() },
+        { label: $_('migration.inbound.review.authentication'), value: flow.state.authMethod === 'passkey' ? $_('migration.inbound.review.authPasskey') : $_('migration.inbound.review.authPassword') },
+      ]}
+      {loading}
+      onBack={() => flow.setStep('choose-handle')}
+      onContinue={startMigration}
+    >
+      {#snippet warning()}
         <strong>{$_('migration.offline.review.plcWarningTitle')}</strong>
         <p>{$_('migration.offline.review.plcWarning')}</p>
-      </div>
-
-      <div class="button-row">
-        <button class="ghost" onclick={() => flow.setStep('choose-handle')} disabled={loading}>{$_('migration.inbound.common.back')}</button>
-        <button onclick={startMigration} disabled={loading}>
-          {loading ? $_('migration.inbound.review.starting') : $_('migration.inbound.review.startMigration')}
-        </button>
-      </div>
-    </div>
+      {/snippet}
+    </ReviewStep>
 
   {:else if flow.state.step === 'creating' || flow.state.step === 'importing'}
-    <div class="step-content">
-      <h2>{$_('migration.offline.migrating.title')}</h2>
-      <p>{$_('migration.offline.migrating.desc')}</p>
-
-      <div class="progress-section">
-        <div class="progress-item" class:completed={flow.state.step !== 'creating'} class:active={flow.state.step === 'creating'}>
-          <span class="icon">{flow.state.step !== 'creating' ? '✓' : '○'}</span>
-          <span>{$_('migration.offline.migrating.creating')}</span>
-        </div>
-        <div class="progress-item" class:active={flow.state.step === 'importing'}>
-          <span class="icon">○</span>
-          <span>{$_('migration.offline.migrating.importing')}</span>
-        </div>
-      </div>
-
-      <p class="status-text">{flow.state.progress.currentOperation}</p>
-    </div>
+    <ProgressStep
+      title={$_('migration.offline.migrating.title')}
+      description={$_('migration.offline.migrating.desc')}
+      items={[
+        { label: $_('migration.offline.migrating.creating'), completed: flow.state.step !== 'creating', active: flow.state.step === 'creating' },
+        { label: $_('migration.offline.migrating.importing'), completed: false, active: flow.state.step === 'importing' },
+      ]}
+      statusText={flow.state.progress.currentOperation}
+    />
 
   {:else if flow.state.step === 'migrating-blobs'}
-    <div class="step-content">
-      <h2>{$_('migration.offline.blobs.title')}</h2>
-      <p>{$_('migration.offline.blobs.desc')}</p>
-
-      <div class="progress-section">
-        <div class="progress-item completed">
-          <span class="icon">✓</span>
-          <span>{$_('migration.offline.migrating.importing')}</span>
-        </div>
-        <div class="progress-item active">
-          <span class="icon">○</span>
-          <span>{$_('migration.offline.blobs.migrating')}</span>
-        </div>
-      </div>
-
-      {#if flow.state.progress.blobsTotal > 0}
-        <div class="blob-progress">
-          <div class="blob-progress-bar">
-            <div
-              class="blob-progress-fill"
-              style="width: {(flow.state.progress.blobsMigrated / flow.state.progress.blobsTotal) * 100}%"
-            ></div>
-          </div>
-          <p class="blob-progress-text">
-            {flow.state.progress.blobsMigrated} / {flow.state.progress.blobsTotal} blobs
-          </p>
-        </div>
-      {/if}
-
-      <p class="status-text">{flow.state.progress.currentOperation}</p>
-
+    <ProgressStep
+      title={$_('migration.offline.blobs.title')}
+      description={$_('migration.offline.blobs.desc')}
+      items={[
+        { label: $_('migration.offline.migrating.importing'), completed: true },
+        { label: `${$_('migration.offline.blobs.migrating')} (${flow.state.progress.blobsMigrated}/${flow.state.progress.blobsTotal})`, completed: false, active: true },
+      ]}
+      statusText={flow.state.progress.currentOperation}
+      progressBar={flow.state.progress.blobsTotal > 0 ? { current: flow.state.progress.blobsMigrated, total: flow.state.progress.blobsTotal } : undefined}
+    >
       {#if flow.state.progress.blobsFailed.length > 0}
         <div class="warning-box">
           <strong>{$_('migration.offline.blobs.failedTitle')}</strong>
           <p>{$_('migration.offline.blobs.failedDesc', { values: { count: flow.state.progress.blobsFailed.length } })}</p>
         </div>
       {/if}
-    </div>
+    </ProgressStep>
 
   {:else if flow.state.step === 'email-verify'}
     <EmailVerifyStep
-      email={flow.state.targetEmail}
+      channel={flow.state.verificationChannel}
+      identifier={verificationIdentifier()}
+      handle={flow.state.targetHandle}
       token={flow.state.emailVerifyToken}
       {loading}
       error={flow.state.error}
@@ -565,23 +494,15 @@
     />
 
   {:else if flow.state.step === 'plc-signing' || flow.state.step === 'finalizing'}
-    <div class="step-content">
-      <h2>{$_('migration.inbound.finalizing.title')}</h2>
-      <p>{$_('migration.inbound.finalizing.desc')}</p>
-
-      <div class="progress-section">
-        <div class="progress-item" class:completed={flow.state.progress.plcSigned}>
-          <span class="icon">{flow.state.progress.plcSigned ? '✓' : '○'}</span>
-          <span>{$_('migration.inbound.finalizing.signingPlc')}</span>
-        </div>
-        <div class="progress-item" class:completed={flow.state.progress.activated}>
-          <span class="icon">{flow.state.progress.activated ? '✓' : '○'}</span>
-          <span>{$_('migration.inbound.finalizing.activating')}</span>
-        </div>
-      </div>
-
-      <p class="status-text">{flow.state.progress.currentOperation}</p>
-    </div>
+    <ProgressStep
+      title={$_('migration.inbound.finalizing.title')}
+      description={$_('migration.inbound.finalizing.desc')}
+      items={[
+        { label: $_('migration.inbound.finalizing.signingPlc'), completed: flow.state.progress.plcSigned },
+        { label: $_('migration.inbound.finalizing.activating'), completed: flow.state.progress.activated },
+      ]}
+      statusText={flow.state.progress.currentOperation}
+    />
 
   {:else if flow.state.step === 'success'}
     <SuccessStep

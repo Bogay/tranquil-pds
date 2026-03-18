@@ -92,12 +92,6 @@
   margin: 0 0 var(--space-5) 0;
 }
 
-.info-box {
-  background: var(--accent-muted);
-  padding: var(--space-5);
-  margin-bottom: var(--space-5);
-}
-
 .info-box h3 {
   margin: 0 0 var(--space-3) 0;
   font-size: var(--text-base);
@@ -117,13 +111,6 @@
 .info-box p {
   margin: 0;
   color: var(--text-secondary);
-}
-
-.warning-box {
-  background: var(--warning-bg);
-  padding: var(--space-5);
-  margin-bottom: var(--space-5);
-  font-size: var(--text-sm);
 }
 
 .warning-box strong {
@@ -158,6 +145,7 @@
 
 .button-row {
   display: flex;
+  flex-direction: row;
   gap: var(--space-3);
   justify-content: flex-end;
   margin-top: var(--space-5);
@@ -260,28 +248,6 @@
   font-size: var(--text-sm);
 }
 
-.blob-progress {
-  margin: var(--space-4) 0;
-}
-
-.blob-progress-bar {
-  height: 8px;
-  background: var(--bg-primary);
-  overflow: hidden;
-  margin-bottom: var(--space-2);
-}
-
-.blob-progress-fill {
-  height: 100%;
-  background: var(--accent);
-}
-
-.blob-progress-text {
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  margin: 0;
-}
 
 .success-content {
   text-align: center;
@@ -411,43 +377,6 @@ label.auth-option {
   color: var(--text-secondary);
 }
 
-.app-password-display {
-  background: var(--bg-primary);
-  padding: var(--space-5);
-  margin-bottom: var(--space-5);
-  text-align: center;
-}
-
-.app-password-label {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  margin-bottom: var(--space-3);
-}
-
-.app-password-code {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: var(--text-lg);
-  letter-spacing: 0.1em;
-  padding: var(--space-4);
-  background: var(--bg-tertiary);
-  margin-bottom: var(--space-4);
-  user-select: all;
-}
-
-.copy-btn {
-  font-size: var(--text-sm);
-}
-
-.current-account {
-  background: var(--bg-primary);
-  padding: var(--space-4);
-  margin-bottom: var(--space-5);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
 .current-account .label {
   color: var(--text-secondary);
 }
@@ -455,12 +384,6 @@ label.auth-option {
 .current-account .value {
   font-weight: var(--font-medium);
   font-size: var(--text-lg);
-}
-
-.server-info {
-  background: var(--bg-primary);
-  padding: var(--space-4);
-  margin-top: var(--space-5);
 }
 
 .server-info h3 {
@@ -486,11 +409,6 @@ label.auth-option {
   margin-right: var(--space-3);
   color: var(--secondary);
   font-size: var(--text-sm);
-}
-
-.final-warning {
-  background: var(--error-bg);
-  border-color: var(--error-border);
 }
 
 .final-warning strong {
@@ -594,16 +512,6 @@ label.auth-option {
 .message {
   padding: var(--space-4);
   margin-bottom: var(--space-4);
-}
-
-.message.success {
-  background: var(--success-bg);
-  color: var(--success-text);
-}
-
-.message.error {
-  background: var(--error-bg);
-  color: var(--error-text);
 }
 
 .handle-choice-options {

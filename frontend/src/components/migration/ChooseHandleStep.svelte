@@ -1,34 +1,44 @@
 <script lang="ts">
-  import type { AuthMethod, HandlePreservation, ServerDescription } from '../../lib/migration/types'
+  import type { AuthMethod, HandlePreservation, ServerDescription, VerificationChannel } from '../../lib/migration/types'
+  import type { VerificationChannel as ApiVerificationChannel } from '../../lib/types/api'
   import { _ } from '../../lib/i18n'
   import HandleInput from '../HandleInput.svelte'
+  import CommsChannelPicker from '../CommsChannelPicker.svelte'
 
   interface Props {
     handleInput: string
     selectedDomain: string
-    handleAvailable: boolean | null
-    checkingHandle: boolean
     email: string
     password: string
     authMethod: AuthMethod
     inviteCode: string
     serverInfo: ServerDescription | null
+    availableCommsChannels: ApiVerificationChannel[]
+    verificationChannel: VerificationChannel
+    discordUsername: string
+    telegramUsername: string
+    signalUsername: string
     migratingFromLabel: string
     migratingFromValue: string
     loading?: boolean
     sourceHandle: string
     sourceDid: string
+    sourcePdsDomains?: string[]
     handlePreservation: HandlePreservation
     existingHandleVerified: boolean
     verifyingExistingHandle?: boolean
     existingHandleError?: string | null
+    checkAvailability: (fullHandle: string) => Promise<boolean>
     onHandleChange: (handle: string) => void
     onDomainChange: (domain: string) => void
-    onCheckHandle: () => void
     onEmailChange: (email: string) => void
     onPasswordChange: (password: string) => void
     onAuthMethodChange: (method: AuthMethod) => void
     onInviteCodeChange: (code: string) => void
+    onVerificationChannelChange: (channel: VerificationChannel) => void
+    onDiscordChange: (value: string) => void
+    onTelegramChange: (value: string) => void
+    onSignalChange: (value: string) => void
     onHandlePreservationChange?: (preservation: HandlePreservation) => void
     onVerifyExistingHandle?: () => void
     onBack: () => void
@@ -38,45 +48,70 @@
   let {
     handleInput,
     selectedDomain,
-    handleAvailable,
-    checkingHandle,
     email,
     password,
     authMethod,
     inviteCode,
     serverInfo,
+    availableCommsChannels,
+    verificationChannel,
+    discordUsername,
+    telegramUsername,
+    signalUsername,
     migratingFromLabel,
     migratingFromValue,
     loading = false,
     sourceHandle,
     sourceDid,
+    sourcePdsDomains = [],
     handlePreservation,
     existingHandleVerified,
     verifyingExistingHandle = false,
     existingHandleError = null,
+    checkAvailability,
     onHandleChange,
     onDomainChange,
-    onCheckHandle,
     onEmailChange,
     onPasswordChange,
     onAuthMethodChange,
     onInviteCodeChange,
+    onVerificationChannelChange,
+    onDiscordChange,
+    onTelegramChange,
+    onSignalChange,
     onHandlePreservationChange,
     onVerifyExistingHandle,
     onBack,
     onContinue,
   }: Props = $props()
 
+  let handleAvailable = $state<boolean | null>(null)
+  let checkingHandle = $state(false)
+
   const handleTooShort = $derived(handleInput.trim().length > 0 && handleInput.trim().length < 3)
 
-  const isExternalHandle = $derived(
-    serverInfo != null &&
+  const isSourcePdsManaged = $derived(
+    sourcePdsDomains.length > 0 &&
     sourceHandle.includes('.') &&
+    sourcePdsDomains.some(d => sourceHandle.endsWith(`.${d}`))
+  )
+
+  const isExternalHandle = $derived(
+    sourceHandle.includes('.') &&
+    !isSourcePdsManaged &&
+    serverInfo != null &&
     !serverInfo.availableUserDomains.some(d => sourceHandle.endsWith(`.${d}`))
   )
 
+  const hasVerificationIdentifier = $derived(
+    (verificationChannel === 'email' && email.trim().length > 0) ||
+    (verificationChannel === 'discord' && discordUsername.trim().length > 0) ||
+    (verificationChannel === 'telegram' && telegramUsername.trim().length > 0) ||
+    (verificationChannel === 'signal' && signalUsername.trim().length > 0)
+  )
+
   const canContinue = $derived(
-    email &&
+    hasVerificationIdentifier &&
     (authMethod === 'passkey' || password) &&
     (
       (handlePreservation === 'existing' && existingHandleVerified) ||
@@ -178,6 +213,9 @@
         domains={serverInfo?.availableUserDomains ?? []}
         {selectedDomain}
         placeholder="username"
+        {checkAvailability}
+        bind:available={handleAvailable}
+        bind:checking={checkingHandle}
         onInput={onHandleChange}
         onDomainChange={onDomainChange}
       />
@@ -196,17 +234,20 @@
     </div>
   {/if}
 
-  <div class="field">
-    <label for="email">{$_('migration.inbound.chooseHandle.email')}</label>
-    <input
-      id="email"
-      type="email"
-      placeholder="you@example.com"
-      value={email}
-      oninput={(e) => onEmailChange((e.target as HTMLInputElement).value)}
-      required
-    />
-  </div>
+  <CommsChannelPicker
+    channel={verificationChannel}
+    {email}
+    {discordUsername}
+    {telegramUsername}
+    {signalUsername}
+    availableChannels={availableCommsChannels}
+    disabled={loading}
+    onChannelChange={onVerificationChannelChange}
+    onEmailChange={onEmailChange}
+    onDiscordChange={onDiscordChange}
+    onTelegramChange={onTelegramChange}
+    onSignalChange={onSignalChange}
+  />
 
   <div class="field">
     <span class="field-label">{$_('migration.inbound.chooseHandle.authMethod')}</span>
