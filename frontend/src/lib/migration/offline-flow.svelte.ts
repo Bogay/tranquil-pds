@@ -7,10 +7,9 @@ import type {
 } from "./types.ts";
 import {
   AtprotoClient,
-  base64UrlEncode,
   createLocalClient,
-  prepareWebAuthnCreationOptions,
 } from "./atproto-client.ts";
+import { createPasskeyCredential } from "../flows/perform-passkey-registration.ts";
 import { api } from "../api.ts";
 import { type KeypairInfo, plcOps, type PrivateKey } from "./plc-ops.ts";
 import { migrateBlobs as migrateBlobsUtil } from "./blob-migration.ts";
@@ -124,20 +123,13 @@ export function getOfflineResumeInfo(): {
 
 export { clearOfflineState };
 
-function createInitialProgress(): MigrationProgress {
-  return {
-    repoExported: false,
-    repoImported: false,
-    blobsTotal: 0,
-    blobsMigrated: 0,
-    blobsFailed: [],
-    prefsMigrated: false,
-    plcSigned: false,
-    activated: false,
-    deactivated: false,
-    currentOperation: "",
-  };
-}
+import {
+  createInitialProgress,
+  checkHandleAvailabilityViaClient,
+  loadServerInfo,
+  resolveVerificationIdentifier,
+} from "../flows/migration-shared.ts";
+import { createEmailVerificationPoller } from "../flows/email-verification.ts";
 
 export type OfflineInboundMigrationFlow = ReturnType<
   typeof createOfflineInboundMigrationFlow
@@ -171,6 +163,10 @@ export function createOfflineInboundMigrationFlow() {
     plcUpdatedTemporarily: false,
     handlePreservation: "new",
     existingHandleVerified: false,
+    verificationChannel: "email",
+    discordUsername: "",
+    telegramUsername: "",
+    signalUsername: "",
   });
 
   let localServerInfo: ServerDescription | null = null;
@@ -198,21 +194,13 @@ export function createOfflineInboundMigrationFlow() {
   }
 
   async function loadLocalServerInfo(): Promise<ServerDescription> {
-    if (!localServerInfo) {
-      const client = createLocalClient();
-      localServerInfo = await client.describeServer();
-    }
-    return localServerInfo;
+    const info = await loadServerInfo(createLocalClient(), localServerInfo);
+    localServerInfo = info;
+    return info;
   }
 
   async function checkHandleAvailability(handle: string): Promise<boolean> {
-    const client = createLocalClient();
-    try {
-      await client.resolveHandle(handle);
-      return false;
-    } catch {
-      return true;
-    }
+    return checkHandleAvailabilityViaClient(createLocalClient(), handle);
   }
 
   async function validateRotationKey(): Promise<boolean> {
@@ -235,18 +223,6 @@ export function createOfflineInboundMigrationFlow() {
       const pdsService = lastOperation.services?.atproto_pds;
       if (pdsService?.endpoint) {
         state.oldPdsUrl = pdsService.endpoint;
-        console.log(
-          "[offline-migration] Captured old PDS URL:",
-          state.oldPdsUrl,
-        );
-      } else {
-        console.warn(
-          "[offline-migration] No PDS service endpoint found in PLC document",
-        );
-        console.log(
-          "[offline-migration] PLC services:",
-          JSON.stringify(lastOperation.services),
-        );
       }
 
       saveOfflineState(state);
@@ -315,9 +291,13 @@ export function createOfflineInboundMigrationFlow() {
       {
         did: unsafeAsDid(state.userDid),
         handle: unsafeAsHandle(fullHandle),
-        email: unsafeAsEmail(state.targetEmail),
+        email: state.targetEmail ? unsafeAsEmail(state.targetEmail) : undefined,
         password: state.targetPassword,
         inviteCode: state.inviteCode || undefined,
+        verificationChannel: state.verificationChannel,
+        discordUsername: state.discordUsername || undefined,
+        telegramUsername: state.telegramUsername || undefined,
+        signalUsername: state.signalUsername || undefined,
       },
     );
 
@@ -338,8 +318,12 @@ export function createOfflineInboundMigrationFlow() {
     const createResult = await api.createPasskeyAccount({
       did: unsafeAsDid(state.userDid),
       handle: unsafeAsHandle(fullHandle),
-      email: unsafeAsEmail(state.targetEmail),
+      email: state.targetEmail ? unsafeAsEmail(state.targetEmail) : undefined,
       inviteCode: state.inviteCode || undefined,
+      verificationChannel: state.verificationChannel,
+      discordUsername: state.discordUsername || undefined,
+      telegramUsername: state.telegramUsername || undefined,
+      signalUsername: state.signalUsername || undefined,
     }, serviceAuthToken);
 
     state.targetHandle = fullHandle;
@@ -487,20 +471,32 @@ export function createOfflineInboundMigrationFlow() {
   }
 
   async function resendEmailVerification(): Promise<void> {
-    await api.resendMigrationVerification(unsafeAsEmail(state.targetEmail));
+    await api.resendMigrationVerification(
+      state.verificationChannel,
+      resolveVerificationIdentifier(
+        state.verificationChannel,
+        state.targetEmail,
+        state.discordUsername,
+        state.telegramUsername,
+        state.signalUsername,
+      ),
+    );
   }
 
-  let checkingEmailVerification = false;
-
-  async function checkEmailVerifiedAndProceed(): Promise<boolean> {
-    if (checkingEmailVerification) return false;
-    if (state.authMethod === "passkey") return false;
-
-    checkingEmailVerification = true;
-    try {
-      const { verified } = await api.checkEmailVerified(state.targetEmail);
-      if (!verified) return false;
-
+  const verificationPoller = createEmailVerificationPoller({
+    async checkVerified() {
+      if (state.authMethod === "passkey") return false;
+      if (state.verificationChannel === "email") {
+        const { verified } = await api.checkEmailVerified(state.targetEmail);
+        return verified;
+      }
+      const { verified } = await api.checkChannelVerified(
+        state.userDid,
+        state.verificationChannel,
+      );
+      return verified;
+    },
+    async onVerified() {
       if (!state.localAccessToken) {
         const session = await api.createSession(
           state.targetEmail,
@@ -519,12 +515,11 @@ export function createOfflineInboundMigrationFlow() {
 
       cleanup();
       setStep("success");
-      return true;
-    } catch {
-      return false;
-    } finally {
-      checkingEmailVerification = false;
-    }
+    },
+  });
+
+  function checkEmailVerifiedAndProceed(): Promise<boolean> {
+    return verificationPoller.checkAndAdvance();
   }
 
   async function startPasskeyRegistration(): Promise<{ options: unknown }> {
@@ -543,41 +538,14 @@ export function createOfflineInboundMigrationFlow() {
       throw new Error("No passkey setup token");
     }
 
-    if (!globalThis.PublicKeyCredential) {
-      throw new Error("Passkeys are not supported in this browser");
-    }
-
-    const { options } = await startPasskeyRegistration();
-
-    const publicKeyOptions = prepareWebAuthnCreationOptions(
-      options as { publicKey: Record<string, unknown> },
+    const credential = await createPasskeyCredential(
+      () => startPasskeyRegistration(),
     );
-    const credential = await navigator.credentials.create({
-      publicKey: publicKeyOptions,
-    });
-
-    if (!credential) {
-      throw new Error("Passkey creation was cancelled");
-    }
-
-    const publicKeyCredential = credential as PublicKeyCredential;
-    const response = publicKeyCredential
-      .response as AuthenticatorAttestationResponse;
-
-    const credentialData = {
-      id: publicKeyCredential.id,
-      rawId: base64UrlEncode(publicKeyCredential.rawId),
-      type: publicKeyCredential.type,
-      response: {
-        clientDataJSON: base64UrlEncode(response.clientDataJSON),
-        attestationObject: base64UrlEncode(response.attestationObject),
-      },
-    };
 
     const result = await api.completePasskeySetup(
       unsafeAsDid(state.userDid),
       state.passkeySetupToken,
-      credentialData,
+      credential,
       passkeyName,
     );
 
@@ -675,6 +643,10 @@ export function createOfflineInboundMigrationFlow() {
       plcUpdatedTemporarily: false,
       handlePreservation: "new",
       existingHandleVerified: false,
+      verificationChannel: "email",
+      discordUsername: "",
+      telegramUsername: "",
+      signalUsername: "",
     };
     localServerInfo = null;
   }

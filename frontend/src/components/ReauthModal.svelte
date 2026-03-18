@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { portal } from '../lib/portal'
   import { getAuthState, getValidToken } from '../lib/auth.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
@@ -136,7 +137,7 @@
 </script>
 
 {#if show}
-  <div class="modal-backdrop" onclick={handleClose} onkeydown={(e) => e.key === 'Escape' && handleClose()} role="presentation">
+  <div class="modal-backdrop" use:portal onclick={handleClose} onkeydown={(e) => e.key === 'Escape' && handleClose()} role="presentation">
     <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <h2>{$_('reauth.title')}</h2>
@@ -181,7 +182,7 @@
 
       <div class="modal-content">
         {#if activeMethod === 'password'}
-          <form onsubmit={handlePasswordSubmit}>
+          <form id="reauth-form" onsubmit={handlePasswordSubmit}>
             <div>
               <label for="reauth-password">{$_('reauth.password')}</label>
               <input
@@ -192,12 +193,9 @@
                 autocomplete="current-password"
               />
             </div>
-            <button type="submit" disabled={loading || !password}>
-              {loading ? $_('common.verifying') : $_('common.verify')}
-            </button>
           </form>
         {:else if activeMethod === 'totp'}
-          <form onsubmit={handleTotpSubmit}>
+          <form id="reauth-form" onsubmit={handleTotpSubmit}>
             <div>
               <label for="reauth-totp">{$_('reauth.authenticatorCode')}</label>
               <input
@@ -211,15 +209,10 @@
                 maxlength="6"
               />
             </div>
-            <button type="submit" disabled={loading || !totpCode}>
-              {loading ? $_('common.verifying') : $_('common.verify')}
-            </button>
           </form>
         {:else if activeMethod === 'passkey'}
           <div class="passkey-auth">
-            <button onclick={handlePasskeyAuth} disabled={loading}>
-              {loading ? $_('reauth.authenticating') : $_('reauth.usePasskey')}
-            </button>
+            <p>{$_('reauth.usePasskey')}</p>
           </div>
         {/if}
       </div>
@@ -228,6 +221,15 @@
         <button class="secondary" onclick={handleClose} disabled={loading}>
           {$_('reauth.cancel')}
         </button>
+        {#if activeMethod === 'passkey'}
+          <button onclick={handlePasskeyAuth} disabled={loading}>
+            {loading ? $_('reauth.authenticating') : $_('common.verify')}
+          </button>
+        {:else}
+          <button type="submit" form="reauth-form" disabled={loading || (activeMethod === 'password' ? !password : !totpCode)}>
+            {loading ? $_('common.verifying') : $_('common.verify')}
+          </button>
+        {/if}
       </div>
     </div>
   </div>

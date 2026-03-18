@@ -12,8 +12,6 @@ import {
   createLocalClient,
   exchangeOAuthCode,
   generateDPoPKeyPair,
-  generateOAuthState,
-  generatePKCE,
   getMigrationOAuthClientId,
   getMigrationOAuthRedirectUri,
   getOAuthServerMetadata,
@@ -22,6 +20,11 @@ import {
   resolvePdsUrl,
   saveDPoPKey,
 } from "./atproto-client.ts";
+import {
+  generateCodeChallenge,
+  generateCodeVerifier,
+  generateState,
+} from "../oauth.ts";
 import {
   clearMigrationState,
   saveMigrationState,
@@ -40,20 +43,13 @@ function migrationLog(stage: string, data?: Record<string, unknown>) {
   }
 }
 
-function createInitialProgress(): MigrationProgress {
-  return {
-    repoExported: false,
-    repoImported: false,
-    blobsTotal: 0,
-    blobsMigrated: 0,
-    blobsFailed: [],
-    prefsMigrated: false,
-    plcSigned: false,
-    activated: false,
-    deactivated: false,
-    currentOperation: "",
-  };
-}
+import {
+  createInitialProgress,
+  checkHandleAvailabilityViaClient,
+  loadServerInfo,
+  resolveVerificationIdentifier,
+} from "../flows/migration-shared.ts";
+import { createEmailVerificationPoller } from "../flows/email-verification.ts";
 
 export function createInboundMigrationFlow() {
   let state = $state<InboundMigrationState>({
@@ -82,11 +78,16 @@ export function createInboundMigrationFlow() {
     generatedAppPasswordName: null,
     handlePreservation: "new",
     existingHandleVerified: false,
+    verificationChannel: "email",
+    discordUsername: "",
+    telegramUsername: "",
+    signalUsername: "",
   });
 
   let sourceClient: AtprotoClient | null = null;
   let localClient: AtprotoClient | null = null;
   let localServerInfo: ServerDescription | null = null;
+  let sourcePdsDomains: string[] = [];
 
   function setStep(step: InboundStep) {
     state.step = step;
@@ -113,10 +114,9 @@ export function createInboundMigrationFlow() {
     if (!localClient) {
       localClient = createLocalClient();
     }
-    if (!localServerInfo) {
-      localServerInfo = await localClient.describeServer();
-    }
-    return localServerInfo;
+    const info = await loadServerInfo(localClient, localServerInfo);
+    localServerInfo = info;
+    return info;
   }
 
   async function resolveSourcePds(handle: string): Promise<void> {
@@ -147,8 +147,9 @@ export function createInboundMigrationFlow() {
       );
     }
 
-    const { codeVerifier, codeChallenge } = await generatePKCE();
-    const oauthState = generateOAuthState();
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+    const oauthState = generateState();
 
     const dpopKeyPair = await generateDPoPKeyPair();
     await saveDPoPKey(dpopKeyPair);
@@ -314,16 +315,23 @@ export function createInboundMigrationFlow() {
     saveMigrationState(state);
   }
 
+  async function loadSourcePdsDomains(): Promise<string[]> {
+    if (sourcePdsDomains.length > 0) return sourcePdsDomains;
+    if (!sourceClient) return [];
+    try {
+      const info = await sourceClient.describeServer();
+      sourcePdsDomains = info.availableUserDomains;
+    } catch {
+      sourcePdsDomains = [];
+    }
+    return sourcePdsDomains;
+  }
+
   async function checkHandleAvailability(handle: string): Promise<boolean> {
     if (!localClient) {
       localClient = createLocalClient();
     }
-    try {
-      await localClient.resolveHandle(handle);
-      return false;
-    } catch {
-      return true;
-    }
+    return checkHandleAvailabilityViaClient(localClient, handle);
   }
 
   async function verifyExistingHandle(): Promise<{
@@ -401,8 +409,12 @@ export function createInboundMigrationFlow() {
         const passkeyParams = {
           did: state.sourceDid,
           handle: state.targetHandle,
-          email: state.targetEmail,
+          email: state.targetEmail || undefined,
           inviteCode: state.inviteCode || undefined,
+          verificationChannel: state.verificationChannel,
+          discordUsername: state.discordUsername || undefined,
+          telegramUsername: state.telegramUsername || undefined,
+          signalUsername: state.signalUsername || undefined,
         };
 
         migrationLog("startMigration: Creating passkey account on NEW PDS", {
@@ -428,9 +440,13 @@ export function createInboundMigrationFlow() {
         const accountParams = {
           did: state.sourceDid,
           handle: state.targetHandle,
-          email: state.targetEmail,
+          email: state.targetEmail || undefined,
           password: state.targetPassword,
           inviteCode: state.inviteCode || undefined,
+          verificationChannel: state.verificationChannel,
+          discordUsername: state.discordUsername || undefined,
+          telegramUsername: state.telegramUsername || undefined,
+          signalUsername: state.signalUsername || undefined,
         };
 
         migrationLog("startMigration: Creating account on NEW PDS", {
@@ -618,30 +634,40 @@ export function createInboundMigrationFlow() {
     if (!localClient) {
       localClient = createLocalClient();
     }
-    await localClient.resendMigrationVerification();
+    await localClient.resendMigrationVerification(
+      state.verificationChannel,
+      resolveVerificationIdentifier(
+        state.verificationChannel,
+        state.targetEmail,
+        state.discordUsername,
+        state.telegramUsername,
+        state.signalUsername,
+      ),
+    );
   }
 
-  let checkingEmailVerification = false;
-
-  async function checkEmailVerifiedAndProceed(): Promise<boolean> {
-    if (checkingEmailVerification) return false;
-    if (!localClient) return false;
-
-    checkingEmailVerification = true;
-    try {
-      const verified = await localClient.checkEmailVerified(state.targetEmail);
-      if (!verified) return false;
-
+  const verificationPoller = createEmailVerificationPoller({
+    async checkVerified() {
+      if (!localClient) return false;
+      if (state.verificationChannel === "email") {
+        return localClient.checkEmailVerified(state.targetEmail);
+      }
+      return localClient.checkChannelVerified(
+        state.sourceDid,
+        state.verificationChannel,
+      );
+    },
+    async onVerified() {
       if (state.authMethod === "passkey") {
         migrationLog(
           "checkEmailVerifiedAndProceed: Email verified, proceeding to passkey setup",
         );
         setStep("passkey-setup");
-        return true;
+        return;
       }
 
-      if (!localClient.getAccessToken()) {
-        await localClient.loginDeactivated(
+      if (!localClient!.getAccessToken()) {
+        await localClient!.loginDeactivated(
           state.targetEmail,
           state.targetPassword,
         );
@@ -652,11 +678,11 @@ export function createInboundMigrationFlow() {
         setError(
           "Email verified! Please log in to your old account again to complete the migration.",
         );
-        return true;
+        return;
       }
 
       if (state.sourceDid.startsWith("did:web:")) {
-        const credentials = await localClient.getRecommendedDidCredentials();
+        const credentials = await localClient!.getRecommendedDidCredentials();
         state.targetVerificationMethod =
           credentials.verificationMethods?.atproto || null;
         setStep("did-web-update");
@@ -664,16 +690,11 @@ export function createInboundMigrationFlow() {
         await sourceClient.requestPlcOperationSignature();
         setStep("plc-token");
       }
-      return true;
-    } catch (e) {
-      const err = e as Error & { error?: string };
-      if (err.error === "AccountNotVerified") {
-        return false;
-      }
-      return false;
-    } finally {
-      checkingEmailVerification = false;
-    }
+    },
+  });
+
+  function checkEmailVerifiedAndProceed(): Promise<boolean> {
+    return verificationPoller.checkAndAdvance();
   }
 
   async function submitPlcToken(token: string): Promise<void> {
@@ -946,6 +967,10 @@ export function createInboundMigrationFlow() {
       generatedAppPasswordName: null,
       handlePreservation: "new",
       existingHandleVerified: false,
+      verificationChannel: "email",
+      discordUsername: "",
+      telegramUsername: "",
+      signalUsername: "",
     };
     sourceClient = null;
     passkeySetup = null;
@@ -1025,6 +1050,7 @@ export function createInboundMigrationFlow() {
     setStep,
     setError,
     loadLocalServerInfo,
+    loadSourcePdsDomains,
     resolveSourcePds,
     initiateOAuthLogin,
     handleOAuthCallback,

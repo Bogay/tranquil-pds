@@ -1,4 +1,5 @@
 import { api, ApiError } from "../api.ts";
+import { createEmailVerificationPoller } from "../flows/email-verification.ts";
 import { setSession } from "../auth.svelte.ts";
 import {
   createServiceJwt,
@@ -223,43 +224,51 @@ export function createRegistrationFlow(
     state.step = "creating";
   }
 
+  async function generateByodToken(): Promise<string | undefined> {
+    if (
+      state.info.didType !== "web-external" ||
+      state.externalDidWeb.keyMode !== "byod" ||
+      !state.externalDidWeb.byodPrivateKey
+    ) {
+      return undefined;
+    }
+    return createServiceJwt(
+      state.externalDidWeb.byodPrivateKey,
+      state.info.externalDid!.trim(),
+      getPdsDid(),
+      "com.atproto.server.createAccount",
+    );
+  }
+
+  function commonAccountParams() {
+    return {
+      didType: state.info.didType,
+      did: state.info.didType === "web-external"
+        ? unsafeAsDid(state.info.externalDid!.trim())
+        : undefined,
+      signingKey: state.info.didType === "web-external" &&
+          state.externalDidWeb.keyMode === "reserved"
+        ? state.externalDidWeb.reservedSigningKey
+        : undefined,
+      inviteCode: state.info.inviteCode?.trim() || undefined,
+      verificationChannel: state.info.verificationChannel,
+      discordUsername: state.info.discordUsername?.trim() || undefined,
+      telegramUsername: state.info.telegramUsername?.trim() || undefined,
+      signalUsername: state.info.signalUsername?.trim() || undefined,
+    };
+  }
+
   async function createPasswordAccount() {
     state.submitting = true;
     state.error = null;
 
     try {
-      let byodToken: string | undefined;
-
-      if (
-        state.info.didType === "web-external" &&
-        state.externalDidWeb.keyMode === "byod" &&
-        state.externalDidWeb.byodPrivateKey
-      ) {
-        byodToken = await createServiceJwt(
-          state.externalDidWeb.byodPrivateKey,
-          state.info.externalDid!.trim(),
-          getPdsDid(),
-          "com.atproto.server.createAccount",
-        );
-      }
-
+      const byodToken = await generateByodToken();
       const result = await api.createAccount({
         handle: getFullHandle(),
         email: state.info.email.trim(),
         password: state.info.password!,
-        inviteCode: state.info.inviteCode?.trim() || undefined,
-        didType: state.info.didType,
-        did: state.info.didType === "web-external"
-          ? state.info.externalDid!.trim()
-          : undefined,
-        signingKey: state.info.didType === "web-external" &&
-            state.externalDidWeb.keyMode === "reserved"
-          ? state.externalDidWeb.reservedSigningKey
-          : undefined,
-        verificationChannel: state.info.verificationChannel,
-        discordUsername: state.info.discordUsername?.trim() || undefined,
-        telegramUsername: state.info.telegramUsername?.trim() || undefined,
-        signalUsername: state.info.signalUsername?.trim() || undefined,
+        ...commonAccountParams(),
       }, byodToken);
 
       state.account = {
@@ -280,39 +289,13 @@ export function createRegistrationFlow(
     state.error = null;
 
     try {
-      let byodToken: string | undefined;
-
-      if (
-        state.info.didType === "web-external" &&
-        state.externalDidWeb.keyMode === "byod" &&
-        state.externalDidWeb.byodPrivateKey
-      ) {
-        byodToken = await createServiceJwt(
-          state.externalDidWeb.byodPrivateKey,
-          state.info.externalDid!.trim(),
-          getPdsDid(),
-          "com.atproto.server.createAccount",
-        );
-      }
-
+      const byodToken = await generateByodToken();
       const result = await api.createPasskeyAccount({
         handle: unsafeAsHandle(getFullHandle()),
         email: state.info.email?.trim()
           ? unsafeAsEmail(state.info.email.trim())
           : undefined,
-        inviteCode: state.info.inviteCode?.trim() || undefined,
-        didType: state.info.didType,
-        did: state.info.didType === "web-external"
-          ? unsafeAsDid(state.info.externalDid!.trim())
-          : undefined,
-        signingKey: state.info.didType === "web-external" &&
-            state.externalDidWeb.keyMode === "reserved"
-          ? state.externalDidWeb.reservedSigningKey
-          : undefined,
-        verificationChannel: state.info.verificationChannel,
-        discordUsername: state.info.discordUsername?.trim() || undefined,
-        telegramUsername: state.info.telegramUsername?.trim() || undefined,
-        signalUsername: state.info.signalUsername?.trim() || undefined,
+        ...commonAccountParams(),
       }, byodToken);
 
       state.account = {
@@ -343,6 +326,50 @@ export function createRegistrationFlow(
     persistState();
   }
 
+  function getAccountPassword(): string {
+    return state.mode === "passkey"
+      ? state.account!.appPassword!
+      : state.info.password!;
+  }
+
+  async function handlePostVerification(
+    session: SessionState,
+  ): Promise<void> {
+    state.session = session;
+
+    if (
+      state.info.didType === "web-external" &&
+      state.externalDidWeb.keyMode === "byod"
+    ) {
+      const credentials = await api.getRecommendedDidCredentials(
+        session.accessJwt,
+      );
+      const newPublicKeyMultibase =
+        credentials.verificationMethods?.atproto?.replace("did:key:", "") || "";
+
+      const didDoc = generateDidDocument(
+        state.info.externalDid!.trim(),
+        newPublicKeyMultibase,
+        state.account!.handle,
+        getPdsEndpoint(),
+      );
+      state.externalDidWeb.updatedDidDocument = JSON.stringify(
+        didDoc,
+        null,
+        "\t",
+      );
+      state.step = "updated-did-doc";
+      persistState();
+    } else if (state.info.didType === "web-external") {
+      await api.activateAccount(session.accessJwt);
+      await finalizeSession();
+      state.step = "redirect-to-dashboard";
+    } else {
+      await finalizeSession();
+      state.step = "redirect-to-dashboard";
+    }
+  }
+
   async function verifyAccount(code: string) {
     state.submitting = true;
     state.error = null;
@@ -354,48 +381,13 @@ export function createRegistrationFlow(
       );
 
       if (state.info.didType === "web-external") {
-        const password = state.mode === "passkey"
-          ? state.account!.appPassword!
-          : state.info.password!;
-        const session = await api.createSession(state.account!.did, password);
-        state.session = {
-          accessJwt: session.accessJwt,
-          refreshJwt: session.refreshJwt,
-        };
-
-        if (state.externalDidWeb.keyMode === "byod") {
-          const credentials = await api.getRecommendedDidCredentials(
-            session.accessJwt,
-          );
-          const newPublicKeyMultibase =
-            credentials.verificationMethods?.atproto?.replace("did:key:", "") ||
-            "";
-
-          const didDoc = generateDidDocument(
-            state.info.externalDid!.trim(),
-            newPublicKeyMultibase,
-            state.account!.handle,
-            getPdsEndpoint(),
-          );
-          state.externalDidWeb.updatedDidDocument = JSON.stringify(
-            didDoc,
-            null,
-            "\t",
-          );
-          state.step = "updated-did-doc";
-          persistState();
-        } else {
-          await api.activateAccount(session.accessJwt);
-          await finalizeSession();
-          state.step = "redirect-to-dashboard";
-        }
+        const session = await api.createSession(
+          state.account!.did,
+          getAccountPassword(),
+        );
+        await handlePostVerification(session);
       } else {
-        state.session = {
-          accessJwt: confirmResult.accessJwt,
-          refreshJwt: confirmResult.refreshJwt,
-        };
-        await finalizeSession();
-        state.step = "redirect-to-dashboard";
+        await handlePostVerification(confirmResult);
       }
     } catch (err) {
       setError(err);
@@ -419,74 +411,26 @@ export function createRegistrationFlow(
     }
   }
 
-  let checkingVerification = false;
-
-  async function checkAndAdvanceIfVerified(): Promise<boolean> {
-    if (checkingVerification || !state.account) return false;
-
-    checkingVerification = true;
-    try {
+  const verificationPoller = createEmailVerificationPoller({
+    async checkVerified() {
+      if (!state.account) return false;
       const result = await api.checkChannelVerified(
         state.account.did,
         state.info.verificationChannel,
       );
-      if (!result.verified) return false;
+      return result.verified;
+    },
+    async onVerified() {
+      const session = await api.createSession(
+        state.account!.did,
+        getAccountPassword(),
+      );
+      await handlePostVerification(session);
+    },
+  });
 
-      if (state.info.didType === "web-external") {
-        const password = state.mode === "passkey"
-          ? state.account.appPassword!
-          : state.info.password!;
-        const session = await api.createSession(state.account.did, password);
-        state.session = {
-          accessJwt: session.accessJwt,
-          refreshJwt: session.refreshJwt,
-        };
-
-        if (state.externalDidWeb.keyMode === "byod") {
-          const credentials = await api.getRecommendedDidCredentials(
-            session.accessJwt,
-          );
-          const newPublicKeyMultibase =
-            credentials.verificationMethods?.atproto?.replace("did:key:", "") ||
-            "";
-
-          const didDoc = generateDidDocument(
-            state.info.externalDid!.trim(),
-            newPublicKeyMultibase,
-            state.account.handle,
-            getPdsEndpoint(),
-          );
-          state.externalDidWeb.updatedDidDocument = JSON.stringify(
-            didDoc,
-            null,
-            "\t",
-          );
-          state.step = "updated-did-doc";
-          persistState();
-        } else {
-          await api.activateAccount(session.accessJwt);
-          await finalizeSession();
-          state.step = "redirect-to-dashboard";
-        }
-      } else {
-        const password = state.mode === "passkey"
-          ? state.account.appPassword!
-          : state.info.password!;
-        const session = await api.createSession(state.account.did, password);
-        state.session = {
-          accessJwt: session.accessJwt,
-          refreshJwt: session.refreshJwt,
-        };
-        await finalizeSession();
-        state.step = "redirect-to-dashboard";
-      }
-
-      return true;
-    } catch {
-      return false;
-    } finally {
-      checkingVerification = false;
-    }
+  function checkAndAdvanceIfVerified(): Promise<boolean> {
+    return verificationPoller.checkAndAdvance();
   }
 
   function goBack() {

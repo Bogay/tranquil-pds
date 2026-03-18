@@ -603,6 +603,20 @@ export class AtprotoClient {
     return result.verified;
   }
 
+  async checkChannelVerified(
+    did: string,
+    channel: string,
+  ): Promise<boolean> {
+    const result = await this.xrpc<{ verified: boolean }>(
+      "_checkChannelVerified",
+      {
+        httpMethod: "POST",
+        body: { did, channel },
+      },
+    );
+    return result.verified;
+  }
+
   async verifyToken(
     token: string,
     identifier: string,
@@ -625,9 +639,13 @@ export class AtprotoClient {
     });
   }
 
-  async resendMigrationVerification(): Promise<void> {
+  async resendMigrationVerification(
+    channel: string,
+    identifier: string,
+  ): Promise<void> {
     await this.xrpc("com.atproto.server.resendMigrationVerification", {
       httpMethod: "POST",
+      body: { channel, identifier },
     });
   }
 
@@ -731,23 +749,7 @@ export async function getOAuthServerMetadata(
   }
 }
 
-export async function generatePKCE(): Promise<{
-  codeVerifier: string;
-  codeChallenge: string;
-}> {
-  const array = new Uint8Array(32);
-  crypto.getRandomValues(array);
-  const codeVerifier = base64UrlEncode(array);
-
-  const encoder = new TextEncoder();
-  const data = encoder.encode(codeVerifier);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  const codeChallenge = base64UrlEncode(new Uint8Array(digest));
-
-  return { codeVerifier, codeChallenge };
-}
-
-export function base64UrlEncode(buffer: Uint8Array | ArrayBuffer): string {
+function base64UrlEncode(buffer: Uint8Array | ArrayBuffer): string {
   const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
   const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join(
     "",
@@ -758,45 +760,11 @@ export function base64UrlEncode(buffer: Uint8Array | ArrayBuffer): string {
   );
 }
 
-export function base64UrlDecode(base64url: string): Uint8Array {
-  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
-  const binary = atob(padded);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-}
-
-export function prepareWebAuthnCreationOptions(
-  options: { publicKey: Record<string, unknown> },
-): PublicKeyCredentialCreationOptions {
-  const pk = options.publicKey;
-  return {
-    ...pk,
-    challenge: base64UrlDecode(pk.challenge as string),
-    user: {
-      ...(pk.user as Record<string, unknown>),
-      id: base64UrlDecode((pk.user as Record<string, unknown>).id as string),
-    },
-    excludeCredentials:
-      ((pk.excludeCredentials as Array<Record<string, unknown>>) ?? []).map(
-        (cred) => ({
-          ...cred,
-          id: base64UrlDecode(cred.id as string),
-        }),
-      ),
-  } as unknown as PublicKeyCredentialCreationOptions;
-}
-
 async function computeAccessTokenHash(accessToken: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(accessToken);
   const hash = await crypto.subtle.digest("SHA-256", data);
   return base64UrlEncode(new Uint8Array(hash));
-}
-
-export function generateOAuthState(): string {
-  const array = new Uint8Array(16);
-  crypto.getRandomValues(array);
-  return base64UrlEncode(array);
 }
 
 export function buildOAuthAuthorizationUrl(

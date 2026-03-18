@@ -50,6 +50,8 @@ export interface MigrationProgress {
 
 export type HandlePreservation = "new" | "existing";
 
+export type VerificationChannel = "email" | "discord" | "telegram" | "signal";
+
 export interface InboundMigrationState {
   direction: "inbound";
   step: InboundStep;
@@ -78,6 +80,10 @@ export interface InboundMigrationState {
   resumeToStep?: InboundStep;
   handlePreservation: HandlePreservation;
   existingHandleVerified: boolean;
+  verificationChannel: VerificationChannel;
+  discordUsername: string;
+  telegramUsername: string;
+  signalUsername: string;
 }
 
 export interface OfflineInboundMigrationState {
@@ -107,6 +113,10 @@ export interface OfflineInboundMigrationState {
   plcUpdatedTemporarily: boolean;
   handlePreservation: HandlePreservation;
   existingHandleVerified: boolean;
+  verificationChannel: VerificationChannel;
+  discordUsername: string;
+  telegramUsername: string;
+  signalUsername: string;
 }
 
 export type MigrationState = InboundMigrationState;
@@ -142,6 +152,7 @@ export interface ServerDescription {
   availableUserDomains: string[];
   inviteCodeRequired: boolean;
   phoneVerificationRequired?: boolean;
+  availableCommsChannels?: VerificationChannel[];
   links?: {
     privacyPolicy?: string;
     termsOfService?: string;
@@ -226,17 +237,25 @@ export interface BlobRef {
 export interface CreateAccountParams {
   did?: string;
   handle: string;
-  email: string;
+  email?: string;
   password: string;
   inviteCode?: string;
   recoveryKey?: string;
+  verificationChannel?: VerificationChannel;
+  discordUsername?: string;
+  telegramUsername?: string;
+  signalUsername?: string;
 }
 
 export interface CreatePasskeyAccountParams {
   did?: string;
   handle: string;
-  email: string;
+  email?: string;
   inviteCode?: string;
+  verificationChannel?: VerificationChannel;
+  discordUsername?: string;
+  telegramUsername?: string;
+  signalUsername?: string;
 }
 
 export interface PasskeyAccountSetup {
