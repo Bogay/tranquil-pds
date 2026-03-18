@@ -376,12 +376,12 @@
                 </div>
                 <div class="item-details">
                   <div class="detail">
-                    <span class="label">{$_('delegation.did')}</span>
-                    <span class="value did">{controller.did}</span>
+                    <span class="detail-label">{$_('delegation.did')}</span>
+                    <span class="detail-value detail-value-did">{controller.did}</span>
                   </div>
                   <div class="detail">
-                    <span class="label">{$_('delegation.granted')}</span>
-                    <span class="value">{formatDateTime(controller.grantedAt)}</span>
+                    <span class="detail-label">{$_('delegation.granted')}</span>
+                    <span class="detail-value">{formatDateTime(controller.grantedAt)}</span>
                   </div>
                 </div>
               </div>
@@ -507,12 +507,12 @@
                 </div>
                 <div class="item-details">
                   <div class="detail">
-                    <span class="label">{$_('delegation.did')}</span>
-                    <span class="value did">{account.did}</span>
+                    <span class="detail-label">{$_('delegation.did')}</span>
+                    <span class="detail-value detail-value-did">{account.did}</span>
                   </div>
                   <div class="detail">
-                    <span class="label">{$_('delegation.granted')}</span>
-                    <span class="value">{formatDateTime(account.grantedAt)}</span>
+                    <span class="detail-label">{$_('delegation.granted')}</span>
+                    <span class="detail-value">{formatDateTime(account.grantedAt)}</span>
                   </div>
                 </div>
               </div>
@@ -601,19 +601,19 @@
               </div>
               <div class="audit-entry-details">
                 <div class="detail">
-                  <span class="label">{$_('delegation.actor')}</span>
-                  <span class="value did">{entry.actorDid}</span>
+                  <span class="detail-label">{$_('delegation.actor')}</span>
+                  <span class="detail-value detail-value-did">{entry.actorDid}</span>
                 </div>
                 {#if entry.delegatedDid}
                   <div class="detail">
-                    <span class="label">{$_('delegation.target')}</span>
-                    <span class="value did">{entry.delegatedDid}</span>
+                    <span class="detail-label">{$_('delegation.target')}</span>
+                    <span class="detail-value detail-value-did">{entry.delegatedDid}</span>
                   </div>
                 {/if}
                 {#if entry.actionDetails}
                   <div class="detail">
-                    <span class="label">{$_('delegation.details')}</span>
-                    <span class="value audit-details-value">{formatActionDetails(entry.actionDetails)}</span>
+                    <span class="detail-label">{$_('delegation.details')}</span>
+                    <span class="detail-value audit-details-value">{formatActionDetails(entry.actionDetails)}</span>
                   </div>
                 {/if}
               </div>

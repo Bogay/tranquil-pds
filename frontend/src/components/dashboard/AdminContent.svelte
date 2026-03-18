@@ -11,6 +11,8 @@
     setColors as setGlobalColors,
     setHasLogo as setGlobalHasLogo
   } from '../../lib/serverConfig.svelte'
+  import LoadMoreSentinel from '../LoadMoreSentinel.svelte'
+  import { portal } from '../../lib/portal'
 
   interface Props {
     session: Session
@@ -32,7 +34,6 @@
     indexedAt: string
     emailConfirmedAt?: string
     deactivatedAt?: string
-    invitesDisabled?: boolean
   }
 
   let stats = $state<ServerStats | null>(null)
@@ -41,6 +42,8 @@
   let usersLoading = $state(false)
   let searchQuery = $state('')
   let usersCursor = $state<string | undefined>(undefined)
+  let usersHasMore = $state(true)
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
   let selectedUser = $state<User | null>(null)
   let userActionLoading = $state(false)
@@ -63,7 +66,7 @@
   let serverConfigLoading = $state(false)
 
   onMount(async () => {
-    await Promise.all([loadStats(), loadServerConfig()])
+    await Promise.all([loadStats(), loadServerConfig(), loadUsers(true)])
   })
 
   async function loadStats() {
@@ -82,6 +85,7 @@
     if (reset) {
       users = []
       usersCursor = undefined
+      usersHasMore = true
     }
     try {
       const result = await api.searchAccounts(session.accessJwt, {
@@ -91,6 +95,7 @@
       })
       users = reset ? result.accounts : [...users, ...result.accounts]
       usersCursor = result.cursor
+      usersHasMore = !!result.cursor
     } catch {
       toast.error($_('admin.failedToLoadUsers'))
     } finally {
@@ -98,9 +103,10 @@
     }
   }
 
-  function handleSearch(e: Event) {
-    e.preventDefault()
-    loadUsers(true)
+  function onSearchInput(value: string) {
+    searchQuery = value
+    if (searchDebounce) clearTimeout(searchDebounce)
+    searchDebounce = setTimeout(() => loadUsers(true), 300)
   }
 
   function formatBytes(bytes: number): string {
@@ -216,7 +222,6 @@
         indexedAt: details.indexedAt,
         emailConfirmedAt: details.emailConfirmedAt,
         deactivatedAt: details.deactivatedAt,
-        invitesDisabled: details.invitesDisabled
       }
     } catch {
     } finally {
@@ -226,26 +231,6 @@
 
   function closeUserDetail() {
     selectedUser = null
-  }
-
-  async function toggleUserInvites() {
-    if (!selectedUser) return
-    userActionLoading = true
-    try {
-      if (selectedUser.invitesDisabled) {
-        await api.enableAccountInvites(session.accessJwt, unsafeAsDid(selectedUser.did))
-        selectedUser = { ...selectedUser, invitesDisabled: false }
-        toast.success($_('admin.invitesEnabled'))
-      } else {
-        await api.disableAccountInvites(session.accessJwt, unsafeAsDid(selectedUser.did))
-        selectedUser = { ...selectedUser, invitesDisabled: true }
-        toast.success($_('admin.invitesDisabled'))
-      }
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToToggleInvites'))
-    } finally {
-      userActionLoading = false
-    }
   }
 
   async function deleteUserAccount() {
@@ -372,16 +357,12 @@
   <section class="users-section">
     <h3>{$_('admin.userManagement')}</h3>
 
-    <form class="search-bar" onsubmit={handleSearch}>
-      <input
-        type="text"
-        bind:value={searchQuery}
-        placeholder={$_('admin.searchPlaceholder')}
-      />
-      <button type="submit" disabled={usersLoading}>
-        {usersLoading ? $_('common.loading') : $_('admin.search')}
-      </button>
-    </form>
+    <input
+      type="text"
+      value={searchQuery}
+      oninput={(e) => onSearchInput(e.currentTarget.value)}
+      placeholder={$_('admin.searchPlaceholder')}
+    />
 
     {#if users.length === 0 && !usersLoading}
       <p class="empty">{$_('admin.searchToSeeUsers')}</p>
@@ -412,18 +393,14 @@
           </li>
         {/each}
       </ul>
-      {#if usersCursor}
-        <button type="button" class="load-more" onclick={() => loadUsers(false)} disabled={usersLoading}>
-          {usersLoading ? $_('common.loading') : $_('admin.loadMore')}
-        </button>
-      {/if}
+      <LoadMoreSentinel hasMore={usersHasMore} loading={usersLoading} onLoadMore={() => loadUsers(false)} />
     {/if}
   </section>
 
 </div>
 
 {#if selectedUser}
-  <div class="modal-backdrop" onclick={closeUserDetail} onkeydown={(e) => e.key === 'Escape' && closeUserDetail()} role="presentation">
+  <div class="modal-backdrop" use:portal onclick={closeUserDetail} onkeydown={(e) => e.key === 'Escape' && closeUserDetail()} role="presentation">
     <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <h2>{$_('admin.userDetails')}</h2>
@@ -437,7 +414,7 @@
           <dt>{$_('admin.handle')}</dt>
           <dd>@{selectedUser.handle}</dd>
           <dt>{$_('admin.did')}</dt>
-          <dd class="mono">{selectedUser.did}</dd>
+          <dd class="definition-mono">{selectedUser.did}</dd>
           <dt>{$_('admin.email')}</dt>
           <dd>{selectedUser.email || '-'}</dd>
           <dt>{$_('admin.created')}</dt>
@@ -452,22 +429,8 @@
               <span class="badge unverified">{$_('admin.unverified')}</span>
             {/if}
           </dd>
-          <dt>{$_('admin.invites')}</dt>
-          <dd>
-            {#if selectedUser.invitesDisabled}
-              <span class="badge deactivated">{$_('admin.disabled')}</span>
-            {:else}
-              <span class="badge verified">{$_('admin.enabled')}</span>
-            {/if}
-          </dd>
         </dl>
         <div class="modal-actions">
-          <button
-            onclick={toggleUserInvites}
-            disabled={userActionLoading}
-          >
-            {selectedUser.invitesDisabled ? $_('admin.enableInvites') : $_('admin.disableInvites')}
-          </button>
           <button
             class="danger"
             onclick={deleteUserAccount}

@@ -116,12 +116,12 @@
             </div>
             <div class="session-details">
               <div class="detail">
-                <span class="label">{$_('sessions.created')}</span>
-                <span class="value">{timeAgo(s.createdAt)}</span>
+                <span class="detail-label">{$_('sessions.created')}</span>
+                <span class="detail-value">{timeAgo(s.createdAt)}</span>
               </div>
               <div class="detail">
-                <span class="label">{$_('sessions.expires')}</span>
-                <span class="value">{formatDate(s.expiresAt)}</span>
+                <span class="detail-label">{$_('sessions.expires')}</span>
+                <span class="detail-value">{formatDate(s.expiresAt)}</span>
               </div>
             </div>
           </div>
