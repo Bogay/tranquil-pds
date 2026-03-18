@@ -218,7 +218,7 @@ describe("OAuth Registration Flow", () => {
       });
 
       const RegisterPassword =
-        (await import("../routes/RegisterPassword.svelte")).default;
+        (await import("../routes/Register.svelte")).default;
       render(RegisterPassword);
 
       await waitFor(
@@ -253,7 +253,7 @@ describe("OAuth Registration Flow", () => {
       );
 
       const RegisterPassword =
-        (await import("../routes/RegisterPassword.svelte")).default;
+        (await import("../routes/Register.svelte")).default;
       render(RegisterPassword);
 
       await waitFor(() => {

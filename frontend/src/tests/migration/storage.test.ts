@@ -88,6 +88,10 @@ function createInboundState(
     generatedAppPasswordName: null,
     handlePreservation: "new",
     existingHandleVerified: false,
+    verificationChannel: "email",
+    discordUsername: "",
+    telegramUsername: "",
+    signalUsername: "",
     ...overrides,
   };
 }
@@ -130,8 +134,7 @@ function createOutboundState(
 
 describe("migration/storage", () => {
   beforeEach(() => {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(DPOP_KEY_STORAGE);
+    localStorage.clear();
   });
 
   describe("saveMigrationState", () => {
