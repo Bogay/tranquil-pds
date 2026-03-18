@@ -435,6 +435,8 @@ section h3 {
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  width: 100vw;
+  height: 100vh;
   background: var(--overlay-bg);
   z-index: var(--z-modal);
   display: flex;
@@ -496,12 +498,6 @@ section h3 {
   padding: var(--space-7);
 }
 
-.page-lg {
-  max-width: var(--width-xl);
-  margin: 0 auto;
-  padding: var(--space-7);
-}
-
 .page-header {
   margin-bottom: var(--space-6);
 }
@@ -541,47 +537,12 @@ section h3 {
   text-decoration: none;
 }
 
-.text-muted {
-  color: var(--text-muted);
-}
-
-.text-secondary {
-  color: var(--text-secondary);
-}
-
-.text-sm {
-  font-size: var(--text-sm);
-}
-
-.text-xs {
-  font-size: var(--text-xs);
-}
-
 .text-center {
   text-align: center;
 }
 
 .mono {
   font-family: var(--font-mono);
-}
-
-.mt-4 {
-  margin-top: var(--space-4);
-}
-.mt-5 {
-  margin-top: var(--space-5);
-}
-.mt-6 {
-  margin-top: var(--space-6);
-}
-.mb-4 {
-  margin-bottom: var(--space-4);
-}
-.mb-5 {
-  margin-bottom: var(--space-5);
-}
-.mb-6 {
-  margin-bottom: var(--space-6);
 }
 
 .split-layout {
@@ -605,12 +566,6 @@ section h3 {
 
 .split-layout > * {
   min-width: 0;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-4);
 }
 
 @media (min-width: 600px) {
@@ -649,7 +604,6 @@ section h3 {
 .info-panel p:last-child {
   margin-bottom: 0;
 }
-
 
 .skeleton {
   background: var(--bg-secondary);
@@ -843,10 +797,6 @@ section h3 {
   min-width: 0;
 }
 
-.form-links {
-  margin-top: var(--space-6);
-}
-
 .form-links .link-text {
   text-align: center;
   color: var(--text-secondary);
@@ -989,24 +939,10 @@ a.btn:hover {
   text-decoration: none;
 }
 
-.card-interactive {
-  cursor: pointer;
-}
-
 .card-interactive:hover {
   border-color: var(--secondary);
   box-shadow: 0 2px 8px var(--accent-muted);
 }
-
-.card-danger {
-  background: var(--error-bg);
-  border-color: var(--error-border);
-}
-
-.padding-none { padding: 0; }
-.padding-sm { padding: var(--space-4); }
-.padding-md { padding: var(--space-6); }
-.padding-lg { padding: var(--space-7); }
 
 section.danger {
   background: var(--error-bg);
@@ -1080,26 +1016,6 @@ section .description {
   padding: var(--space-4);
   box-shadow: var(--shadow-lg);
   pointer-events: auto;
-}
-
-.toast-success {
-  background: var(--success-bg);
-  color: var(--success-text);
-}
-
-.toast-error {
-  background: var(--error-bg);
-  color: var(--error-text);
-}
-
-.toast-warning {
-  background: var(--warning-bg);
-  color: var(--warning-text);
-}
-
-.toast-info {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
 }
 
 .toast-message {
@@ -1286,7 +1202,7 @@ section .description {
   margin-bottom: var(--space-4);
 }
 
-.modal-content button:not(.tab) {
+.modal-content button:not(.tab):not(.secondary) {
   width: 100%;
 }
 
@@ -1338,18 +1254,11 @@ svg.sso-icon {
   display: block;
 }
 
-
 .form-actions {
   display: flex;
   flex-direction: row;
   gap: var(--space-4);
   margin-top: var(--space-5);
-}
-
-.cancel-row {
-  display: flex;
-  justify-content: center;
-  margin-top: var(--space-4);
 }
 
 .form-actions .primary {

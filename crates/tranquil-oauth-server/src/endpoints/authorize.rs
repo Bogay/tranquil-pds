@@ -323,9 +323,16 @@ pub async fn authorize_get(
             .await
         && !accounts.is_empty()
     {
+        let login_hint_param = request_data
+            .parameters
+            .login_hint
+            .as_ref()
+            .map(|h| format!("&login_hint={}", url_encode(h)))
+            .unwrap_or_default();
         return redirect_see_other(&format!(
-            "/app/oauth/accounts?request_uri={}",
-            url_encode(&request_uri)
+            "/app/oauth/accounts?request_uri={}{}",
+            url_encode(&request_uri),
+            login_hint_param
         ));
     }
     redirect_see_other(&format!(

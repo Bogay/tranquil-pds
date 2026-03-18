@@ -4,6 +4,7 @@
   import { toast } from '../lib/toast.svelte'
   import SsoIcon from '../components/SsoIcon.svelte'
   import HandleInput from '../components/HandleInput.svelte'
+  import IdentityTypeSection from '../components/IdentityTypeSection.svelte'
 
   interface PendingRegistration {
     request_uri: string
@@ -91,9 +92,7 @@
     return commsChannels[ch as keyof CommsChannelConfig] ?? false
   }
 
-  function extractDomain(did: string): string {
-    return did.replace('did:web:', '').replace(/%3A/g, ':')
-  }
+
 
   let fullHandle = $derived(() => {
     if (!handle.trim()) return ''
@@ -497,55 +496,15 @@
             </div>
           </fieldset>
 
-          <fieldset>
-            <legend>{$_('registerPasskey.identityType')}</legend>
-            <p class="section-hint">{$_('registerPasskey.identityTypeHint')}</p>
-            <div class="radio-group">
-              <label class="radio-label">
-                <input type="radio" name="didType" value="plc" bind:group={didType} disabled={submitting} />
-                <span class="radio-content">
-                  <strong>{$_('registerPasskey.didPlcRecommended')}</strong>
-                  <span class="radio-hint">{$_('registerPasskey.didPlcHint')}</span>
-                </span>
-              </label>
-              <label class="radio-label" class:disabled={serverInfo?.selfHostedDidWebEnabled === false}>
-                <input type="radio" name="didType" value="web" bind:group={didType} disabled={submitting || serverInfo?.selfHostedDidWebEnabled === false} />
-                <span class="radio-content">
-                  <strong>{$_('registerPasskey.didWeb')}</strong>
-                  {#if serverInfo?.selfHostedDidWebEnabled === false}
-                    <span class="radio-hint disabled-hint">{$_('registerPasskey.didWebDisabledHint')}</span>
-                  {:else}
-                    <span class="radio-hint">{$_('registerPasskey.didWebHint')}</span>
-                  {/if}
-                </span>
-              </label>
-              <label class="radio-label">
-                <input type="radio" name="didType" value="web-external" bind:group={didType} disabled={submitting} />
-                <span class="radio-content">
-                  <strong>{$_('registerPasskey.didWebBYOD')}</strong>
-                  <span class="radio-hint">{$_('registerPasskey.didWebBYODHint')}</span>
-                </span>
-              </label>
-            </div>
-            {#if didType === 'web'}
-              <div class="warning-box">
-                <strong>{$_('registerPasskey.didWebWarningTitle')}</strong>
-                <ul>
-                  <li><strong>{$_('registerPasskey.didWebWarning1')}</strong> {@html $_('registerPasskey.didWebWarning1Detail', { values: { did: `<code>did:web:yourhandle.${serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>` } })}</li>
-                  <li><strong>{$_('registerPasskey.didWebWarning2')}</strong> {$_('registerPasskey.didWebWarning2Detail')}</li>
-                  <li><strong>{$_('registerPasskey.didWebWarning3')}</strong> {$_('registerPasskey.didWebWarning3Detail')}</li>
-                  <li><strong>{$_('registerPasskey.didWebWarning4')}</strong> {$_('registerPasskey.didWebWarning4Detail')}</li>
-                </ul>
-              </div>
-            {/if}
-            {#if didType === 'web-external'}
-              <div class="field">
-                <label for="external-did">{$_('registerPasskey.externalDid')}</label>
-                <input id="external-did" type="text" bind:value={externalDid} placeholder={$_('registerPasskey.externalDidPlaceholder')} disabled={submitting} required />
-                <p class="hint">{$_('registerPasskey.externalDidHint')} <code>https://{externalDid ? extractDomain(externalDid) : 'yourdomain.com'}/.well-known/did.json</code></p>
-              </div>
-            {/if}
-          </fieldset>
+          <IdentityTypeSection
+            {didType}
+            {externalDid}
+            disabled={submitting}
+            selfHostedDidWebEnabled={serverInfo?.selfHostedDidWebEnabled !== false}
+            defaultDomain={serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}
+            onDidTypeChange={(v) => didType = v}
+            onExternalDidChange={(v) => externalDid = v}
+          />
 
           {#if serverInfo?.inviteCodeRequired}
             <div>

@@ -23,7 +23,7 @@ pub use account_status::{
 };
 pub use app_password::{create_app_password, list_app_passwords, revoke_app_password};
 pub use email::{
-    authorize_email_update, check_channel_verified, check_comms_channel_in_use, check_email_in_use,
+    authorize_email_update, check_channel_verified, check_email_in_use,
     check_email_update_status, check_email_verified, confirm_email, request_email_update,
     update_email,
 };

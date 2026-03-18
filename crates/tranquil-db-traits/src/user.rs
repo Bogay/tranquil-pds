@@ -429,12 +429,6 @@ pub trait UserRepository: Send + Sync {
 
     async fn count_accounts_by_email(&self, email: &str) -> Result<i64, DbError>;
 
-    async fn count_accounts_by_comms_identifier(
-        &self,
-        channel: CommsChannel,
-        identifier: &str,
-    ) -> Result<i64, DbError>;
-
     async fn get_handles_by_email(&self, email: &str) -> Result<Vec<Handle>, DbError>;
 
     async fn set_password_reset_code(

@@ -499,7 +499,8 @@ pub mod repo {
         user_repo: &dyn UserRepository,
         infra_repo: &dyn InfraRepository,
         user_id: Uuid,
-        email: &str,
+        channel: tranquil_db_traits::CommsChannel,
+        recipient: &str,
         token: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
@@ -508,12 +509,12 @@ pub mod repo {
             .await?
             .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
-        let encoded_email = urlencoding::encode(email);
+        let encoded_recipient = urlencoding::encode(recipient);
         let encoded_token = urlencoding::encode(token);
         let verify_page = format!("https://{}/app/verify", hostname);
         let verify_link = format!(
             "https://{}/app/verify?token={}&identifier={}",
-            hostname, encoded_token, encoded_email
+            hostname, encoded_token, encoded_recipient
         );
         let body = format_message(
             strings.migration_verification_body,
@@ -531,9 +532,9 @@ pub mod repo {
         infra_repo
             .enqueue_comms(
                 Some(user_id),
-                tranquil_db_traits::CommsChannel::Email,
+                channel,
                 CommsType::MigrationVerification,
-                email,
+                recipient,
                 Some(&subject),
                 &body,
                 None,

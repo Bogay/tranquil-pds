@@ -72,10 +72,6 @@ async fn handle_migration_verification(
     channel: CommsChannel,
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
-    if channel != CommsChannel::Email {
-        return Err(ApiError::InvalidChannel);
-    }
-
     let user = state
         .user_repo
         .get_verification_info(did)
@@ -83,19 +79,43 @@ async fn handle_migration_verification(
         .log_db_err("during migration verification")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    if user.email.as_ref().map(|e| e.to_lowercase()) != Some(identifier.to_string()) {
-        return Err(ApiError::IdentifierMismatch);
-    }
+    match channel {
+        CommsChannel::Email => {
+            if user.email.as_ref().map(|e| e.to_lowercase()) != Some(identifier.to_string()) {
+                return Err(ApiError::IdentifierMismatch);
+            }
+            if !user.channel_verification.email {
+                state
+                    .user_repo
+                    .set_email_verified_flag(user.id)
+                    .await
+                    .log_db_err("updating email_verified status")?;
+            }
+        }
+        CommsChannel::Discord => {
+            state
+                .user_repo
+                .set_discord_verified_flag(user.id)
+                .await
+                .log_db_err("updating discord verified status")?;
+        }
+        CommsChannel::Telegram => {
+            state
+                .user_repo
+                .set_telegram_verified_flag(user.id)
+                .await
+                .log_db_err("updating telegram verified status")?;
+        }
+        CommsChannel::Signal => {
+            state
+                .user_repo
+                .set_signal_verified_flag(user.id)
+                .await
+                .log_db_err("updating signal verified status")?;
+        }
+    };
 
-    if !user.channel_verification.email {
-        state
-            .user_repo
-            .set_email_verified_flag(user.id)
-            .await
-            .log_db_err("updating email_verified status")?;
-    }
-
-    info!(did = %did, "Migration email verified successfully");
+    info!(did = %did, channel = ?channel, "Migration verification completed successfully");
 
     Ok(Json(VerifyTokenOutput {
         success: true,

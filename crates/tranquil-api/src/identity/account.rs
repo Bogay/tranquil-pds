@@ -153,9 +153,7 @@ pub async fn create_account(
     let verification_channel = input
         .verification_channel
         .unwrap_or(tranquil_db_traits::CommsChannel::Email);
-    let verification_recipient = if is_migration {
-        None
-    } else {
+    let verification_recipient = {
         Some(match verification_channel {
             tranquil_db_traits::CommsChannel::Email => match &input.email {
                 Some(email) if !email.trim().is_empty() => email.trim().to_string(),
@@ -372,9 +370,11 @@ pub async fn create_account(
                     return ApiError::InternalError(None).into_response();
                 }
                 let hostname = &tranquil_config::get().server.hostname;
-                let verification_required = if let Some(ref user_email) = email {
+                let verification_required = if let Some(ref recipient) = verification_recipient {
                     let token = tranquil_pds::auth::verification_token::generate_migration_token(
-                        &did_typed, user_email,
+                        &did_typed,
+                        verification_channel,
+                        recipient,
                     );
                     let formatted_token =
                         tranquil_pds::auth::verification_token::format_token_for_display(&token);
@@ -382,13 +382,14 @@ pub async fn create_account(
                         state.user_repo.as_ref(),
                         state.infra_repo.as_ref(),
                         reactivated.user_id,
-                        user_email,
+                        verification_channel,
+                        recipient,
                         &formatted_token,
                         hostname,
                     )
                     .await
                     {
-                        warn!("Failed to enqueue migration verification email: {:?}", e);
+                        warn!("Failed to enqueue migration verification: {:?}", e);
                     }
                     true
                 } else {
@@ -403,7 +404,7 @@ pub async fn create_account(
                         access_jwt: access_meta.token,
                         refresh_jwt: refresh_meta.token,
                         verification_required,
-                        verification_channel: tranquil_db_traits::CommsChannel::Email,
+                        verification_channel,
                     }),
                 )
                     .into_response();
@@ -668,10 +669,11 @@ pub async fn create_account(
                 );
             }
         }
-    } else if let Some(ref user_email) = email {
+    } else if let Some(ref recipient) = verification_recipient {
         let token = tranquil_pds::auth::verification_token::generate_migration_token(
             &did_for_commit,
-            user_email,
+            verification_channel,
+            recipient,
         );
         let formatted_token =
             tranquil_pds::auth::verification_token::format_token_for_display(&token);
@@ -679,13 +681,14 @@ pub async fn create_account(
             state.user_repo.as_ref(),
             state.infra_repo.as_ref(),
             user_id,
-            user_email,
+            verification_channel,
+            recipient,
             &formatted_token,
             hostname,
         )
         .await
         {
-            warn!("Failed to enqueue migration verification email: {:?}", e);
+            warn!("Failed to enqueue migration verification: {:?}", e);
         }
     }
 

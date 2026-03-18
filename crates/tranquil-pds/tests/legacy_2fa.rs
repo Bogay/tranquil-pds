@@ -127,7 +127,7 @@ async fn test_legacy_2fa_auth_factor_required() {
         body["message"]
             .as_str()
             .unwrap_or("")
-            .contains("sign in code")
+            .contains("sign-in code")
     );
 }
 

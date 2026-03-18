@@ -1654,33 +1654,6 @@ impl UserRepository for PostgresUserRepository {
         .map_err(map_sqlx_error)
     }
 
-    async fn count_accounts_by_comms_identifier(
-        &self,
-        channel: CommsChannel,
-        identifier: &str,
-    ) -> Result<i64, DbError> {
-        let query = match channel {
-            CommsChannel::Email => {
-                "SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER($1) AND deactivated_at IS NULL"
-            }
-            CommsChannel::Discord => {
-                "SELECT COUNT(*) FROM users WHERE LOWER(discord_username) = LOWER($1) AND deactivated_at IS NULL"
-            }
-            CommsChannel::Telegram => {
-                "SELECT COUNT(*) FROM users WHERE LOWER(telegram_username) = LOWER($1) AND deactivated_at IS NULL"
-            }
-            CommsChannel::Signal => {
-                "SELECT COUNT(*) FROM users WHERE signal_username = $1 AND deactivated_at IS NULL"
-            }
-        };
-        sqlx::query_scalar(query)
-            .bind(identifier)
-            .fetch_one(&self.pool)
-            .await
-            .map(|c: Option<i64>| c.unwrap_or(0))
-            .map_err(map_sqlx_error)
-    }
-
     async fn get_handles_by_email(&self, email: &str) -> Result<Vec<Handle>, DbError> {
         sqlx::query_scalar!(
             "SELECT handle FROM users WHERE LOWER(email) = LOWER($1) AND deactivated_at IS NULL ORDER BY created_at DESC",

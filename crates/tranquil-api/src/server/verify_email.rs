@@ -40,7 +40,8 @@ pub async fn verify_migration_email(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResendMigrationVerificationInput {
-    pub email: String,
+    pub channel: Option<tranquil_db_traits::CommsChannel>,
+    pub identifier: String,
 }
 
 #[derive(Serialize)]
@@ -53,9 +54,12 @@ pub async fn resend_migration_verification(
     State(state): State<AppState>,
     Json(input): Json<ResendMigrationVerificationInput>,
 ) -> Result<Json<ResendMigrationVerificationOutput>, ApiError> {
-    let email = input.email.trim().to_lowercase();
+    let channel = input
+        .channel
+        .unwrap_or(tranquil_db_traits::CommsChannel::Email);
+    let identifier = input.identifier.trim().to_lowercase();
 
-    let user = match state.user_repo.get_by_email(&email).await {
+    let user = match state.user_repo.get_by_email(&identifier).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return Ok(Json(ResendMigrationVerificationOutput { sent: true }));
@@ -71,23 +75,28 @@ pub async fn resend_migration_verification(
     }
 
     let hostname = &tranquil_config::get().server.hostname;
-    let token = tranquil_pds::auth::verification_token::generate_migration_token(&user.did, &email);
+    let token = tranquil_pds::auth::verification_token::generate_migration_token(
+        &user.did,
+        channel,
+        &identifier,
+    );
     let formatted_token = tranquil_pds::auth::verification_token::format_token_for_display(&token);
 
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_migration_verification(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
         user.id,
-        &email,
+        channel,
+        &identifier,
         &formatted_token,
         hostname,
     )
     .await
     {
-        warn!(error = ?e, "Failed to enqueue migration verification email");
+        warn!(error = ?e, channel = ?channel, "Failed to enqueue migration verification");
     }
 
-    info!(did = %user.did, "Resent migration verification email");
+    info!(did = %user.did, channel = ?channel, "Resent migration verification");
 
     Ok(Json(ResendMigrationVerificationOutput { sent: true }))
 }

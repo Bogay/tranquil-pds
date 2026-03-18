@@ -80,13 +80,8 @@ pub fn generate_signup_token(did: &Did, channel: CommsChannel, identifier: &str)
     generate_token(did, VerificationPurpose::Signup, channel, identifier)
 }
 
-pub fn generate_migration_token(did: &Did, email: &str) -> String {
-    generate_token(
-        did,
-        VerificationPurpose::Migration,
-        CommsChannel::Email,
-        email,
-    )
+pub fn generate_migration_token(did: &Did, channel: CommsChannel, identifier: &str) -> String {
+    generate_token(did, VerificationPurpose::Migration, channel, identifier)
 }
 
 pub fn generate_channel_update_token(did: &Did, channel: CommsChannel, identifier: &str) -> String {
@@ -196,16 +191,17 @@ pub fn verify_signup_token(
 
 pub fn verify_migration_token(
     token: &str,
-    expected_email: &str,
+    expected_channel: CommsChannel,
+    expected_identifier: &str,
 ) -> Result<VerificationToken, VerifyError> {
     let parsed = verify_token_signature(token)?;
     if parsed.purpose != VerificationPurpose::Migration {
         return Err(VerifyError::PurposeMismatch);
     }
-    if parsed.channel != CommsChannel::Email {
+    if parsed.channel != expected_channel {
         return Err(VerifyError::ChannelMismatch);
     }
-    let expected_hash = hash_identifier(expected_email);
+    let expected_hash = hash_identifier(expected_identifier);
     if parsed.identifier_hash != expected_hash {
         return Err(VerifyError::IdentifierMismatch);
     }
@@ -345,8 +341,8 @@ mod tests {
         init();
         let did: Did = "did:plc:test123".parse().unwrap();
         let email = "test@example.com";
-        let token = generate_migration_token(&did, email);
-        let result = verify_migration_token(&token, email);
+        let token = generate_migration_token(&did, CommsChannel::Email, email);
+        let result = verify_migration_token(&token, CommsChannel::Email, email);
         assert!(result.is_ok(), "Expected Ok, got {:?}", result);
         let parsed = result.unwrap();
         assert_eq!(parsed.did, did);
@@ -409,7 +405,7 @@ mod tests {
         let did: Did = "did:plc:test123".parse().unwrap();
         let email = "test@example.com";
         let signup_token = generate_signup_token(&did, CommsChannel::Email, email);
-        let result = verify_migration_token(&signup_token, email);
+        let result = verify_migration_token(&signup_token, CommsChannel::Email, email);
         assert!(matches!(result, Err(VerifyError::PurposeMismatch)));
     }
 

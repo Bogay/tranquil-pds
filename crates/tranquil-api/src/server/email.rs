@@ -606,37 +606,3 @@ pub async fn check_email_in_use(
     }))
     .into_response()
 }
-
-#[derive(Deserialize)]
-pub struct CheckCommsChannelInUseInput {
-    pub channel: CommsChannel,
-    pub identifier: String,
-}
-
-pub async fn check_comms_channel_in_use(
-    State(state): State<AppState>,
-    _rate_limit: RateLimited<VerificationCheckLimit>,
-    Json(input): Json<CheckCommsChannelInUseInput>,
-) -> Response {
-    let identifier = input.identifier.trim();
-    if identifier.is_empty() {
-        return ApiError::InvalidRequest("identifier is required".into()).into_response();
-    }
-
-    let count = match state
-        .user_repo
-        .count_accounts_by_comms_identifier(input.channel, identifier)
-        .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            error!("DB error checking comms channel usage: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    Json(json!({
-        "inUse": count > 0,
-    }))
-    .into_response()
-}

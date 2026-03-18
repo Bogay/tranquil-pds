@@ -1,4 +1,4 @@
-import { api, ApiError, castSession, typedApi } from "./api.ts";
+import { api, ApiError, castSession } from "./api.ts";
 import type {
   CreateAccountParams,
   CreateAccountResult,
@@ -15,7 +15,6 @@ import {
   unsafeAsRefreshToken,
 } from "./types/branded.ts";
 import { err, isErr, isOk, ok, type Result } from "./types/result.ts";
-import { assertNever } from "./types/exhaustive.ts";
 import {
   checkForOAuthCallback,
   clearAllOAuthState,
@@ -392,15 +391,15 @@ export async function login(
     : null;
   setLoading(previousSession);
 
-  const result = await typedApi.createSession(identifier, password);
-  if (isErr(result)) {
-    const error = toAuthError(result.error);
+  try {
+    const session = await api.createSession(identifier, password);
+    setAuthenticated(session);
+    return ok(session);
+  } catch (e) {
+    const error = toAuthError(e);
     setError(error);
     return err(error);
   }
-
-  setAuthenticated(result.value);
-  return ok(result.value);
 }
 
 export async function loginWithOAuth(): Promise<Result<void, AuthError>> {
@@ -654,7 +653,7 @@ export function matchAuthState<T>(handlers: {
     case "error":
       return handlers.error(current.error, current.savedAccounts);
     default:
-      return assertNever(current);
+      throw new Error(`Unexpected auth state: ${(current as { kind: string }).kind}`);
   }
 }
 

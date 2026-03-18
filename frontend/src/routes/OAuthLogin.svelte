@@ -494,17 +494,16 @@
               <span>{$_('oauth.login.rememberDevice')}</span>
             </label>
 
-            <button type="submit" disabled={submitting || !username || !password}>
-              {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
-            </button>
+            <div class="actions">
+              <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
+                {$_('common.cancel')}
+              </button>
+              <button type="submit" disabled={submitting || !username || !password}>
+                {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
+              </button>
+            </div>
           </div>
         {/if}
-      </div>
-
-      <div class="cancel-row">
-        <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
-          {$_('common.cancel')}
-        </button>
       </div>
     {:else}
       {#if hasPassword || !securityStatusChecked}
@@ -526,17 +525,14 @@
         </label>
 
         <div class="actions">
+          <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
+            {$_('common.cancel')}
+          </button>
           <button type="submit" disabled={submitting || !username || !password}>
             {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
           </button>
         </div>
       {/if}
-
-      <div class="cancel-row">
-        <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
-          {$_('common.cancel')}
-        </button>
-      </div>
     {/if}
   </form>
 

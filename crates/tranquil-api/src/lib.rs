@@ -216,10 +216,6 @@ pub fn api_routes() -> axum::Router<AppState> {
             post(server::check_email_in_use),
         )
         .route(
-            "/_account.checkCommsChannelInUse",
-            post(server::check_comms_channel_in_use),
-        )
-        .route(
             "/com.atproto.server.reserveSigningKey",
             post(server::reserve_signing_key),
         )

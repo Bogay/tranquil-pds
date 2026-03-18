@@ -15,17 +15,15 @@
   import OAuthConsent from './routes/OAuthConsent.svelte'
   import OAuthLogin from './routes/OAuthLogin.svelte'
   import OAuthAccounts from './routes/OAuthAccounts.svelte'
-  import OAuth2FA from './routes/OAuth2FA.svelte'
-  import OAuthTotp from './routes/OAuthTotp.svelte'
+  import OAuthVerifyCode from './routes/OAuthVerifyCode.svelte'
   import OAuthPasskey from './routes/OAuthPasskey.svelte'
   import OAuthDelegation from './routes/OAuthDelegation.svelte'
   import OAuthError from './routes/OAuthError.svelte'
   import SsoRegisterComplete from './routes/SsoRegisterComplete.svelte'
   import Register from './routes/Register.svelte'
-  import RegisterPassword from './routes/RegisterPassword.svelte'
+
   import ActAs from './routes/ActAs.svelte'
   import Migration from './routes/Migration.svelte'
-  import UiTest from './routes/UiTest.svelte'
   import { _ } from './lib/i18n'
   initI18n()
 
@@ -105,9 +103,8 @@
       case '/oauth/accounts':
         return OAuthAccounts
       case '/oauth/2fa':
-        return OAuth2FA
       case '/oauth/totp':
-        return OAuthTotp
+        return OAuthVerifyCode
       case '/oauth/passkey':
         return OAuthPasskey
       case '/oauth/delegation':
@@ -118,17 +115,14 @@
         return SsoRegisterComplete
       case '/register':
       case '/oauth/register':
+      case '/oauth/register-password':
         return Register
       case '/oauth/register-sso':
         return RegisterSso
-      case '/oauth/register-password':
-        return RegisterPassword
       case '/act-as':
         return ActAs
       case '/migrate':
         return Migration
-      case '/ui-test':
-        return UiTest
       default:
         return Login
     }

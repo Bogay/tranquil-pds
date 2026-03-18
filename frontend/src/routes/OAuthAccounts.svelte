@@ -13,13 +13,12 @@
   let submitting = $state(false)
   let accounts = $state<AccountInfo[]>([])
 
-  function getRequestUri(): string | null {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('request_uri')
+  function getParam(name: string): string | null {
+    return new URLSearchParams(window.location.search).get(name)
   }
 
   async function fetchAccounts() {
-    const requestUri = getRequestUri()
+    const requestUri = getParam('request_uri')
     if (!requestUri) {
       error = 'Missing request_uri parameter'
       loading = false
@@ -36,6 +35,19 @@
       }
       const data = await response.json()
       accounts = data.accounts || []
+
+      const loginHint = getParam('login_hint')
+      if (loginHint && accounts.length > 0) {
+        const hint = loginHint.toLowerCase()
+        const matched = accounts.find(
+          (a) => a.did === hint || a.handle.toLowerCase() === hint
+        )
+        if (matched) {
+          loading = false
+          handleSelectAccount(matched.did)
+          return
+        }
+      }
     } catch {
       error = 'Failed to connect to server'
     } finally {
@@ -44,7 +56,7 @@
   }
 
   async function handleSelectAccount(did: string) {
-    const requestUri = getRequestUri()
+    const requestUri = getParam('request_uri')
     if (!requestUri) {
       error = 'Missing request_uri parameter'
       return
@@ -98,7 +110,7 @@
   }
 
   function handleDifferentAccount() {
-    const requestUri = getRequestUri()
+    const requestUri = getParam('request_uri')
     if (requestUri) {
       navigate(routes.oauthLogin, { params: { request_uri: requestUri } })
     } else {

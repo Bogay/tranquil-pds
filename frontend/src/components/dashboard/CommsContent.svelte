@@ -33,9 +33,6 @@
   let verifyingChannel = $state<string | null>(null)
   let verificationCode = $state('')
   let historyLoading = $state(true)
-  let discordInUse = $state(false)
-  let telegramInUse = $state(false)
-  let signalInUse = $state(false)
   let messages = $state<Array<{
     createdAt: string
     channel: string
@@ -147,23 +144,6 @@
     return formatDateTime(dateStr)
   }
 
-  async function checkChannelInUse(channel: 'discord' | 'telegram' | 'signal', identifier: string) {
-    const trimmed = identifier.trim()
-    if (!trimmed) {
-      const resetMap = { discord: () => discordInUse = false, telegram: () => telegramInUse = false, signal: () => signalInUse = false }
-      resetMap[channel]()
-      return
-    }
-    try {
-      const result = await api.checkCommsChannelInUse(channel, trimmed)
-      const setMap = { discord: (v: boolean) => discordInUse = v, telegram: (v: boolean) => telegramInUse = v, signal: (v: boolean) => signalInUse = v }
-      setMap[channel](result.inUse)
-    } catch {
-      const resetMap = { discord: () => discordInUse = false, telegram: () => telegramInUse = false, signal: () => signalInUse = false }
-      resetMap[channel]()
-    }
-  }
-
   const channels = ['email', 'discord', 'telegram', 'signal']
 
   function getChannelName(id: string): string {
@@ -261,14 +241,10 @@
                   id="discord"
                   type="text"
                   bind:value={discordUsername}
-                  onblur={() => checkChannelInUse('discord', discordUsername)}
                   placeholder={$_('register.discordUsernamePlaceholder')}
                   disabled={saving}
                 />
               </div>
-              {#if discordInUse}
-                <p class="hint warning">{$_('comms.discordInUseWarning')}</p>
-              {/if}
               {#if discordUsername && discordUsername === savedDiscordUsername && !discordVerified && discordBotUsername}
                 {@const encodedHandle = session.handle.replaceAll('.', '_')}
                 <div class="discord-verify-prompt">
@@ -296,14 +272,10 @@
                   id="telegram"
                   type="text"
                   bind:value={telegramUsername}
-                  onblur={() => checkChannelInUse('telegram', telegramUsername)}
                   placeholder={$_('register.telegramUsernamePlaceholder')}
                   disabled={saving}
                 />
               </div>
-              {#if telegramInUse}
-                <p class="hint warning">{$_('comms.telegramInUseWarning')}</p>
-              {/if}
               {#if telegramUsername && telegramUsername === savedTelegramUsername && !telegramVerified && telegramBotUsername}
                 {@const encodedHandle = session.handle.replaceAll('.', '_')}
                 <div class="telegram-verify-prompt">
@@ -329,14 +301,10 @@
                   id="signal"
                   type="text"
                   bind:value={signalUsername}
-                  onblur={() => checkChannelInUse('signal', signalUsername)}
                   placeholder={$_('register.signalUsernamePlaceholder')}
                   disabled={saving}
                 />
               </div>
-              {#if signalInUse}
-                <p class="hint warning">{$_('comms.signalInUseWarning')}</p>
-              {/if}
               {#if signalUsername && signalUsername === savedSignalUsername && !signalVerified}
                 <div class="verify-form">
                   <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="512" />

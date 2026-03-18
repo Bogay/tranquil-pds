@@ -261,7 +261,7 @@
       error = null
 
       try {
-        await api.resendMigrationVerification(unsafeAsEmail(identifier.trim()))
+        await api.resendMigrationVerification('email', identifier.trim())
         resendMessage = $_('verify.codeResentDetail')
       } catch (e) {
         error = e instanceof Error ? e.message : 'Failed to resend verification'

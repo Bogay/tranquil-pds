@@ -10,15 +10,11 @@
     signalUsername: string
     availableChannels: VerificationChannel[]
     disabled?: boolean
-    discordInUse?: boolean
-    telegramInUse?: boolean
-    signalInUse?: boolean
     onChannelChange: (channel: VerificationChannel) => void
     onEmailChange: (value: string) => void
     onDiscordChange: (value: string) => void
     onTelegramChange: (value: string) => void
     onSignalChange: (value: string) => void
-    onCheckInUse?: (channel: 'discord' | 'telegram' | 'signal', identifier: string) => void
   }
 
   let {
@@ -29,15 +25,11 @@
     signalUsername,
     availableChannels,
     disabled = false,
-    discordInUse = false,
-    telegramInUse = false,
-    signalInUse = false,
     onChannelChange,
     onEmailChange,
     onDiscordChange,
     onTelegramChange,
     onSignalChange,
-    onCheckInUse,
   }: Props = $props()
 
   function channelLabel(ch: string): string {
@@ -92,14 +84,10 @@
       type="text"
       value={discordUsername}
       oninput={(e) => onDiscordChange((e.target as HTMLInputElement).value)}
-      onblur={() => onCheckInUse?.('discord', discordUsername)}
       placeholder={$_('register.discordUsernamePlaceholder')}
       {disabled}
       required
     />
-    {#if discordInUse}
-      <p class="hint warning">{$_('register.discordInUseWarning')}</p>
-    {/if}
   </div>
 {:else if channel === 'telegram'}
   <div>
@@ -109,14 +97,10 @@
       type="text"
       value={telegramUsername}
       oninput={(e) => onTelegramChange((e.target as HTMLInputElement).value)}
-      onblur={() => onCheckInUse?.('telegram', telegramUsername)}
       placeholder={$_('register.telegramUsernamePlaceholder')}
       {disabled}
       required
     />
-    {#if telegramInUse}
-      <p class="hint warning">{$_('register.telegramInUseWarning')}</p>
-    {/if}
   </div>
 {:else if channel === 'signal'}
   <div>
@@ -126,14 +110,10 @@
       type="tel"
       value={signalUsername}
       oninput={(e) => onSignalChange((e.target as HTMLInputElement).value)}
-      onblur={() => onCheckInUse?.('signal', signalUsername)}
       placeholder={$_('register.signalUsernamePlaceholder')}
       {disabled}
       required
     />
     <p class="hint">{$_('register.signalUsernameHint')}</p>
-    {#if signalInUse}
-      <p class="hint warning">{$_('register.signalInUseWarning')}</p>
-    {/if}
   </div>
 {/if}

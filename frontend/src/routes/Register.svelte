@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl, getCurrentPath } from '../lib/router.svelte'
   import { api } from '../lib/api'
   import { _ } from '../lib/i18n'
   import {
@@ -8,21 +8,24 @@
     VerificationStep,
     KeyChoiceStep,
     DidDocStep,
-    AppPasswordStep,
   } from '../lib/registration'
-  import {
-    prepareCreationOptions,
-    serializeAttestationResponse,
-    type WebAuthnCreationOptionsResponse,
-  } from '../lib/webauthn'
+  import type { RegistrationMode } from '../lib/registration'
+  import AppPasswordStep from '../components/migration/AppPasswordStep.svelte'
+  import PasskeySetupStep from '../components/migration/PasskeySetupStep.svelte'
+  import { performPasskeyRegistration, PasskeyCancelledError } from '../lib/flows/perform-passkey-registration'
   import AccountTypeSwitcher from '../components/AccountTypeSwitcher.svelte'
   import HandleInput from '../components/HandleInput.svelte'
+  import IdentityTypeSection from '../components/IdentityTypeSection.svelte'
+  import CommsChannelPicker from '../components/CommsChannelPicker.svelte'
   import { ensureRequestUri, getRequestUriFromUrl } from '../lib/oauth'
+
+  const mode: RegistrationMode = getCurrentPath().includes('register-password') ? 'password' : 'passkey'
+  const isPasskey = mode === 'passkey'
 
   let serverInfo = $state<{
     availableUserDomains: string[]
     inviteCodeRequired: boolean
-    availableCommsChannels?: string[]
+    availableCommsChannels?: import('../lib/types/api').VerificationChannel[]
     selfHostedDidWebEnabled?: boolean
   } | null>(null)
   let loadingServerInfo = $state(true)
@@ -31,6 +34,7 @@
 
   let flow = $state<ReturnType<typeof createRegistrationFlow> | null>(null)
   let passkeyName = $state('')
+  let confirmPassword = $state('')
   let clientName = $state<string | null>(null)
   let selectedDomain = $state('')
   let checkHandleTimeout: ReturnType<typeof setTimeout> | null = null
@@ -99,20 +103,24 @@
   $effect(() => {
     if (flow?.state.step === 'creating' && !creatingStarted) {
       creatingStarted = true
-      flow.createPasskeyAccount()
+      if (isPasskey) {
+        flow.createPasskeyAccount()
+      } else {
+        flow.createPasswordAccount()
+      }
     }
   })
 
   async function loadServerInfo() {
     try {
       const restored = restoreRegistrationFlow()
-      if (restored && restored.state.mode === 'passkey') {
+      if (restored && restored.state.mode === mode) {
         flow = restored
         serverInfo = await api.describeServer()
       } else {
         serverInfo = await api.describeServer()
         const hostname = serverInfo?.availableUserDomains?.[0] || window.location.hostname
-        flow = createRegistrationFlow('passkey', hostname)
+        flow = createRegistrationFlow(mode, hostname)
       }
       selectedDomain = serverInfo?.availableUserDomains?.[0] || window.location.hostname
       if (flow) flow.setSelectedDomain(selectedDomain)
@@ -128,6 +136,11 @@
     const info = flow.info
     if (!info.handle.trim()) return $_('registerPasskey.errors.handleRequired')
     if (info.handle.includes('.')) return $_('registerPasskey.errors.handleNoDots')
+    if (!isPasskey) {
+      if (!info.password) return $_('register.validation.passwordRequired')
+      if (info.password.length < 8) return $_('register.validation.passwordLength')
+      if (info.password !== confirmPassword) return $_('register.validation.passwordsMismatch')
+    }
     if (serverInfo?.inviteCodeRequired && !info.inviteCode?.trim()) {
       return $_('registerPasskey.errors.inviteRequired')
     }
@@ -162,7 +175,7 @@
       return
     }
 
-    if (!window.PublicKeyCredential) {
+    if (isPasskey && !window.PublicKeyCredential) {
       flow.setError($_('registerPasskey.errors.passkeysNotSupported'))
       return
     }
@@ -174,39 +187,25 @@
   async function handlePasskeyRegistration() {
     if (!flow || !flow.account) return
 
+    const { did, setupToken } = flow.account
+    if (!setupToken) return
+
     flow.setSubmitting(true)
     flow.clearError()
 
     try {
-      const { options } = await api.startPasskeyRegistrationForSetup(
-        flow.account.did,
-        flow.account.setupToken!,
-        passkeyName || undefined
-      )
-
-      const publicKeyOptions = prepareCreationOptions(options as unknown as WebAuthnCreationOptionsResponse)
-      const credential = await navigator.credentials.create({
-        publicKey: publicKeyOptions
-      })
-
-      if (!credential) {
-        flow.setError($_('registerPasskey.errors.passkeyCancelled'))
-        flow.setSubmitting(false)
-        return
-      }
-
-      const credentialResponse = serializeAttestationResponse(credential as PublicKeyCredential)
-
-      const result = await api.completePasskeySetup(
-        flow.account.did,
-        flow.account.setupToken!,
-        credentialResponse,
-        passkeyName || undefined
-      )
+      const result = await performPasskeyRegistration({
+        startRegistration: () => api.startPasskeyRegistrationForSetup(
+          did, setupToken, passkeyName || undefined,
+        ),
+        completeSetup: (credential, name) => api.completePasskeySetup(
+          did, setupToken, credential, name,
+        ),
+      }, passkeyName || undefined)
 
       flow.setPasskeyComplete(result.appPassword, result.appPasswordName)
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+      if (err instanceof PasskeyCancelledError || (err instanceof DOMException && err.name === 'NotAllowedError')) {
         flow.setError($_('registerPasskey.errors.passkeyCancelled'))
       } else if (err instanceof Error) {
         flow.setError(err.message || $_('registerPasskey.errors.passkeyFailed'))
@@ -221,6 +220,9 @@
   async function completeOAuthRegistration() {
     const requestUri = getRequestUriFromUrl()
     if (!requestUri || !flow?.account) {
+      if (!isPasskey && flow) {
+        await flow.finalizeSession()
+      }
       navigate(routes.dashboard)
       return
     }
@@ -235,7 +237,7 @@
         body: JSON.stringify({
           request_uri: requestUri,
           did: flow.account.did,
-          app_password: flow.account.appPassword,
+          app_password: flow.account.appPassword || (isPasskey ? undefined : flow.info.password),
         }),
       })
 
@@ -255,26 +257,6 @@
     } catch (err) {
       console.error('OAuth registration completion failed:', err)
       flow.setError(err instanceof Error ? err.message : $_('common.error'))
-    }
-  }
-
-  function isChannelAvailable(ch: string): boolean {
-    const available = serverInfo?.availableCommsChannels ?? ['email']
-    return available.includes(ch)
-  }
-
-  function channelLabel(ch: string): string {
-    switch (ch) {
-      case 'email':
-        return $_('register.email')
-      case 'discord':
-        return $_('register.discord')
-      case 'telegram':
-        return $_('register.telegram')
-      case 'signal':
-        return $_('register.signal')
-      default:
-        return ch
     }
   }
 
@@ -332,7 +314,7 @@
     <div class="loading"></div>
   {:else if flow}
     <header class="page-header">
-      <h1>{$_('oauth.register.title')}</h1>
+      <h1>{isPasskey ? $_('oauth.register.title') : $_('register.title')}</h1>
       {#if clientName}
         <p class="subtitle">{$_('oauth.register.subtitle')} <strong>{clientName}</strong></p>
       {/if}
@@ -354,7 +336,7 @@
         </div>
       </div>
 
-      <AccountTypeSwitcher active="passkey" {ssoAvailable} oauthRequestUri={getRequestUriFromUrl()} />
+      <AccountTypeSwitcher active={mode} {ssoAvailable} oauthRequestUri={getRequestUriFromUrl()} />
 
       <form class="register-form" onsubmit={handleInfoSubmit}>
         <div>
@@ -381,124 +363,57 @@
           {/if}
         </div>
 
-        <div>
-          <label for="verification-channel">{$_('register.verificationMethod')}</label>
-          <select id="verification-channel" bind:value={flow.info.verificationChannel} disabled={flow.state.submitting}>
-            <option value="email">{channelLabel('email')}</option>
-            {#if isChannelAvailable('discord')}
-              <option value="discord">{channelLabel('discord')}</option>
-            {/if}
-            {#if isChannelAvailable('telegram')}
-              <option value="telegram">{channelLabel('telegram')}</option>
-            {/if}
-            {#if isChannelAvailable('signal')}
-              <option value="signal">{channelLabel('signal')}</option>
-            {/if}
-          </select>
-        </div>
+        {#if !isPasskey}
+          <div>
+            <label for="password">{$_('register.password')}</label>
+            <input
+              id="password"
+              type="password"
+              bind:value={flow.info.password}
+              placeholder={$_('register.passwordPlaceholder')}
+              disabled={flow.state.submitting}
+              required
+              minlength="8"
+            />
+          </div>
 
-        {#if flow.info.verificationChannel === 'email'}
           <div>
-            <label for="email">{$_('register.emailAddress')}</label>
+            <label for="confirm-password">{$_('register.confirmPassword')}</label>
             <input
-              id="email"
-              type="email"
-              bind:value={flow.info.email}
-              placeholder={$_('register.emailPlaceholder')}
+              id="confirm-password"
+              type="password"
+              bind:value={confirmPassword}
+              placeholder={$_('register.confirmPasswordPlaceholder')}
               disabled={flow.state.submitting}
               required
             />
-          </div>
-        {:else if flow.info.verificationChannel === 'discord'}
-          <div>
-            <label for="discord-username">{$_('register.discordUsername')}</label>
-            <input
-              id="discord-username"
-              type="text"
-              bind:value={flow.info.discordUsername}
-              placeholder={$_('register.discordUsernamePlaceholder')}
-              disabled={flow.state.submitting}
-              required
-            />
-          </div>
-        {:else if flow.info.verificationChannel === 'telegram'}
-          <div>
-            <label for="telegram-username">{$_('register.telegramUsername')}</label>
-            <input
-              id="telegram-username"
-              type="text"
-              bind:value={flow.info.telegramUsername}
-              placeholder={$_('register.telegramUsernamePlaceholder')}
-              disabled={flow.state.submitting}
-              required
-            />
-          </div>
-        {:else if flow.info.verificationChannel === 'signal'}
-          <div>
-            <label for="signal-number">{$_('register.signalUsername')}</label>
-            <input
-              id="signal-number"
-              type="tel"
-              bind:value={flow.info.signalUsername}
-              placeholder={$_('register.signalUsernamePlaceholder')}
-              disabled={flow.state.submitting}
-              required
-            />
-            <p class="hint">{$_('register.signalUsernameHint')}</p>
           </div>
         {/if}
 
-        <fieldset class="identity-section">
-          <legend>{$_('registerPasskey.identityType')}</legend>
-          <div class="radio-group">
-            <label class="radio-label">
-              <input type="radio" name="didType" value="plc" bind:group={flow.info.didType} disabled={flow.state.submitting} />
-              <span class="radio-content">
-                <strong>{$_('registerPasskey.didPlcRecommended')}</strong>
-                <span class="radio-hint">{$_('registerPasskey.didPlcHint')}</span>
-              </span>
-            </label>
-            <label class="radio-label" class:disabled={serverInfo?.selfHostedDidWebEnabled === false}>
-              <input type="radio" name="didType" value="web" bind:group={flow.info.didType} disabled={flow.state.submitting || serverInfo?.selfHostedDidWebEnabled === false} />
-              <span class="radio-content">
-                <strong>{$_('registerPasskey.didWeb')}</strong>
-                {#if serverInfo?.selfHostedDidWebEnabled === false}
-                  <span class="radio-hint disabled-hint">{$_('registerPasskey.didWebDisabledHint')}</span>
-                {:else}
-                  <span class="radio-hint">{$_('registerPasskey.didWebHint')}</span>
-                {/if}
-              </span>
-            </label>
-            <label class="radio-label">
-              <input type="radio" name="didType" value="web-external" bind:group={flow.info.didType} disabled={flow.state.submitting} />
-              <span class="radio-content">
-                <strong>{$_('registerPasskey.didWebBYOD')}</strong>
-                <span class="radio-hint">{$_('registerPasskey.didWebBYODHint')}</span>
-              </span>
-            </label>
-          </div>
-        </fieldset>
+        <CommsChannelPicker
+          channel={flow.info.verificationChannel}
+          email={flow.info.email}
+          discordUsername={flow.info.discordUsername ?? ''}
+          telegramUsername={flow.info.telegramUsername ?? ''}
+          signalUsername={flow.info.signalUsername ?? ''}
+          availableChannels={serverInfo?.availableCommsChannels ?? ['email']}
+          disabled={flow.state.submitting}
+          onChannelChange={(ch) => { if (flow) flow.info.verificationChannel = ch }}
+          onEmailChange={(v) => { if (flow) flow.info.email = v }}
+          onDiscordChange={(v) => { if (flow) flow.info.discordUsername = v }}
+          onTelegramChange={(v) => { if (flow) flow.info.telegramUsername = v }}
+          onSignalChange={(v) => { if (flow) flow.info.signalUsername = v }}
+        />
 
-        {#if flow.info.didType === 'web'}
-          <div class="warning-box">
-            <strong>{$_('registerPasskey.didWebWarningTitle')}</strong>
-            <ul>
-              <li><strong>{$_('registerPasskey.didWebWarning1')}</strong> {@html $_('registerPasskey.didWebWarning1Detail', { values: { did: `<code>did:web:yourhandle.${serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>` } })}</li>
-              <li><strong>{$_('registerPasskey.didWebWarning2')}</strong> {$_('registerPasskey.didWebWarning2Detail')}</li>
-              {#if $_('registerPasskey.didWebWarning3')}
-                <li><strong>{$_('registerPasskey.didWebWarning3')}</strong> {$_('registerPasskey.didWebWarning3Detail')}</li>
-              {/if}
-            </ul>
-          </div>
-        {/if}
-
-        {#if flow.info.didType === 'web-external'}
-          <div>
-            <label for="external-did">{$_('registerPasskey.externalDid')}</label>
-            <input id="external-did" type="text" bind:value={flow.info.externalDid} placeholder={$_('registerPasskey.externalDidPlaceholder')} disabled={flow.state.submitting} required />
-            <p class="hint">{$_('registerPasskey.externalDidHint')} <code>https://{flow.info.externalDid ? flow.extractDomain(flow.info.externalDid) : 'yourdomain.com'}/.well-known/did.json</code></p>
-          </div>
-        {/if}
+        <IdentityTypeSection
+          didType={flow.info.didType}
+          externalDid={flow.info.externalDid ?? ''}
+          disabled={flow.state.submitting}
+          selfHostedDidWebEnabled={serverInfo?.selfHostedDidWebEnabled !== false}
+          defaultDomain={serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}
+          onDidTypeChange={(v) => { if (flow) flow.info.didType = v }}
+          onExternalDidChange={(v) => { if (flow) flow.info.externalDid = v }}
+        />
 
         {#if serverInfo?.inviteCodeRequired}
           <div>
@@ -528,42 +443,34 @@
       <KeyChoiceStep {flow} />
 
     {:else if flow.state.step === 'initial-did-doc'}
-      <DidDocStep {flow} type="initial" onConfirm={() => flow?.createPasskeyAccount()} onBack={() => flow?.goBack()} />
+      <DidDocStep
+        {flow}
+        type="initial"
+        onConfirm={() => isPasskey ? flow?.createPasskeyAccount() : flow?.createPasswordAccount()}
+        onBack={() => flow?.goBack()}
+      />
 
     {:else if flow.state.step === 'creating'}
       <div class="loading">
-        <p>{$_('registerPasskey.creatingAccount')}</p>
+        <p>{isPasskey ? $_('registerPasskey.creatingAccount') : $_('common.creating')}</p>
       </div>
 
-    {:else if flow.state.step === 'passkey'}
-      <div class="passkey-step">
-        <h2>{$_('registerPasskey.setupPasskey')}</h2>
-        <p>{$_('registerPasskey.passkeyDescription')}</p>
+    {:else if isPasskey && flow.state.step === 'passkey'}
+      <PasskeySetupStep
+        {passkeyName}
+        loading={flow.state.submitting}
+        error={flow.state.error}
+        onPasskeyNameChange={(n) => passkeyName = n}
+        onRegister={handlePasskeyRegistration}
+      />
 
-        <div class="field">
-          <label for="passkey-name">{$_('registerPasskey.passkeyName')}</label>
-          <input
-            id="passkey-name"
-            type="text"
-            bind:value={passkeyName}
-            placeholder={$_('registerPasskey.passkeyNamePlaceholder')}
-            disabled={flow.state.submitting}
-          />
-          <p class="hint">{$_('registerPasskey.passkeyNameHint')}</p>
-        </div>
-
-        <button
-          type="button"
-          class="primary"
-          onclick={handlePasskeyRegistration}
-          disabled={flow.state.submitting}
-        >
-          {flow.state.submitting ? $_('common.loading') : $_('registerPasskey.createPasskey')}
-        </button>
-      </div>
-
-    {:else if flow.state.step === 'app-password'}
-      <AppPasswordStep {flow} />
+    {:else if isPasskey && flow.state.step === 'app-password'}
+      <AppPasswordStep
+        appPassword={flow.account?.appPassword ?? ''}
+        appPasswordName={flow.account?.appPasswordName ?? ''}
+        loading={flow.state.submitting}
+        onContinue={() => flow!.proceedFromAppPassword()}
+      />
 
     {:else if flow.state.step === 'verify'}
       <VerificationStep {flow} />
@@ -571,9 +478,14 @@
     {:else if flow.state.step === 'updated-did-doc'}
       <DidDocStep {flow} type="updated" onConfirm={() => flow?.activateAccount()} />
 
-    {:else if flow.state.step === 'activating'}
+    {:else if isPasskey && flow.state.step === 'activating'}
       <div class="loading">
         <p>{$_('registerPasskey.activatingAccount')}</p>
+      </div>
+
+    {:else if !isPasskey && flow.state.step === 'redirect-to-dashboard'}
+      <div class="loading">
+        <p>{$_('register.redirecting')}</p>
       </div>
     {/if}
   {/if}

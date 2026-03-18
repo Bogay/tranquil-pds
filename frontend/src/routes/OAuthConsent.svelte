@@ -310,15 +310,15 @@
             <div class="delegation-badge">{$_('oauthConsent.delegatedAccess')}</div>
             <div class="delegation-info">
               <div class="info-row">
-                <span class="label">{$_('oauthConsent.actingAs')}</span>
-                <span class="did">{consentData.did}</span>
+                <span class="consent-account-label">{$_('oauthConsent.actingAs')}</span>
+                <span class="consent-account-did">{consentData.did}</span>
               </div>
               <div class="info-row">
-                <span class="label">{$_('oauthConsent.controller')}</span>
-                <span class="handle">@{consentData.controller_handle || consentData.controller_did}</span>
+                <span class="consent-account-label">{$_('oauthConsent.controller')}</span>
+                <span class="consent-account-handle">@{consentData.controller_handle || consentData.controller_did}</span>
               </div>
               <div class="info-row">
-                <span class="label">{$_('oauthConsent.accessLevel')}</span>
+                <span class="consent-account-label">{$_('oauthConsent.accessLevel')}</span>
                 <span class="level-badge level-{consentData.delegation_level?.toLowerCase()}">{consentData.delegation_level}</span>
               </div>
             </div>
@@ -340,11 +340,11 @@
               </div>
             {/if}
           {:else}
-            <span class="label">{$_('oauth.consent.signingInAs')}</span>
+            <span class="consent-account-label">{$_('oauth.consent.signingInAs')}</span>
             {#if consentData.handle}
-              <span class="handle">@{consentData.handle}</span>
+              <span class="consent-account-handle">@{consentData.handle}</span>
             {/if}
-            <span class="did">{consentData.did}</span>
+            <span class="consent-account-did">{consentData.did}</span>
           {/if}
         </div>
       </div>

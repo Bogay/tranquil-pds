@@ -1,18 +1,8 @@
 <script lang="ts">
   import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
-  import { getAuthState } from '../lib/auth.svelte'
   import { _ } from '../lib/i18n'
-  import type { Session } from '../lib/types/api'
   import { unsafeAsEmail } from '../lib/types/branded'
-
-  const auth = $derived(getAuthState())
-
-  function getSession(): Session | null {
-    return auth.kind === 'authenticated' ? auth.session : null
-  }
-
-  const session = $derived(getSession())
 
   let email = $state('')
   let token = $state('')
@@ -22,12 +12,6 @@
   let error = $state<string | null>(null)
   let success = $state<string | null>(null)
   let tokenSent = $state(false)
-
-  $effect(() => {
-    if (session) {
-      navigate(routes.dashboard)
-    }
-  })
 
   async function handleRequestReset(e: Event) {
     e.preventDefault()

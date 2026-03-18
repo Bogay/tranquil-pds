@@ -38,9 +38,6 @@ export interface RegistrationFlowState {
   selectedDomain: string;
   handleAvailable: boolean | null;
   checkingHandle: boolean;
-  discordInUse: boolean;
-  telegramInUse: boolean;
-  signalInUse: boolean;
 }
 
 export function createRegistrationFlow(
@@ -73,9 +70,6 @@ export function createRegistrationFlow(
     selectedDomain: "",
     handleAvailable: null,
     checkingHandle: false,
-    discordInUse: false,
-    telegramInUse: false,
-    signalInUse: false,
   });
 
   function getPdsEndpoint(): string {
@@ -149,23 +143,6 @@ export function createRegistrationFlow(
       state.handleAvailable = null;
     } finally {
       state.checkingHandle = false;
-    }
-  }
-
-  async function checkCommsChannelInUse(
-    channel: "discord" | "telegram" | "signal",
-    identifier: string,
-  ): Promise<void> {
-    const trimmed = identifier.trim();
-    if (!trimmed) {
-      state[`${channel}InUse`] = false;
-      return;
-    }
-    try {
-      const result = await api.checkCommsChannelInUse(channel, trimmed);
-      state[`${channel}InUse`] = result.inUse;
-    } catch {
-      state[`${channel}InUse`] = false;
     }
   }
 
@@ -498,7 +475,6 @@ export function createRegistrationFlow(
     finalizeSession,
     goBack,
     checkHandleAvailability,
-    checkCommsChannelInUse,
 
     setError(msg: string) {
       state.error = msg;
