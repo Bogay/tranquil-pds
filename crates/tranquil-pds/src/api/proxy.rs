@@ -247,7 +247,7 @@ async fn proxy_handler(
                     &resolved.did,
                     method,
                 ) {
-                    return e;
+                    return e.into_response();
                 }
 
                 let key_bytes = match auth_user.key_bytes {

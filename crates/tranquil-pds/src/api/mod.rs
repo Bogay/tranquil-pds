@@ -7,6 +7,8 @@ pub mod validation;
 pub use error::ApiError;
 pub use proxy_client::{AtUriParts, proxy_client, validate_at_uri, validate_limit};
 pub use responses::{
-    DidResponse, EmptyResponse, EnabledResponse, HasPasswordResponse, OptionsResponse,
-    StatusResponse, SuccessResponse, TokenRequiredResponse, VerifiedResponse,
+    AccountsOutput, AuditLogOutput, ControllersOutput, DidResponse, EmailUpdateStatusOutput,
+    EmptyResponse, EnabledResponse, HasPasswordResponse, InUseOutput, OptionsResponse,
+    PasswordResetOutput, PreferredLocaleOutput, PresetsOutput, StatusResponse, SuccessResponse,
+    TokenRequiredResponse, VerifiedResponse,
 };

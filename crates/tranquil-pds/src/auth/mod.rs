@@ -29,7 +29,7 @@ pub use account_verified::{AccountVerified, require_not_migrated, require_verifi
 pub use extractor::{
     Active, Admin, AnyUser, Auth, AuthAny, AuthError, AuthPolicy, AuthScheme, ExtractedToken,
     NotTakendown, Permissive, ServiceAuth, extract_auth_token_from_header,
-    extract_bearer_token_from_header,
+    extract_bearer_token_from_header, extract_jti_from_headers,
 };
 pub use mfa_verified::{
     MfaMethod, MfaVerified, require_legacy_session_mfa, require_reauth_window,

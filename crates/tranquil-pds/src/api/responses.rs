@@ -116,3 +116,60 @@ impl<T: Serialize> OptionsResponse<T> {
         Json(Self { options })
     }
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountsOutput<T: Serialize> {
+    pub accounts: T,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLogOutput<T: Serialize> {
+    pub entries: T,
+    pub total: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControllersOutput<T: Serialize> {
+    pub controllers: T,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetsOutput<T: Serialize> {
+    pub presets: T,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailUpdateStatusOutput {
+    pub pending: bool,
+    pub authorized: bool,
+    pub new_email: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InUseOutput {
+    pub in_use: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordResetOutput {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multiple_accounts: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferredLocaleOutput {
+    pub preferred_locale: Option<String>,
+}

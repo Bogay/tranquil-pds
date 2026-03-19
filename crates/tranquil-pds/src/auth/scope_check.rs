@@ -1,7 +1,3 @@
-#![allow(clippy::result_large_err)]
-
-use axum::response::{IntoResponse, Response};
-
 use crate::api::error::ApiError;
 use crate::oauth::scopes::{
     AccountAction, AccountAttr, IdentityAttr, RepoAction, ScopePermissions,
@@ -24,7 +20,7 @@ pub fn check_repo_scope(
     scope: Option<&str>,
     action: RepoAction,
     collection: &str,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
@@ -32,14 +28,14 @@ pub fn check_repo_scope(
     let permissions = ScopePermissions::from_scope_string(scope);
     permissions
         .assert_repo(action, collection)
-        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())))
 }
 
 pub fn check_blob_scope(
     auth_source: &AuthSource,
     scope: Option<&str>,
     mime: &str,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
@@ -47,7 +43,7 @@ pub fn check_blob_scope(
     let permissions = ScopePermissions::from_scope_string(scope);
     permissions
         .assert_blob(mime)
-        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())))
 }
 
 pub fn check_rpc_scope(
@@ -55,7 +51,7 @@ pub fn check_rpc_scope(
     scope: Option<&str>,
     aud: &str,
     lxm: &str,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
@@ -63,7 +59,7 @@ pub fn check_rpc_scope(
     let permissions = ScopePermissions::from_scope_string(scope);
     permissions
         .assert_rpc(aud, lxm)
-        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())))
 }
 
 pub fn check_account_scope(
@@ -71,7 +67,7 @@ pub fn check_account_scope(
     scope: Option<&str>,
     attr: AccountAttr,
     action: AccountAction,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
@@ -79,14 +75,14 @@ pub fn check_account_scope(
     let permissions = ScopePermissions::from_scope_string(scope);
     permissions
         .assert_account(attr, action)
-        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())))
 }
 
 pub fn check_identity_scope(
     auth_source: &AuthSource,
     scope: Option<&str>,
     attr: IdentityAttr,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
@@ -94,5 +90,5 @@ pub fn check_identity_scope(
     let permissions = ScopePermissions::from_scope_string(scope);
     permissions
         .assert_identity(attr)
-        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())))
 }

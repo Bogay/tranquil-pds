@@ -112,6 +112,12 @@ pub enum ApiError {
     SsoLinkNotFound,
     AuthFactorTokenRequired,
     LegacyLoginBlocked,
+    ReauthRequired {
+        methods: Vec<String>,
+    },
+    MfaVerificationRequiredWithMethods {
+        methods: Vec<String>,
+    },
 }
 
 impl ApiError {
@@ -131,7 +137,8 @@ impl ApiError {
             | Self::InvalidPassword(_)
             | Self::InvalidToken(_)
             | Self::PasskeyCounterAnomaly
-            | Self::OAuthExpiredToken(_) => StatusCode::UNAUTHORIZED,
+            | Self::OAuthExpiredToken(_)
+            | Self::ReauthRequired { .. } => StatusCode::UNAUTHORIZED,
             Self::InvalidCode(_) => StatusCode::BAD_REQUEST,
             Self::ExpiredToken(_) => StatusCode::BAD_REQUEST,
             Self::Forbidden
@@ -142,6 +149,7 @@ impl ApiError {
             | Self::AccountMigrated
             | Self::AccountNotVerified
             | Self::MfaVerificationRequired
+            | Self::MfaVerificationRequiredWithMethods { .. }
             | Self::AuthorizationError(_) => StatusCode::FORBIDDEN,
             Self::RateLimitExceeded(_) => StatusCode::TOO_MANY_REQUESTS,
             Self::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
@@ -310,6 +318,10 @@ impl ApiError {
             Self::SsoLinkNotFound => Cow::Borrowed("SsoLinkNotFound"),
             Self::AuthFactorTokenRequired => Cow::Borrowed("AuthFactorTokenRequired"),
             Self::LegacyLoginBlocked => Cow::Borrowed("MfaRequired"),
+            Self::ReauthRequired { .. } => Cow::Borrowed("ReauthRequired"),
+            Self::MfaVerificationRequiredWithMethods { .. } => {
+                Cow::Borrowed("MfaVerificationRequired")
+            }
         }
     }
     fn message(&self) -> String {
@@ -471,6 +483,12 @@ impl ApiError {
             Self::AuthFactorTokenRequired => {
                 "A sign-in code has been sent to your email address".into()
             }
+            Self::ReauthRequired { .. } => {
+                "Re-authentication required for this action".into()
+            }
+            Self::MfaVerificationRequiredWithMethods { .. } => {
+                "This sensitive operation requires MFA verification".into()
+            }
         }
     }
     pub fn from_upstream_response(status: StatusCode, body: &[u8]) -> Self {
@@ -499,6 +517,31 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        match self {
+            Self::ReauthRequired { ref methods } => {
+                return (
+                    self.status_code(),
+                    Json(serde_json::json!({
+                        "error": "ReauthRequired",
+                        "message": "Re-authentication required for this action",
+                        "reauthMethods": methods,
+                    })),
+                )
+                    .into_response();
+            }
+            Self::MfaVerificationRequiredWithMethods { ref methods } => {
+                return (
+                    self.status_code(),
+                    Json(serde_json::json!({
+                        "error": "MfaVerificationRequired",
+                        "message": "This sensitive operation requires MFA verification",
+                        "reauthMethods": methods,
+                    })),
+                )
+                    .into_response();
+            }
+            _ => {}
+        }
         let body = ErrorBody {
             error: self.error_name(),
             message: self.message(),
@@ -591,6 +634,12 @@ impl From<crate::auth::extractor::AuthError> for ApiError {
                 Self::AuthenticationFailed(None)
             }
         }
+    }
+}
+
+impl From<crate::auth::scope_verified::ScopeVerificationError> for ApiError {
+    fn from(e: crate::auth::scope_verified::ScopeVerificationError) -> Self {
+        Self::InsufficientScope(Some(e.to_string()))
     }
 }
 

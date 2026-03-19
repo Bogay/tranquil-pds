@@ -17,6 +17,16 @@ pub enum ReauthMethod {
     Passkey,
 }
 
+impl ReauthMethod {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Password => "password",
+            Self::Totp => "totp",
+            Self::Passkey => "passkey",
+        }
+    }
+}
+
 fn is_reauth_required(last_reauth_at: Option<chrono::DateTime<Utc>>) -> bool {
     match last_reauth_at {
         None => true,
@@ -27,7 +37,7 @@ fn is_reauth_required(last_reauth_at: Option<chrono::DateTime<Utc>>) -> bool {
     }
 }
 
-async fn get_available_reauth_methods(
+pub async fn get_available_reauth_methods(
     user_repo: &dyn UserRepository,
     _session_repo: &dyn SessionRepository,
     did: &crate::types::Did,

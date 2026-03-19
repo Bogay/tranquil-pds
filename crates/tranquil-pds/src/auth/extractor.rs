@@ -12,7 +12,7 @@ use super::{
     is_service_token, scope_verified::VerifyScope, validate_bearer_token_for_service_auth,
 };
 use crate::api::error::ApiError;
-use crate::oauth::scopes::{RepoAction, ScopePermissions};
+use crate::oauth::scopes::{AccountAction, AccountAttr, RepoAction, ScopePermissions};
 use crate::state::AppState;
 use crate::types::Did;
 use crate::util::build_full_url;
@@ -128,6 +128,12 @@ pub fn extract_auth_token_from_header(auth_header: Option<&str>) -> Option<Extra
     }
 
     None
+}
+
+pub fn extract_jti_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
+    let auth_header = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    let token = extract_bearer_token_from_header(Some(auth_header))?;
+    tranquil_auth::get_jti_from_token(&token).ok()
 }
 
 pub trait AuthPolicy: Send + Sync + 'static {
@@ -356,14 +362,26 @@ impl<P: AuthPolicy> Auth<P> {
         self.0.permissions()
     }
 
-    #[allow(clippy::result_large_err)]
-    pub fn check_repo_scope(&self, action: RepoAction, collection: &str) -> Result<(), Response> {
+    pub fn check_repo_scope(&self, action: RepoAction, collection: &str) -> Result<(), ApiError> {
         if !self.needs_scope_check() {
             return Ok(());
         }
         self.permissions()
             .assert_repo(action, collection)
-            .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
+            .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())))
+    }
+
+    pub fn check_account_scope(
+        &self,
+        attr: AccountAttr,
+        action: AccountAction,
+    ) -> Result<(), ApiError> {
+        if !self.needs_scope_check() {
+            return Ok(());
+        }
+        self.permissions()
+            .assert_account(attr, action)
+            .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())))
     }
 }
 

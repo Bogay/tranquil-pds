@@ -1,6 +1,7 @@
 pub mod actor;
 pub mod admin;
 pub mod age_assurance;
+pub mod common;
 pub mod delegation;
 pub mod discord_webhook;
 pub mod identity;
@@ -10,7 +11,6 @@ pub mod repo;
 pub mod server;
 pub mod telegram_webhook;
 pub mod temp;
-pub mod verification;
 
 use tranquil_pds::state::AppState;
 
@@ -386,7 +386,7 @@ pub fn api_routes() -> axum::Router<AppState> {
         )
         .route(
             "/_account.confirmChannelVerification",
-            post(verification::confirm_channel_verification),
+            post(server::confirm_channel_verification),
         )
         .route("/_account.verifyToken", post(server::verify_token))
         .route(

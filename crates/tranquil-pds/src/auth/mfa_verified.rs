@@ -1,4 +1,4 @@
-use axum::response::Response;
+use crate::api::error::ApiError;
 
 use super::AuthenticatedUser;
 use crate::state::AppState;
@@ -73,21 +73,29 @@ impl<'a> MfaVerified<'a> {
 pub async fn require_legacy_session_mfa<'a>(
     state: &AppState,
     user: &'a AuthenticatedUser,
-) -> Result<MfaVerified<'a>, Response> {
-    use crate::auth::reauth::{check_legacy_session_mfa, legacy_mfa_required_response};
+) -> Result<MfaVerified<'a>, ApiError> {
+    use crate::auth::reauth::check_legacy_session_mfa;
 
     if check_legacy_session_mfa(&*state.session_repo, &user.did).await {
         Ok(MfaVerified::from_session_reauth(user))
     } else {
-        Err(legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &user.did).await)
+        let methods = crate::auth::reauth::get_available_reauth_methods(
+            &*state.user_repo,
+            &*state.session_repo,
+            &user.did,
+        )
+        .await;
+        Err(ApiError::MfaVerificationRequiredWithMethods {
+            methods: methods.iter().map(|m| m.as_str().to_string()).collect(),
+        })
     }
 }
 
 pub async fn require_reauth_window<'a>(
     state: &AppState,
     user: &'a AuthenticatedUser,
-) -> Result<MfaVerified<'a>, Response> {
-    use crate::auth::reauth::{REAUTH_WINDOW_SECONDS, reauth_required_response};
+) -> Result<MfaVerified<'a>, ApiError> {
+    use crate::auth::reauth::REAUTH_WINDOW_SECONDS;
     use chrono::Utc;
 
     let status = state
@@ -105,10 +113,26 @@ pub async fn require_reauth_window<'a>(
                     return Ok(MfaVerified::from_session_reauth(user));
                 }
             }
-            Err(reauth_required_response(&*state.user_repo, &*state.session_repo, &user.did).await)
+            let methods = crate::auth::reauth::get_available_reauth_methods(
+                &*state.user_repo,
+                &*state.session_repo,
+                &user.did,
+            )
+            .await;
+            Err(ApiError::ReauthRequired {
+                methods: methods.iter().map(|m| m.as_str().to_string()).collect(),
+            })
         }
         None => {
-            Err(reauth_required_response(&*state.user_repo, &*state.session_repo, &user.did).await)
+            let methods = crate::auth::reauth::get_available_reauth_methods(
+                &*state.user_repo,
+                &*state.session_repo,
+                &user.did,
+            )
+            .await;
+            Err(ApiError::ReauthRequired {
+                methods: methods.iter().map(|m| m.as_str().to_string()).collect(),
+            })
         }
     }
 }
@@ -116,8 +140,8 @@ pub async fn require_reauth_window<'a>(
 pub async fn require_reauth_window_if_available<'a>(
     state: &AppState,
     user: &'a AuthenticatedUser,
-) -> Result<Option<MfaVerified<'a>>, Response> {
-    use crate::auth::reauth::{check_reauth_required_cached, reauth_required_response};
+) -> Result<Option<MfaVerified<'a>>, ApiError> {
+    use crate::auth::reauth::check_reauth_required_cached;
 
     let has_password = state
         .user_repo
@@ -144,7 +168,15 @@ pub async fn require_reauth_window_if_available<'a>(
     }
 
     if check_reauth_required_cached(&*state.session_repo, &state.cache, &user.did).await {
-        Err(reauth_required_response(&*state.user_repo, &*state.session_repo, &user.did).await)
+        let methods = crate::auth::reauth::get_available_reauth_methods(
+            &*state.user_repo,
+            &*state.session_repo,
+            &user.did,
+        )
+        .await;
+        Err(ApiError::ReauthRequired {
+            methods: methods.iter().map(|m| m.as_str().to_string()).collect(),
+        })
     } else {
         Ok(Some(MfaVerified::from_session_reauth(user)))
     }
