@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use tranquil_db_traits::WebauthnChallengeType;
@@ -20,7 +16,7 @@ pub struct StartRegistrationInput {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StartRegistrationResponse {
+pub struct StartRegistrationOutput {
     pub options: serde_json::Value,
 }
 
@@ -28,7 +24,7 @@ pub async fn start_passkey_registration(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<StartRegistrationInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<StartRegistrationOutput>, ApiError> {
     let webauthn = &state.webauthn_config;
 
     let handle = state
@@ -73,7 +69,7 @@ pub async fn start_passkey_registration(
 
     info!(did = %auth.did, "Passkey registration started");
 
-    Ok(Json(StartRegistrationResponse { options }).into_response())
+    Ok(Json(StartRegistrationOutput { options }))
 }
 
 #[derive(Deserialize)]
@@ -85,7 +81,7 @@ pub struct FinishRegistrationInput {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FinishRegistrationResponse {
+pub struct FinishRegistrationOutput {
     pub id: String,
     pub credential_id: String,
 }
@@ -94,7 +90,7 @@ pub async fn finish_passkey_registration(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<FinishRegistrationInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<FinishRegistrationOutput>, ApiError> {
     let webauthn = &state.webauthn_config;
 
     let reg_state_json = state
@@ -154,11 +150,10 @@ pub async fn finish_passkey_registration(
 
     info!(did = %auth.did, passkey_id = %passkey_id, "Passkey registered");
 
-    Ok(Json(FinishRegistrationResponse {
+    Ok(Json(FinishRegistrationOutput {
         id: passkey_id.to_string(),
         credential_id: credential_id_base64,
-    })
-    .into_response())
+    }))
 }
 
 #[derive(Serialize)]
@@ -173,14 +168,14 @@ pub struct PasskeyInfo {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ListPasskeysResponse {
+pub struct ListPasskeysOutput {
     pub passkeys: Vec<PasskeyInfo>,
 }
 
 pub async fn list_passkeys(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<ListPasskeysOutput>, ApiError> {
     let passkeys = state
         .user_repo
         .get_passkeys_for_user(&auth.did)
@@ -198,10 +193,9 @@ pub async fn list_passkeys(
         })
         .collect();
 
-    Ok(Json(ListPasskeysResponse {
+    Ok(Json(ListPasskeysOutput {
         passkeys: passkey_infos,
-    })
-    .into_response())
+    }))
 }
 
 #[derive(Deserialize)]
@@ -214,23 +208,17 @@ pub async fn delete_passkey(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<DeletePasskeyInput>,
-) -> Result<Response, ApiError> {
-    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+) -> Result<Json<EmptyResponse>, ApiError> {
+    let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
-    let reauth_mfa = match require_reauth_window(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+    let reauth_mfa = require_reauth_window(&state, &auth).await?;
 
     let id: uuid::Uuid = input.id.parse().map_err(|_| ApiError::InvalidId)?;
 
     match state.user_repo.delete_passkey(id, reauth_mfa.did()).await {
         Ok(true) => {
             info!(did = %session_mfa.did(), passkey_id = %id, "Passkey deleted");
-            Ok(EmptyResponse::ok().into_response())
+            Ok(Json(EmptyResponse {}))
         }
         Ok(false) => Err(ApiError::PasskeyNotFound),
         Err(e) => {
@@ -251,7 +239,7 @@ pub async fn update_passkey(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<UpdatePasskeyInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let id: uuid::Uuid = input.id.parse().map_err(|_| ApiError::InvalidId)?;
 
     match state
@@ -261,7 +249,7 @@ pub async fn update_passkey(
     {
         Ok(true) => {
             info!(did = %auth.did, passkey_id = %id, "Passkey renamed");
-            Ok(EmptyResponse::ok().into_response())
+            Ok(Json(EmptyResponse {}))
         }
         Ok(false) => Err(ApiError::PasskeyNotFound),
         Err(e) => {

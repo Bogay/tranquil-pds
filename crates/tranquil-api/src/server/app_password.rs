@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
@@ -34,7 +30,7 @@ pub struct ListAppPasswordsOutput {
 pub async fn list_app_passwords(
     State(state): State<AppState>,
     auth: Auth<Permissive>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<ListAppPasswordsOutput>, ApiError> {
     let user = state
         .user_repo
         .get_by_did(&auth.did)
@@ -60,7 +56,7 @@ pub async fn list_app_passwords(
                 .map(|d| d.to_string()),
         })
         .collect();
-    Ok(Json(ListAppPasswordsOutput { passwords }).into_response())
+    Ok(Json(ListAppPasswordsOutput { passwords }))
 }
 
 #[derive(Deserialize)]
@@ -86,7 +82,7 @@ pub async fn create_app_password(
     _rate_limit: RateLimited<AppPasswordLimit>,
     auth: Auth<NotTakendown>,
     Json(input): Json<CreateAppPasswordInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<CreateAppPasswordOutput>, ApiError> {
     let user = state
         .user_repo
         .get_by_did(&auth.did)
@@ -194,8 +190,7 @@ pub async fn create_app_password(
         created_at: created_at.to_rfc3339(),
         privileged: privilege.is_privileged(),
         scopes: final_scopes,
-    })
-    .into_response())
+    }))
 }
 
 #[derive(Deserialize)]
@@ -207,7 +202,7 @@ pub async fn revoke_app_password(
     State(state): State<AppState>,
     auth: Auth<Permissive>,
     Json(input): Json<RevokeAppPasswordInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let user = state
         .user_repo
         .get_by_did(&auth.did)
@@ -247,5 +242,5 @@ pub async fn revoke_app_password(
         .await
         .log_db_err("revoking app password")?;
 
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }

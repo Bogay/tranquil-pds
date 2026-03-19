@@ -1,9 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tranquil_pds::api::ApiError;
@@ -39,7 +34,7 @@ pub async fn update_did_document(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<UpdateDidDocumentInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<UpdateDidDocumentOutput>, ApiError> {
     if !auth.did.starts_with("did:web:") {
         return Err(ApiError::InvalidRequest(
             "DID document updates are only available for did:web accounts".into(),
@@ -120,20 +115,16 @@ pub async fn update_did_document(
 
     tracing::info!("Updated DID document for {}", &auth.did);
 
-    Ok((
-        StatusCode::OK,
-        Json(UpdateDidDocumentOutput {
-            success: true,
-            did_document: did_doc,
-        }),
-    )
-        .into_response())
+    Ok(Json(UpdateDidDocumentOutput {
+        success: true,
+        did_document: did_doc,
+    }))
 }
 
 pub async fn get_did_document(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     if !auth.did.starts_with("did:web:") {
         return Err(ApiError::InvalidRequest(
             "This endpoint is only available for did:web accounts".into(),
@@ -142,7 +133,7 @@ pub async fn get_did_document(
 
     let did_doc = build_did_document(&state, &auth.did).await;
 
-    Ok((StatusCode::OK, Json(json!({ "didDocument": did_doc }))).into_response())
+    Ok(Json(serde_json::json!({ "didDocument": did_doc })))
 }
 
 async fn build_did_document(state: &AppState, did: &tranquil_pds::types::Did) -> serde_json::Value {

@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -46,7 +42,7 @@ pub async fn create_invite_code(
     State(state): State<AppState>,
     auth: Auth<Admin>,
     Json(input): Json<CreateInviteCodeInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<CreateInviteCodeOutput>, ApiError> {
     if input.use_count < 1 {
         return Err(ApiError::InvalidRequest(
             "useCount must be at least 1".into(),
@@ -66,7 +62,7 @@ pub async fn create_invite_code(
         .create_invite_code(&code, input.use_count, Some(&for_account))
         .await
     {
-        Ok(true) => Ok(Json(CreateInviteCodeOutput { code }).into_response()),
+        Ok(true) => Ok(Json(CreateInviteCodeOutput { code })),
         Ok(false) => {
             error!("No admin user found to create invite code");
             Err(ApiError::InternalError(None))
@@ -101,7 +97,7 @@ pub async fn create_invite_codes(
     State(state): State<AppState>,
     auth: Auth<Admin>,
     Json(input): Json<CreateInviteCodesInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<CreateInviteCodesOutput>, ApiError> {
     if input.use_count < 1 {
         return Err(ApiError::InvalidRequest(
             "useCount must be at least 1".into(),
@@ -147,8 +143,7 @@ pub async fn create_invite_codes(
     match result {
         Ok(result_codes) => Ok(Json(CreateInviteCodesOutput {
             codes: result_codes,
-        })
-        .into_response()),
+        })),
         Err(e) => {
             error!("DB error creating invite codes: {:?}", e);
             Err(ApiError::InternalError(None))
@@ -193,7 +188,7 @@ pub async fn get_account_invite_codes(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
     axum::extract::Query(params): axum::extract::Query<GetAccountInviteCodesParams>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<GetAccountInviteCodesOutput>, ApiError> {
     let include_used = params.include_used.unwrap_or(true);
 
     let codes_info = state
@@ -247,5 +242,5 @@ pub async fn get_account_invite_codes(
     .await;
 
     let codes: Vec<InviteCode> = codes.into_iter().flatten().collect();
-    Ok(Json(GetAccountInviteCodesOutput { codes }).into_response())
+    Ok(Json(GetAccountInviteCodesOutput { codes }))
 }

@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
@@ -67,14 +63,14 @@ pub struct TrustedDevice {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ListTrustedDevicesResponse {
+pub struct ListTrustedDevicesOutput {
     pub devices: Vec<TrustedDevice>,
 }
 
 pub async fn list_trusted_devices(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<ListTrustedDevicesOutput>, ApiError> {
     let rows = state
         .oauth_repo
         .list_trusted_devices(&auth.did)
@@ -97,7 +93,7 @@ pub async fn list_trusted_devices(
         })
         .collect();
 
-    Ok(Json(ListTrustedDevicesResponse { devices }).into_response())
+    Ok(Json(ListTrustedDevicesOutput { devices }))
 }
 
 #[derive(Deserialize)]
@@ -110,7 +106,7 @@ pub async fn revoke_trusted_device(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<RevokeTrustedDeviceInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<SuccessResponse>, ApiError> {
     match state
         .oauth_repo
         .device_belongs_to_user(&input.device_id, &auth.did)
@@ -133,7 +129,7 @@ pub async fn revoke_trusted_device(
         .log_db_err("revoking device trust")?;
 
     info!(did = %&auth.did, device_id = %input.device_id, "Trusted device revoked");
-    Ok(SuccessResponse::ok().into_response())
+    Ok(Json(SuccessResponse { success: true }))
 }
 
 #[derive(Deserialize)]
@@ -147,7 +143,7 @@ pub async fn update_trusted_device(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<UpdateTrustedDeviceInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<SuccessResponse>, ApiError> {
     match state
         .oauth_repo
         .device_belongs_to_user(&input.device_id, &auth.did)
@@ -170,7 +166,7 @@ pub async fn update_trusted_device(
         .log_db_err("updating device friendly name")?;
 
     info!(did = %auth.did, device_id = %input.device_id, "Trusted device updated");
-    Ok(SuccessResponse::ok().into_response())
+    Ok(Json(SuccessResponse { success: true }))
 }
 
 pub async fn get_device_trust_state(
