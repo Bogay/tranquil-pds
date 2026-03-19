@@ -1,17 +1,12 @@
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use backon::{ExponentialBuilder, Retryable};
-use bcrypt::verify;
 use chrono::{Duration, Utc};
 use cid::Cid;
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,6 +15,7 @@ use tranquil_pds::api::EmptyResponse;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Auth, NotTakendown, Permissive, require_legacy_session_mfa};
 use tranquil_pds::cache::Cache;
+use tranquil_pds::oauth::scopes::{AccountAction, AccountAttr};
 use tranquil_pds::plc::PlcClient;
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::PlainPassword;
@@ -42,13 +38,13 @@ pub struct CheckAccountStatusOutput {
 pub async fn check_account_status(
     State(state): State<AppState>,
     auth: Auth<Permissive>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<CheckAccountStatusOutput>, ApiError> {
     let did = &auth.did;
     let user_id = state
         .user_repo
         .get_id_by_did(did)
         .await
-        .map_err(|_| ApiError::InternalError(None))?
+        .log_db_err("fetching user ID for account status")?
         .ok_or(ApiError::InternalError(None))?;
     let is_active = state
         .user_repo
@@ -97,21 +93,17 @@ pub async fn check_account_status(
         .unwrap_or(0);
     let valid_did =
         is_valid_did_for_service(state.user_repo.as_ref(), state.cache.clone(), did).await;
-    Ok((
-        StatusCode::OK,
-        Json(CheckAccountStatusOutput {
-            activated: is_active,
-            valid_did,
-            repo_commit: repo_commit.clone(),
-            repo_rev,
-            repo_blocks: block_count,
-            indexed_records: record_count,
-            private_state_values: 0,
-            expected_blobs,
-            imported_blobs,
-        }),
-    )
-        .into_response())
+    Ok(Json(CheckAccountStatusOutput {
+        activated: is_active,
+        valid_did,
+        repo_commit: repo_commit.clone(),
+        repo_rev,
+        repo_blocks: block_count,
+        indexed_records: record_count,
+        private_state_values: 0,
+        expected_blobs,
+        imported_blobs,
+    }))
 }
 
 async fn is_valid_did_for_service(
@@ -204,8 +196,8 @@ async fn assert_valid_did_document_for_service(
         if let Some(ref expected_rotation_key) = server_rotation_key {
             let rotation_keys = doc_data
                 .get("rotationKeys")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|k| k.as_str()).collect::<Vec<_>>())
+                .and_then(Value::as_array)
+                .map(|arr| arr.iter().filter_map(Value::as_str).collect::<Vec<_>>())
                 .unwrap_or_default();
             if !rotation_keys.contains(&expected_rotation_key.as_str()) {
                 return Err(ApiError::InvalidRequest(
@@ -217,7 +209,7 @@ async fn assert_valid_did_document_for_service(
         let doc_signing_key = doc_data
             .get("verificationMethods")
             .and_then(|v| v.get("atproto"))
-            .and_then(|k| k.as_str());
+            .and_then(Value::as_str);
 
         let user_key = user_repo
             .get_user_key_by_did(did)
@@ -279,16 +271,16 @@ async fn assert_valid_did_document_for_service(
 
         let pds_endpoint = doc
             .get("service")
-            .and_then(|s| s.as_array())
+            .and_then(Value::as_array)
             .and_then(|arr| {
                 arr.iter().find(|svc| {
                     svc.get("id").and_then(|id| id.as_str()) == Some("#atproto_pds")
-                        || svc.get("type").and_then(|t| t.as_str())
+                        || svc.get("type").and_then(Value::as_str)
                             == Some(tranquil_pds::plc::ServiceType::Pds.as_str())
                 })
             })
             .and_then(|svc| svc.get("serviceEndpoint"))
-            .and_then(|e| e.as_str());
+            .and_then(Value::as_str);
 
         if pds_endpoint != Some(&expected_endpoint) {
             warn!(
@@ -307,22 +299,17 @@ async fn assert_valid_did_document_for_service(
 pub async fn activate_account(
     State(state): State<AppState>,
     auth: Auth<Permissive>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     info!("[MIGRATION] activateAccount called");
     info!(
         "[MIGRATION] activateAccount: Authenticated user did={}",
         auth.did
     );
 
-    if let Err(e) = tranquil_pds::auth::scope_check::check_account_scope(
-        &auth.auth_source,
-        auth.scope.as_deref(),
-        tranquil_pds::oauth::scopes::AccountAttr::Repo,
-        tranquil_pds::oauth::scopes::AccountAction::Manage,
-    ) {
-        info!("[MIGRATION] activateAccount: Scope check failed");
-        return Ok(e);
-    }
+    auth.check_account_scope(AccountAttr::Repo, AccountAction::Manage)
+        .inspect_err(|_| {
+            info!("[MIGRATION] activateAccount: Scope check failed");
+        })?;
 
     let did = auth.did.clone();
 
@@ -460,7 +447,7 @@ pub async fn activate_account(
                 );
             }
             info!("[MIGRATION] activateAccount: SUCCESS for did={}", did);
-            Ok(EmptyResponse::ok().into_response())
+            Ok(Json(EmptyResponse {}))
         }
         Err(e) => {
             error!(
@@ -482,15 +469,8 @@ pub async fn deactivate_account(
     State(state): State<AppState>,
     auth: Auth<Permissive>,
     Json(input): Json<DeactivateAccountInput>,
-) -> Result<Response, ApiError> {
-    if let Err(e) = tranquil_pds::auth::scope_check::check_account_scope(
-        &auth.auth_source,
-        auth.scope.as_deref(),
-        tranquil_pds::oauth::scopes::AccountAttr::Repo,
-        tranquil_pds::oauth::scopes::AccountAction::Manage,
-    ) {
-        return Ok(e);
-    }
+) -> Result<Json<EmptyResponse>, ApiError> {
+    auth.check_account_scope(AccountAttr::Repo, AccountAction::Manage)?;
 
     let delete_after: Option<chrono::DateTime<chrono::Utc>> = input
         .delete_after
@@ -521,9 +501,9 @@ pub async fn deactivate_account(
             {
                 warn!("Failed to sequence account deactivated event: {}", e);
             }
-            Ok(EmptyResponse::ok().into_response())
+            Ok(Json(EmptyResponse {}))
         }
-        Ok(false) => Ok(EmptyResponse::ok().into_response()),
+        Ok(false) => Ok(Json(EmptyResponse {})),
         Err(e) => {
             error!("DB error deactivating account: {:?}", e);
             Err(ApiError::InternalError(None))
@@ -534,11 +514,8 @@ pub async fn deactivate_account(
 pub async fn request_account_delete(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
-) -> Result<Response, ApiError> {
-    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+) -> Result<Json<EmptyResponse>, ApiError> {
+    let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
     let user_id = state
         .user_repo
@@ -567,7 +544,7 @@ pub async fn request_account_delete(
         warn!("Failed to enqueue account deletion notification: {:?}", e);
     }
     info!("Account deletion requested for user {}", session_mfa.did());
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }
 
 #[derive(Deserialize)]
@@ -580,71 +557,71 @@ pub struct DeleteAccountInput {
 pub async fn delete_account(
     State(state): State<AppState>,
     Json(input): Json<DeleteAccountInput>,
-) -> Response {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let did = &input.did;
     let password = &input.password;
     let token = input.token.trim();
     if password.is_empty() {
-        return ApiError::InvalidRequest("password is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("password is required".into()));
     }
     const OLD_PASSWORD_MAX_LENGTH: usize = 512;
     if password.len() > OLD_PASSWORD_MAX_LENGTH {
-        return ApiError::InvalidRequest("Invalid password length".into()).into_response();
+        return Err(ApiError::InvalidRequest("Invalid password length".into()));
     }
     if token.is_empty() {
-        return ApiError::InvalidToken(Some("token is required".into())).into_response();
+        return Err(ApiError::InvalidToken(Some("token is required".into())));
     }
-    let user = match state.user_repo.get_user_for_deletion(did).await {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            return ApiError::InvalidRequest("account not found".into()).into_response();
-        }
-        Err(e) => {
+    let user = state
+        .user_repo
+        .get_user_for_deletion(did)
+        .await
+        .map_err(|e| {
             error!("DB error in delete_account: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::InvalidRequest("account not found".into()))?;
     let (user_id, password_hash, handle) = (user.id, user.password_hash, user.handle);
-    let password_valid = if password_hash
-        .as_ref()
-        .map(|h| verify(password, h).unwrap_or(false))
-        .unwrap_or(false)
+    if crate::common::verify_credential(
+        state.session_repo.as_ref(),
+        user_id,
+        password,
+        password_hash.as_deref(),
+    )
+    .await
+    .is_none()
     {
-        true
-    } else {
-        let app_pass_hashes = state
-            .session_repo
-            .get_app_password_hashes_by_did(did)
-            .await
-            .unwrap_or_default();
-        app_pass_hashes
-            .iter()
-            .any(|h| verify(password, h).unwrap_or(false))
-    };
-    if !password_valid {
-        return ApiError::AuthenticationFailed(Some("Invalid password".into())).into_response();
+        return Err(ApiError::AuthenticationFailed(Some(
+            "Invalid password".into(),
+        )));
     }
-    let deletion_request = match state.infra_repo.get_deletion_request(token).await {
-        Ok(Some(req)) => req,
-        Ok(None) => {
-            return ApiError::InvalidToken(Some("Invalid or expired token".into())).into_response();
-        }
-        Err(e) => {
+    let deletion_request = state
+        .infra_repo
+        .get_deletion_request(token)
+        .await
+        .map_err(|e| {
             error!("DB error fetching deletion token: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::InvalidToken(Some(
+            "Invalid or expired token".into(),
+        )))?;
     if &deletion_request.did != did {
-        return ApiError::InvalidToken(Some("Token does not match account".into())).into_response();
+        return Err(ApiError::InvalidToken(Some(
+            "Token does not match account".into(),
+        )));
     }
     if Utc::now() > deletion_request.expires_at {
         let _ = state.infra_repo.delete_deletion_request(token).await;
-        return ApiError::ExpiredToken(None).into_response();
+        return Err(ApiError::ExpiredToken(None));
     }
-    if let Err(e) = state.user_repo.delete_account_complete(user_id, did).await {
-        error!("DB error deleting account: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+    state
+        .user_repo
+        .delete_account_complete(user_id, did)
+        .await
+        .map_err(|e| {
+            error!("DB error deleting account: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
     let account_seq = tranquil_pds::repo_ops::sequence_account_event(
         &state,
         did,
@@ -672,5 +649,5 @@ pub async fn delete_account(
         .delete(&tranquil_pds::cache_keys::handle_key(&handle))
         .await;
     info!("Account {} deleted successfully", did);
-    EmptyResponse::ok().into_response()
+    Ok(Json(EmptyResponse {}))
 }

@@ -1,14 +1,10 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use bcrypt::{DEFAULT_COST, hash};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use tracing::{error, info, warn};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::api::{EmptyResponse, HasPasswordResponse, SuccessResponse};
+use tranquil_pds::api::{EmptyResponse, HasPasswordResponse, PasswordResetOutput, SuccessResponse};
 use tranquil_pds::auth::{
     Active, Auth, NormalizedLoginIdentifier, require_legacy_session_mfa, require_reauth_window,
     require_reauth_window_if_available,
@@ -32,10 +28,12 @@ pub async fn request_password_reset(
     State(state): State<AppState>,
     _rate_limit: RateLimited<PasswordResetLimit>,
     Json(input): Json<RequestPasswordResetInput>,
-) -> Response {
+) -> Result<Json<PasswordResetOutput>, ApiError> {
     let identifier = input.email.trim();
     if identifier.is_empty() {
-        return ApiError::InvalidRequest("email or handle is required".into()).into_response();
+        return Err(ApiError::InvalidRequest(
+            "email or handle is required".into(),
+        ));
     }
     let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized = identifier.to_lowercase();
@@ -60,11 +58,16 @@ pub async fn request_password_reset(
         Ok(Some(id)) => id,
         Ok(None) => {
             info!("Password reset requested for unknown identifier");
-            return Json(serde_json::json!({ "success": true })).into_response();
+            return Ok(Json(PasswordResetOutput {
+                success: true,
+                multiple_accounts: None,
+                account_count: None,
+                message: None,
+            }));
         }
         Err(e) => {
             error!("DB error in request_password_reset: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     let code = generate_reset_code();
@@ -75,7 +78,7 @@ pub async fn request_password_reset(
         .await
     {
         error!("DB error setting reset code: {:?}", e);
-        return ApiError::InternalError(None).into_response();
+        return Err(ApiError::InternalError(None));
     }
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_password_reset(
@@ -92,14 +95,18 @@ pub async fn request_password_reset(
     info!("Password reset requested for user {}", user_id);
 
     match multiple_accounts_warning {
-        Some(count) => Json(serde_json::json!({
-            "success": true,
-            "multipleAccounts": true,
-            "accountCount": count,
-            "message": "Multiple accounts share this email. Reset link sent to the most recent account. Use your handle for a specific account."
-        }))
-        .into_response(),
-        None => Json(serde_json::json!({ "success": true })).into_response(),
+        Some(count) => Ok(Json(PasswordResetOutput {
+            success: true,
+            multiple_accounts: Some(true),
+            account_count: Some(count),
+            message: Some("Multiple accounts share this email. Reset link sent to the most recent account. Use your handle for a specific account.".into()),
+        })),
+        None => Ok(Json(PasswordResetOutput {
+            success: true,
+            multiple_accounts: None,
+            account_count: None,
+            message: None,
+        })),
     }
 }
 
@@ -113,37 +120,37 @@ pub async fn reset_password(
     State(state): State<AppState>,
     _rate_limit: RateLimited<ResetPasswordLimit>,
     Json(input): Json<ResetPasswordInput>,
-) -> Response {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let token = input.token.trim();
     let password = &input.password;
     if token.is_empty() {
-        return ApiError::InvalidToken(None).into_response();
+        return Err(ApiError::InvalidToken(None));
     }
     if password.is_empty() {
-        return ApiError::InvalidRequest("password is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("password is required".into()));
     }
     if let Err(e) = validate_password(password) {
-        return ApiError::InvalidRequest(e.to_string()).into_response();
+        return Err(ApiError::InvalidRequest(e.to_string()));
     }
     let user = match state.user_repo.get_user_by_reset_code(token).await {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return ApiError::InvalidToken(None).into_response();
+            return Err(ApiError::InvalidToken(None));
         }
         Err(e) => {
             error!("DB error in reset_password: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     let user_id = user.id;
     let Some(exp) = user.expires_at else {
-        return ApiError::InvalidToken(None).into_response();
+        return Err(ApiError::InvalidToken(None));
     };
     if Utc::now() > exp {
         if let Err(e) = state.user_repo.clear_password_reset_code(user_id).await {
             error!("Failed to clear expired reset code: {:?}", e);
         }
-        return ApiError::ExpiredToken(None).into_response();
+        return Err(ApiError::ExpiredToken(None));
     }
     let password_clone = password.to_string();
     let password_hash =
@@ -151,11 +158,11 @@ pub async fn reset_password(
             Ok(Ok(h)) => h,
             Ok(Err(e)) => {
                 error!("Failed to hash password: {:?}", e);
-                return ApiError::InternalError(None).into_response();
+                return Err(ApiError::InternalError(None));
             }
             Err(e) => {
                 error!("Failed to spawn blocking task: {:?}", e);
-                return ApiError::InternalError(None).into_response();
+                return Err(ApiError::InternalError(None));
             }
         };
     let result = match state
@@ -166,7 +173,7 @@ pub async fn reset_password(
         Ok(r) => r,
         Err(e) => {
             error!("Failed to reset password: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     futures::future::join_all(result.session_jtis.iter().map(|jti| {
@@ -197,7 +204,7 @@ pub async fn reset_password(
         }
     }
     info!("Password reset completed for user {}", user_id);
-    EmptyResponse::ok().into_response()
+    Ok(Json(EmptyResponse {}))
 }
 
 #[derive(Deserialize)]
@@ -211,13 +218,10 @@ pub async fn change_password(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<ChangePasswordInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     use tranquil_pds::auth::verify_password_mfa;
 
-    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+    let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
     if input.current_password.is_empty() {
         return Err(ApiError::InvalidRequest(
@@ -259,35 +263,29 @@ pub async fn change_password(
         .log_db_err("updating password")?;
 
     info!(did = %session_mfa.did(), "Password changed successfully");
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }
 
 pub async fn get_password_status(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<HasPasswordResponse>, ApiError> {
     let has = state
         .user_repo
         .has_password_by_did(&auth.did)
         .await
         .log_db_err("checking password status")?
         .ok_or(ApiError::AccountNotFound)?;
-    Ok(HasPasswordResponse::response(has).into_response())
+    Ok(Json(HasPasswordResponse { has_password: has }))
 }
 
 pub async fn remove_password(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
-    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+) -> Result<Json<SuccessResponse>, ApiError> {
+    let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
-    let reauth_mfa = match require_reauth_window(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+    let reauth_mfa = require_reauth_window(&state, &auth).await?;
 
     let has_passkeys = state
         .user_repo
@@ -320,7 +318,7 @@ pub async fn remove_password(
         .log_db_err("removing password")?;
 
     info!(did = %session_mfa.did(), "Password removed - account is now passkey-only");
-    Ok(SuccessResponse::ok().into_response())
+    Ok(Json(SuccessResponse { success: true }))
 }
 
 #[derive(Deserialize)]
@@ -333,11 +331,8 @@ pub async fn set_password(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<SetPasswordInput>,
-) -> Result<Response, ApiError> {
-    let reauth_mfa = match require_reauth_window_if_available(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+) -> Result<Json<SuccessResponse>, ApiError> {
+    let reauth_mfa = require_reauth_window_if_available(&state, &auth).await?;
 
     let new_password = &input.new_password;
     if new_password.is_empty() {
@@ -381,5 +376,5 @@ pub async fn set_password(
         .log_db_err("setting password")?;
 
     info!(did = %did, "Password set for passkey-only account");
-    Ok(SuccessResponse::ok().into_response())
+    Ok(Json(SuccessResponse { success: true }))
 }

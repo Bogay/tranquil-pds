@@ -1,9 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
@@ -27,7 +22,7 @@ pub enum ReauthMethod {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReauthStatusResponse {
+pub struct ReauthStatusOutput {
     pub last_reauth_at: Option<DateTime<Utc>>,
     pub reauth_required: bool,
     pub available_methods: Vec<ReauthMethod>,
@@ -36,7 +31,7 @@ pub struct ReauthStatusResponse {
 pub async fn get_reauth_status(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<ReauthStatusOutput>, ApiError> {
     let last_reauth_at = state
         .session_repo
         .get_last_reauth_at(&auth.did)
@@ -44,15 +39,13 @@ pub async fn get_reauth_status(
         .log_db_err("getting last reauth")?;
 
     let reauth_required = is_reauth_required(last_reauth_at);
-    let available_methods =
-        get_available_reauth_methods(&*state.user_repo, &*state.session_repo, &auth.did).await;
+    let available_methods = get_available_reauth_methods(&*state.user_repo, &auth.did).await;
 
-    Ok(Json(ReauthStatusResponse {
+    Ok(Json(ReauthStatusOutput {
         last_reauth_at,
         reauth_required,
         available_methods,
-    })
-    .into_response())
+    }))
 }
 
 #[derive(Deserialize)]
@@ -63,7 +56,7 @@ pub struct PasswordReauthInput {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReauthResponse {
+pub struct ReauthOutput {
     pub reauthed_at: DateTime<Utc>,
 }
 
@@ -71,7 +64,7 @@ pub async fn reauth_password(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<PasswordReauthInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<ReauthOutput>, ApiError> {
     let password_hash = state
         .user_repo
         .get_password_hash_by_did(&auth.did)
@@ -103,7 +96,7 @@ pub async fn reauth_password(
         .log_db_err("updating reauth")?;
 
     info!(did = %&auth.did, "Re-auth successful via password");
-    Ok(Json(ReauthResponse { reauthed_at }).into_response())
+    Ok(Json(ReauthOutput { reauthed_at }))
 }
 
 #[derive(Deserialize)]
@@ -116,7 +109,7 @@ pub async fn reauth_totp(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<TotpReauthInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<ReauthOutput>, ApiError> {
     let _rate_limit = check_user_rate_limit_with_message::<TotpVerifyLimit>(
         &state,
         &auth.did,
@@ -139,19 +132,19 @@ pub async fn reauth_totp(
         .log_db_err("updating reauth")?;
 
     info!(did = %&auth.did, "Re-auth successful via TOTP");
-    Ok(Json(ReauthResponse { reauthed_at }).into_response())
+    Ok(Json(ReauthOutput { reauthed_at }))
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PasskeyReauthStartResponse {
+pub struct PasskeyReauthStartOutput {
     pub options: serde_json::Value,
 }
 
 pub async fn reauth_passkey_start(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<PasskeyReauthStartOutput>, ApiError> {
     let stored_passkeys = state
         .user_repo
         .get_passkeys_for_user(&auth.did)
@@ -196,7 +189,7 @@ pub async fn reauth_passkey_start(
         .log_db_err("saving authentication state")?;
 
     let options = serde_json::to_value(&rcr).unwrap_or(serde_json::json!({}));
-    Ok(Json(PasskeyReauthStartResponse { options }).into_response())
+    Ok(Json(PasskeyReauthStartOutput { options }))
 }
 
 #[derive(Deserialize)]
@@ -209,7 +202,7 @@ pub async fn reauth_passkey_finish(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<PasskeyReauthFinishInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<ReauthOutput>, ApiError> {
     let auth_state_json = state
         .user_repo
         .load_webauthn_challenge(&auth.did, WebauthnChallengeType::Authentication)
@@ -270,7 +263,7 @@ pub async fn reauth_passkey_finish(
         .log_db_err("updating reauth")?;
 
     info!(did = %&auth.did, "Re-auth successful via passkey");
-    Ok(Json(ReauthResponse { reauthed_at }).into_response())
+    Ok(Json(ReauthOutput { reauthed_at }))
 }
 
 pub async fn update_last_reauth_cached(
@@ -302,33 +295,25 @@ fn is_reauth_required(last_reauth_at: Option<DateTime<Utc>>) -> bool {
 
 async fn get_available_reauth_methods(
     user_repo: &dyn UserRepository,
-    _session_repo: &dyn SessionRepository,
     did: &tranquil_pds::types::Did,
 ) -> Vec<ReauthMethod> {
-    let mut methods = Vec::new();
-
     let has_password = user_repo
         .get_password_hash_by_did(did)
         .await
         .ok()
         .flatten()
         .is_some();
-
-    if has_password {
-        methods.push(ReauthMethod::Password);
-    }
-
     let has_totp = user_repo.has_totp_enabled(did).await.unwrap_or(false);
-    if has_totp {
-        methods.push(ReauthMethod::Totp);
-    }
-
     let has_passkeys = user_repo.has_passkeys(did).await.unwrap_or(false);
-    if has_passkeys {
-        methods.push(ReauthMethod::Passkey);
-    }
 
-    methods
+    [
+        (has_password, ReauthMethod::Password),
+        (has_totp, ReauthMethod::Totp),
+        (has_passkeys, ReauthMethod::Passkey),
+    ]
+    .into_iter()
+    .filter_map(|(enabled, method)| enabled.then_some(method))
+    .collect()
 }
 
 pub async fn check_reauth_required(
@@ -364,31 +349,6 @@ pub async fn check_reauth_required_cached(
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReauthRequiredError {
-    pub error: String,
-    pub message: String,
-    pub reauth_methods: Vec<ReauthMethod>,
-}
-
-pub async fn reauth_required_response(
-    user_repo: &dyn UserRepository,
-    session_repo: &dyn SessionRepository,
-    did: &tranquil_pds::types::Did,
-) -> Response {
-    let methods = get_available_reauth_methods(user_repo, session_repo, did).await;
-    (
-        StatusCode::UNAUTHORIZED,
-        Json(ReauthRequiredError {
-            error: "ReauthRequired".to_string(),
-            message: "Re-authentication required for this action".to_string(),
-            reauth_methods: methods,
-        }),
-    )
-        .into_response()
-}
-
 pub async fn check_legacy_session_mfa(
     session_repo: &dyn SessionRepository,
     did: &tranquil_pds::types::Did,
@@ -418,29 +378,4 @@ pub async fn update_mfa_verified(
     did: &tranquil_pds::types::Did,
 ) -> Result<(), tranquil_db_traits::DbError> {
     session_repo.update_mfa_verified(did).await
-}
-
-pub async fn legacy_mfa_required_response(
-    user_repo: &dyn UserRepository,
-    session_repo: &dyn SessionRepository,
-    did: &tranquil_pds::types::Did,
-) -> Response {
-    let methods = get_available_reauth_methods(user_repo, session_repo, did).await;
-    (
-        StatusCode::FORBIDDEN,
-        Json(MfaVerificationRequiredError {
-            error: "MfaVerificationRequired".to_string(),
-            message: "This sensitive operation requires MFA verification. Your session was created via a legacy app that doesn't support MFA during login.".to_string(),
-            reauth_methods: methods,
-        }),
-    )
-        .into_response()
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MfaVerificationRequiredError {
-    pub error: String,
-    pub message: String,
-    pub reauth_methods: Vec<ReauthMethod>,
 }

@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use tranquil_pds::api::EmptyResponse;
@@ -21,7 +17,7 @@ const ENCRYPTION_VERSION: i32 = 1;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateTotpSecretResponse {
+pub struct CreateTotpSecretOutput {
     pub secret: String,
     pub uri: String,
     pub qr_base64: String,
@@ -30,7 +26,7 @@ pub struct CreateTotpSecretResponse {
 pub async fn create_totp_secret(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<CreateTotpSecretOutput>, ApiError> {
     use tranquil_db_traits::TotpRecordState;
 
     match state.user_repo.get_totp_record_state(&auth.did).await {
@@ -74,12 +70,11 @@ pub async fn create_totp_secret(
 
     info!(did = %&auth.did, "TOTP secret created (pending verification)");
 
-    Ok(Json(CreateTotpSecretResponse {
+    Ok(Json(CreateTotpSecretOutput {
         secret: secret_base32,
         uri,
         qr_base64: qr_code,
-    })
-    .into_response())
+    }))
 }
 
 #[derive(Deserialize)]
@@ -89,7 +84,7 @@ pub struct EnableTotpInput {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EnableTotpResponse {
+pub struct EnableTotpOutput {
     pub backup_codes: Vec<String>,
 }
 
@@ -97,7 +92,7 @@ pub async fn enable_totp(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<EnableTotpInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EnableTotpOutput>, ApiError> {
     use tranquil_db_traits::TotpRecordState;
 
     let _rate_limit = check_user_rate_limit_with_message::<TotpVerifyLimit>(
@@ -151,7 +146,7 @@ pub async fn enable_totp(
 
     info!(did = %&auth.did, "TOTP enabled with {} backup codes", backup_codes.len());
 
-    Ok(Json(EnableTotpResponse { backup_codes }).into_response())
+    Ok(Json(EnableTotpOutput { backup_codes }))
 }
 
 #[derive(Deserialize)]
@@ -164,11 +159,8 @@ pub async fn disable_totp(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<DisableTotpInput>,
-) -> Result<Response, ApiError> {
-    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+) -> Result<Json<EmptyResponse>, ApiError> {
+    let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
     let _rate_limit = check_user_rate_limit_with_message::<TotpVerifyLimit>(
         &state,
@@ -190,12 +182,12 @@ pub async fn disable_totp(
 
     info!(did = %session_mfa.did(), "TOTP disabled (verified via {} and {})", password_mfa.method(), totp_mfa.method());
 
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetTotpStatusResponse {
+pub struct GetTotpStatusOutput {
     pub enabled: bool,
     pub has_backup_codes: bool,
     pub backup_codes_remaining: i64,
@@ -204,7 +196,7 @@ pub struct GetTotpStatusResponse {
 pub async fn get_totp_status(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<GetTotpStatusOutput>, ApiError> {
     use tranquil_db_traits::TotpRecordState;
 
     let enabled = match state.user_repo.get_totp_record_state(&auth.did).await {
@@ -222,12 +214,11 @@ pub async fn get_totp_status(
         .await
         .log_db_err("counting backup codes")?;
 
-    Ok(Json(GetTotpStatusResponse {
+    Ok(Json(GetTotpStatusOutput {
         enabled,
         has_backup_codes: backup_count > 0,
         backup_codes_remaining: backup_count,
-    })
-    .into_response())
+    }))
 }
 
 #[derive(Deserialize)]
@@ -238,7 +229,7 @@ pub struct RegenerateBackupCodesInput {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RegenerateBackupCodesResponse {
+pub struct RegenerateBackupCodesOutput {
     pub backup_codes: Vec<String>,
 }
 
@@ -246,7 +237,7 @@ pub async fn regenerate_backup_codes(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<RegenerateBackupCodesInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<RegenerateBackupCodesOutput>, ApiError> {
     let _rate_limit = check_user_rate_limit_with_message::<TotpVerifyLimit>(
         &state,
         &auth.did,
@@ -275,7 +266,7 @@ pub async fn regenerate_backup_codes(
 
     info!(did = %password_mfa.did(), "Backup codes regenerated (verified via {} and {})", password_mfa.method(), totp_mfa.method());
 
-    Ok(Json(RegenerateBackupCodesResponse { backup_codes }).into_response())
+    Ok(Json(RegenerateBackupCodesOutput { backup_codes }))
 }
 
 async fn verify_backup_code_for_user(

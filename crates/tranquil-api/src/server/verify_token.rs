@@ -1,6 +1,12 @@
-use axum::{Json, extract::State};
+use crate::common;
+use axum::{
+    Json,
+    extract::State,
+    response::{IntoResponse, Response},
+};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
+use tranquil_pds::api::SuccessResponse;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::comms::comms_repo;
 use tranquil_pds::types::Did;
@@ -92,27 +98,7 @@ async fn handle_migration_verification(
                     .log_db_err("updating email_verified status")?;
             }
         }
-        CommsChannel::Discord => {
-            state
-                .user_repo
-                .set_discord_verified_flag(user.id)
-                .await
-                .log_db_err("updating discord verified status")?;
-        }
-        CommsChannel::Telegram => {
-            state
-                .user_repo
-                .set_telegram_verified_flag(user.id)
-                .await
-                .log_db_err("updating telegram verified status")?;
-        }
-        CommsChannel::Signal => {
-            state
-                .user_repo
-                .set_signal_verified_flag(user.id)
-                .await
-                .log_db_err("updating signal verified status")?;
-        }
+        _ => common::set_channel_verified_flag(state.user_repo.as_ref(), user.id, channel).await?,
     };
 
     info!(did = %did, channel = ?channel, "Migration verification completed successfully");
@@ -239,36 +225,7 @@ async fn handle_signup_verification(
         }));
     }
 
-    match channel {
-        CommsChannel::Email => {
-            state
-                .user_repo
-                .set_email_verified_flag(user.id)
-                .await
-                .log_db_err("updating email verified status")?;
-        }
-        CommsChannel::Discord => {
-            state
-                .user_repo
-                .set_discord_verified_flag(user.id)
-                .await
-                .log_db_err("updating discord verified status")?;
-        }
-        CommsChannel::Telegram => {
-            state
-                .user_repo
-                .set_telegram_verified_flag(user.id)
-                .await
-                .log_db_err("updating telegram verified status")?;
-        }
-        CommsChannel::Signal => {
-            state
-                .user_repo
-                .set_signal_verified_flag(user.id)
-                .await
-                .log_db_err("updating signal verified status")?;
-        }
-    };
+    common::set_channel_verified_flag(state.user_repo.as_ref(), user.id, channel).await?;
 
     info!(did = %did, channel = ?channel, "Signup verified successfully");
 
@@ -292,4 +249,27 @@ async fn handle_signup_verification(
         purpose: VerificationPurpose::Signup,
         channel,
     }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmChannelVerificationInput {
+    pub channel: CommsChannel,
+    pub identifier: String,
+    pub code: String,
+}
+
+pub async fn confirm_channel_verification(
+    State(state): State<AppState>,
+    Json(input): Json<ConfirmChannelVerificationInput>,
+) -> Response {
+    let token_input = VerifyTokenInput {
+        token: input.code,
+        identifier: input.identifier,
+    };
+
+    match verify_token_internal(&state, token_input).await {
+        Ok(_output) => SuccessResponse::ok().into_response(),
+        Err(e) => e.into_response(),
+    }
 }
