@@ -6,6 +6,7 @@ use axum::{
 use cid::Cid;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::str::FromStr;
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::auth::{Active, Auth, Permissive};
@@ -51,7 +52,7 @@ pub async fn dereference_scope(
     State(state): State<AppState>,
     _auth: Auth<Active>,
     Json(input): Json<DereferenceScopeInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<DereferenceScopeOutput>, ApiError> {
     let scope_parts: Vec<&str> = input.scope.split_whitespace().collect();
     let mut resolved_scopes: Vec<String> = Vec::new();
 
@@ -96,7 +97,7 @@ pub async fn dereference_scope(
                 }
             };
 
-            if let Some(scope_value) = scope_record.get("scope").and_then(|v| v.as_str()) {
+            if let Some(scope_value) = scope_record.get("scope").and_then(Value::as_str) {
                 let _ = state
                     .cache
                     .set(
@@ -118,6 +119,5 @@ pub async fn dereference_scope(
 
     Ok(Json(DereferenceScopeOutput {
         scope: resolved_scopes.join(" "),
-    })
-    .into_response())
+    }))
 }

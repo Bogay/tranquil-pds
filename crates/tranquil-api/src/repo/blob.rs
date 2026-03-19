@@ -2,7 +2,6 @@ use axum::body::Body;
 use axum::{
     Json,
     extract::{Query, State},
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
@@ -58,10 +57,7 @@ pub async fn upload_blob(
             }
             let mime_type_for_check = get_header_str(&headers, http::header::CONTENT_TYPE)
                 .unwrap_or("application/octet-stream");
-            let scope_proof = match user.verify_blob_upload(mime_type_for_check) {
-                Ok(proof) => proof,
-                Err(e) => return Ok(e.into_response()),
-            };
+            let scope_proof = user.verify_blob_upload(mime_type_for_check)?;
             (
                 scope_proof.principal_did().into_did(),
                 scope_proof.controller_did().map(|c| c.into_did()),
@@ -237,7 +233,7 @@ pub async fn list_missing_blobs(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
     Query(params): Query<ListMissingBlobsParams>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<ListMissingBlobsOutput>, ApiError> {
     let did = &auth.did;
     let user = state
         .user_repo
@@ -269,12 +265,8 @@ pub async fn list_missing_blobs(
     } else {
         None
     };
-    Ok((
-        StatusCode::OK,
-        Json(ListMissingBlobsOutput {
-            cursor: next_cursor,
-            blobs,
-        }),
-    )
-        .into_response())
+    Ok(Json(ListMissingBlobsOutput {
+        cursor: next_cursor,
+        blobs,
+    }))
 }

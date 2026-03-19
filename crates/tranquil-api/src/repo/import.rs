@@ -1,8 +1,4 @@
-use axum::{
-    body::Bytes,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, body::Bytes, extract::State};
 use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
@@ -22,7 +18,7 @@ pub async fn import_repo(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
     body: Bytes,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let accepting_imports = tranquil_config::get().import.accepting;
     if !accepting_imports {
         return Err(ApiError::InvalidRequest(
@@ -340,7 +336,7 @@ pub async fn import_repo(
                     );
                 }
             }
-            Ok(EmptyResponse::ok().into_response())
+            Ok(Json(EmptyResponse {}))
         }
         Err(ImportError::SizeLimitExceeded) => Err(ApiError::PayloadTooLarge(format!(
             "Import exceeds block limit of {}",

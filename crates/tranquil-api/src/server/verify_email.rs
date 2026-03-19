@@ -74,27 +74,14 @@ pub async fn resend_migration_verification(
         return Ok(Json(ResendMigrationVerificationOutput { sent: true }));
     }
 
-    let hostname = &tranquil_config::get().server.hostname;
-    let token = tranquil_pds::auth::verification_token::generate_migration_token(
+    crate::identity::provision::enqueue_migration_verification(
+        &state,
+        user.id,
         &user.did,
         channel,
         &identifier,
-    );
-    let formatted_token = tranquil_pds::auth::verification_token::format_token_for_display(&token);
-
-    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_migration_verification(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
-        user.id,
-        channel,
-        &identifier,
-        &formatted_token,
-        hostname,
     )
-    .await
-    {
-        warn!(error = ?e, channel = ?channel, "Failed to enqueue migration verification");
-    }
+    .await;
 
     info!(did = %user.did, channel = ?channel, "Resent migration verification");
 

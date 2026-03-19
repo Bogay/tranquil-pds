@@ -23,9 +23,8 @@ pub use account_status::{
 };
 pub use app_password::{create_app_password, list_app_passwords, revoke_app_password};
 pub use email::{
-    authorize_email_update, check_channel_verified, check_email_in_use,
-    check_email_update_status, check_email_verified, confirm_email, request_email_update,
-    update_email,
+    authorize_email_update, check_channel_verified, check_email_in_use, check_email_update_status,
+    check_email_verified, confirm_email, request_email_update, update_email,
 };
 pub use invite::{create_invite_code, create_invite_codes, get_account_invite_codes};
 pub use logo::get_logo;
@@ -44,9 +43,8 @@ pub use password::{
     set_password,
 };
 pub use reauth::{
-    check_legacy_session_mfa, check_reauth_required, get_reauth_status,
-    legacy_mfa_required_response, reauth_passkey_finish, reauth_passkey_start, reauth_password,
-    reauth_required_response, reauth_totp, update_mfa_verified,
+    check_legacy_session_mfa, check_reauth_required, get_reauth_status, reauth_passkey_finish,
+    reauth_passkey_start, reauth_password, reauth_totp, update_mfa_verified,
 };
 pub use service_auth::get_service_auth;
 pub use session::{
@@ -64,4 +62,7 @@ pub use trusted_devices::{
     trust_device, update_trusted_device,
 };
 pub use verify_email::{resend_migration_verification, verify_migration_email};
-pub use verify_token::{VerifyTokenInput, VerifyTokenOutput, verify_token, verify_token_internal};
+pub use verify_token::{
+    VerifyTokenInput, VerifyTokenOutput, confirm_channel_verification, verify_token,
+    verify_token_internal,
+};

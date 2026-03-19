@@ -1,27 +1,20 @@
 use super::validation::validate_record_with_status;
 use super::validation_mode::{ValidationMode, deserialize_validation_mode};
-use crate::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
-use cid::Cid;
-use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
+use crate::repo::record::write::CommitInfo;
+use axum::{Json, extract::State};
+use jacquard_repo::{mst::Mst, storage::BlockStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::str::FromStr;
-use std::sync::Arc;
 use tracing::info;
-use tranquil_pds::api::error::ApiError;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{
     Active, Auth, WriteOpKind, require_not_migrated, require_verified_or_delegated,
     verify_batch_write_scopes,
 };
-use tranquil_pds::cid_types::CommitCid;
-use tranquil_pds::delegation::DelegationActionType;
 use tranquil_pds::repo::tracking::TrackingBlockStore;
+use tranquil_pds::repo_ops::{
+    FinalizeParams, RecordOp, begin_repo_write, extract_blob_cids, finalize_repo_write,
+};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
 use tranquil_pds::validation::ValidationStatus;
@@ -42,7 +35,7 @@ async fn process_single_write(
     did: &Did,
     validate: ValidationMode,
     tracking_store: &TrackingBlockStore,
-) -> Result<WriteAccumulator, Response> {
+) -> Result<WriteAccumulator, ApiError> {
     let WriteAccumulator {
         mst,
         mut results,
@@ -60,32 +53,31 @@ async fn process_single_write(
             let validation_status = if validate.should_skip() {
                 None
             } else {
-                match validate_record_with_status(
-                    value,
-                    collection,
-                    rkey.as_ref(),
-                    validate.requires_lexicon(),
+                Some(
+                    validate_record_with_status(
+                        value,
+                        collection,
+                        rkey.as_ref(),
+                        validate.requires_lexicon(),
+                    )
+                    .await?,
                 )
-                .await
-                {
-                    Ok(status) => Some(status),
-                    Err(err_response) => return Err(*err_response),
-                }
             };
             all_blob_cids.extend(extract_blob_cids(value));
             let rkey = rkey.clone().unwrap_or_else(Rkey::generate);
             let record_ipld = tranquil_pds::util::json_to_ipld(value);
-            let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld).map_err(|_| {
-                ApiError::InvalidRecord("Failed to serialize record".into()).into_response()
-            })?;
-            let record_cid = tracking_store.put(&record_bytes).await.map_err(|_| {
-                ApiError::InternalError(Some("Failed to store record".into())).into_response()
-            })?;
+            let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
+                .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
+            let record_cid = tracking_store
+                .put(&record_bytes)
+                .await
+                .map_err(|_| ApiError::InternalError(Some("Failed to store record".into())))?;
             let key = format!("{}/{}", collection, rkey);
             modified_keys.push(key.clone());
-            let new_mst = mst.add(&key, record_cid).await.map_err(|_| {
-                ApiError::InternalError(Some("Failed to add to MST".into())).into_response()
-            })?;
+            let new_mst = mst
+                .add(&key, record_cid)
+                .await
+                .map_err(|_| ApiError::InternalError(Some("Failed to add to MST".into())))?;
             let uri = AtUri::from_parts(did, collection, &rkey);
             results.push(WriteResult::CreateResult {
                 uri,
@@ -113,32 +105,31 @@ async fn process_single_write(
             let validation_status = if validate.should_skip() {
                 None
             } else {
-                match validate_record_with_status(
-                    value,
-                    collection,
-                    Some(rkey),
-                    validate.requires_lexicon(),
+                Some(
+                    validate_record_with_status(
+                        value,
+                        collection,
+                        Some(rkey),
+                        validate.requires_lexicon(),
+                    )
+                    .await?,
                 )
-                .await
-                {
-                    Ok(status) => Some(status),
-                    Err(err_response) => return Err(*err_response),
-                }
             };
             all_blob_cids.extend(extract_blob_cids(value));
             let record_ipld = tranquil_pds::util::json_to_ipld(value);
-            let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld).map_err(|_| {
-                ApiError::InvalidRecord("Failed to serialize record".into()).into_response()
-            })?;
-            let record_cid = tracking_store.put(&record_bytes).await.map_err(|_| {
-                ApiError::InternalError(Some("Failed to store record".into())).into_response()
-            })?;
+            let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
+                .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
+            let record_cid = tracking_store
+                .put(&record_bytes)
+                .await
+                .map_err(|_| ApiError::InternalError(Some("Failed to store record".into())))?;
             let key = format!("{}/{}", collection, rkey);
             modified_keys.push(key.clone());
             let prev_record_cid = mst.get(&key).await.ok().flatten();
-            let new_mst = mst.update(&key, record_cid).await.map_err(|_| {
-                ApiError::InternalError(Some("Failed to update MST".into())).into_response()
-            })?;
+            let new_mst = mst
+                .update(&key, record_cid)
+                .await
+                .map_err(|_| ApiError::InternalError(Some("Failed to update MST".into())))?;
             let uri = AtUri::from_parts(did, collection, rkey);
             results.push(WriteResult::UpdateResult {
                 uri,
@@ -163,9 +154,10 @@ async fn process_single_write(
             let key = format!("{}/{}", collection, rkey);
             modified_keys.push(key.clone());
             let prev_record_cid = mst.get(&key).await.ok().flatten();
-            let new_mst = mst.delete(&key).await.map_err(|_| {
-                ApiError::InternalError(Some("Failed to delete from MST".into())).into_response()
-            })?;
+            let new_mst = mst
+                .delete(&key)
+                .await
+                .map_err(|_| ApiError::InternalError(Some("Failed to delete from MST".into())))?;
             results.push(WriteResult::DeleteResult {});
             ops.push(RecordOp::Delete {
                 collection: collection.clone(),
@@ -189,7 +181,7 @@ async fn process_writes(
     did: &Did,
     validate: ValidationMode,
     tracking_store: &TrackingBlockStore,
-) -> Result<WriteAccumulator, Response> {
+) -> Result<WriteAccumulator, ApiError> {
     use futures::stream::{self, TryStreamExt};
     let initial_acc = WriteAccumulator {
         mst: initial_mst,
@@ -198,7 +190,7 @@ async fn process_writes(
         modified_keys: Vec::new(),
         all_blob_cids: Vec::new(),
     };
-    stream::iter(writes.iter().map(Ok::<_, Response>))
+    stream::iter(writes.iter().map(Ok::<_, ApiError>))
         .try_fold(initial_acc, |acc, write| async move {
             process_single_write(write, acc, did, validate, tracking_store).await
         })
@@ -261,17 +253,11 @@ pub struct ApplyWritesOutput {
     pub results: Vec<WriteResult>,
 }
 
-#[derive(Serialize)]
-pub struct CommitInfo {
-    pub cid: String,
-    pub rev: String,
-}
-
 pub async fn apply_writes(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<ApplyWritesInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<ApplyWritesOutput>, ApiError> {
     info!(
         "apply_writes called: repo={}, writes={}",
         input.repo,
@@ -288,7 +274,7 @@ pub async fn apply_writes(
         )));
     }
 
-    let batch_proof = match verify_batch_write_scopes(
+    let batch_proof = verify_batch_write_scopes(
         &auth,
         &auth,
         &input.writes,
@@ -302,10 +288,7 @@ pub async fn apply_writes(
             WriteOp::Update { .. } => WriteOpKind::Update,
             WriteOp::Delete { .. } => WriteOpKind::Delete,
         },
-    ) {
-        Ok(proof) => proof,
-        Err(e) => return Ok(e.into_response()),
-    };
+    )?;
 
     let principal_did = batch_proof.principal_did();
     let controller_did = batch_proof.controller_did().map(|c| c.into_did());
@@ -317,140 +300,35 @@ pub async fn apply_writes(
     }
 
     let did = principal_did.into_did();
-    if let Err(e) = require_not_migrated(&state, &did).await {
-        return Ok(e);
-    }
-    if let Err(e) = require_verified_or_delegated(&state, batch_proof.user()).await {
-        return Ok(e);
-    }
+    require_not_migrated(&state, &did).await?;
+    require_verified_or_delegated(&state, batch_proof.user()).await?;
 
     let user_id: uuid::Uuid = state
         .user_repo
         .get_id_by_did(&did)
         .await
-        .ok()
-        .flatten()
-        .ok_or_else(|| ApiError::InternalError(Some("User not found".into())))?;
+        .log_db_err("fetching user for batch write")?
+        .ok_or(ApiError::InternalError(Some("User not found".into())))?;
 
-    let _write_lock = state.repo_write_locks.lock(user_id).await;
+    let (ctx, mst) = begin_repo_write(&state, user_id, input.swap_commit.as_deref()).await?;
 
-    let root_cid_str = state
-        .repo_repo
-        .get_repo_root_cid_by_user_id(user_id)
-        .await
-        .ok()
-        .flatten()
-        .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())))?;
-    let current_root_cid = CommitCid::from_str(&root_cid_str)
-        .map_err(|_| ApiError::InternalError(Some("Invalid repo root CID".into())))?;
-    if let Some(swap_commit) = &input.swap_commit
-        && CommitCid::from_str(swap_commit).ok().as_ref() != Some(&current_root_cid)
-    {
-        return Err(ApiError::InvalidSwap(Some("Repo has been modified".into())));
-    }
-    let tracking_store = TrackingBlockStore::new(state.block_store.clone());
-    let commit_bytes = tracking_store
-        .get(current_root_cid.as_cid())
-        .await
-        .ok()
-        .flatten()
-        .ok_or_else(|| ApiError::InternalError(Some("Commit block not found".into())))?;
-    let commit = Commit::from_cbor(&commit_bytes)
-        .map_err(|_| ApiError::InternalError(Some("Failed to parse commit".into())))?;
-    let original_mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
-    let initial_mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
     let WriteAccumulator {
-        mst,
+        mst: final_mst,
         results,
         ops,
         modified_keys,
         all_blob_cids,
-    } = match process_writes(
+    } = process_writes(
         &input.writes,
-        initial_mst,
+        mst,
         &did,
         input.validate,
-        &tracking_store,
+        &ctx.tracking_store,
     )
-    .await
-    {
-        Ok(acc) => acc,
-        Err(response) => return Ok(response),
-    };
-    let new_mst_root = mst
-        .persist()
-        .await
-        .map_err(|_| ApiError::InternalError(Some("Failed to persist MST".into())))?;
-    let (new_mst_blocks, old_mst_blocks) = {
-        let mut new_blocks = std::collections::BTreeMap::new();
-        let mut old_blocks = std::collections::BTreeMap::new();
-        for key in &modified_keys {
-            mst.blocks_for_path(key, &mut new_blocks)
-                .await
-                .map_err(|_| {
-                    ApiError::InternalError(Some("Failed to get new MST blocks for path".into()))
-                })?;
-            original_mst
-                .blocks_for_path(key, &mut old_blocks)
-                .await
-                .map_err(|_| {
-                    ApiError::InternalError(Some("Failed to get old MST blocks for path".into()))
-                })?;
-        }
-        (new_blocks, old_blocks)
-    };
-    let mut relevant_blocks = new_mst_blocks.clone();
-    relevant_blocks.extend(old_mst_blocks.iter().map(|(k, v)| (*k, v.clone())));
-    let written_cids: Vec<Cid> = tracking_store
-        .get_all_relevant_cids()
-        .into_iter()
-        .chain(relevant_blocks.keys().copied())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
-    let prev_record_cids = ops.iter().filter_map(|op| match op {
-        RecordOp::Update {
-            prev: Some(cid), ..
-        }
-        | RecordOp::Delete {
-            prev: Some(cid), ..
-        } => Some(*cid),
-        _ => None,
-    });
-    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid.into_cid())
-        .chain(
-            old_mst_blocks
-                .keys()
-                .filter(|cid| !new_mst_blocks.contains_key(*cid))
-                .copied(),
-        )
-        .chain(prev_record_cids)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let commit_res = match commit_and_log(
-        &state,
-        CommitParams {
-            did: &did,
-            user_id,
-            current_root_cid: Some(current_root_cid.into_cid()),
-            prev_data_cid: Some(commit.data),
-            new_mst_root,
-            ops,
-            blocks_cids: &written_cids_str,
-            blobs: &all_blob_cids,
-            obsolete_cids,
-        },
-    )
-    .await
-    {
-        Ok(res) => res,
-        Err(e) => return Err(ApiError::from(e)),
-    };
+    .await?;
 
-    if let Some(ref controller) = controller_did {
-        let write_summary: Vec<serde_json::Value> = input
+    let write_summary: Option<serde_json::Value> = controller_did.as_ref().map(|_| {
+        let writes: Vec<serde_json::Value> = input
             .writes
             .iter()
             .map(|w| match w {
@@ -475,34 +353,34 @@ pub async fn apply_writes(
                 }),
             })
             .collect();
+        json!({
+            "action": "apply_writes",
+            "count": input.writes.len(),
+            "writes": writes
+        })
+    });
 
-        let _ = state
-            .delegation_repo
-            .log_delegation_action(
-                &did,
-                controller,
-                Some(controller),
-                DelegationActionType::RepoWrite,
-                Some(json!({
-                    "action": "apply_writes",
-                    "count": input.writes.len(),
-                    "writes": write_summary
-                })),
-                None,
-                None,
-            )
-            .await;
-    }
-
-    Ok((
-        StatusCode::OK,
-        Json(ApplyWritesOutput {
-            commit: CommitInfo {
-                cid: commit_res.commit_cid.to_string(),
-                rev: commit_res.rev,
-            },
-            results,
-        }),
+    let commit_result = finalize_repo_write(
+        &state,
+        ctx,
+        final_mst,
+        FinalizeParams {
+            did: &did,
+            user_id,
+            controller_did: controller_did.as_ref(),
+            delegation_detail: write_summary,
+            ops,
+            modified_keys: &modified_keys,
+            blob_cids: &all_blob_cids,
+        },
     )
-        .into_response())
+    .await?;
+
+    Ok(Json(ApplyWritesOutput {
+        commit: CommitInfo {
+            cid: commit_result.commit_cid.to_string(),
+            rev: commit_result.rev,
+        },
+        results,
+    }))
 }
