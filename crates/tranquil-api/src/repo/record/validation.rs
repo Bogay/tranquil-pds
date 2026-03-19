@@ -1,4 +1,3 @@
-use axum::response::Response;
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::types::{Nsid, Rkey};
 use tranquil_pds::validation::{RecordValidator, ValidationError, ValidationStatus};
@@ -8,21 +7,19 @@ pub async fn validate_record_with_status(
     collection: &Nsid,
     rkey: Option<&Rkey>,
     require_lexicon: bool,
-) -> Result<ValidationStatus, Box<Response>> {
+) -> Result<ValidationStatus, ApiError> {
     let registry = tranquil_lexicon::LexiconRegistry::global();
     if !registry.has_schema(collection.as_str()) {
         let _ = registry.resolve_dynamic(collection.as_str()).await;
     }
 
     let validator = RecordValidator::new().require_lexicon(require_lexicon);
-    match validator.validate_with_rkey(record, collection.as_str(), rkey.map(|r| r.as_str())) {
-        Ok(status) => Ok(status),
-        Err(e) => Err(validation_error_to_box_response(e)),
-    }
+    validator
+        .validate_with_rkey(record, collection.as_str(), rkey.map(|v| v.as_str()))
+        .map_err(validation_error_to_api_error)
 }
 
-fn validation_error_to_box_response(e: ValidationError) -> Box<Response> {
-    use axum::response::IntoResponse;
+fn validation_error_to_api_error(e: ValidationError) -> ApiError {
     let msg = match e {
         ValidationError::MissingType => "Record must have a $type field".to_string(),
         ValidationError::TypeMismatch { expected, actual } => {
@@ -44,5 +41,5 @@ fn validation_error_to_box_response(e: ValidationError) -> Box<Response> {
         ValidationError::UnknownType(type_name) => format!("Lexicon not found: lex:{}", type_name),
         e => e.to_string(),
     };
-    Box::new(ApiError::InvalidRecord(msg).into_response())
+    ApiError::InvalidRecord(msg)
 }

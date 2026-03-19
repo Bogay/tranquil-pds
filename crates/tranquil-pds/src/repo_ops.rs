@@ -1,15 +1,19 @@
 use crate::api::error::ApiError;
 use crate::cid_types::CommitCid;
+use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use crate::types::{Did, Handle, Nsid, Rkey};
 use bytes::Bytes;
 use cid::Cid;
 use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::commit::Commit;
+use jacquard_repo::mst::Mst;
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::{Value, json};
 use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::OwnedMutexGuard;
 use tracing::error;
 use tranquil_db_traits::SequenceNumber;
 use uuid::Uuid;
@@ -156,6 +160,135 @@ pub fn extract_backlinks(uri: &AtUri, record: &Value) -> Vec<Backlink> {
             .unwrap_or_default(),
         _ => Vec::new(),
     }
+}
+
+pub struct RepoWriteContext {
+    pub tracking_store: TrackingBlockStore,
+    pub current_root_cid: Cid,
+    pub prev_data_cid: Cid,
+    pub write_lock: OwnedMutexGuard<()>,
+}
+
+pub struct FinalizeParams<'a> {
+    pub did: &'a Did,
+    pub user_id: Uuid,
+    pub controller_did: Option<&'a Did>,
+    pub delegation_detail: Option<serde_json::Value>,
+    pub ops: Vec<RecordOp>,
+    pub modified_keys: &'a [String],
+    pub blob_cids: &'a [String],
+}
+
+pub async fn begin_repo_write(
+    state: &AppState,
+    user_id: Uuid,
+    swap_commit: Option<&str>,
+) -> Result<(RepoWriteContext, Mst<TrackingBlockStore>), ApiError> {
+    let write_lock = state.repo_write_locks.lock(user_id).await;
+
+    let root_cid_str = state
+        .repo_repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
+        .map_err(|e| {
+            error!("DB error fetching repo root: {}", e);
+            ApiError::InternalError(None)
+        })?
+        .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())))?;
+
+    let current_root_cid = Cid::from_str(root_cid_str.as_str())
+        .map_err(|_| ApiError::InternalError(Some("Invalid repo root CID".into())))?;
+
+    if let Some(expected) = swap_commit {
+        let expected_cid = Cid::from_str(expected)
+            .map_err(|_| ApiError::InvalidSwap(Some("Invalid swap commit CID".into())))?;
+        if expected_cid != current_root_cid {
+            return Err(ApiError::InvalidSwap(Some("Repo has been modified".into())));
+        }
+    }
+
+    let tracking_store = TrackingBlockStore::new(state.block_store.clone());
+    let commit_bytes = tracking_store
+        .get(&current_root_cid)
+        .await
+        .map_err(|e| {
+            error!("Failed to load commit block: {:?}", e);
+            ApiError::InternalError(None)
+        })?
+        .ok_or_else(|| ApiError::InternalError(Some("Commit block not found".into())))?;
+
+    let commit = Commit::from_cbor(&commit_bytes).map_err(|e| {
+        error!("Failed to parse commit: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
+
+    let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
+
+    let ctx = RepoWriteContext {
+        tracking_store,
+        current_root_cid,
+        prev_data_cid: commit.data,
+        write_lock,
+    };
+
+    Ok((ctx, mst))
+}
+
+pub async fn finalize_repo_write(
+    state: &AppState,
+    ctx: RepoWriteContext,
+    mst: Mst<TrackingBlockStore>,
+    params: FinalizeParams<'_>,
+) -> Result<CommitResult, ApiError> {
+    let new_mst_root = mst.persist().await.map_err(|e| {
+        error!("MST persist failed: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
+
+    let written_cids: Vec<Cid> = ctx
+        .tracking_store
+        .get_all_relevant_cids()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let written_cids_str: Vec<String> = written_cids.iter().map(ToString::to_string).collect();
+
+    let result = commit_and_log(
+        state,
+        CommitParams {
+            did: params.did,
+            user_id: params.user_id,
+            current_root_cid: Some(ctx.current_root_cid),
+            prev_data_cid: Some(ctx.prev_data_cid),
+            new_mst_root,
+            ops: params.ops,
+            blocks_cids: &written_cids_str,
+            blobs: params.blob_cids,
+            obsolete_cids: vec![ctx.current_root_cid],
+        },
+    )
+    .await?;
+
+    if let Some(controller_did) = params.controller_did
+        && let Some(detail) = params.delegation_detail
+        && let Err(e) = state
+            .delegation_repo
+            .log_delegation_action(
+                params.did,
+                controller_did,
+                Some(controller_did),
+                tranquil_db_traits::DelegationActionType::RepoWrite,
+                Some(detail),
+                None,
+                None,
+            )
+            .await
+    {
+        tracing::warn!("Failed to log delegation audit: {:?}", e);
+    }
+
+    Ok(result)
 }
 
 pub fn create_signed_commit(
@@ -392,9 +525,6 @@ pub async fn create_record_internal(
     rkey: &Rkey,
     record: &serde_json::Value,
 ) -> Result<(String, Cid), CommitError> {
-    use crate::repo::tracking::TrackingBlockStore;
-    use jacquard_repo::mst::Mst;
-    use std::sync::Arc;
     let user_id: Uuid = state
         .user_repo
         .get_id_by_did(did)

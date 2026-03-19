@@ -1,4 +1,5 @@
 use super::pagination::{PaginationDirection, deserialize_pagination_direction};
+use crate::common;
 use axum::{
     Json,
     extract::{Query, State},
@@ -59,40 +60,9 @@ pub async fn get_record(
     _headers: HeaderMap,
     Query(input): Query<GetRecordInput>,
 ) -> Response {
-    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
-    let user_id_opt = if input.repo.is_did() {
-        let did: tranquil_pds::types::Did = match input.repo.as_str().parse() {
-            Ok(d) => d,
-            Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
-        };
-        state.user_repo.get_id_by_did(&did).await.map_err(|_| ())
-    } else {
-        let repo_str = input.repo.as_str();
-        let handle_str = if !repo_str.contains('.') {
-            format!("{}.{}", repo_str, hostname_for_handles)
-        } else {
-            repo_str.to_string()
-        };
-        let handle: tranquil_pds::types::Handle = match handle_str.parse() {
-            Ok(h) => h,
-            Err(_) => {
-                return ApiError::InvalidRequest("Invalid handle format".into()).into_response();
-            }
-        };
-        state
-            .user_repo
-            .get_id_by_handle(&handle)
-            .await
-            .map_err(|_| ())
-    };
-    let user_id: uuid::Uuid = match user_id_opt {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            return ApiError::RepoNotFound(Some("Repo not found".into())).into_response();
-        }
-        Err(_) => {
-            return ApiError::InternalError(None).into_response();
-        }
+    let user_id = match common::resolve_repo_user_id(state.user_repo.as_ref(), &input.repo).await {
+        Ok(id) => id,
+        Err(e) => return e.into_response(),
     };
     let record_row = state
         .repo_repo
@@ -158,40 +128,9 @@ pub async fn list_records(
     State(state): State<AppState>,
     Query(input): Query<ListRecordsInput>,
 ) -> Response {
-    let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
-    let user_id_opt = if input.repo.is_did() {
-        let did: tranquil_pds::types::Did = match input.repo.as_str().parse() {
-            Ok(d) => d,
-            Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
-        };
-        state.user_repo.get_id_by_did(&did).await.map_err(|_| ())
-    } else {
-        let repo_str = input.repo.as_str();
-        let handle_str = if !repo_str.contains('.') {
-            format!("{}.{}", repo_str, hostname_for_handles)
-        } else {
-            repo_str.to_string()
-        };
-        let handle: tranquil_pds::types::Handle = match handle_str.parse() {
-            Ok(h) => h,
-            Err(_) => {
-                return ApiError::InvalidRequest("Invalid handle format".into()).into_response();
-            }
-        };
-        state
-            .user_repo
-            .get_id_by_handle(&handle)
-            .await
-            .map_err(|_| ())
-    };
-    let user_id: uuid::Uuid = match user_id_opt {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            return ApiError::RepoNotFound(Some("Repo not found".into())).into_response();
-        }
-        Err(_) => {
-            return ApiError::InternalError(None).into_response();
-        }
+    let user_id = match common::resolve_repo_user_id(state.user_repo.as_ref(), &input.repo).await {
+        Ok(id) => id,
+        Err(e) => return e.into_response(),
     };
     let limit = input.limit.unwrap_or(50).clamp(1, 100);
     let limit_i64 = i64::from(limit);
