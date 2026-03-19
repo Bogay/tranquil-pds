@@ -12,8 +12,11 @@ use subtle::ConstantTimeEq;
 use tracing::{error, info, warn};
 use tranquil_db_traits::CommsChannel;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::api::{EmptyResponse, TokenRequiredResponse, VerifiedResponse};
+use tranquil_pds::api::{
+    EmailUpdateStatusOutput, EmptyResponse, InUseOutput, TokenRequiredResponse, VerifiedResponse,
+};
 use tranquil_pds::auth::{Auth, NotTakendown};
+use tranquil_pds::oauth::scopes::{AccountAction, AccountAttr};
 use tranquil_pds::rate_limit::{EmailUpdateLimit, RateLimited, VerificationCheckLimit};
 use tranquil_pds::state::AppState;
 
@@ -48,15 +51,8 @@ pub async fn request_email_update(
     _rate_limit: RateLimited<EmailUpdateLimit>,
     auth: Auth<NotTakendown>,
     input: Option<Json<RequestEmailUpdateInput>>,
-) -> Result<Response, ApiError> {
-    if let Err(e) = tranquil_pds::auth::scope_check::check_account_scope(
-        &auth.auth_source,
-        auth.scope.as_deref(),
-        tranquil_pds::oauth::scopes::AccountAttr::Email,
-        tranquil_pds::oauth::scopes::AccountAction::Manage,
-    ) {
-        return Ok(e);
-    }
+) -> Result<Json<TokenRequiredResponse>, ApiError> {
+    auth.check_account_scope(AccountAttr::Email, AccountAction::Manage)?;
 
     let user = state
         .user_repo
@@ -119,7 +115,7 @@ pub async fn request_email_update(
     }
 
     info!("Email update requested for user {}", user.id);
-    Ok(TokenRequiredResponse::response(token_required).into_response())
+    Ok(Json(TokenRequiredResponse { token_required }))
 }
 
 #[derive(Deserialize)]
@@ -134,15 +130,8 @@ pub async fn confirm_email(
     _rate_limit: RateLimited<EmailUpdateLimit>,
     auth: Auth<NotTakendown>,
     Json(input): Json<ConfirmEmailInput>,
-) -> Result<Response, ApiError> {
-    if let Err(e) = tranquil_pds::auth::scope_check::check_account_scope(
-        &auth.auth_source,
-        auth.scope.as_deref(),
-        tranquil_pds::oauth::scopes::AccountAttr::Email,
-        tranquil_pds::oauth::scopes::AccountAction::Manage,
-    ) {
-        return Ok(e);
-    }
+) -> Result<Json<EmptyResponse>, ApiError> {
+    auth.check_account_scope(AccountAttr::Email, AccountAction::Manage)?;
 
     let did = &auth.did;
     let user = state
@@ -163,7 +152,7 @@ pub async fn confirm_email(
     }
 
     if user.email_verified {
-        return Ok(EmptyResponse::ok().into_response());
+        return Ok(Json(EmptyResponse {}));
     }
 
     let confirmation_code =
@@ -196,7 +185,7 @@ pub async fn confirm_email(
         .log_db_err("confirming email")?;
 
     info!("Email confirmed for user {}", user.id);
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }
 
 #[derive(Deserialize)]
@@ -212,15 +201,8 @@ pub async fn update_email(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
     Json(input): Json<UpdateEmailInput>,
-) -> Result<Response, ApiError> {
-    if let Err(e) = tranquil_pds::auth::scope_check::check_account_scope(
-        &auth.auth_source,
-        auth.scope.as_deref(),
-        tranquil_pds::oauth::scopes::AccountAttr::Email,
-        tranquil_pds::oauth::scopes::AccountAction::Manage,
-    ) {
-        return Ok(e);
-    }
+) -> Result<Json<EmptyResponse>, ApiError> {
+    auth.check_account_scope(AccountAttr::Email, AccountAction::Manage)?;
 
     let did = &auth.did;
     let user = state
@@ -279,7 +261,7 @@ pub async fn update_email(
                     ApiError::InternalError(Some("Failed to update 2FA setting".into()))
                 })?;
         }
-        return Ok(EmptyResponse::ok().into_response());
+        return Ok(Json(EmptyResponse {}));
     }
 
     if email_verified {
@@ -394,7 +376,7 @@ pub async fn update_email(
     }
 
     info!("Email updated for user {}", user_id);
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }
 
 #[derive(Deserialize)]
@@ -406,19 +388,18 @@ pub async fn check_email_verified(
     State(state): State<AppState>,
     _rate_limit: RateLimited<VerificationCheckLimit>,
     Json(input): Json<CheckEmailVerifiedInput>,
-) -> Response {
-    match state
+) -> Result<Json<VerifiedResponse>, ApiError> {
+    let verified = state
         .user_repo
         .check_email_verified_by_identifier(&input.identifier)
         .await
-    {
-        Ok(Some(verified)) => VerifiedResponse::response(verified).into_response(),
-        Ok(None) => ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error checking email verified: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
-    }
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
+
+    Ok(Json(VerifiedResponse { verified }))
 }
 
 #[derive(Deserialize)]
@@ -431,19 +412,18 @@ pub async fn check_channel_verified(
     State(state): State<AppState>,
     _rate_limit: RateLimited<VerificationCheckLimit>,
     Json(input): Json<CheckChannelVerifiedInput>,
-) -> Response {
-    match state
+) -> Result<Json<VerifiedResponse>, ApiError> {
+    let verified = state
         .user_repo
         .check_channel_verified_by_did(&input.did, input.channel)
         .await
-    {
-        Ok(Some(verified)) => VerifiedResponse::response(verified).into_response(),
-        Ok(None) => ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error checking channel verified: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
-    }
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
+
+    Ok(Json(VerifiedResponse { verified }))
 }
 
 #[derive(Deserialize)]
@@ -545,37 +525,37 @@ pub async fn check_email_update_status(
     State(state): State<AppState>,
     _rate_limit: RateLimited<VerificationCheckLimit>,
     auth: Auth<NotTakendown>,
-) -> Result<Response, ApiError> {
-    if let Err(e) = tranquil_pds::auth::scope_check::check_account_scope(
-        &auth.auth_source,
-        auth.scope.as_deref(),
-        tranquil_pds::oauth::scopes::AccountAttr::Email,
-        tranquil_pds::oauth::scopes::AccountAction::Read,
-    ) {
-        return Ok(e);
-    }
+) -> Result<Json<EmailUpdateStatusOutput>, ApiError> {
+    auth.check_account_scope(AccountAttr::Email, AccountAction::Read)?;
 
     let cache_key = email_update_cache_key(&auth.did);
     let pending_json = match state.cache.get(&cache_key).await {
         Some(json) => json,
         None => {
-            return Ok(Json(json!({ "pending": false, "authorized": false })).into_response());
+            return Ok(Json(EmailUpdateStatusOutput {
+                pending: false,
+                authorized: false,
+                new_email: None,
+            }));
         }
     };
 
     let pending: PendingEmailUpdate = match serde_json::from_str(&pending_json) {
         Ok(p) => p,
         Err(_) => {
-            return Ok(Json(json!({ "pending": false, "authorized": false })).into_response());
+            return Ok(Json(EmailUpdateStatusOutput {
+                pending: false,
+                authorized: false,
+                new_email: None,
+            }));
         }
     };
 
-    Ok(Json(json!({
-        "pending": true,
-        "authorized": pending.authorized,
-        "newEmail": pending.new_email,
+    Ok(Json(EmailUpdateStatusOutput {
+        pending: true,
+        authorized: pending.authorized,
+        new_email: Some(pending.new_email),
     }))
-    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -587,22 +567,20 @@ pub async fn check_email_in_use(
     State(state): State<AppState>,
     _rate_limit: RateLimited<VerificationCheckLimit>,
     Json(input): Json<CheckEmailInUseInput>,
-) -> Response {
+) -> Result<Json<InUseOutput>, ApiError> {
     let email = input.email.trim().to_lowercase();
     if email.is_empty() {
-        return ApiError::InvalidRequest("email is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("email is required".into()));
     }
 
-    let count = match state.user_repo.count_accounts_by_email(&email).await {
-        Ok(c) => c,
-        Err(e) => {
+    let count = state
+        .user_repo
+        .count_accounts_by_email(&email)
+        .await
+        .map_err(|e| {
             error!("DB error checking email usage: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
-    Json(json!({
-        "inUse": count > 0,
-    }))
-    .into_response()
+    Ok(Json(InUseOutput { in_use: count > 0 }))
 }

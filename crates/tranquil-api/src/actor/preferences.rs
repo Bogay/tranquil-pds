@@ -69,7 +69,7 @@ pub async fn get_preferences(State(state): State<AppState>, auth: Auth<Permissiv
     if let Some(age) = personal_details_pref
         .as_ref()
         .and_then(|pref| pref.get("birthDate"))
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .and_then(get_age_from_datestring)
     {
         let declared_age_pref = serde_json::json!({
@@ -122,7 +122,7 @@ pub async fn put_preferences(
             if pref_str.len() > MAX_PREFERENCE_SIZE {
                 return PrefValidation::TooLarge(pref_str.len());
             }
-            let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
+            let pref_type = match pref.get("$type").and_then(Value::as_str) {
                 Some(t) => t,
                 None => return PrefValidation::MissingType,
             };
@@ -179,7 +179,7 @@ pub async fn put_preferences(
         .preferences
         .into_iter()
         .filter_map(|pref| {
-            let pref_type = pref.get("$type").and_then(|t| t.as_str())?;
+            let pref_type = pref.get("$type").and_then(Value::as_str)?;
             if pref_type == DECLARED_AGE_PREF {
                 return None;
             }

@@ -2,13 +2,14 @@ use crate::identity::provision::{create_plc_did, init_genesis_repo};
 use axum::{
     Json,
     extract::{Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
 use tranquil_pds::api::error::ApiError;
+use tranquil_pds::api::{
+    AccountsOutput, AuditLogOutput, ControllersOutput, PresetsOutput, SuccessResponse,
+};
 use tranquil_pds::auth::{Active, Auth};
 use tranquil_pds::delegation::{
     DelegationActionType, SCOPE_PRESETS, ValidatedDelegationScope, verify_can_add_controllers,
@@ -21,20 +22,15 @@ use tranquil_pds::types::{Did, Handle};
 pub async fn list_controllers(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
-    let controllers = match state
+) -> Result<Json<ControllersOutput<Vec<tranquil_db_traits::ControllerInfo>>>, ApiError> {
+    let controllers = state
         .delegation_repo
         .get_delegations_for_account(&auth.did)
         .await
-    {
-        Ok(c) => c,
-        Err(e) => {
+        .map_err(|e| {
             tracing::error!("Failed to list controllers: {:?}", e);
-            return Ok(
-                ApiError::InternalError(Some("Failed to list controllers".into())).into_response(),
-            );
-        }
-    };
+            ApiError::InternalError(Some("Failed to list controllers".into()))
+        })?;
 
     let resolve_futures = controllers.into_iter().map(|mut c| {
         let did_resolver = state.did_resolver.clone();
@@ -44,7 +40,7 @@ pub async fn list_controllers(
                     .resolve_did_document(c.did.as_str())
                     .await
                     .and_then(|doc| tranquil_types::did_doc::extract_handle(&doc))
-                    .map(|h| h.into());
+                    .map(Into::into);
             }
             c
         }
@@ -52,7 +48,7 @@ pub async fn list_controllers(
 
     let controllers = futures::future::join_all(resolve_futures).await;
 
-    Ok(Json(serde_json::json!({ "controllers": controllers })).into_response())
+    Ok(Json(ControllersOutput { controllers }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,7 +61,7 @@ pub async fn add_controller(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<AddControllerInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<SuccessResponse>, ApiError> {
     let resolved = tranquil_pds::delegation::resolve_identity(&state, &input.controller_did)
         .await
         .ok_or(ApiError::ControllerNotFound)?;
@@ -74,9 +70,9 @@ pub async fn add_controller(
         && let Some(ref pds_url) = resolved.pds_url
     {
         if !pds_url.starts_with("https://") {
-            return Ok(
-                ApiError::InvalidDelegation("Controller PDS must use HTTPS".into()).into_response(),
-            );
+            return Err(ApiError::InvalidDelegation(
+                "Controller PDS must use HTTPS".into(),
+            ));
         }
         match state
             .cross_pds_oauth
@@ -84,10 +80,9 @@ pub async fn add_controller(
             .await
         {
             Some(true) => {
-                return Ok(ApiError::InvalidDelegation(
+                return Err(ApiError::InvalidDelegation(
                     "Cannot add a delegated account from another PDS as a controller".into(),
-                )
-                .into_response());
+                ));
             }
             Some(false) => {}
             None => {
@@ -100,10 +95,7 @@ pub async fn add_controller(
         }
     }
 
-    let can_add = match verify_can_add_controllers(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+    let can_add = verify_can_add_controllers(&state, &auth).await?;
 
     if resolved.is_local
         && state
@@ -112,10 +104,9 @@ pub async fn add_controller(
             .await
             .unwrap_or(false)
     {
-        return Ok(ApiError::InvalidDelegation(
+        return Err(ApiError::InvalidDelegation(
             "Cannot add a controlled account as a controller".into(),
-        )
-        .into_response());
+        ));
     }
 
     match state
@@ -136,7 +127,7 @@ pub async fn add_controller(
                     can_add.did(),
                     Some(&input.controller_did),
                     DelegationActionType::GrantCreated,
-                    Some(serde_json::json!({
+                    Some(json!({
                         "granted_scopes": input.granted_scopes.as_str(),
                         "is_local": resolved.is_local
                     })),
@@ -145,17 +136,13 @@ pub async fn add_controller(
                 )
                 .await;
 
-            Ok((
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "success": true
-                })),
-            )
-                .into_response())
+            Ok(Json(SuccessResponse { success: true }))
         }
         Err(e) => {
             tracing::error!("Failed to add controller: {:?}", e);
-            Ok(ApiError::InternalError(Some("Failed to add controller".into())).into_response())
+            Err(ApiError::InternalError(Some(
+                "Failed to add controller".into(),
+            )))
         }
     }
 }
@@ -169,7 +156,7 @@ pub async fn remove_controller(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<RemoveControllerInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<SuccessResponse>, ApiError> {
     match state
         .delegation_repo
         .revoke_delegation(&auth.did, &input.controller_did, &auth.did)
@@ -197,7 +184,7 @@ pub async fn remove_controller(
                     &auth.did,
                     Some(&input.controller_did),
                     DelegationActionType::GrantRevoked,
-                    Some(serde_json::json!({
+                    Some(json!({
                         "revoked_app_passwords": revoked_app_passwords,
                         "revoked_oauth_tokens": revoked_oauth_tokens
                     })),
@@ -206,18 +193,14 @@ pub async fn remove_controller(
                 )
                 .await;
 
-            Ok((
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "success": true
-                })),
-            )
-                .into_response())
+            Ok(Json(SuccessResponse { success: true }))
         }
-        Ok(false) => Ok(ApiError::DelegationNotFound.into_response()),
+        Ok(false) => Err(ApiError::DelegationNotFound),
         Err(e) => {
             tracing::error!("Failed to remove controller: {:?}", e);
-            Ok(ApiError::InternalError(Some("Failed to remove controller".into())).into_response())
+            Err(ApiError::InternalError(Some(
+                "Failed to remove controller".into(),
+            )))
         }
     }
 }
@@ -232,7 +215,7 @@ pub async fn update_controller_scopes(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<UpdateControllerScopesInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<SuccessResponse>, ApiError> {
     match state
         .delegation_repo
         .update_delegation_scopes(&auth.did, &input.controller_did, &input.granted_scopes)
@@ -246,7 +229,7 @@ pub async fn update_controller_scopes(
                     &auth.did,
                     Some(&input.controller_did),
                     DelegationActionType::ScopesModified,
-                    Some(serde_json::json!({
+                    Some(json!({
                         "new_scopes": input.granted_scopes.as_str()
                     })),
                     None,
@@ -254,21 +237,14 @@ pub async fn update_controller_scopes(
                 )
                 .await;
 
-            Ok((
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "success": true
-                })),
-            )
-                .into_response())
+            Ok(Json(SuccessResponse { success: true }))
         }
-        Ok(false) => Ok(ApiError::DelegationNotFound.into_response()),
+        Ok(false) => Err(ApiError::DelegationNotFound),
         Err(e) => {
             tracing::error!("Failed to update controller scopes: {:?}", e);
-            Ok(
-                ApiError::InternalError(Some("Failed to update controller scopes".into()))
-                    .into_response(),
-            )
+            Err(ApiError::InternalError(Some(
+                "Failed to update controller scopes".into(),
+            )))
         }
     }
 }
@@ -276,23 +252,17 @@ pub async fn update_controller_scopes(
 pub async fn list_controlled_accounts(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
-    let accounts = match state
+) -> Result<Json<AccountsOutput<Vec<tranquil_db_traits::DelegatedAccountInfo>>>, ApiError> {
+    let accounts = state
         .delegation_repo
         .get_accounts_controlled_by(&auth.did)
         .await
-    {
-        Ok(a) => a,
-        Err(e) => {
+        .map_err(|e| {
             tracing::error!("Failed to list controlled accounts: {:?}", e);
-            return Ok(
-                ApiError::InternalError(Some("Failed to list controlled accounts".into()))
-                    .into_response(),
-            );
-        }
-    };
+            ApiError::InternalError(Some("Failed to list controlled accounts".into()))
+        })?;
 
-    Ok(Json(serde_json::json!({ "accounts": accounts })).into_response())
+    Ok(Json(AccountsOutput { accounts }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -311,23 +281,18 @@ pub async fn get_audit_log(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Query(params): Query<AuditLogParams>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<AuditLogOutput<Vec<tranquil_db_traits::AuditLogEntry>>>, ApiError> {
     let limit = params.limit.clamp(1, 100);
     let offset = params.offset.max(0);
 
-    let entries = match state
+    let entries = state
         .delegation_repo
         .get_audit_log_for_account(&auth.did, limit, offset)
         .await
-    {
-        Ok(e) => e,
-        Err(e) => {
+        .map_err(|e| {
             tracing::error!("Failed to get audit log: {:?}", e);
-            return Ok(
-                ApiError::InternalError(Some("Failed to get audit log".into())).into_response(),
-            );
-        }
-    };
+            ApiError::InternalError(Some("Failed to get audit log".into()))
+        })?;
 
     let total = state
         .delegation_repo
@@ -335,11 +300,14 @@ pub async fn get_audit_log(
         .await
         .unwrap_or_default();
 
-    Ok(Json(serde_json::json!({ "entries": entries, "total": total })).into_response())
+    Ok(Json(AuditLogOutput { entries, total }))
 }
 
-pub async fn get_scope_presets() -> Response {
-    Json(serde_json::json!({ "presets": SCOPE_PRESETS })).into_response()
+pub async fn get_scope_presets()
+-> Json<PresetsOutput<&'static [tranquil_pds::delegation::ScopePreset]>> {
+    Json(PresetsOutput {
+        presets: SCOPE_PRESETS,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,7 +321,7 @@ pub struct CreateDelegatedAccountInput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateDelegatedAccountResponse {
+pub struct CreateDelegatedAccountOutput {
     pub did: Did,
     pub handle: Handle,
 }
@@ -363,18 +331,11 @@ pub async fn create_delegated_account(
     _rate_limit: RateLimited<AccountCreationLimit>,
     auth: Auth<Active>,
     Json(input): Json<CreateDelegatedAccountInput>,
-) -> Result<Response, ApiError> {
-    let can_control = match verify_can_control_accounts(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+) -> Result<Json<CreateDelegatedAccountOutput>, ApiError> {
+    let can_control = verify_can_control_accounts(&state, &auth).await?;
 
-    let handle = match tranquil_pds::api::validation::resolve_handle_input(&input.handle) {
-        Ok(h) => h,
-        Err(e) => {
-            return Ok(ApiError::InvalidRequest(e.to_string()).into_response());
-        }
-    };
+    let handle = tranquil_pds::api::validation::resolve_handle_input(&input.handle)
+        .map_err(|e| ApiError::InvalidRequest(e.to_string()))?;
 
     let email = input
         .email
@@ -384,18 +345,18 @@ pub async fn create_delegated_account(
     if let Some(ref email) = email
         && !tranquil_pds::api::validation::is_valid_email(email)
     {
-        return Ok(ApiError::InvalidEmail.into_response());
+        return Err(ApiError::InvalidEmail);
     }
 
     let validated_invite_code = if let Some(ref code) = input.invite_code {
         match state.infra_repo.validate_invite_code(code).await {
             Ok(validated) => Some(validated),
-            Err(_) => return Ok(ApiError::InvalidInviteCode.into_response()),
+            Err(_) => return Err(ApiError::InvalidInviteCode),
         }
     } else {
         let invite_required = tranquil_config::get().server.invite_code_required;
         if invite_required {
-            return Ok(ApiError::InviteCodeRequired.into_response());
+            return Err(ApiError::InviteCodeRequired);
         }
         None
     };
@@ -409,6 +370,7 @@ pub async fn create_delegated_account(
     info!(did = %did, handle = %handle, controller = %can_control.did(), "Created DID for delegated account");
 
     let repo = init_genesis_repo(&state, &did, &plc.signing_key, &plc.signing_key_bytes).await?;
+    let repo_for_seq = repo.clone();
 
     let create_input = tranquil_db_traits::CreateDelegatedAccountInput {
         handle: handle.clone(),
@@ -431,14 +393,14 @@ pub async fn create_delegated_account(
     {
         Ok(id) => id,
         Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
-            return Ok(ApiError::HandleNotAvailable(None).into_response());
+            return Err(ApiError::HandleNotAvailable(None));
         }
         Err(tranquil_db_traits::CreateAccountError::EmailTaken) => {
-            return Ok(ApiError::EmailTaken.into_response());
+            return Err(ApiError::EmailTaken);
         }
         Err(e) => {
             error!("Error creating delegated account: {:?}", e);
-            return Ok(ApiError::InternalError(None).into_response());
+            return Err(ApiError::InternalError(None));
         }
     };
 
@@ -451,36 +413,14 @@ pub async fn create_delegated_account(
         warn!("Failed to record invite code use for {}: {:?}", did, e);
     }
 
-    if let Err(e) =
-        tranquil_pds::repo_ops::sequence_identity_event(&state, &did, Some(&handle)).await
-    {
-        warn!("Failed to sequence identity event for {}: {}", did, e);
-    }
-    if let Err(e) = tranquil_pds::repo_ops::sequence_account_event(
+    crate::identity::provision::sequence_new_account(
         &state,
         &did,
-        tranquil_db_traits::AccountStatus::Active,
+        &handle,
+        &repo_for_seq,
+        handle.as_str(),
     )
-    .await
-    {
-        warn!("Failed to sequence account event for {}: {}", did, e);
-    }
-
-    let profile_record = json!({
-        "$type": "app.bsky.actor.profile",
-        "displayName": handle
-    });
-    if let Err(e) = tranquil_pds::repo_ops::create_record_internal(
-        &state,
-        &did,
-        &tranquil_pds::types::PROFILE_COLLECTION,
-        &tranquil_pds::types::PROFILE_RKEY,
-        &profile_record,
-    )
-    .await
-    {
-        warn!("Failed to create default profile for {}: {}", did, e);
-    }
+    .await;
 
     let _ = state
         .delegation_repo
@@ -500,7 +440,7 @@ pub async fn create_delegated_account(
 
     info!(did = %did, handle = %handle, controller = %&auth.did, "Delegated account created");
 
-    Ok(Json(CreateDelegatedAccountResponse { did, handle }).into_response())
+    Ok(Json(CreateDelegatedAccountOutput { did, handle }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -511,7 +451,7 @@ pub struct ResolveControllerParams {
 pub async fn resolve_controller(
     State(state): State<AppState>,
     Query(params): Query<ResolveControllerParams>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<tranquil_pds::delegation::ResolvedIdentity>, ApiError> {
     let identifier = params.identifier.trim().trim_start_matches('@');
 
     let did: Did = if identifier.starts_with("did:") {
@@ -538,5 +478,5 @@ pub async fn resolve_controller(
         .await
         .ok_or(ApiError::ControllerNotFound)?;
 
-    Ok(Json(resolved).into_response())
+    Ok(Json(resolved))
 }

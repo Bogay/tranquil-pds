@@ -1,20 +1,16 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
 use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType};
-use tranquil_pds::api::error::ApiError;
+use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Active, Auth};
 use tranquil_pds::state::AppState;
 use tranquil_types::Did;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NotificationPrefsResponse {
+pub struct NotificationPrefsOutput {
     pub preferred_channel: CommsChannel,
     pub email: String,
     pub discord_username: Option<String>,
@@ -28,14 +24,14 @@ pub struct NotificationPrefsResponse {
 pub async fn get_notification_prefs(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<NotificationPrefsOutput>, ApiError> {
     let prefs = state
         .user_repo
         .get_notification_prefs(&auth.did)
         .await
-        .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?
+        .log_db_err("get notification prefs")?
         .ok_or(ApiError::AccountNotFound)?;
-    Ok(Json(NotificationPrefsResponse {
+    Ok(Json(NotificationPrefsOutput {
         preferred_channel: prefs.preferred_channel,
         email: prefs.email,
         discord_username: prefs.discord_username,
@@ -44,8 +40,7 @@ pub async fn get_notification_prefs(
         telegram_verified: prefs.telegram_verified,
         signal_username: prefs.signal_username,
         signal_verified: prefs.signal_verified,
-    })
-    .into_response())
+    }))
 }
 
 #[derive(Serialize)]
@@ -61,26 +56,26 @@ pub struct NotificationHistoryEntry {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetNotificationHistoryResponse {
+pub struct GetNotificationHistoryOutput {
     pub notifications: Vec<NotificationHistoryEntry>,
 }
 
 pub async fn get_notification_history(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<GetNotificationHistoryOutput>, ApiError> {
     let user_id = state
         .user_repo
         .get_id_by_did(&auth.did)
         .await
-        .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?
+        .log_db_err("get user id by did")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let rows = state
         .infra_repo
         .get_notification_history(user_id, 50)
         .await
-        .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
+        .log_db_err("get notification history")?;
 
     let sensitive_types = [
         CommsType::EmailVerification,
@@ -112,7 +107,7 @@ pub async fn get_notification_history(
         })
         .collect();
 
-    Ok(Json(GetNotificationHistoryResponse { notifications }).into_response())
+    Ok(Json(GetNotificationHistoryOutput { notifications }))
 }
 
 #[derive(Deserialize)]
@@ -127,7 +122,7 @@ pub struct UpdateNotificationPrefsInput {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateNotificationPrefsResponse {
+pub struct UpdateNotificationPrefsOutput {
     pub success: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub verification_required: Vec<CommsChannel>,
@@ -159,12 +154,7 @@ pub async fn request_channel_verification(
                 hostname,
             )
             .await
-            .map_err(|e| {
-                ApiError::InternalError(Some(format!(
-                    "Failed to enqueue email notification: {}",
-                    e
-                )))
-            })?;
+            .log_db_err("enqueue email verification")?;
         }
         _ => {
             let hostname = &tranquil_config::get().server.hostname;
@@ -216,25 +206,117 @@ pub async fn request_channel_verification(
                     Some(json!({"code": formatted_token})),
                 )
                 .await
-                .map_err(|e| {
-                    ApiError::InternalError(Some(format!("Failed to enqueue notification: {}", e)))
-                })?;
+                .log_db_err("enqueue channel verification")?;
         }
     }
 
     Ok(token)
 }
 
+async fn process_messaging_channel_update(
+    state: &AppState,
+    user_id: uuid::Uuid,
+    did: &Did,
+    channel: CommsChannel,
+    raw_value: &str,
+    effective_channel: CommsChannel,
+    verification_required: &mut Vec<CommsChannel>,
+) -> Result<(), ApiError> {
+    let clean = match channel {
+        CommsChannel::Discord => raw_value.trim().to_lowercase(),
+        CommsChannel::Telegram => raw_value.trim_start_matches('@').to_string(),
+        CommsChannel::Signal => raw_value.trim().trim_start_matches('@').to_lowercase(),
+        CommsChannel::Email => raw_value.trim().to_lowercase(),
+    };
+
+    if clean.is_empty() {
+        if effective_channel == channel {
+            return Err(ApiError::InvalidRequest(format!(
+                "Cannot remove {:?} while it is the preferred notification channel",
+                channel
+            )));
+        }
+        match channel {
+            CommsChannel::Discord => state
+                .user_repo
+                .clear_discord(user_id)
+                .await
+                .log_db_err("clear discord")?,
+            CommsChannel::Telegram => state
+                .user_repo
+                .clear_telegram(user_id)
+                .await
+                .log_db_err("clear telegram")?,
+            CommsChannel::Signal => state
+                .user_repo
+                .clear_signal(user_id)
+                .await
+                .log_db_err("clear signal")?,
+            CommsChannel::Email => {}
+        };
+        info!(did = %did, channel = ?channel, "Cleared channel");
+        return Ok(());
+    }
+
+    let valid = match channel {
+        CommsChannel::Discord => tranquil_pds::api::validation::is_valid_discord_username(&clean),
+        CommsChannel::Telegram => tranquil_pds::api::validation::is_valid_telegram_username(&clean),
+        CommsChannel::Signal => tranquil_pds::comms::is_valid_signal_username(&clean),
+        CommsChannel::Email => tranquil_pds::api::validation::is_valid_email(&clean),
+    };
+    if !valid {
+        return Err(match channel {
+            CommsChannel::Discord => ApiError::InvalidRequest(
+                "Invalid Discord username. Must be 2-32 lowercase characters (letters, numbers, underscores, periods)".into(),
+            ),
+            CommsChannel::Telegram => ApiError::InvalidRequest(
+                "Invalid Telegram username. Must be 5-32 characters, alphanumeric or underscore".into(),
+            ),
+            CommsChannel::Signal => ApiError::InvalidRequest(
+                "Invalid Signal username. Must be 3-32 characters followed by .XX (e.g. username.01)".into(),
+            ),
+            CommsChannel::Email => ApiError::InvalidEmail,
+        });
+    }
+
+    match channel {
+        CommsChannel::Discord => state
+            .user_repo
+            .set_unverified_discord(user_id, &clean)
+            .await
+            .log_db_err("set unverified discord")?,
+        CommsChannel::Telegram => state
+            .user_repo
+            .set_unverified_telegram(user_id, &clean)
+            .await
+            .log_db_err("set unverified telegram")?,
+        CommsChannel::Signal => state
+            .user_repo
+            .set_unverified_signal(user_id, &clean)
+            .await
+            .log_db_err("set unverified signal")?,
+        CommsChannel::Email => {}
+    };
+
+    if matches!(channel, CommsChannel::Signal) {
+        request_channel_verification(state, user_id, did, channel, &clean, None).await?;
+    }
+
+    verification_required.push(channel);
+    info!(did = %did, channel = ?channel, value = %clean, "Stored unverified channel username");
+    Ok(())
+}
+
 pub async fn update_notification_prefs(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<UpdateNotificationPrefsInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<UpdateNotificationPrefsOutput>, ApiError> {
     let user_row = state
         .user_repo
         .get_id_handle_email_by_did(&auth.did)
         .await
-        .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?
+        .log_db_err("get user by did")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let user_id = user_row.id;
@@ -245,7 +327,7 @@ pub async fn update_notification_prefs(
         .user_repo
         .get_notification_prefs(&auth.did)
         .await
-        .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?
+        .log_db_err("get notification prefs for update")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let effective_channel = input
@@ -268,7 +350,7 @@ pub async fn update_notification_prefs(
             .user_repo
             .update_preferred_comms_channel(&auth.did, effective_channel)
             .await
-            .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
+            .log_db_err("update preferred channel")?;
         info!(did = %auth.did, channel = ?effective_channel, "Updated preferred notification channel");
     }
 
@@ -298,107 +380,46 @@ pub async fn update_notification_prefs(
     }
 
     if let Some(ref discord_username) = input.discord_username {
-        let discord_clean = discord_username.trim().to_lowercase();
-        if discord_clean.is_empty() {
-            if effective_channel == CommsChannel::Discord {
-                return Err(ApiError::InvalidRequest(
-                    "Cannot remove Discord while it is the preferred notification channel".into(),
-                ));
-            }
-            state
-                .user_repo
-                .clear_discord(user_id)
-                .await
-                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            info!(did = %auth.did, "Cleared Discord");
-        } else if !tranquil_pds::api::validation::is_valid_discord_username(&discord_clean) {
-            return Err(ApiError::InvalidRequest(
-                "Invalid Discord username. Must be 2-32 lowercase characters (letters, numbers, underscores, periods)"
-                    .into(),
-            ));
-        } else {
-            state
-                .user_repo
-                .set_unverified_discord(user_id, &discord_clean)
-                .await
-                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            verification_required.push(CommsChannel::Discord);
-            info!(did = %auth.did, discord_username = %discord_clean, "Stored unverified Discord username");
-        }
+        process_messaging_channel_update(
+            &state,
+            user_id,
+            &auth.did,
+            CommsChannel::Discord,
+            discord_username,
+            effective_channel,
+            &mut verification_required,
+        )
+        .await?;
     }
 
     if let Some(ref telegram) = input.telegram_username {
-        let telegram_clean = telegram.trim_start_matches('@');
-        if telegram_clean.is_empty() {
-            if effective_channel == CommsChannel::Telegram {
-                return Err(ApiError::InvalidRequest(
-                    "Cannot remove Telegram while it is the preferred notification channel".into(),
-                ));
-            }
-            state
-                .user_repo
-                .clear_telegram(user_id)
-                .await
-                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            info!(did = %auth.did, "Cleared Telegram username");
-        } else if !tranquil_pds::api::validation::is_valid_telegram_username(telegram_clean) {
-            return Err(ApiError::InvalidRequest(
-                "Invalid Telegram username. Must be 5-32 characters, alphanumeric or underscore"
-                    .into(),
-            ));
-        } else {
-            state
-                .user_repo
-                .set_unverified_telegram(user_id, telegram_clean)
-                .await
-                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            verification_required.push(CommsChannel::Telegram);
-            info!(did = %auth.did, telegram_username = %telegram_clean, "Stored unverified Telegram username");
-        }
+        process_messaging_channel_update(
+            &state,
+            user_id,
+            &auth.did,
+            CommsChannel::Telegram,
+            telegram,
+            effective_channel,
+            &mut verification_required,
+        )
+        .await?;
     }
 
     if let Some(ref signal) = input.signal_username {
-        let signal_clean = signal.trim().trim_start_matches('@').to_lowercase();
-        if signal_clean.is_empty() {
-            if effective_channel == CommsChannel::Signal {
-                return Err(ApiError::InvalidRequest(
-                    "Cannot remove Signal while it is the preferred notification channel".into(),
-                ));
-            }
-            state
-                .user_repo
-                .clear_signal(user_id)
-                .await
-                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            info!(did = %auth.did, "Cleared Signal username");
-        } else if !tranquil_pds::comms::is_valid_signal_username(&signal_clean) {
-            return Err(ApiError::InvalidRequest(
-                "Invalid Signal username. Must be 3-32 characters followed by .XX (e.g. username.01)"
-                    .into(),
-            ));
-        } else {
-            state
-                .user_repo
-                .set_unverified_signal(user_id, &signal_clean)
-                .await
-                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            request_channel_verification(
-                &state,
-                user_id,
-                &auth.did,
-                CommsChannel::Signal,
-                &signal_clean,
-                None,
-            )
-            .await?;
-            verification_required.push(CommsChannel::Signal);
-            info!(did = %auth.did, signal_username = %signal_clean, "Stored unverified Signal username");
-        }
+        process_messaging_channel_update(
+            &state,
+            user_id,
+            &auth.did,
+            CommsChannel::Signal,
+            signal,
+            effective_channel,
+            &mut verification_required,
+        )
+        .await?;
     }
 
-    Ok(Json(UpdateNotificationPrefsResponse {
+    Ok(Json(UpdateNotificationPrefsOutput {
         success: true,
         verification_required,
-    })
-    .into_response())
+    }))
 }

@@ -1,37 +1,60 @@
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, Method, StatusCode},
-    response::{IntoResponse, Response},
+    http::{HeaderMap, Method},
 };
-use serde_json::json;
+use serde::Serialize;
 use tranquil_pds::auth::{
     AccountRequirement, extract_auth_token_from_header, validate_token_with_dpop,
 };
 use tranquil_pds::state::AppState;
 
-pub async fn get_state(State(state): State<AppState>, headers: HeaderMap) -> Response {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgeAssuranceState {
+    pub status: &'static str,
+    pub access: &'static str,
+    pub last_initiated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgeAssuranceMetadata {
+    pub account_created_at: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct GetAgeAssuranceOutput {
+    pub state: AgeAssuranceState,
+    pub metadata: AgeAssuranceMetadata,
+}
+
+#[derive(Serialize)]
+pub struct AgeAssuranceStatusOutput {
+    pub status: &'static str,
+}
+
+pub async fn get_state(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Json<GetAgeAssuranceOutput> {
     let created_at = get_account_created_at(&state, &headers).await;
     let now = chrono::Utc::now().to_rfc3339();
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "state": {
-                "status": "assured",
-                "access": "full",
-                "lastInitiatedAt": now
-            },
-            "metadata": {
-                "accountCreatedAt": created_at
-            }
-        })),
-    )
-        .into_response()
+    Json(GetAgeAssuranceOutput {
+        state: AgeAssuranceState {
+            status: "assured",
+            access: "full",
+            last_initiated_at: now,
+        },
+        metadata: AgeAssuranceMetadata {
+            account_created_at: created_at,
+        },
+    })
 }
 
-pub async fn get_age_assurance_state() -> Response {
-    (StatusCode::OK, Json(json!({"status": "assured"}))).into_response()
+pub async fn get_age_assurance_state() -> Json<AgeAssuranceStatusOutput> {
+    Json(AgeAssuranceStatusOutput { status: "assured" })
 }
 
 async fn get_account_created_at(state: &AppState, headers: &HeaderMap) -> Option<String> {
