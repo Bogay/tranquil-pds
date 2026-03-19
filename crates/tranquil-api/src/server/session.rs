@@ -10,7 +10,7 @@ use serde_json::json;
 use tracing::{error, info, warn};
 use tranquil_db_traits::{SessionId, TokenFamilyId};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
-use tranquil_pds::api::{EmptyResponse, SuccessResponse};
+use tranquil_pds::api::{EmptyResponse, PreferredLocaleOutput, SuccessResponse};
 use tranquil_pds::auth::{
     Active, Auth, NormalizedLoginIdentifier, Permissive, require_legacy_session_mfa,
     require_reauth_window,
@@ -19,10 +19,6 @@ use tranquil_pds::rate_limit::{LoginLimit, RateLimited, RefreshSessionLimit};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{AccountState, Did, Handle, PlainPassword};
 use tranquil_types::TokenId;
-
-fn full_handle(stored_handle: &str, _pds_hostname: &str) -> String {
-    stored_handle.to_string()
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,13 +55,12 @@ pub async fn create_session(
     State(state): State<AppState>,
     rate_limit: RateLimited<LoginLimit>,
     Json(input): Json<CreateSessionInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let client_ip = rate_limit.client_ip();
     info!(
         "create_session called with identifier: {}",
         input.identifier
     );
-    let pds_host = &tranquil_config::get().server.hostname;
     let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_identifier =
         NormalizedLoginIdentifier::normalize(&input.identifier, hostname_for_handles);
@@ -85,12 +80,13 @@ pub async fn create_session(
                 "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYw1ZzQKZqmK",
             );
             warn!("User not found for login attempt");
-            return ApiError::AuthenticationFailed(Some("Invalid identifier or password".into()))
-                .into_response();
+            return Err(ApiError::AuthenticationFailed(Some(
+                "Invalid identifier or password".into(),
+            )));
         }
         Err(e) => {
             error!("Database error fetching user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     let key_bytes = match tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version)
@@ -98,40 +94,30 @@ pub async fn create_session(
         Ok(k) => k,
         Err(e) => {
             error!("Failed to decrypt user key: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
-    let (password_valid, app_password_name, app_password_scopes, app_password_controller) = if row
-        .password_hash
-        .as_ref()
-        .map(|h| verify(&input.password, h).unwrap_or(false))
-        .unwrap_or(false)
-    {
-        (true, None, None, None)
-    } else {
-        let app_passwords = state
-            .session_repo
-            .get_app_passwords_for_login(row.id)
-            .await
-            .unwrap_or_default();
-        let matched = app_passwords
-            .iter()
-            .find(|app| verify(&input.password, &app.password_hash).unwrap_or(false));
-        match matched {
-            Some(app) => (
-                true,
-                Some(app.name.clone()),
-                app.scopes.clone(),
-                app.created_by_controller_did.clone(),
-            ),
-            None => (false, None, None, None),
+    let credential = crate::common::verify_credential(
+        state.session_repo.as_ref(),
+        row.id,
+        &input.password,
+        row.password_hash.as_deref(),
+    )
+    .await;
+    let (app_password_name, app_password_scopes, app_password_controller) = match credential {
+        Some(crate::common::CredentialMatch::MainPassword) => (None, None, None),
+        Some(crate::common::CredentialMatch::AppPassword {
+            name,
+            scopes,
+            controller_did,
+        }) => (Some(name), scopes, controller_did),
+        None => {
+            warn!("Password verification failed for login attempt");
+            return Err(ApiError::AuthenticationFailed(Some(
+                "Invalid identifier or password".into(),
+            )));
         }
     };
-    if !password_valid {
-        warn!("Password verification failed for login attempt");
-        return ApiError::AuthenticationFailed(Some("Invalid identifier or password".into()))
-            .into_response();
-    }
     let account_state = AccountState::from_db_fields(
         row.deactivated_at,
         row.takedown_ref.clone(),
@@ -140,7 +126,7 @@ pub async fn create_session(
     );
     if account_state.is_takendown() && !input.allow_takendown {
         warn!("Login attempt for takendown account: {}", row.did);
-        return ApiError::AccountTakedown.into_response();
+        return Err(ApiError::AccountTakedown);
     }
     let is_verified = row.channel_verification.has_any_verified();
     let is_delegated = state
@@ -159,7 +145,7 @@ pub async fn create_session(
             .as_ref()
             .map(|r| r.channel.as_str())
             .unwrap_or(row.preferred_comms_channel.as_str());
-        return (
+        return Ok((
             StatusCode::FORBIDDEN,
             Json(json!({
                 "error": "account_not_verified",
@@ -169,7 +155,7 @@ pub async fn create_session(
                 "channel": channel
             })),
         )
-            .into_response();
+            .into_response());
     }
     let has_totp = row.totp_enabled;
     let email_2fa_enabled = row.email_2fa_enabled;
@@ -190,7 +176,7 @@ pub async fn create_session(
         Ok(tranquil_pds::auth::legacy_2fa::Legacy2faOutcome::NotRequired) => {}
         Ok(tranquil_pds::auth::legacy_2fa::Legacy2faOutcome::Blocked) => {
             warn!("Legacy login blocked for TOTP-enabled account: {}", row.did);
-            return ApiError::LegacyLoginBlocked.into_response();
+            return Err(ApiError::LegacyLoginBlocked);
         }
         Ok(tranquil_pds::auth::legacy_2fa::Legacy2faOutcome::ChallengeSent(code)) => {
             let hostname = &tranquil_config::get().server.hostname;
@@ -206,12 +192,11 @@ pub async fn create_session(
                 error!("Failed to send 2FA code: {:?}", e);
                 tranquil_pds::auth::legacy_2fa::clear_challenge(state.cache.as_ref(), &row.did)
                     .await;
-                return ApiError::InternalError(Some(
+                return Err(ApiError::InternalError(Some(
                     "Failed to send verification code. Please try again.".into(),
-                ))
-                .into_response();
+                )));
             }
-            return ApiError::AuthFactorTokenRequired.into_response();
+            return Err(ApiError::AuthFactorTokenRequired);
         }
         Ok(tranquil_pds::auth::legacy_2fa::Legacy2faOutcome::Verified) => {}
         Err(tranquil_pds::auth::legacy_2fa::Legacy2faFlowError::Challenge(e)) => {
@@ -219,18 +204,16 @@ pub async fn create_session(
             return match e {
                 ChallengeError::CacheUnavailable => {
                     error!("Cache unavailable for 2FA, blocking legacy login");
-                    ApiError::ServiceUnavailable(Some(
+                    Err(ApiError::ServiceUnavailable(Some(
                         "2FA service temporarily unavailable. Please try again later or use an OAuth client.".into(),
-                    ))
-                    .into_response()
+                    )))
                 }
-                ChallengeError::RateLimited => ApiError::RateLimitExceeded(Some(
+                ChallengeError::RateLimited => Err(ApiError::RateLimitExceeded(Some(
                     "Please wait before requesting a new verification code.".into(),
-                ))
-                .into_response(),
+                ))),
                 ChallengeError::CacheError => {
                     error!("Cache error during 2FA challenge creation");
-                    ApiError::InternalError(None).into_response()
+                    Err(ApiError::InternalError(None))
                 }
             };
         }
@@ -247,7 +230,7 @@ pub async fn create_session(
                 | ValidationError::InvalidCode
                 | ValidationError::CacheError => "Invalid verification code",
             };
-            return ApiError::InvalidCode(Some(msg.into())).into_response();
+            return Err(ApiError::InvalidCode(Some(msg.into())));
         }
     }
     let access_meta = match tranquil_pds::auth::create_access_token_with_delegation(
@@ -260,7 +243,7 @@ pub async fn create_session(
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create access token: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     let refresh_meta =
@@ -268,7 +251,7 @@ pub async fn create_session(
             Ok(m) => m,
             Err(e) => {
                 error!("Failed to create refresh token: {:?}", e);
-                return ApiError::InternalError(None).into_response();
+                return Err(ApiError::InternalError(None));
             }
         };
     let did_for_doc = row.did.clone();
@@ -291,7 +274,7 @@ pub async fn create_session(
     );
     if let Err(e) = insert_result {
         error!("Failed to insert session: {:?}", e);
-        return ApiError::InternalError(None).into_response();
+        return Err(ApiError::InternalError(None));
     }
     if is_legacy_login {
         warn!(
@@ -313,7 +296,7 @@ pub async fn create_session(
             error!("Failed to queue legacy login notification: {:?}", e);
         }
     }
-    let handle = full_handle(&row.handle, pds_host);
+    let handle = row.handle.clone();
     let is_active = account_state.is_active();
     let status = account_state.status_for_session().map(String::from);
     let email_auth_factor_out = if email_2fa_enabled || has_totp {
@@ -321,25 +304,55 @@ pub async fn create_session(
     } else {
         None
     };
-    Json(CreateSessionOutput {
-        access_jwt: access_meta.token,
-        refresh_jwt: refresh_meta.token,
-        handle: handle.into(),
-        did: row.did,
-        did_doc,
-        email: row.email,
-        email_confirmed: Some(row.channel_verification.email),
-        email_auth_factor: email_auth_factor_out,
-        active: Some(is_active),
-        status,
-    })
-    .into_response()
+    Ok((
+        StatusCode::OK,
+        Json(CreateSessionOutput {
+            access_jwt: access_meta.token,
+            refresh_jwt: refresh_meta.token,
+            handle,
+            did: row.did,
+            did_doc,
+            email: row.email,
+            email_confirmed: Some(row.channel_verification.email),
+            email_auth_factor: email_auth_factor_out,
+            active: Some(is_active),
+            status,
+        }),
+    )
+        .into_response())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetSessionOutput {
+    pub handle: Handle,
+    pub did: Did,
+    pub active: bool,
+    pub preferred_channel: String,
+    pub preferred_channel_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_locale: Option<String>,
+    pub is_admin: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_confirmed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_auth_factor: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migrated_to_pds: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migrated_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub did_doc: Option<serde_json::Value>,
 }
 
 pub async fn get_session(
     State(state): State<AppState>,
     auth: Auth<Permissive>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<GetSessionOutput>, ApiError> {
     let permissions = auth.permissions();
     let can_read_email = permissions.allows_email_read();
 
@@ -354,47 +367,45 @@ pub async fn get_session(
             let preferred_channel_verified = row
                 .channel_verification
                 .is_verified(row.preferred_comms_channel);
-            let pds_hostname = &tranquil_config::get().server.hostname;
-            let handle = full_handle(&row.handle, pds_hostname);
+            let handle = row.handle.clone();
             let account_state = AccountState::from_db_fields(
                 row.deactivated_at,
                 row.takedown_ref.clone(),
                 row.migrated_to_pds.clone(),
                 row.migrated_at,
             );
-            let email_value = if can_read_email {
-                row.email.clone()
-            } else {
-                None
+            let email = match can_read_email {
+                true => row.email.clone(),
+                false => None,
             };
-            let email_confirmed_value = can_read_email && row.channel_verification.email;
-            let mut response = json!({
-                "handle": handle,
-                "did": &auth.did,
-                "active": account_state.is_active(),
-                "preferredChannel": row.preferred_comms_channel.as_str(),
-                "preferredChannelVerified": preferred_channel_verified,
-                "preferredLocale": row.preferred_locale,
-                "isAdmin": row.is_admin
-            });
-            if can_read_email {
-                response["email"] = json!(email_value);
-                response["emailConfirmed"] = json!(email_confirmed_value);
-            }
-            if row.email_2fa_enabled || row.totp_enabled {
-                response["emailAuthFactor"] = json!(true);
-            }
-            if let Some(status) = account_state.status_for_session() {
-                response["status"] = json!(status);
-            }
-            if let AccountState::Migrated { to_pds, at } = &account_state {
-                response["migratedToPds"] = json!(to_pds);
-                response["migratedAt"] = json!(at);
-            }
-            if let Some(doc) = did_doc {
-                response["didDoc"] = doc;
-            }
-            Ok(Json(response).into_response())
+            let email_confirmed = match can_read_email {
+                true => Some(row.channel_verification.email),
+                false => None,
+            };
+            let email_auth_factor = match row.email_2fa_enabled || row.totp_enabled {
+                true => Some(true),
+                false => None,
+            };
+            let (migrated_to_pds, migrated_at) = match &account_state {
+                AccountState::Migrated { to_pds, at } => (Some(to_pds.clone()), Some(*at)),
+                _ => (None, None),
+            };
+            Ok(Json(GetSessionOutput {
+                handle,
+                did: auth.did.clone(),
+                active: account_state.is_active(),
+                preferred_channel: row.preferred_comms_channel.as_str().to_string(),
+                preferred_channel_verified,
+                preferred_locale: row.preferred_locale,
+                is_admin: row.is_admin,
+                email,
+                email_confirmed,
+                email_auth_factor,
+                status: account_state.status_for_session().map(String::from),
+                migrated_to_pds,
+                migrated_at,
+                did_doc,
+            }))
         }
         Ok(None) => Err(ApiError::AuthenticationFailed(None)),
         Err(e) => {
@@ -407,45 +418,61 @@ pub async fn get_session(
 pub async fn delete_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    _auth: Auth<Active>,
-) -> Result<Response, ApiError> {
-    let extracted = tranquil_pds::auth::extract_auth_token_from_header(
-        tranquil_pds::util::get_header_str(&headers, http::header::AUTHORIZATION),
-    )
-    .ok_or(ApiError::AuthenticationRequired)?;
-    let jti = tranquil_pds::auth::get_jti_from_token(&extracted.token)
-        .map_err(|_| ApiError::AuthenticationFailed(None))?;
-    let did = tranquil_pds::auth::get_did_from_token(&extracted.token).ok();
+    auth: Auth<Active>,
+) -> Result<Json<EmptyResponse>, ApiError> {
+    let jti = tranquil_pds::auth::extract_jti_from_headers(&headers)
+        .ok_or(ApiError::AuthenticationRequired)?;
     match state.session_repo.delete_session_by_access_jti(&jti).await {
         Ok(rows) if rows > 0 => {
-            if let Some(did) = did {
-                let session_cache_key = tranquil_pds::cache_keys::session_key(&did, &jti);
-                let _ = state.cache.delete(&session_cache_key).await;
-            }
-            Ok(EmptyResponse::ok().into_response())
+            let session_cache_key = tranquil_pds::cache_keys::session_key(&auth.did, &jti);
+            let _ = state.cache.delete(&session_cache_key).await;
+            Ok(Json(EmptyResponse {}))
         }
         Ok(_) => Err(ApiError::AuthenticationFailed(None)),
         Err(_) => Err(ApiError::AuthenticationFailed(None)),
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshSessionOutput {
+    pub access_jwt: String,
+    pub refresh_jwt: String,
+    pub handle: Handle,
+    pub did: Did,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    pub email_confirmed: bool,
+    pub preferred_channel: String,
+    pub preferred_channel_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_locale: Option<String>,
+    pub is_admin: bool,
+    pub active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub did_doc: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
 pub async fn refresh_session(
     State(state): State<AppState>,
     _rate_limit: RateLimited<RefreshSessionLimit>,
     headers: axum::http::HeaderMap,
-) -> Response {
+) -> Result<Json<RefreshSessionOutput>, ApiError> {
     let extracted = match tranquil_pds::auth::extract_auth_token_from_header(
         tranquil_pds::util::get_header_str(&headers, http::header::AUTHORIZATION),
     ) {
         Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
+        None => return Err(ApiError::AuthenticationRequired),
     };
     let refresh_token = extracted.token;
     let refresh_jti = match tranquil_pds::auth::get_jti_from_token(&refresh_token) {
         Ok(jti) => jti,
         Err(_) => {
-            return ApiError::AuthenticationFailed(Some("Invalid token format".into()))
-                .into_response();
+            return Err(ApiError::AuthenticationFailed(Some(
+                "Invalid token format".into(),
+            )));
         }
     };
     if let Ok(Some(_)) = state
@@ -454,10 +481,9 @@ pub async fn refresh_session(
         .await
     {
         warn!("Refresh token reuse detected for jti: {}", refresh_jti);
-        return ApiError::AuthenticationFailed(Some(
+        return Err(ApiError::AuthenticationFailed(Some(
             "Refresh token has been revoked due to suspected compromise".into(),
-        ))
-        .into_response();
+        )));
     }
     let session_row = match state
         .session_repo
@@ -466,12 +492,13 @@ pub async fn refresh_session(
     {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return ApiError::AuthenticationFailed(Some("Invalid refresh token".into()))
-                .into_response();
+            return Err(ApiError::AuthenticationFailed(Some(
+                "Invalid refresh token".into(),
+            )));
         }
         Err(e) => {
             error!("Database error fetching session: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     let key_bytes = match tranquil_pds::config::decrypt_key(
@@ -481,12 +508,13 @@ pub async fn refresh_session(
         Ok(k) => k,
         Err(e) => {
             error!("Failed to decrypt user key: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     if tranquil_pds::auth::verify_refresh_token(&refresh_token, &key_bytes).is_err() {
-        return ApiError::AuthenticationFailed(Some("Invalid refresh token".into()))
-            .into_response();
+        return Err(ApiError::AuthenticationFailed(Some(
+            "Invalid refresh token".into(),
+        )));
     }
     let new_access_meta = match tranquil_pds::auth::create_access_token_with_delegation(
         &session_row.did,
@@ -498,7 +526,7 @@ pub async fn refresh_session(
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create access token: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     let new_refresh_meta = match tranquil_pds::auth::create_refresh_token_with_metadata(
@@ -508,7 +536,7 @@ pub async fn refresh_session(
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create refresh token: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     let refresh_data = tranquil_db_traits::SessionRefreshData {
@@ -527,24 +555,22 @@ pub async fn refresh_session(
         Ok(tranquil_db_traits::RefreshSessionResult::Success) => {}
         Ok(tranquil_db_traits::RefreshSessionResult::TokenAlreadyUsed) => {
             warn!("Refresh token reuse detected during atomic operation");
-            return ApiError::AuthenticationFailed(Some(
+            return Err(ApiError::AuthenticationFailed(Some(
                 "Refresh token has been revoked due to suspected compromise".into(),
-            ))
-            .into_response();
+            )));
         }
         Ok(tranquil_db_traits::RefreshSessionResult::ConcurrentRefresh) => {
             warn!(
                 "Concurrent refresh detected for session_id: {}",
                 session_row.id
             );
-            return ApiError::AuthenticationFailed(Some(
+            return Err(ApiError::AuthenticationFailed(Some(
                 "Refresh token has been revoked due to suspected compromise".into(),
-            ))
-            .into_response();
+            )));
         }
         Err(e) => {
             error!("Database error during session refresh: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     }
     let did_for_doc = session_row.did.clone();
@@ -558,38 +584,32 @@ pub async fn refresh_session(
             let preferred_channel_verified = u
                 .channel_verification
                 .is_verified(u.preferred_comms_channel);
-            let pds_hostname = &tranquil_config::get().server.hostname;
-            let handle = full_handle(&u.handle, pds_hostname);
+            let handle = u.handle.clone();
             let account_state =
                 AccountState::from_db_fields(u.deactivated_at, u.takedown_ref.clone(), None, None);
-            let mut response = json!({
-                "accessJwt": new_access_meta.token,
-                "refreshJwt": new_refresh_meta.token,
-                "handle": handle,
-                "did": session_row.did,
-                "email": u.email,
-                "emailConfirmed": u.channel_verification.email,
-                "preferredChannel": u.preferred_comms_channel.as_str(),
-                "preferredChannelVerified": preferred_channel_verified,
-                "preferredLocale": u.preferred_locale,
-                "isAdmin": u.is_admin,
-                "active": account_state.is_active()
-            });
-            if let Some(doc) = did_doc {
-                response["didDoc"] = doc;
-            }
-            if let Some(status) = account_state.status_for_session() {
-                response["status"] = json!(status);
-            }
-            Json(response).into_response()
+            Ok(Json(RefreshSessionOutput {
+                access_jwt: new_access_meta.token,
+                refresh_jwt: new_refresh_meta.token,
+                handle,
+                did: session_row.did,
+                email: u.email,
+                email_confirmed: u.channel_verification.email,
+                preferred_channel: u.preferred_comms_channel.as_str().to_string(),
+                preferred_channel_verified,
+                preferred_locale: u.preferred_locale,
+                is_admin: u.is_admin,
+                active: account_state.is_active(),
+                did_doc,
+                status: account_state.status_for_session().map(String::from),
+            }))
         }
         Ok(None) => {
             error!("User not found for existing session: {}", session_row.did);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
         Err(e) => {
             error!("Database error fetching user: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
@@ -617,18 +637,19 @@ pub struct ConfirmSignupOutput {
 pub async fn confirm_signup(
     State(state): State<AppState>,
     Json(input): Json<ConfirmSignupInput>,
-) -> Response {
+) -> Result<Json<ConfirmSignupOutput>, ApiError> {
     info!("confirm_signup called for DID: {}", input.did);
     let row = match state.user_repo.get_confirm_signup_by_did(&input.did).await {
         Ok(Some(row)) => row,
         Ok(None) => {
             warn!("User not found for confirm_signup: {}", input.did);
-            return ApiError::InvalidRequest("Invalid DID or verification code".into())
-                .into_response();
+            return Err(ApiError::InvalidRequest(
+                "Invalid DID or verification code".into(),
+            ));
         }
         Err(e) => {
             error!("Database error in confirm_signup: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
 
@@ -656,18 +677,18 @@ pub async fn confirm_signup(
                     "Token DID mismatch for confirm_signup: expected {}, got {}",
                     input.did, token_data.did
                 );
-                return ApiError::InvalidRequest("Invalid verification code".into())
-                    .into_response();
+                return Err(ApiError::InvalidRequest("Invalid verification code".into()));
             }
         }
         Err(tranquil_pds::auth::verification_token::VerifyError::Expired) => {
             warn!("Verification code expired for user: {}", input.did);
-            return ApiError::ExpiredToken(Some("Verification code has expired".into()))
-                .into_response();
+            return Err(ApiError::ExpiredToken(Some(
+                "Verification code has expired".into(),
+            )));
         }
         Err(e) => {
             warn!("Invalid verification code for user {}: {:?}", input.did, e);
-            return ApiError::InvalidRequest("Invalid verification code".into()).into_response();
+            return Err(ApiError::InvalidRequest("Invalid verification code".into()));
         }
     }
 
@@ -676,26 +697,9 @@ pub async fn confirm_signup(
         Ok(k) => k,
         Err(e) => {
             error!("Failed to decrypt user key: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
-
-    let access_meta =
-        match tranquil_pds::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to create access token: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-    let refresh_meta =
-        match tranquil_pds::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to create refresh token: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
 
     if let Err(e) = state
         .user_repo
@@ -703,25 +707,22 @@ pub async fn confirm_signup(
         .await
     {
         error!("Failed to update verification status: {:?}", e);
-        return ApiError::InternalError(None).into_response();
+        return Err(ApiError::InternalError(None));
     }
 
-    let session_data = tranquil_db_traits::SessionTokenCreate {
-        did: row.did.clone(),
-        access_jti: access_meta.jti.clone(),
-        refresh_jti: refresh_meta.jti.clone(),
-        access_expires_at: access_meta.expires_at,
-        refresh_expires_at: refresh_meta.expires_at,
-        login_type: tranquil_db_traits::LoginType::Modern,
-        mfa_verified: false,
-        scope: Some("transition:generic transition:chat.bsky".to_string()),
-        controller_did: None,
-        app_password_name: None,
+    let session = match crate::identity::provision::create_and_store_session(
+        &state,
+        &row.did,
+        &row.did,
+        &key_bytes,
+        "transition:generic transition:chat.bsky",
+        None,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(_) => return Err(ApiError::InternalError(None)),
     };
-    if let Err(e) = state.session_repo.create_session(&session_data).await {
-        error!("Failed to insert session: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
 
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_welcome(
@@ -734,17 +735,16 @@ pub async fn confirm_signup(
     {
         warn!("Failed to enqueue welcome notification: {:?}", e);
     }
-    Json(ConfirmSignupOutput {
-        access_jwt: access_meta.token,
-        refresh_jwt: refresh_meta.token,
+    Ok(Json(ConfirmSignupOutput {
+        access_jwt: session.access_jwt,
+        refresh_jwt: session.refresh_jwt,
         handle: row.handle,
         did: row.did,
         email: row.email,
         email_verified: matches!(row.channel, tranquil_db_traits::CommsChannel::Email),
         preferred_channel: row.channel,
         preferred_channel_verified: true,
-    })
-    .into_response()
+    }))
 }
 
 const AUTO_VERIFY_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(120);
@@ -794,25 +794,14 @@ pub async fn auto_resend_verification(state: &AppState, did: &Did) -> Option<Aut
         );
         return Some(result);
     }
-    let verification_token =
-        tranquil_pds::auth::verification_token::generate_signup_token(did, row.channel, &recipient);
-    let formatted_token =
-        tranquil_pds::auth::verification_token::format_token_for_display(&verification_token);
-    let hostname = &tranquil_config::get().server.hostname;
-    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
+    crate::identity::provision::enqueue_signup_verification(
+        state,
         row.id,
+        did,
         row.channel,
         &recipient,
-        &formatted_token,
-        hostname,
     )
-    .await
-    {
-        warn!("Failed to auto-resend verification for {}: {:?}", did, e);
-        return Some(result);
-    }
+    .await;
     let _ = state
         .cache
         .set(&debounce_key, "1", AUTO_VERIFY_DEBOUNCE)
@@ -829,7 +818,7 @@ pub struct ResendVerificationInput {
 pub async fn resend_verification(
     State(state): State<AppState>,
     Json(input): Json<ResendVerificationInput>,
-) -> Response {
+) -> Result<Json<SuccessResponse>, ApiError> {
     info!("resend_verification called for DID: {}", input.did);
     let row = match state
         .user_repo
@@ -838,16 +827,18 @@ pub async fn resend_verification(
     {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return ApiError::InvalidRequest("User not found".into()).into_response();
+            return Err(ApiError::InvalidRequest("User not found".into()));
         }
         Err(e) => {
             error!("Database error in resend_verification: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
     let is_verified = row.channel_verification.has_any_verified();
     if is_verified {
-        return ApiError::InvalidRequest("Account is already verified".into()).into_response();
+        return Err(ApiError::InvalidRequest(
+            "Account is already verified".into(),
+        ));
     }
 
     let recipient = match row.channel {
@@ -861,29 +852,15 @@ pub async fn resend_verification(
         tranquil_db_traits::CommsChannel::Signal => row.signal_username.clone().unwrap_or_default(),
     };
 
-    let verification_token = tranquil_pds::auth::verification_token::generate_signup_token(
+    crate::identity::provision::enqueue_signup_verification(
+        &state,
+        row.id,
         &input.did,
         row.channel,
         &recipient,
-    );
-    let formatted_token =
-        tranquil_pds::auth::verification_token::format_token_for_display(&verification_token);
-
-    let hostname = &tranquil_config::get().server.hostname;
-    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
-        row.id,
-        row.channel,
-        &recipient,
-        &formatted_token,
-        hostname,
     )
-    .await
-    {
-        warn!("Failed to enqueue verification notification: {:?}", e);
-    }
-    SuccessResponse::ok().into_response()
+    .await;
+    Ok(Json(SuccessResponse { success: true }))
 }
 
 #[derive(Serialize)]
@@ -914,12 +891,8 @@ pub async fn list_sessions(
     State(state): State<AppState>,
     headers: HeaderMap,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
-    let current_jti = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .and_then(|token| tranquil_pds::auth::get_jti_from_token(token).ok());
+) -> Result<Json<ListSessionsOutput>, ApiError> {
+    let current_jti = tranquil_pds::auth::extract_jti_from_headers(&headers);
 
     let jwt_rows = state
         .session_repo
@@ -959,7 +932,7 @@ pub async fn list_sessions(
     let mut sessions: Vec<SessionInfo> = jwt_sessions.chain(oauth_sessions).collect();
     sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-    Ok((StatusCode::OK, Json(ListSessionsOutput { sessions })).into_response())
+    Ok(Json(ListSessionsOutput { sessions }))
 }
 
 fn extract_client_name(client_id: &str) -> String {
@@ -982,7 +955,7 @@ pub async fn revoke_session(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<RevokeSessionInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     if let Some(jwt_id) = input.session_id.strip_prefix("jwt:") {
         let session_id = jwt_id
             .parse::<i32>()
@@ -1021,19 +994,16 @@ pub async fn revoke_session(
     } else {
         return Err(ApiError::InvalidRequest("Invalid session ID format".into()));
     }
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }
 
 pub async fn revoke_all_sessions(
     State(state): State<AppState>,
     headers: HeaderMap,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
-    let jti = tranquil_pds::auth::extract_auth_token_from_header(
-        headers.get("authorization").and_then(|v| v.to_str().ok()),
-    )
-    .and_then(|extracted| tranquil_pds::auth::get_jti_from_token(&extracted.token).ok())
-    .ok_or(ApiError::InvalidToken(None))?;
+) -> Result<Json<SuccessResponse>, ApiError> {
+    let jti = tranquil_pds::auth::extract_jti_from_headers(&headers)
+        .ok_or(ApiError::InvalidToken(None))?;
 
     if auth.is_oauth() {
         state
@@ -1061,7 +1031,7 @@ pub async fn revoke_all_sessions(
     }
 
     info!(did = %&auth.did, "All other sessions revoked");
-    Ok(SuccessResponse::ok().into_response())
+    Ok(Json(SuccessResponse { success: true }))
 }
 
 #[derive(Serialize)]
@@ -1074,7 +1044,7 @@ pub struct LegacyLoginPreferenceOutput {
 pub async fn get_legacy_login_preference(
     State(state): State<AppState>,
     auth: Auth<Active>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<LegacyLoginPreferenceOutput>, ApiError> {
     let pref = state
         .user_repo
         .get_legacy_login_pref(&auth.did)
@@ -1084,8 +1054,7 @@ pub async fn get_legacy_login_preference(
     Ok(Json(LegacyLoginPreferenceOutput {
         allow_legacy_login: pref.allow_legacy_login,
         has_mfa: pref.has_mfa,
-    })
-    .into_response())
+    }))
 }
 
 #[derive(Deserialize)]
@@ -1094,20 +1063,20 @@ pub struct UpdateLegacyLoginInput {
     pub allow_legacy_login: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLegacyLoginOutput {
+    pub allow_legacy_login: bool,
+}
+
 pub async fn update_legacy_login_preference(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<UpdateLegacyLoginInput>,
-) -> Result<Response, ApiError> {
-    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+) -> Result<Json<UpdateLegacyLoginOutput>, ApiError> {
+    let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
-    let reauth_mfa = match require_reauth_window(&state, &auth).await {
-        Ok(proof) => proof,
-        Err(response) => return Ok(response),
-    };
+    let reauth_mfa = require_reauth_window(&state, &auth).await?;
 
     let updated = state
         .user_repo
@@ -1122,10 +1091,9 @@ pub async fn update_legacy_login_preference(
         allow_legacy_login = input.allow_legacy_login,
         "Legacy login preference updated"
     );
-    Ok(Json(json!({
-        "allowLegacyLogin": input.allow_legacy_login
+    Ok(Json(UpdateLegacyLoginOutput {
+        allow_legacy_login: input.allow_legacy_login,
     }))
-    .into_response())
 }
 
 use tranquil_pds::comms::VALID_LOCALES;
@@ -1140,7 +1108,7 @@ pub async fn update_locale(
     State(state): State<AppState>,
     auth: Auth<Active>,
     Json(input): Json<UpdateLocaleInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<PreferredLocaleOutput>, ApiError> {
     if !VALID_LOCALES.contains(&input.preferred_locale.as_str()) {
         return Err(ApiError::InvalidRequest(format!(
             "Invalid locale. Valid options: {}",
@@ -1161,8 +1129,7 @@ pub async fn update_locale(
         locale = %input.preferred_locale,
         "User locale preference updated"
     );
-    Ok(Json(json!({
-        "preferredLocale": input.preferred_locale
+    Ok(Json(PreferredLocaleOutput {
+        preferred_locale: Some(input.preferred_locale),
     }))
-    .into_response())
 }
