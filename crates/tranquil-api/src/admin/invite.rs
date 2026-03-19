@@ -1,8 +1,7 @@
+use crate::common;
 use axum::{
     Json,
     extract::{Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -23,7 +22,7 @@ pub async fn disable_invite_codes(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(input): Json<DisableInviteCodesInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     if let Some(codes) = &input.codes
         && let Err(e) = state.infra_repo.disable_invite_codes_by_code(codes).await
     {
@@ -40,7 +39,7 @@ pub async fn disable_invite_codes(
             error!("DB error disabling invite codes by account: {:?}", e);
         }
     }
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }
 
 #[derive(Deserialize)]
@@ -80,7 +79,7 @@ pub async fn get_invite_codes(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Query(params): Query<GetInviteCodesParams>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<GetInviteCodesOutput>, ApiError> {
     let limit = params.limit.unwrap_or(100).clamp(1, 500);
     let sort_order = match params.sort.as_deref() {
         Some("usage") => InviteCodeSortOrder::Usage,
@@ -104,26 +103,21 @@ pub async fn get_invite_codes(
         .into_iter()
         .collect();
 
-    let uses_by_code: std::collections::HashMap<String, Vec<InviteCodeUseInfo>> =
-        if code_strings.is_empty() {
-            std::collections::HashMap::new()
-        } else {
+    let uses_by_code = if code_strings.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        common::group_invite_uses_by_code(
             state
                 .infra_repo
                 .get_invite_code_uses_batch(&code_strings)
                 .await
-                .unwrap_or_default()
-                .into_iter()
-                .fold(std::collections::HashMap::new(), |mut acc, u| {
-                    acc.entry(u.code.clone())
-                        .or_default()
-                        .push(InviteCodeUseInfo {
-                            used_by: u.used_by_did.to_string(),
-                            used_at: u.used_at.to_rfc3339(),
-                        });
-                    acc
-                })
-        };
+                .unwrap_or_default(),
+            |u| InviteCodeUseInfo {
+                used_by: u.used_by_did.to_string(),
+                used_at: u.used_at.to_rfc3339(),
+            },
+        )
+    };
 
     let codes: Vec<InviteCodeInfo> = codes_rows
         .iter()
@@ -149,14 +143,10 @@ pub async fn get_invite_codes(
     } else {
         None
     };
-    Ok((
-        StatusCode::OK,
-        Json(GetInviteCodesOutput {
-            cursor: next_cursor,
-            codes,
-        }),
-    )
-        .into_response())
+    Ok(Json(GetInviteCodesOutput {
+        cursor: next_cursor,
+        codes,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -168,7 +158,7 @@ pub async fn disable_account_invites(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(input): Json<DisableAccountInvitesInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let account = input.account.trim();
     if account.is_empty() {
         return Err(ApiError::InvalidRequest("account is required".into()));
@@ -182,7 +172,7 @@ pub async fn disable_account_invites(
         .set_invites_disabled(&account_did, true)
         .await
     {
-        Ok(true) => Ok(EmptyResponse::ok().into_response()),
+        Ok(true) => Ok(Json(EmptyResponse {})),
         Ok(false) => Err(ApiError::AccountNotFound),
         Err(e) => {
             error!("DB error disabling account invites: {:?}", e);
@@ -200,7 +190,7 @@ pub async fn enable_account_invites(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(input): Json<EnableAccountInvitesInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let account = input.account.trim();
     if account.is_empty() {
         return Err(ApiError::InvalidRequest("account is required".into()));
@@ -214,7 +204,7 @@ pub async fn enable_account_invites(
         .set_invites_disabled(&account_did, false)
         .await
     {
-        Ok(true) => Ok(EmptyResponse::ok().into_response()),
+        Ok(true) => Ok(Json(EmptyResponse {})),
         Ok(false) => Err(ApiError::AccountNotFound),
         Err(e) => {
             error!("DB error enabling account invites: {:?}", e);

@@ -1,9 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
@@ -30,7 +25,7 @@ pub async fn send_email(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(input): Json<SendEmailInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<SendEmailOutput>, ApiError> {
     let content = input.content.trim();
     if content.is_empty() {
         return Err(ApiError::InvalidRequest("content is required".into()));
@@ -68,11 +63,11 @@ pub async fn send_email(
                 handle,
                 input.recipient_did
             );
-            Ok((StatusCode::OK, Json(SendEmailOutput { sent: true })).into_response())
+            Ok(Json(SendEmailOutput { sent: true }))
         }
         Err(e) => {
             warn!("Failed to enqueue admin email: {:?}", e);
-            Ok((StatusCode::OK, Json(SendEmailOutput { sent: false })).into_response())
+            Ok(Json(SendEmailOutput { sent: false }))
         }
     }
 }

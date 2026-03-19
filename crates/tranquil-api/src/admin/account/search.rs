@@ -1,8 +1,6 @@
 use axum::{
     Json,
     extract::{Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
@@ -51,7 +49,7 @@ pub async fn search_accounts(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Query(params): Query<SearchAccountsParams>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<SearchAccountsOutput>, ApiError> {
     let limit = params.limit.clamp(1, 100);
     let email_filter = params.email.as_deref().map(|e| format!("%{}%", e));
     let handle_filter = params.handle.as_deref().map(|h| format!("%{}%", h));
@@ -91,12 +89,8 @@ pub async fn search_accounts(
     } else {
         None
     };
-    Ok((
-        StatusCode::OK,
-        Json(SearchAccountsOutput {
-            cursor: next_cursor,
-            accounts,
-        }),
-    )
-        .into_response())
+    Ok(Json(SearchAccountsOutput {
+        cursor: next_cursor,
+        accounts,
+    }))
 }

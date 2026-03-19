@@ -1,11 +1,9 @@
 use axum::{
     Json,
     extract::{Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use tracing::{error, warn};
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::auth::{Admin, Auth};
@@ -37,7 +35,7 @@ pub async fn get_subject_status(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Query(params): Query<GetSubjectStatusParams>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<SubjectStatus>, ApiError> {
     if params.did.is_none() && params.uri.is_none() && params.blob.is_none() {
         return Err(ApiError::InvalidRequest(
             "Must provide did, uri, or blob".into(),
@@ -57,18 +55,14 @@ pub async fn get_subject_status(
                     applied: true,
                     r#ref: Some(r.clone()),
                 });
-                return Ok((
-                    StatusCode::OK,
-                    Json(SubjectStatus {
-                        subject: json!({
-                            "$type": "com.atproto.admin.defs#repoRef",
-                            "did": did_str
-                        }),
-                        takedown,
-                        deactivated,
+                return Ok(Json(SubjectStatus {
+                    subject: json!({
+                        "$type": "com.atproto.admin.defs#repoRef",
+                        "did": did_str
                     }),
-                )
-                    .into_response());
+                    takedown,
+                    deactivated,
+                }));
             }
             Ok(None) => {
                 return Err(ApiError::SubjectNotFound);
@@ -89,19 +83,15 @@ pub async fn get_subject_status(
                     applied: true,
                     r#ref: Some(r.clone()),
                 });
-                return Ok((
-                    StatusCode::OK,
-                    Json(SubjectStatus {
-                        subject: json!({
-                            "$type": "com.atproto.repo.strongRef",
-                            "uri": uri_str,
-                            "cid": uri_str
-                        }),
-                        takedown,
-                        deactivated: None,
+                return Ok(Json(SubjectStatus {
+                    subject: json!({
+                        "$type": "com.atproto.repo.strongRef",
+                        "uri": uri_str,
+                        "cid": uri_str
                     }),
-                )
-                    .into_response());
+                    takedown,
+                    deactivated: None,
+                }));
             }
             Ok(None) => {
                 return Err(ApiError::RecordNotFound);
@@ -125,19 +115,15 @@ pub async fn get_subject_status(
                     applied: true,
                     r#ref: Some(r.clone()),
                 });
-                return Ok((
-                    StatusCode::OK,
-                    Json(SubjectStatus {
-                        subject: json!({
-                            "$type": "com.atproto.admin.defs#repoBlobRef",
-                            "did": did,
-                            "cid": blob.cid
-                        }),
-                        takedown,
-                        deactivated: None,
+                return Ok(Json(SubjectStatus {
+                    subject: json!({
+                        "$type": "com.atproto.admin.defs#repoBlobRef",
+                        "did": did,
+                        "cid": blob.cid
                     }),
-                )
-                    .into_response());
+                    takedown,
+                    deactivated: None,
+                }));
             }
             Ok(None) => {
                 return Err(ApiError::BlobNotFound(None));
@@ -169,11 +155,11 @@ pub async fn update_subject_status(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(input): Json<UpdateSubjectStatusInput>,
-) -> Result<Response, ApiError> {
-    let subject_type = input.subject.get("$type").and_then(|t| t.as_str());
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let subject_type = input.subject.get("$type").and_then(Value::as_str);
     match subject_type {
         Some("com.atproto.admin.defs#repoRef") => {
-            let did_str = input.subject.get("did").and_then(|d| d.as_str());
+            let did_str = input.subject.get("did").and_then(Value::as_str);
             if let Some(did_str) = did_str {
                 let did: Did = match did_str.parse() {
                     Ok(d) => d,
@@ -238,24 +224,20 @@ pub async fn update_subject_status(
                         .delete(&tranquil_pds::cache_keys::handle_key(&handle))
                         .await;
                 }
-                return Ok((
-                    StatusCode::OK,
-                    Json(json!({
-                        "subject": input.subject,
-                        "takedown": input.takedown.as_ref().map(|t| json!({
-                            "applied": t.applied,
-                            "ref": t.r#ref
-                        })),
-                        "deactivated": input.deactivated.as_ref().map(|d| json!({
-                            "applied": d.applied
-                        }))
+                return Ok(Json(json!({
+                    "subject": input.subject,
+                    "takedown": input.takedown.as_ref().map(|t| json!({
+                        "applied": t.applied,
+                        "ref": t.r#ref
                     })),
-                )
-                    .into_response());
+                    "deactivated": input.deactivated.as_ref().map(|d| json!({
+                        "applied": d.applied
+                    }))
+                })));
             }
         }
         Some("com.atproto.repo.strongRef") => {
-            let uri_str = input.subject.get("uri").and_then(|u| u.as_str());
+            let uri_str = input.subject.get("uri").and_then(Value::as_str);
             if let Some(uri_str) = uri_str {
                 let cid: CidLink = uri_str
                     .parse()
@@ -278,21 +260,17 @@ pub async fn update_subject_status(
                             ApiError::InternalError(Some("Failed to update takedown status".into()))
                         })?;
                 }
-                return Ok((
-                    StatusCode::OK,
-                    Json(json!({
-                        "subject": input.subject,
-                        "takedown": input.takedown.as_ref().map(|t| json!({
-                            "applied": t.applied,
-                            "ref": t.r#ref
-                        }))
-                    })),
-                )
-                    .into_response());
+                return Ok(Json(json!({
+                    "subject": input.subject,
+                    "takedown": input.takedown.as_ref().map(|t| json!({
+                        "applied": t.applied,
+                        "ref": t.r#ref
+                    }))
+                })));
             }
         }
         Some("com.atproto.admin.defs#repoBlobRef") => {
-            let cid_str = input.subject.get("cid").and_then(|c| c.as_str());
+            let cid_str = input.subject.get("cid").and_then(Value::as_str);
             if let Some(cid_str) = cid_str {
                 let cid: CidLink = cid_str
                     .parse()
@@ -315,17 +293,13 @@ pub async fn update_subject_status(
                             ApiError::InternalError(Some("Failed to update takedown status".into()))
                         })?;
                 }
-                return Ok((
-                    StatusCode::OK,
-                    Json(json!({
-                        "subject": input.subject,
-                        "takedown": input.takedown.as_ref().map(|t| json!({
-                            "applied": t.applied,
-                            "ref": t.r#ref
-                        }))
-                    })),
-                )
-                    .into_response());
+                return Ok(Json(json!({
+                    "subject": input.subject,
+                    "takedown": input.takedown.as_ref().map(|t| json!({
+                        "applied": t.applied,
+                        "ref": t.r#ref
+                    }))
+                })));
             }
         }
         _ => {}

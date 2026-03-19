@@ -1,8 +1,7 @@
+use crate::common;
 use axum::{
     Json,
     extract::{Query, RawQuery, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -68,7 +67,7 @@ pub async fn get_account_info(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Query(params): Query<GetAccountInfoParams>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<AccountInfo>, ApiError> {
     let account = state
         .infra_repo
         .get_admin_account_info_by_did(&params.did)
@@ -79,26 +78,22 @@ pub async fn get_account_info(
     let invited_by = get_invited_by(&state, account.id).await;
     let invites = get_invites_for_user(&state, account.id).await;
 
-    Ok((
-        StatusCode::OK,
-        Json(AccountInfo {
-            did: account.did,
-            handle: account.handle,
-            email: account.email,
-            indexed_at: account.created_at.to_rfc3339(),
-            invite_note: None,
-            invites_disabled: account.invites_disabled,
-            email_confirmed_at: if account.email_verified {
-                Some(account.created_at.to_rfc3339())
-            } else {
-                None
-            },
-            deactivated_at: account.deactivated_at.map(|dt| dt.to_rfc3339()),
-            invited_by,
-            invites,
-        }),
-    )
-        .into_response())
+    Ok(Json(AccountInfo {
+        did: account.did,
+        handle: account.handle,
+        email: account.email,
+        indexed_at: account.created_at.to_rfc3339(),
+        invite_note: None,
+        invites_disabled: account.invites_disabled,
+        email_confirmed_at: if account.email_verified {
+            Some(account.created_at.to_rfc3339())
+        } else {
+            None
+        },
+        deactivated_at: account.deactivated_at.map(|dt| dt.to_rfc3339()),
+        invited_by,
+        invites,
+    }))
 }
 
 async fn get_invited_by(state: &AppState, user_id: uuid::Uuid) -> Option<InviteCodeInfo> {
@@ -133,16 +128,10 @@ async fn get_invites_for_user(
         .await
         .ok()?;
 
-    let uses_by_code: HashMap<String, Vec<InviteCodeUseInfo>> =
-        uses.into_iter().fold(HashMap::new(), |mut acc, u| {
-            acc.entry(u.code.clone())
-                .or_default()
-                .push(InviteCodeUseInfo {
-                    used_by: u.used_by_did,
-                    used_at: u.used_at.to_rfc3339(),
-                });
-            acc
-        });
+    let uses_by_code = common::group_invite_uses_by_code(uses, |u| InviteCodeUseInfo {
+        used_by: u.used_by_did,
+        used_at: u.used_at.to_rfc3339(),
+    });
 
     let invites: Vec<InviteCodeInfo> = invite_codes
         .into_iter()
@@ -195,7 +184,7 @@ pub async fn get_account_infos(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     RawQuery(raw_query): RawQuery,
-) -> Result<Response, ApiError> {
+) -> Result<Json<GetAccountInfosOutput>, ApiError> {
     let dids: Vec<String> =
         tranquil_pds::util::parse_repeated_query_param(raw_query.as_deref(), "dids")
             .into_iter()
@@ -244,18 +233,10 @@ pub async fn get_account_infos(
         .into_iter()
         .collect();
 
-    let uses_by_code: HashMap<String, Vec<InviteCodeUseInfo>> =
-        all_invite_uses
-            .into_iter()
-            .fold(HashMap::new(), |mut acc, u| {
-                acc.entry(u.code.clone())
-                    .or_default()
-                    .push(InviteCodeUseInfo {
-                        used_by: u.used_by_did,
-                        used_at: u.used_at.to_rfc3339(),
-                    });
-                acc
-            });
+    let uses_by_code = common::group_invite_uses_by_code(all_invite_uses, |u| InviteCodeUseInfo {
+        used_by: u.used_by_did,
+        used_at: u.used_at.to_rfc3339(),
+    });
 
     let (codes_by_user, code_info_map): (
         HashMap<uuid::Uuid, Vec<InviteCodeInfo>>,
@@ -304,5 +285,5 @@ pub async fn get_account_infos(
         })
         .collect();
 
-    Ok((StatusCode::OK, Json(GetAccountInfosOutput { infos })).into_response())
+    Ok(Json(GetAccountInfosOutput { infos }))
 }

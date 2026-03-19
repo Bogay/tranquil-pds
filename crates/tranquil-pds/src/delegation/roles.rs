@@ -1,7 +1,5 @@
 use std::marker::PhantomData;
 
-use axum::response::{IntoResponse, Response};
-
 use crate::api::error::ApiError;
 use crate::auth::AuthenticatedUser;
 use crate::state::AppState;
@@ -29,21 +27,20 @@ async fn check_delegation_flag(
     did: &Did,
     check_is_delegated: bool,
     error_msg: &str,
-) -> Result<bool, Response> {
+) -> Result<bool, ApiError> {
     let result = if check_is_delegated {
         state.delegation_repo.is_delegated_account(did).await
     } else {
         state.delegation_repo.controls_any_accounts(did).await
     };
     match result {
-        Ok(true) => Err(ApiError::InvalidDelegation(error_msg.into()).into_response()),
+        Ok(true) => Err(ApiError::InvalidDelegation(error_msg.into())),
         Ok(false) => Ok(false),
         Err(e) => {
             tracing::error!("Failed to check delegation status: {:?}", e);
-            Err(
-                ApiError::InternalError(Some("Failed to verify delegation status".into()))
-                    .into_response(),
-            )
+            Err(ApiError::InternalError(Some(
+                "Failed to verify delegation status".into(),
+            )))
         }
     }
 }
@@ -51,7 +48,7 @@ async fn check_delegation_flag(
 pub async fn verify_can_add_controllers<'a>(
     state: &AppState,
     user: &'a AuthenticatedUser,
-) -> Result<CanAddControllers<'a>, Response> {
+) -> Result<CanAddControllers<'a>, ApiError> {
     check_delegation_flag(
         state,
         &user.did,
@@ -68,7 +65,7 @@ pub async fn verify_can_add_controllers<'a>(
 pub async fn verify_can_control_accounts<'a>(
     state: &AppState,
     user: &'a AuthenticatedUser,
-) -> Result<CanControlAccounts<'a>, Response> {
+) -> Result<CanControlAccounts<'a>, ApiError> {
     check_delegation_flag(
         state,
         &user.did,

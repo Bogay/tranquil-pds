@@ -1,3 +1,4 @@
+use crate::common;
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -10,6 +11,7 @@ use k256::elliptic_curve::sec1::ToEncodedPoint;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
+use tranquil_pds::api::error::DbResultExt;
 use tranquil_pds::api::{ApiError, DidResponse, EmptyResponse};
 use tranquil_pds::auth::{Auth, NotTakendown};
 use tranquil_pds::plc::signing_key_to_did_key;
@@ -188,91 +190,20 @@ async fn serve_handle_did_doc(state: &AppState, handle: &str, hostname: &str) ->
 
     let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
 
-    if let Some((ovr, parsed)) = overrides.as_ref().and_then(|ovr| {
-        serde_json::from_value::<Vec<DidWebVerificationMethod>>(ovr.verification_methods.clone())
-            .ok()
-            .filter(|p| !p.is_empty())
-            .map(|p| (ovr, p))
-    }) {
-        let also_known_as = if !ovr.also_known_as.is_empty() {
-            ovr.also_known_as.clone()
-        } else {
-            vec![format!("at://{}", current_handle)]
-        };
-
-        return Json(json!({
-            "@context": [
-                "https://www.w3.org/ns/did/v1",
-                "https://w3id.org/security/multikey/v1",
-                "https://w3id.org/security/suites/secp256k1-2019/v1"
-            ],
-            "id": did,
-            "alsoKnownAs": also_known_as,
-            "verificationMethod": parsed.iter().map(|m| json!({
-                "id": format!("{}{}", did, if m.id.starts_with('#') { m.id.clone() } else { format!("#{}", m.id) }),
-                "type": m.method_type,
-                "controller": did,
-                "publicKeyMultibase": m.public_key_multibase
-            })).collect::<Vec<_>>(),
-            "service": [{
-                "id": "#atproto_pds",
-                "type": tranquil_pds::plc::ServiceType::Pds.as_str(),
-                "serviceEndpoint": service_endpoint
-            }]
-        }))
-        .into_response();
-    }
-
-    let key_info = match state.user_repo.get_user_key_by_id(user_id).await {
-        Ok(Some(k)) => k,
-        Ok(None) => return ApiError::InternalError(None).into_response(),
-        Err(_) => return ApiError::InternalError(None).into_response(),
-    };
-    let key_bytes: Vec<u8> =
-        match tranquil_pds::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
-            Ok(k) => k,
-            Err(_) => {
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-    let public_key_multibase = match get_public_key_multibase(&key_bytes) {
-        Ok(pk) => pk,
-        Err(e) => {
-            tracing::error!("Failed to generate public key multibase: {}", e);
-            return ApiError::InternalError(None).into_response();
-        }
+    let verification_methods =
+        build_override_or_key_verification_methods(state, user_id, &did, overrides.as_ref()).await;
+    let verification_methods = match verification_methods {
+        Ok(vm) => vm,
+        Err(resp) => return resp,
     };
 
-    let also_known_as = if let Some(ref ovr) = overrides {
-        if !ovr.also_known_as.is_empty() {
-            ovr.also_known_as.clone()
-        } else {
-            vec![format!("at://{}", current_handle)]
-        }
-    } else {
-        vec![format!("at://{}", current_handle)]
-    };
-
-    Json(json!({
-        "@context": [
-            "https://www.w3.org/ns/did/v1",
-            "https://w3id.org/security/multikey/v1",
-            "https://w3id.org/security/suites/secp256k1-2019/v1"
-        ],
-        "id": did,
-        "alsoKnownAs": also_known_as,
-        "verificationMethod": [{
-            "id": format!("{}#atproto", did),
-            "type": "Multikey",
-            "controller": did,
-            "publicKeyMultibase": public_key_multibase
-        }],
-        "service": [{
-            "id": "#atproto_pds",
-            "type": tranquil_pds::plc::ServiceType::Pds.as_str(),
-            "serviceEndpoint": service_endpoint
-        }]
-    }))
+    let also_known_as = common::resolve_also_known_as(overrides.as_ref(), &current_handle);
+    Json(common::build_did_document(
+        &did,
+        also_known_as,
+        verification_methods,
+        &service_endpoint,
+    ))
     .into_response()
 }
 
@@ -323,92 +254,65 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
 
     let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
 
-    if let Some((ovr, parsed)) = overrides.as_ref().and_then(|ovr| {
+    let verification_methods =
+        build_override_or_key_verification_methods(&state, user_id, &did, overrides.as_ref()).await;
+    let verification_methods = match verification_methods {
+        Ok(vm) => vm,
+        Err(resp) => return resp,
+    };
+
+    let also_known_as = common::resolve_also_known_as(overrides.as_ref(), &current_handle);
+    Json(common::build_did_document(
+        &did,
+        also_known_as,
+        verification_methods,
+        &service_endpoint,
+    ))
+    .into_response()
+}
+
+async fn build_override_or_key_verification_methods(
+    state: &AppState,
+    user_id: uuid::Uuid,
+    did: &str,
+    overrides: Option<&tranquil_db_traits::DidWebOverrides>,
+) -> Result<Vec<serde_json::Value>, Response> {
+    if let Some(parsed) = overrides.and_then(|ovr| {
         serde_json::from_value::<Vec<DidWebVerificationMethod>>(ovr.verification_methods.clone())
             .ok()
             .filter(|p| !p.is_empty())
-            .map(|p| (ovr, p))
     }) {
-        let also_known_as = if !ovr.also_known_as.is_empty() {
-            ovr.also_known_as.clone()
-        } else {
-            vec![format!("at://{}", current_handle)]
-        };
-
-        return Json(json!({
-            "@context": [
-                "https://www.w3.org/ns/did/v1",
-                "https://w3id.org/security/multikey/v1",
-                "https://w3id.org/security/suites/secp256k1-2019/v1"
-            ],
-            "id": did,
-            "alsoKnownAs": also_known_as,
-            "verificationMethod": parsed.iter().map(|m| json!({
-                "id": format!("{}{}", did, if m.id.starts_with('#') { m.id.clone() } else { format!("#{}", m.id) }),
-                "type": m.method_type,
-                "controller": did,
-                "publicKeyMultibase": m.public_key_multibase
-            })).collect::<Vec<_>>(),
-            "service": [{
-                "id": "#atproto_pds",
-                "type": tranquil_pds::plc::ServiceType::Pds.as_str(),
-                "serviceEndpoint": service_endpoint
-            }]
-        }))
-        .into_response();
+        return Ok(parsed
+            .iter()
+            .map(|m| {
+                json!({
+                    "id": format!("{}{}", did, if m.id.starts_with('#') { m.id.clone() } else { format!("#{}", m.id) }),
+                    "type": m.method_type,
+                    "controller": did,
+                    "publicKeyMultibase": m.public_key_multibase
+                })
+            })
+            .collect());
     }
 
     let key_info = match state.user_repo.get_user_key_by_id(user_id).await {
         Ok(Some(k)) => k,
-        Ok(None) => return ApiError::InternalError(None).into_response(),
-        Err(_) => return ApiError::InternalError(None).into_response(),
+        _ => return Err(ApiError::InternalError(None).into_response()),
     };
-    let key_bytes: Vec<u8> =
-        match tranquil_pds::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
-            Ok(k) => k,
-            Err(_) => {
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-    let public_key_multibase = match get_public_key_multibase(&key_bytes) {
-        Ok(pk) => pk,
-        Err(e) => {
-            tracing::error!("Failed to generate public key multibase: {}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let key_bytes =
+        tranquil_pds::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version)
+            .map_err(|_| ApiError::InternalError(None).into_response())?;
+    let public_key_multibase = get_public_key_multibase(&key_bytes).map_err(|e| {
+        tracing::error!("Failed to generate public key multibase: {}", e);
+        ApiError::InternalError(None).into_response()
+    })?;
 
-    let also_known_as = if let Some(ref ovr) = overrides {
-        if !ovr.also_known_as.is_empty() {
-            ovr.also_known_as.clone()
-        } else {
-            vec![format!("at://{}", current_handle)]
-        }
-    } else {
-        vec![format!("at://{}", current_handle)]
-    };
-
-    Json(json!({
-        "@context": [
-            "https://www.w3.org/ns/did/v1",
-            "https://w3id.org/security/multikey/v1",
-            "https://w3id.org/security/suites/secp256k1-2019/v1"
-        ],
-        "id": did,
-        "alsoKnownAs": also_known_as,
-        "verificationMethod": [{
-            "id": format!("{}#atproto", did),
-            "type": "Multikey",
-            "controller": did,
-            "publicKeyMultibase": public_key_multibase
-        }],
-        "service": [{
-            "id": "#atproto_pds",
-            "type": tranquil_pds::plc::ServiceType::Pds.as_str(),
-            "serviceEndpoint": service_endpoint
-        }]
-    }))
-    .into_response()
+    Ok(vec![json!({
+        "id": format!("{}#atproto", did),
+        "type": "Multikey",
+        "controller": did,
+        "publicKeyMultibase": public_key_multibase
+    })])
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -562,12 +466,12 @@ pub struct AtprotoPds {
 pub async fn get_recommended_did_credentials(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<GetRecommendedDidCredentialsOutput>, ApiError> {
     let handle = state
         .user_repo
         .get_handle_by_did(&auth.did)
         .await
-        .map_err(|_| ApiError::InternalError(None))?
+        .log_db_err("fetching handle for DID credentials")?
         .ok_or(ApiError::InternalError(None))?;
 
     let key_bytes = auth.key_bytes.clone().ok_or_else(|| {
@@ -593,21 +497,17 @@ pub async fn get_recommended_did_credentials(
         };
         vec![server_rotation_key]
     };
-    Ok((
-        StatusCode::OK,
-        Json(GetRecommendedDidCredentialsOutput {
-            rotation_keys,
-            also_known_as: vec![format!("at://{}", handle)],
-            verification_methods: VerificationMethods { atproto: did_key },
-            services: Services {
-                atproto_pds: AtprotoPds {
-                    service_type: tranquil_pds::plc::ServiceType::Pds.as_str().to_string(),
-                    endpoint: pds_endpoint,
-                },
+    Ok(Json(GetRecommendedDidCredentialsOutput {
+        rotation_keys,
+        also_known_as: vec![format!("at://{}", handle)],
+        verification_methods: VerificationMethods { atproto: did_key },
+        services: Services {
+            atproto_pds: AtprotoPds {
+                service_type: tranquil_pds::plc::ServiceType::Pds.as_str().to_string(),
+                endpoint: pds_endpoint,
             },
-        }),
-    )
-        .into_response())
+        },
+    }))
 }
 
 #[derive(Deserialize)]
@@ -619,14 +519,12 @@ pub async fn update_handle(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
     Json(input): Json<UpdateHandleInput>,
-) -> Result<Response, ApiError> {
-    if let Err(e) = tranquil_pds::auth::scope_check::check_identity_scope(
+) -> Result<Json<EmptyResponse>, ApiError> {
+    tranquil_pds::auth::scope_check::check_identity_scope(
         &auth.auth_source,
         auth.scope.as_deref(),
         tranquil_pds::oauth::scopes::IdentityAttr::Handle,
-    ) {
-        return Ok(e);
-    }
+    )?;
     let did = auth.did.clone();
     let _rate_limit = check_user_rate_limit_with_message::<HandleUpdateLimit>(
         &state,
@@ -644,7 +542,7 @@ pub async fn update_handle(
         .user_repo
         .get_id_and_handle_by_did(&did)
         .await
-        .map_err(|_| ApiError::InternalError(None))?
+        .log_db_err("fetching user for handle update")?
         .ok_or(ApiError::InternalError(None))?;
     let user_id = user_row.id;
     let current_handle = user_row.handle;
@@ -710,7 +608,7 @@ pub async fn update_handle(
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
-            return Ok(EmptyResponse::ok().into_response());
+            return Ok(Json(EmptyResponse {}));
         }
         if short_part.contains('.') {
             return Err(ApiError::InvalidHandle(Some(
@@ -736,7 +634,7 @@ pub async fn update_handle(
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
-            return Ok(EmptyResponse::ok().into_response());
+            return Ok(Json(EmptyResponse {}));
         }
         match tranquil_pds::handle::verify_handle_ownership(&new_handle, &did).await {
             Ok(()) => {}
@@ -766,7 +664,7 @@ pub async fn update_handle(
         .user_repo
         .check_handle_exists(&handle_typed, user_id)
         .await
-        .map_err(|_| ApiError::InternalError(None))?;
+        .log_db_err("checking handle existence")?;
     if handle_exists {
         return Err(ApiError::HandleTaken);
     }
@@ -797,7 +695,7 @@ pub async fn update_handle(
     if let Err(e) = update_plc_handle(&state, &did, &handle_typed).await {
         warn!("Failed to update PLC handle: {}", e);
     }
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }
 
 pub async fn update_plc_handle(

@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use serde::Deserialize;
 use tracing::{error, warn};
 use tranquil_pds::api::EmptyResponse;
@@ -21,7 +17,7 @@ pub async fn update_account_email(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(input): Json<UpdateAccountEmailInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let account = input.account.trim();
     let email = input.email.trim();
     if account.is_empty() || email.is_empty() {
@@ -39,7 +35,7 @@ pub async fn update_account_email(
         .await
     {
         Ok(0) => Err(ApiError::AccountNotFound),
-        Ok(_) => Ok(EmptyResponse::ok().into_response()),
+        Ok(_) => Ok(Json(EmptyResponse {})),
         Err(e) => {
             error!("DB error updating email: {:?}", e);
             Err(ApiError::InternalError(None))
@@ -57,7 +53,7 @@ pub async fn update_account_handle(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(input): Json<UpdateAccountHandleInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let did = &input.did;
     let input_handle = input.handle.trim();
     if input_handle.is_empty() {
@@ -125,7 +121,7 @@ pub async fn update_account_handle(
             {
                 warn!("Failed to update PLC handle for admin handle update: {}", e);
             }
-            Ok(EmptyResponse::ok().into_response())
+            Ok(Json(EmptyResponse {}))
         }
         Err(e) => {
             error!("DB error updating handle: {:?}", e);
@@ -144,7 +140,7 @@ pub async fn update_account_password(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(input): Json<UpdateAccountPasswordInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let did = &input.did;
     let password = input.password.trim();
     if password.is_empty() {
@@ -161,7 +157,7 @@ pub async fn update_account_password(
         .await
     {
         Ok(0) => Err(ApiError::AccountNotFound),
-        Ok(_) => Ok(EmptyResponse::ok().into_response()),
+        Ok(_) => Ok(Json(EmptyResponse {})),
         Err(e) => {
             error!("DB error updating password: {:?}", e);
             Err(ApiError::InternalError(None))

@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use serde::Deserialize;
 use tracing::warn;
 use tranquil_pds::api::EmptyResponse;
@@ -20,7 +16,7 @@ pub async fn delete_account(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(input): Json<DeleteAccountInput>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<EmptyResponse>, ApiError> {
     let did = &input.did;
     let (user_id, handle) = state
         .user_repo
@@ -52,5 +48,5 @@ pub async fn delete_account(
         .cache
         .delete(&tranquil_pds::cache_keys::handle_key(&handle))
         .await;
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }

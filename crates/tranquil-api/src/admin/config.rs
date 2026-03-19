@@ -8,7 +8,7 @@ use tranquil_types::CidLink;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ServerConfigResponse {
+pub struct ServerConfigOutput {
     pub server_name: String,
     pub primary_color: Option<String>,
     pub primary_color_dark: Option<String>,
@@ -29,7 +29,7 @@ pub struct UpdateServerConfigRequest {
 }
 
 #[derive(Serialize)]
-pub struct UpdateServerConfigResponse {
+pub struct UpdateServerConfigOutput {
     pub success: bool,
 }
 
@@ -42,7 +42,7 @@ fn is_valid_hex_color(s: &str) -> bool {
 
 pub async fn get_server_config(
     State(state): State<AppState>,
-) -> Result<Json<ServerConfigResponse>, ApiError> {
+) -> Result<Json<ServerConfigOutput>, ApiError> {
     let keys = &[
         "server_name",
         "primary_color",
@@ -60,7 +60,7 @@ pub async fn get_server_config(
 
     let config_map: std::collections::HashMap<String, String> = rows.into_iter().collect();
 
-    Ok(Json(ServerConfigResponse {
+    Ok(Json(ServerConfigOutput {
         server_name: config_map
             .get("server_name")
             .cloned()
@@ -77,7 +77,7 @@ pub async fn update_server_config(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
     Json(req): Json<UpdateServerConfigRequest>,
-) -> Result<Json<UpdateServerConfigResponse>, ApiError> {
+) -> Result<Json<UpdateServerConfigOutput>, ApiError> {
     if let Some(server_name) = req.server_name {
         let trimmed = server_name.trim();
         if trimmed.is_empty() || trimmed.len() > 100 {
@@ -224,5 +224,5 @@ pub async fn update_server_config(
         }
     }
 
-    Ok(Json(UpdateServerConfigResponse { success: true }))
+    Ok(Json(UpdateServerConfigOutput { success: true }))
 }
