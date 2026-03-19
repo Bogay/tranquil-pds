@@ -1,7 +1,4 @@
-use axum::{
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use chrono::{Duration, Utc};
 use tracing::{info, warn};
 use tranquil_pds::api::EmptyResponse;
@@ -16,14 +13,12 @@ fn generate_plc_token() -> String {
 pub async fn request_plc_operation_signature(
     State(state): State<AppState>,
     auth: Auth<Permissive>,
-) -> Result<Response, ApiError> {
-    if let Err(e) = tranquil_pds::auth::scope_check::check_identity_scope(
+) -> Result<Json<EmptyResponse>, ApiError> {
+    tranquil_pds::auth::scope_check::check_identity_scope(
         &auth.auth_source,
         auth.scope.as_deref(),
         tranquil_pds::oauth::scopes::IdentityAttr::Wildcard,
-    ) {
-        return Ok(e);
-    }
+    )?;
     let user_id = state
         .user_repo
         .get_id_by_did(&auth.did)
@@ -53,5 +48,5 @@ pub async fn request_plc_operation_signature(
         warn!("Failed to enqueue PLC operation notification: {:?}", e);
     }
     info!("PLC operation signature requested for user {}", auth.did);
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }

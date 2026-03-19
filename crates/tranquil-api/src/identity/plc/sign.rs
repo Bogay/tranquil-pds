@@ -1,9 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use chrono::Utc;
 use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -43,14 +38,12 @@ pub async fn sign_plc_operation(
     State(state): State<AppState>,
     auth: Auth<Permissive>,
     Json(input): Json<SignPlcOperationInput>,
-) -> Result<Response, ApiError> {
-    if let Err(e) = tranquil_pds::auth::scope_check::check_identity_scope(
+) -> Result<Json<SignPlcOperationOutput>, ApiError> {
+    tranquil_pds::auth::scope_check::check_identity_scope(
         &auth.auth_source,
         auth.scope.as_deref(),
         tranquil_pds::oauth::scopes::IdentityAttr::Wildcard,
-    ) {
-        return Ok(e);
-    }
+    )?;
     let did = &auth.did;
     if did.starts_with("did:web:") {
         return Err(ApiError::InvalidRequest(
@@ -145,11 +138,7 @@ pub async fn sign_plc_operation(
 
     let _ = state.infra_repo.delete_plc_token(user_id, token).await;
     info!("Signed PLC operation for user {}", did);
-    Ok((
-        StatusCode::OK,
-        Json(SignPlcOperationOutput {
-            operation: signed_op,
-        }),
-    )
-        .into_response())
+    Ok(Json(SignPlcOperationOutput {
+        operation: signed_op,
+    }))
 }

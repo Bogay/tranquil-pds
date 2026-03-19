@@ -1,4 +1,5 @@
 use super::did::verify_did_web;
+use crate::common;
 use axum::{
     Json,
     extract::State,
@@ -6,11 +7,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcrypt::{DEFAULT_COST, hash};
-use k256::{SecretKey, ecdsa::SigningKey};
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::auth::{ServiceTokenVerifier, extract_auth_token_from_header, is_service_token};
 use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
@@ -45,6 +44,138 @@ pub struct CreateAccountOutput {
     pub refresh_jwt: String,
     pub verification_required: bool,
     pub verification_channel: tranquil_db_traits::CommsChannel,
+}
+
+async fn try_reactivate_migration(
+    state: &AppState,
+    did: &str,
+    handle: &str,
+    email: &Option<String>,
+    verification_channel: tranquil_db_traits::CommsChannel,
+    verification_recipient: Option<&str>,
+) -> Option<Response> {
+    let did_typed: Did = match did.parse() {
+        Ok(d) => d,
+        Err(_) => return Some(ApiError::InternalError(Some("Invalid DID".into())).into_response()),
+    };
+    let handle_typed: Handle = match handle.parse() {
+        Ok(h) => h,
+        Err(_) => return Some(ApiError::InvalidHandle(None).into_response()),
+    };
+    let reactivate_input = tranquil_db_traits::MigrationReactivationInput {
+        did: did_typed.clone(),
+        new_handle: handle_typed.clone(),
+        new_email: email.clone(),
+    };
+    match state
+        .user_repo
+        .reactivate_migration_account(&reactivate_input)
+        .await
+    {
+        Ok(reactivated) => {
+            info!(did = %did, old_handle = %reactivated.old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
+            let secret_key_bytes = match state
+                .user_repo
+                .get_user_key_by_id(reactivated.user_id)
+                .await
+            {
+                Ok(Some(key_info)) => {
+                    match tranquil_pds::config::decrypt_key(
+                        &key_info.key_bytes,
+                        key_info.encryption_version,
+                    ) {
+                        Ok(k) => k,
+                        Err(e) => {
+                            error!("Error decrypting key for reactivated account: {:?}", e);
+                            return Some(ApiError::InternalError(None).into_response());
+                        }
+                    }
+                }
+                _ => {
+                    error!("No signing key found for reactivated account");
+                    return Some(
+                        ApiError::InternalError(Some("Account signing key not found".into()))
+                            .into_response(),
+                    );
+                }
+            };
+            let access_meta =
+                match tranquil_pds::auth::create_access_token_with_metadata(did, &secret_key_bytes)
+                {
+                    Ok(m) => m,
+                    Err(e) => {
+                        error!("Error creating access token: {:?}", e);
+                        return Some(ApiError::InternalError(None).into_response());
+                    }
+                };
+            let refresh_meta = match tranquil_pds::auth::create_refresh_token_with_metadata(
+                did,
+                &secret_key_bytes,
+            ) {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Error creating refresh token: {:?}", e);
+                    return Some(ApiError::InternalError(None).into_response());
+                }
+            };
+            let session_data = tranquil_db_traits::SessionTokenCreate {
+                did: did_typed.clone(),
+                access_jti: access_meta.jti.clone(),
+                refresh_jti: refresh_meta.jti.clone(),
+                access_expires_at: access_meta.expires_at,
+                refresh_expires_at: refresh_meta.expires_at,
+                login_type: tranquil_db_traits::LoginType::Modern,
+                mfa_verified: false,
+                scope: Some("transition:generic transition:chat.bsky".to_string()),
+                controller_did: None,
+                app_password_name: None,
+            };
+            if let Err(e) = state.session_repo.create_session(&session_data).await {
+                error!("Error creating session: {:?}", e);
+                return Some(ApiError::InternalError(None).into_response());
+            }
+            let verification_required = match verification_recipient {
+                Some(recipient) => {
+                    super::provision::enqueue_migration_verification(
+                        state,
+                        reactivated.user_id,
+                        &did_typed,
+                        verification_channel,
+                        recipient,
+                    )
+                    .await;
+                    true
+                }
+                None => false,
+            };
+            Some(
+                (
+                    StatusCode::OK,
+                    Json(CreateAccountOutput {
+                        handle: handle.to_string().into(),
+                        did: did_typed.clone(),
+                        did_doc: state.did_resolver.resolve_did_document(did).await,
+                        access_jwt: access_meta.token,
+                        refresh_jwt: refresh_meta.token,
+                        verification_required,
+                        verification_channel,
+                    }),
+                )
+                    .into_response(),
+            )
+        }
+        Err(tranquil_db_traits::MigrationReactivationError::NotFound) => None,
+        Err(tranquil_db_traits::MigrationReactivationError::NotDeactivated) => {
+            Some(ApiError::AccountAlreadyExists.into_response())
+        }
+        Err(tranquil_db_traits::MigrationReactivationError::HandleTaken) => {
+            Some(ApiError::HandleTaken.into_response())
+        }
+        Err(e) => {
+            error!("Error reactivating migration account: {:?}", e);
+            Some(ApiError::InternalError(None).into_response())
+        }
+    }
 }
 
 pub async fn create_account(
@@ -154,79 +285,37 @@ pub async fn create_account(
         .verification_channel
         .unwrap_or(tranquil_db_traits::CommsChannel::Email);
     let verification_recipient = {
-        Some(match verification_channel {
-            tranquil_db_traits::CommsChannel::Email => match &input.email {
-                Some(email) if !email.trim().is_empty() => email.trim().to_string(),
-                _ => return ApiError::MissingEmail.into_response(),
+        Some(
+            match common::extract_verification_recipient(
+                verification_channel,
+                &common::ChannelInput {
+                    email: input.email.as_deref(),
+                    discord_username: input.discord_username.as_deref(),
+                    telegram_username: input.telegram_username.as_deref(),
+                    signal_username: input.signal_username.as_deref(),
+                },
+            ) {
+                Ok(r) => r,
+                Err(e) => return e.into_response(),
             },
-            tranquil_db_traits::CommsChannel::Discord => match &input.discord_username {
-                Some(username) if !username.trim().is_empty() => {
-                    let clean = username.trim().to_lowercase();
-                    if !tranquil_pds::api::validation::is_valid_discord_username(&clean) {
-                        return ApiError::InvalidRequest(
-                            "Invalid Discord username. Must be 2-32 lowercase characters (letters, numbers, underscores, periods)".into(),
-                        ).into_response();
-                    }
-                    clean
-                }
-                _ => return ApiError::MissingDiscordId.into_response(),
-            },
-            tranquil_db_traits::CommsChannel::Telegram => match &input.telegram_username {
-                Some(username) if !username.trim().is_empty() => {
-                    let clean = username.trim().trim_start_matches('@');
-                    if !tranquil_pds::api::validation::is_valid_telegram_username(clean) {
-                        return ApiError::InvalidRequest(
-                            "Invalid Telegram username. Must be 5-32 characters, alphanumeric or underscore".into(),
-                        ).into_response();
-                    }
-                    clean.to_string()
-                }
-                _ => return ApiError::MissingTelegramUsername.into_response(),
-            },
-            tranquil_db_traits::CommsChannel::Signal => match &input.signal_username {
-                Some(username) if !username.trim().is_empty() => {
-                    username.trim().trim_start_matches('@').to_lowercase()
-                }
-                _ => return ApiError::MissingSignalNumber.into_response(),
-            },
-        })
+        )
     };
     let hostname = &cfg.server.hostname;
-    let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
-        if let Some(signing_key_did) = &input.signing_key {
-            match state
-                .infra_repo
-                .get_reserved_signing_key(signing_key_did)
-                .await
-            {
-                Ok(Some(key)) => (key.private_key_bytes, Some(key.id)),
-                Ok(None) => {
-                    return ApiError::InvalidSigningKey.into_response();
-                }
-                Err(e) => {
-                    error!("Error looking up reserved signing key: {:?}", e);
-                    return ApiError::InternalError(None).into_response();
-                }
-            }
-        } else {
-            let secret_key = SecretKey::random(&mut OsRng);
-            (secret_key.to_bytes().to_vec(), None)
+    let key_result =
+        match super::provision::resolve_signing_key(&state, input.signing_key.as_deref()).await {
+            Ok(k) => k,
+            Err(e) => return e.into_response(),
         };
-    let signing_key = match SigningKey::from_slice(&secret_key_bytes) {
-        Ok(k) => k,
-        Err(e) => {
-            error!("Error creating signing key: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let secret_key_bytes = key_result.secret_key_bytes;
+    let signing_key = key_result.signing_key;
+    let reserved_key_id = key_result.reserved_key_id;
     let did_type = input.did_type.as_deref().unwrap_or("plc");
     let did = match did_type {
         "web" => {
-            if !tranquil_pds::util::is_self_hosted_did_web_enabled() {
-                return ApiError::SelfHostedDidWebDisabled.into_response();
-            }
-            let encoded_handle = handle.replace(':', "%3A");
-            let self_hosted_did = format!("did:web:{}", encoded_handle);
+            let self_hosted_did = match common::create_self_hosted_did_web(&handle) {
+                Ok(d) => d,
+                Err(e) => return e.into_response(),
+            };
             info!(did = %self_hosted_did, "Creating self-hosted did:web account (subdomain)");
             self_hosted_did
         }
@@ -287,140 +376,18 @@ pub async fn create_account(
             }
         }
     };
-    if is_migration {
-        let did_typed: Did = match did.parse() {
-            Ok(d) => d,
-            Err(_) => return ApiError::InternalError(Some("Invalid DID".into())).into_response(),
-        };
-        let handle_typed: Handle = match handle.parse() {
-            Ok(h) => h,
-            Err(_) => return ApiError::InvalidHandle(None).into_response(),
-        };
-        let reactivate_input = tranquil_db_traits::MigrationReactivationInput {
-            did: did_typed.clone(),
-            new_handle: handle_typed.clone(),
-            new_email: email.clone(),
-        };
-        match state
-            .user_repo
-            .reactivate_migration_account(&reactivate_input)
-            .await
-        {
-            Ok(reactivated) => {
-                info!(did = %did, old_handle = %reactivated.old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
-                let secret_key_bytes = match state
-                    .user_repo
-                    .get_user_key_by_id(reactivated.user_id)
-                    .await
-                {
-                    Ok(Some(key_info)) => {
-                        match tranquil_pds::config::decrypt_key(
-                            &key_info.key_bytes,
-                            key_info.encryption_version,
-                        ) {
-                            Ok(k) => k,
-                            Err(e) => {
-                                error!("Error decrypting key for reactivated account: {:?}", e);
-                                return ApiError::InternalError(None).into_response();
-                            }
-                        }
-                    }
-                    _ => {
-                        error!("No signing key found for reactivated account");
-                        return ApiError::InternalError(Some(
-                            "Account signing key not found".into(),
-                        ))
-                        .into_response();
-                    }
-                };
-                let access_meta = match tranquil_pds::auth::create_access_token_with_metadata(
-                    &did,
-                    &secret_key_bytes,
-                ) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        error!("Error creating access token: {:?}", e);
-                        return ApiError::InternalError(None).into_response();
-                    }
-                };
-                let refresh_meta = match tranquil_pds::auth::create_refresh_token_with_metadata(
-                    &did,
-                    &secret_key_bytes,
-                ) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        error!("Error creating refresh token: {:?}", e);
-                        return ApiError::InternalError(None).into_response();
-                    }
-                };
-                let session_data = tranquil_db_traits::SessionTokenCreate {
-                    did: did_typed.clone(),
-                    access_jti: access_meta.jti.clone(),
-                    refresh_jti: refresh_meta.jti.clone(),
-                    access_expires_at: access_meta.expires_at,
-                    refresh_expires_at: refresh_meta.expires_at,
-                    login_type: tranquil_db_traits::LoginType::Modern,
-                    mfa_verified: false,
-                    scope: Some("transition:generic transition:chat.bsky".to_string()),
-                    controller_did: None,
-                    app_password_name: None,
-                };
-                if let Err(e) = state.session_repo.create_session(&session_data).await {
-                    error!("Error creating session: {:?}", e);
-                    return ApiError::InternalError(None).into_response();
-                }
-                let hostname = &tranquil_config::get().server.hostname;
-                let verification_required = if let Some(ref recipient) = verification_recipient {
-                    let token = tranquil_pds::auth::verification_token::generate_migration_token(
-                        &did_typed,
-                        verification_channel,
-                        recipient,
-                    );
-                    let formatted_token =
-                        tranquil_pds::auth::verification_token::format_token_for_display(&token);
-                    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_migration_verification(
-                        state.user_repo.as_ref(),
-                        state.infra_repo.as_ref(),
-                        reactivated.user_id,
-                        verification_channel,
-                        recipient,
-                        &formatted_token,
-                        hostname,
-                    )
-                    .await
-                    {
-                        warn!("Failed to enqueue migration verification: {:?}", e);
-                    }
-                    true
-                } else {
-                    false
-                };
-                return (
-                    axum::http::StatusCode::OK,
-                    Json(CreateAccountOutput {
-                        handle: handle.clone().into(),
-                        did: did_typed.clone(),
-                        did_doc: state.did_resolver.resolve_did_document(&did).await,
-                        access_jwt: access_meta.token,
-                        refresh_jwt: refresh_meta.token,
-                        verification_required,
-                        verification_channel,
-                    }),
-                )
-                    .into_response();
-            }
-            Err(tranquil_db_traits::MigrationReactivationError::NotFound) => {}
-            Err(tranquil_db_traits::MigrationReactivationError::NotDeactivated) => {
-                return ApiError::AccountAlreadyExists.into_response();
-            }
-            Err(tranquil_db_traits::MigrationReactivationError::HandleTaken) => {
-                return ApiError::HandleTaken.into_response();
-            }
-            Err(e) => {
-                error!("Error reactivating migration account: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        }
+    if is_migration
+        && let Some(response) = try_reactivate_migration(
+            &state,
+            &did,
+            &handle,
+            &email,
+            verification_channel,
+            verification_recipient.as_deref(),
+        )
+        .await
+    {
+        return response;
     }
 
     let handle_typed: Handle = match handle.parse() {
@@ -528,7 +495,13 @@ pub async fn create_account(
         None
     };
 
+    let comms = super::provision::normalize_comms_usernames(
+        input.discord_username.as_deref(),
+        input.telegram_username.as_deref(),
+        input.signal_username.as_deref(),
+    );
     let preferred_comms_channel = verification_channel;
+    let repo_for_seq = repo.clone();
 
     let create_input = tranquil_db_traits::CreatePasswordAccountInput {
         handle: handle_typed.clone(),
@@ -536,23 +509,9 @@ pub async fn create_account(
         did: did_for_commit.clone(),
         password_hash,
         preferred_comms_channel,
-        discord_username: input
-            .discord_username
-            .as_deref()
-            .map(|s| s.trim().to_lowercase())
-            .filter(|s| !s.is_empty()),
-        telegram_username: input
-            .telegram_username
-            .as_deref()
-            .map(|s| s.trim().trim_start_matches('@'))
-            .filter(|s| !s.is_empty())
-            .map(String::from),
-        signal_username: input
-            .signal_username
-            .as_deref()
-            .map(|s| s.trim().trim_start_matches('@'))
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_lowercase()),
+        discord_username: comms.discord,
+        telegram_username: comms.telegram,
+        signal_username: comms.signal,
         deactivated_at,
         encrypted_key_bytes: repo.encrypted_key_bytes,
         encryption_version: tranquil_pds::config::ENCRYPTION_VERSION,
@@ -586,144 +545,50 @@ pub async fn create_account(
     };
     let user_id = create_result.user_id;
     if !is_migration && !is_did_web_byod {
-        if let Err(e) = tranquil_pds::repo_ops::sequence_identity_event(
+        super::provision::sequence_new_account(
             &state,
             &did_for_commit,
-            Some(&handle_typed),
+            &handle_typed,
+            &repo_for_seq,
+            &input.handle,
         )
-        .await
-        {
-            warn!("Failed to sequence identity event for {}: {}", did, e);
-        }
-        if let Err(e) = tranquil_pds::repo_ops::sequence_account_event(
-            &state,
-            &did_for_commit,
-            tranquil_db_traits::AccountStatus::Active,
-        )
-        .await
-        {
-            warn!("Failed to sequence account event for {}: {}", did, e);
-        }
-        if let Err(e) = tranquil_pds::repo_ops::sequence_genesis_commit(
-            &state,
-            &did_for_commit,
-            &repo.commit_cid,
-            &repo.mst_root_cid,
-            &rev_str,
-        )
-        .await
-        {
-            warn!("Failed to sequence commit event for {}: {}", did, e);
-        }
-        if let Err(e) = tranquil_pds::repo_ops::sequence_sync_event(
-            &state,
-            &did_for_commit,
-            &commit_cid_str,
-            Some(&rev_str),
-        )
-        .await
-        {
-            warn!("Failed to sequence sync event for {}: {}", did, e);
-        }
-        let profile_record = json!({
-            "$type": "app.bsky.actor.profile",
-            "displayName": input.handle
-        });
-        if let Err(e) = tranquil_pds::repo_ops::create_record_internal(
-            &state,
-            &did_for_commit,
-            &tranquil_pds::types::PROFILE_COLLECTION,
-            &tranquil_pds::types::PROFILE_RKEY,
-            &profile_record,
-        )
-        .await
-        {
-            warn!("Failed to create default profile for {}: {}", did, e);
-        }
+        .await;
     }
-    let hostname = &tranquil_config::get().server.hostname;
     if !is_migration {
         if let Some(ref recipient) = verification_recipient {
-            let verification_token = tranquil_pds::auth::verification_token::generate_signup_token(
+            super::provision::enqueue_signup_verification(
+                &state,
+                user_id,
                 &did_for_commit,
                 verification_channel,
                 recipient,
-            );
-            let formatted_token = tranquil_pds::auth::verification_token::format_token_for_display(
-                &verification_token,
-            );
-            if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
-                state.user_repo.as_ref(),
-                state.infra_repo.as_ref(),
-                user_id,
-                verification_channel,
-                recipient,
-                &formatted_token,
-                hostname,
             )
-            .await
-            {
-                warn!(
-                    "Failed to enqueue signup verification notification: {:?}",
-                    e
-                );
-            }
+            .await;
         }
     } else if let Some(ref recipient) = verification_recipient {
-        let token = tranquil_pds::auth::verification_token::generate_migration_token(
+        super::provision::enqueue_migration_verification(
+            &state,
+            user_id,
             &did_for_commit,
             verification_channel,
             recipient,
-        );
-        let formatted_token =
-            tranquil_pds::auth::verification_token::format_token_for_display(&token);
-        if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_migration_verification(
-            state.user_repo.as_ref(),
-            state.infra_repo.as_ref(),
-            user_id,
-            verification_channel,
-            recipient,
-            &formatted_token,
-            hostname,
         )
-        .await
-        {
-            warn!("Failed to enqueue migration verification: {:?}", e);
-        }
+        .await;
     }
 
-    let access_meta =
-        match tranquil_pds::auth::create_access_token_with_metadata(&did, &secret_key_bytes) {
-            Ok(m) => m,
-            Err(e) => {
-                error!("createAccount: Error creating access token: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-    let refresh_meta =
-        match tranquil_pds::auth::create_refresh_token_with_metadata(&did, &secret_key_bytes) {
-            Ok(m) => m,
-            Err(e) => {
-                error!("createAccount: Error creating refresh token: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-    let session_data = tranquil_db_traits::SessionTokenCreate {
-        did: did_for_commit.clone(),
-        access_jti: access_meta.jti.clone(),
-        refresh_jti: refresh_meta.jti.clone(),
-        access_expires_at: access_meta.expires_at,
-        refresh_expires_at: refresh_meta.expires_at,
-        login_type: tranquil_db_traits::LoginType::Modern,
-        mfa_verified: false,
-        scope: Some("transition:generic transition:chat.bsky".to_string()),
-        controller_did: None,
-        app_password_name: None,
+    let session = match super::provision::create_and_store_session(
+        &state,
+        &did,
+        &did_for_commit,
+        &secret_key_bytes,
+        "transition:generic transition:chat.bsky",
+        None,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => return e.into_response(),
     };
-    if let Err(e) = state.session_repo.create_session(&session_data).await {
-        error!("createAccount: Error creating session: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
 
     let did_doc = state.did_resolver.resolve_did_document(&did).await;
 
@@ -740,8 +605,8 @@ pub async fn create_account(
             handle: handle.clone().into(),
             did: did_for_commit,
             did_doc,
-            access_jwt: access_meta.token,
-            refresh_jwt: refresh_meta.token,
+            access_jwt: session.access_jwt,
+            refresh_jwt: session.refresh_jwt,
             verification_required: !is_migration,
             verification_channel,
         }),

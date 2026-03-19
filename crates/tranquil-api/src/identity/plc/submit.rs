@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State};
 use k256::ecdsa::SigningKey;
 use serde::Deserialize;
 use serde_json::Value;
@@ -23,14 +19,12 @@ pub async fn submit_plc_operation(
     State(state): State<AppState>,
     auth: Auth<Permissive>,
     Json(input): Json<SubmitPlcOperationInput>,
-) -> Result<Response, ApiError> {
-    if let Err(e) = tranquil_pds::auth::scope_check::check_identity_scope(
+) -> Result<Json<EmptyResponse>, ApiError> {
+    tranquil_pds::auth::scope_check::check_identity_scope(
         &auth.auth_source,
         auth.scope.as_deref(),
         tranquil_pds::oauth::scopes::IdentityAttr::Wildcard,
-    ) {
-        return Ok(e);
-    }
+    )?;
     let did = &auth.did;
     if did.starts_with("did:web:") {
         return Err(ApiError::InvalidRequest(
@@ -76,7 +70,7 @@ pub async fn submit_plc_operation(
         .plc_rotation_key
         .clone()
         .unwrap_or_else(|| user_did_key.clone());
-    if let Some(rotation_keys) = op.get("rotationKeys").and_then(|v| v.as_array()) {
+    if let Some(rotation_keys) = op.get("rotationKeys").and_then(Value::as_array) {
         let has_server_key = rotation_keys
             .iter()
             .any(|k| k.as_str() == Some(&server_rotation_key));
@@ -86,11 +80,11 @@ pub async fn submit_plc_operation(
             ));
         }
     }
-    if let Some(services) = op.get("services").and_then(|v| v.as_object())
-        && let Some(pds) = services.get("atproto_pds").and_then(|v| v.as_object())
+    if let Some(services) = op.get("services").and_then(Value::as_object)
+        && let Some(pds) = services.get("atproto_pds").and_then(Value::as_object)
     {
-        let service_type = pds.get("type").and_then(|v| v.as_str());
-        let endpoint = pds.get("endpoint").and_then(|v| v.as_str());
+        let service_type = pds.get("type").and_then(Value::as_str);
+        let endpoint = pds.get("endpoint").and_then(Value::as_str);
         if service_type != Some(tranquil_pds::plc::ServiceType::Pds.as_str()) {
             return Err(ApiError::InvalidRequest(
                 "Incorrect type on atproto_pds service".into(),
@@ -102,8 +96,8 @@ pub async fn submit_plc_operation(
             ));
         }
     }
-    if let Some(verification_methods) = op.get("verificationMethods").and_then(|v| v.as_object())
-        && let Some(atproto_key) = verification_methods.get("atproto").and_then(|v| v.as_str())
+    if let Some(verification_methods) = op.get("verificationMethods").and_then(Value::as_object)
+        && let Some(atproto_key) = verification_methods.get("atproto").and_then(Value::as_str)
         && atproto_key != user_did_key
     {
         return Err(ApiError::InvalidRequest(
@@ -111,11 +105,11 @@ pub async fn submit_plc_operation(
         ));
     }
     if let Some(also_known_as) = (!user.handle.is_empty())
-        .then(|| op.get("alsoKnownAs").and_then(|v| v.as_array()))
+        .then(|| op.get("alsoKnownAs").and_then(Value::as_array))
         .flatten()
     {
         let expected_handle = format!("at://{}", user.handle);
-        let first_aka = also_known_as.first().and_then(|v| v.as_str());
+        let first_aka = also_known_as.first().and_then(Value::as_str);
         if first_aka != Some(&expected_handle) {
             return Err(ApiError::InvalidRequest(
                 "Incorrect handle in alsoKnownAs".into(),
@@ -163,5 +157,5 @@ pub async fn submit_plc_operation(
         warn!(did = %did, "Failed to refresh DID cache after PLC update");
     }
     info!(did = %did, "PLC operation submitted successfully");
-    Ok(EmptyResponse::ok().into_response())
+    Ok(Json(EmptyResponse {}))
 }
