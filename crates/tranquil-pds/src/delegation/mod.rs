@@ -10,6 +10,7 @@ pub use scopes::{
 };
 pub use tranquil_db_traits::DelegationActionType;
 
+use crate::did::DidResolutionError;
 use crate::state::AppState;
 use crate::types::Did;
 
@@ -24,7 +25,10 @@ pub struct ResolvedIdentity {
     pub is_local: bool,
 }
 
-pub async fn resolve_identity(state: &AppState, did: &Did) -> Option<ResolvedIdentity> {
+pub async fn resolve_identity(
+    state: &AppState,
+    did: &Did,
+) -> Result<ResolvedIdentity, DidResolutionError> {
     let is_local = state
         .repos.user
         .get_by_did(did)
@@ -33,15 +37,24 @@ pub async fn resolve_identity(state: &AppState, did: &Did) -> Option<ResolvedIde
         .flatten()
         .is_some();
 
-    let did_doc = state
-        .did_resolver
-        .resolve_did_document(did.as_str())
-        .await?;
+    let did_doc = state.did_resolver.resolve_did(did.as_str()).await?;
 
-    let pds_url = tranquil_types::did_doc::extract_pds_endpoint(&did_doc);
-    let handle = tranquil_types::did_doc::extract_handle(&did_doc);
+    let pds_url = did_doc.services.iter().find_map(|svc| {
+        if (svc.id == "#atproto_pds" || svc.id.ends_with("#atproto_pds"))
+            && svc.service_type == "AtprotoPersonalDataServer"
+        {
+            Some(svc.service_endpoint.clone())
+        } else {
+            None
+        }
+    });
+    let handle = did_doc.also_known_as.iter().find_map(|alias| {
+        alias
+            .strip_prefix("at://")
+            .and_then(|s| Some(s.to_string()))
+    });
 
-    Some(ResolvedIdentity {
+    Ok(ResolvedIdentity {
         did: did.clone(),
         handle,
         pds_url,

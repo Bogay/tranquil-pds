@@ -37,8 +37,9 @@ pub async fn list_controllers(
         async move {
             if c.handle.is_none() {
                 c.handle = did_resolver
-                    .resolve_did_document(c.did.as_str())
+                    .fetch_did_document(c.did.as_str())
                     .await
+                    .ok()
                     .and_then(|doc| tranquil_types::did_doc::extract_handle(&doc))
                     .map(Into::into);
             }
@@ -64,7 +65,7 @@ pub async fn add_controller(
 ) -> Result<Json<SuccessResponse>, ApiError> {
     let resolved = tranquil_pds::delegation::resolve_identity(&state, &input.controller_did)
         .await
-        .ok_or(ApiError::ControllerNotFound)?;
+        .map_err(|_| ApiError::ControllerNotFound)?;
 
     if !resolved.is_local
         && let Some(ref pds_url) = resolved.pds_url
@@ -476,7 +477,7 @@ pub async fn resolve_controller(
 
     let resolved = tranquil_pds::delegation::resolve_identity(&state, &did)
         .await
-        .ok_or(ApiError::ControllerNotFound)?;
+        .map_err(|_| ApiError::ControllerNotFound)?;
 
     Ok(Json(resolved))
 }

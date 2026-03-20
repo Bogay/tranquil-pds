@@ -365,7 +365,7 @@ pub async fn activate_account(
                 .cache
                 .delete(&tranquil_pds::cache_keys::plc_data_key(&did))
                 .await;
-            if state.did_resolver.refresh_did(did.as_str()).await.is_none() {
+            if state.did_resolver.refresh_did(did.as_str()).await.is_err() {
                 warn!(
                     "[MIGRATION] activateAccount: Failed to refresh DID cache for {}",
                     did

@@ -1,5 +1,4 @@
 pub mod api;
-pub mod appview;
 pub mod auth;
 pub mod cache;
 pub mod cache_keys;
@@ -9,6 +8,7 @@ pub mod comms;
 pub mod config;
 pub mod crawlers;
 pub mod delegation;
+pub mod did;
 pub mod handle;
 pub mod image;
 pub mod metrics;

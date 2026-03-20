@@ -1,8 +1,8 @@
-use crate::appview::DidResolver;
 use crate::auth::webauthn::WebAuthnConfig;
 use crate::cache::{Cache, DistributedRateLimiter, create_cache};
 use crate::circuit_breaker::CircuitBreakers;
 use crate::config::AuthConfig;
+use crate::did::DidResolver;
 use crate::oauth::client::CrossPdsOAuthClient;
 use crate::plc::PlcClient;
 use crate::rate_limit::RateLimiters;

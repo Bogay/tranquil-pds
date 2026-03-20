@@ -205,9 +205,14 @@ async fn proxy_handler(
             .into_response();
     };
 
-    let did = proxy_header.split('#').next().unwrap_or(&proxy_header);
-    let Some(resolved) = state.did_resolver.resolve_did(did).await else {
-        error!(did = %did, "Could not resolve service DID");
+    let Some((did, service_id)) = proxy_header.split_once("#") else {
+        return ApiError::InvalidRequest(
+            "Invalid atproto-proxy header. Missing service identifier.".into(),
+        )
+        .into_response();
+    };
+    let Ok(resolved) = state.did_resolver.resolve_service(did, service_id).await else {
+        error!(did = %did, service_id = %service_id, "Could not resolve service DID");
         return ApiError::UpstreamFailure.into_response();
     };
 

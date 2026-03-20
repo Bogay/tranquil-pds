@@ -153,7 +153,7 @@ pub async fn submit_plc_operation(
         .cache
         .delete(&tranquil_pds::cache_keys::plc_data_key(did))
         .await;
-    if state.did_resolver.refresh_did(did).await.is_none() {
+    if state.did_resolver.refresh_did(did).await.is_err() {
         warn!(did = %did, "Failed to refresh DID cache after PLC update");
     }
     info!(did = %did, "PLC operation submitted successfully");
