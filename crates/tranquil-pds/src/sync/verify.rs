@@ -205,6 +205,7 @@ impl CarVerifier {
         data_cid: &Cid,
         blocks: &HashMap<Cid, Bytes>,
     ) -> Result<(), VerifyError> {
+        use super::mst::{entries, left_child, parse_mst_entry};
         use ipld_core::ipld::Ipld;
 
         let mut stack = vec![*data_cid];
@@ -227,65 +228,56 @@ impl CarVerifier {
                 .ok_or_else(|| VerifyError::BlockNotFound(cid.to_string()))?;
             let node: Ipld = serde_ipld_dagcbor::from_slice(block)
                 .map_err(|e| VerifyError::InvalidCbor(e.to_string()))?;
-            if let Ipld::Map(ref obj) = node {
-                if let Some(Ipld::Link(left_cid)) = obj.get("l") {
-                    if !blocks.contains_key(left_cid) {
-                        return Err(VerifyError::BlockNotFound(format!(
-                            "MST left pointer {} not in CAR",
-                            left_cid
-                        )));
-                    }
-                    stack.push(*left_cid);
+            if let Some(left_cid) = left_child(&node) {
+                if !blocks.contains_key(&left_cid) {
+                    return Err(VerifyError::BlockNotFound(format!(
+                        "MST left pointer {} not in CAR",
+                        left_cid
+                    )));
                 }
-                if let Some(Ipld::List(entries)) = obj.get("e") {
-                    let mut last_full_key: Vec<u8> = Vec::new();
-                    for entry in entries {
-                        if let Ipld::Map(entry_obj) = entry {
-                            let prefix_len = entry_obj
-                                .get("p")
-                                .and_then(|p| match p {
-                                    Ipld::Integer(i) => usize::try_from(*i).ok(),
-                                    _ => None,
-                                })
-                                .unwrap_or(0);
-                            let key_suffix = entry_obj.get("k").and_then(|k| match k {
-                                Ipld::Bytes(b) => Some(b.clone()),
-                                Ipld::String(s) => Some(s.as_bytes().to_vec()),
-                                _ => None,
-                            });
-                            if let Some(suffix) = key_suffix {
-                                let mut full_key = Vec::new();
-                                if prefix_len > 0 && prefix_len <= last_full_key.len() {
-                                    full_key.extend_from_slice(&last_full_key[..prefix_len]);
-                                }
-                                full_key.extend_from_slice(&suffix);
-                                if !last_full_key.is_empty() && full_key <= last_full_key {
-                                    return Err(VerifyError::MstValidationFailed(
-                                        "MST keys not in sorted order".to_string(),
-                                    ));
-                                }
-                                last_full_key = full_key;
-                            }
-                            if let Some(Ipld::Link(tree_cid)) = entry_obj.get("t") {
-                                if !blocks.contains_key(tree_cid) {
-                                    return Err(VerifyError::BlockNotFound(format!(
-                                        "MST subtree {} not in CAR",
-                                        tree_cid
-                                    )));
-                                }
-                                stack.push(*tree_cid);
-                            }
-                            if let Some(Ipld::Link(value_cid)) = entry_obj.get("v")
-                                && !blocks.contains_key(value_cid)
+                stack.push(left_cid);
+            }
+            if let Some(entry_list) = entries(&node) {
+                let mut last_full_key: Vec<u8> = Vec::new();
+                entry_list
+                    .iter()
+                    .filter_map(parse_mst_entry)
+                    .try_for_each(|entry| {
+                        if let Some(ref suffix) = entry.key_suffix {
+                            let mut full_key = Vec::new();
+                            if entry.prefix_len > 0
+                                && entry.prefix_len <= last_full_key.len()
                             {
-                                warn!(
-                                    "Record block {} referenced in MST not in CAR (may be expected for partial export)",
-                                    value_cid
-                                );
+                                full_key
+                                    .extend_from_slice(&last_full_key[..entry.prefix_len]);
                             }
+                            full_key.extend_from_slice(suffix);
+                            if !last_full_key.is_empty() && full_key <= last_full_key {
+                                return Err(VerifyError::MstValidationFailed(
+                                    "MST keys not in sorted order".to_string(),
+                                ));
+                            }
+                            last_full_key = full_key;
                         }
-                    }
-                }
+                        if let Some(tree_cid) = entry.subtree {
+                            if !blocks.contains_key(&tree_cid) {
+                                return Err(VerifyError::BlockNotFound(format!(
+                                    "MST subtree {} not in CAR",
+                                    tree_cid
+                                )));
+                            }
+                            stack.push(tree_cid);
+                        }
+                        if let Some(value_cid) = entry.value
+                            && !blocks.contains_key(&value_cid)
+                        {
+                            warn!(
+                                "Record block {} referenced in MST not in CAR (may be expected for partial export)",
+                                value_cid
+                            );
+                        }
+                        Ok(())
+                    })?;
             }
         }
         debug!(

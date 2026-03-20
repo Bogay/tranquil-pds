@@ -192,77 +192,55 @@ fn walk_mst_node(
     prev_key: &[u8],
     records: &mut Vec<ImportedRecord>,
 ) -> Result<(), ImportError> {
+    use super::mst::{entries, left_child, parse_mst_entry, reconstruct_key};
+
     let block = blocks
         .get(cid)
         .ok_or_else(|| ImportError::BlockNotFound(cid.to_string()))?;
-    let value: Ipld = serde_ipld_dagcbor::from_slice(block)
+    let node: Ipld = serde_ipld_dagcbor::from_slice(block)
         .map_err(|e| ImportError::InvalidCbor(e.to_string()))?;
 
-    if let Ipld::Map(ref obj) = value {
-        if let Some(Ipld::Link(left_cid)) = obj.get("l") {
-            walk_mst_node(blocks, left_cid, prev_key, records)?;
-        }
+    if let Some(left_cid) = left_child(&node) {
+        walk_mst_node(blocks, &left_cid, prev_key, records)?;
+    }
 
-        let mut current_key = prev_key.to_vec();
+    let mut current_key = prev_key.to_vec();
 
-        if let Some(Ipld::List(entries)) = obj.get("e") {
-            for entry in entries {
-                if let Ipld::Map(entry_obj) = entry {
-                    let prefix_len = entry_obj
-                        .get("p")
-                        .and_then(|p| match p {
-                            Ipld::Integer(n) => usize::try_from(*n).ok(),
-                            _ => None,
-                        })
-                        .unwrap_or(0);
+    if let Some(entry_list) = entries(&node) {
+        entry_list
+            .iter()
+            .filter_map(parse_mst_entry)
+            .try_for_each(|entry| {
+                if let Some(ref suffix) = entry.key_suffix {
+                    reconstruct_key(&mut current_key, entry.prefix_len, suffix);
+                }
 
-                    let key_suffix = entry_obj.get("k").and_then(|k| {
-                        if let Ipld::Bytes(b) = k {
-                            Some(b.clone())
-                        } else {
-                            None
-                        }
-                    });
+                if let Some(tree_cid) = entry.subtree {
+                    walk_mst_node(blocks, &tree_cid, &current_key, records)?;
+                }
 
-                    if let Some(suffix) = key_suffix {
-                        current_key.truncate(prefix_len);
-                        current_key.extend_from_slice(&suffix);
-                    }
-
-                    if let Some(Ipld::Link(tree_cid)) = entry_obj.get("t") {
-                        walk_mst_node(blocks, tree_cid, &current_key, records)?;
-                    }
-
-                    let record_cid = entry_obj.get("v").and_then(|v| {
-                        if let Ipld::Link(cid) = v {
-                            Some(*cid)
-                        } else {
-                            None
-                        }
-                    });
-
-                    if let Some(record_cid) = record_cid
-                        && let Ok(full_key) = String::from_utf8(current_key.clone())
-                        && let Some(record_block) = blocks.get(&record_cid)
-                        && let Ok(record_value) =
-                            serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
-                    {
-                        let blob_refs = find_blob_refs_ipld(&record_value, 0);
-                        let parts: Vec<&str> = full_key.split('/').collect();
-                        if parts.len() >= 2 {
-                            let collection = parts[..parts.len() - 1].join("/");
-                            let rkey = parts[parts.len() - 1].to_string();
-                            records.push(ImportedRecord {
-                                collection,
-                                rkey,
-                                cid: record_cid,
-                                blob_refs,
-                            });
-                        }
+                if let Some(record_cid) = entry.value
+                    && let Ok(full_key) = String::from_utf8(current_key.clone())
+                    && let Some(record_block) = blocks.get(&record_cid)
+                    && let Ok(record_value) =
+                        serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
+                {
+                    let blob_refs = find_blob_refs_ipld(&record_value, 0);
+                    let parts: Vec<&str> = full_key.split('/').collect();
+                    if parts.len() >= 2 {
+                        let collection = parts[..parts.len() - 1].join("/");
+                        let rkey = parts[parts.len() - 1].to_string();
+                        records.push(ImportedRecord {
+                            collection,
+                            rkey,
+                            cid: record_cid,
+                            blob_refs,
+                        });
                     }
                 }
-            }
-        }
+
+                Ok::<_, ImportError>(())
+            })?;
     }
     Ok(())
 }

@@ -2,6 +2,7 @@ pub mod car;
 pub mod firehose;
 pub mod frame;
 pub mod import;
+pub mod mst;
 pub mod util;
 pub mod verify;
 

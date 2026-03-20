@@ -205,21 +205,36 @@ fn format_atproto_time(dt: chrono::DateTime<chrono::Utc>) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
-fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameError> {
-    let frame = IdentityFrame {
-        did: event.did.clone(),
-        handle: event.handle.as_ref().map(|h| h.to_string()),
-        seq: event.seq.as_i64(),
-        time: format_atproto_time(event.created_at),
-    };
-    let header = FrameHeader {
-        op: 1,
-        t: FrameType::Identity,
-    };
-    let mut bytes = Vec::with_capacity(256);
-    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
-    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
+fn serialize_cbor_pair<H: serde::Serialize, P: serde::Serialize>(
+    header: &H,
+    payload: &P,
+    capacity: usize,
+) -> Result<Vec<u8>, SyncFrameError> {
+    let mut bytes = Vec::with_capacity(capacity);
+    serde_ipld_dagcbor::to_writer(&mut bytes, header)?;
+    serde_ipld_dagcbor::to_writer(&mut bytes, payload)?;
     Ok(bytes)
+}
+
+fn serialize_event_frame<P: serde::Serialize>(
+    frame_type: FrameType,
+    payload: &P,
+    capacity: usize,
+) -> Result<Vec<u8>, SyncFrameError> {
+    serialize_cbor_pair(&FrameHeader { op: 1, t: frame_type }, payload, capacity)
+}
+
+fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameError> {
+    serialize_event_frame(
+        FrameType::Identity,
+        &IdentityFrame {
+            did: event.did.clone(),
+            handle: event.handle.as_ref().map(|h| h.to_string()),
+            seq: event.seq.as_i64(),
+            time: format_atproto_time(event.created_at),
+        },
+        256,
+    )
 }
 
 fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameError> {
@@ -230,13 +245,7 @@ fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameErro
         seq: event.seq.as_i64(),
         time: format_atproto_time(event.created_at),
     };
-    let header = FrameHeader {
-        op: 1,
-        t: FrameType::Account,
-    };
-    let mut bytes = Vec::with_capacity(256);
-    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
-    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
+    let bytes = serialize_event_frame(FrameType::Account, &frame, 256)?;
     let hex_str: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
     tracing::info!(
         did = %frame.did,
@@ -269,33 +278,27 @@ async fn format_sync_event(
         extract_rev_from_commit_bytes(&commit_bytes).ok_or(SyncFrameError::RevExtraction)?
     };
     let car_bytes = write_car_blocks(commit_cid, Some(commit_bytes), BTreeMap::new()).await?;
-    let frame = SyncFrame {
-        did: event.did.clone(),
-        rev,
-        blocks: car_bytes,
-        seq: event.seq.as_i64(),
-        time: format_atproto_time(event.created_at),
-    };
-    let header = FrameHeader {
-        op: 1,
-        t: FrameType::Sync,
-    };
-    let mut bytes = Vec::with_capacity(512);
-    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
-    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
-    Ok(bytes)
+    serialize_event_frame(
+        FrameType::Sync,
+        &SyncFrame {
+            did: event.did.clone(),
+            rev,
+            blocks: car_bytes,
+            seq: event.seq.as_i64(),
+            time: format_atproto_time(event.created_at),
+        },
+        512,
+    )
 }
 
-pub async fn format_event_for_sending(
-    state: &AppState,
-    event: SequencedEvent,
-) -> Result<Vec<u8>, SyncFrameError> {
-    match event.event_type {
-        RepoEventType::Identity => return format_identity_event(&event),
-        RepoEventType::Account => return format_account_event(&event),
-        RepoEventType::Sync => return format_sync_event(state, &event).await,
-        RepoEventType::Commit => {}
-    }
+struct CommitEventContext {
+    frame: CommitFrame,
+    commit_cid: Cid,
+    prev_cid: Option<Cid>,
+    block_cids: Vec<Cid>,
+}
+
+fn prepare_commit_event(event: SequencedEvent) -> Result<CommitEventContext, SyncFrameError> {
     let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
     let prev_cid_link = event.prev_cid.clone();
     let prev_data_cid_link = event.prev_data_cid.clone();
@@ -314,47 +317,81 @@ pub async fn format_event_for_sending(
     let prev_cid = prev_cid_link
         .as_ref()
         .and_then(|c| Cid::from_str(c.as_str()).ok());
-    let mut all_cids: Vec<Cid> = block_cids_str
+    let mut block_cids: Vec<Cid> = block_cids_str
         .iter()
         .filter_map(|s| Cid::from_str(s).ok())
         .filter(|c| Some(*c) != prev_cid)
         .collect();
-    if !all_cids.contains(&commit_cid) {
-        all_cids.push(commit_cid);
+    if !block_cids.contains(&commit_cid) {
+        block_cids.push(commit_cid);
     }
-    if let Some(ref pc) = prev_cid
+    Ok(CommitEventContext {
+        frame,
+        commit_cid,
+        prev_cid,
+        block_cids,
+    })
+}
+
+fn partition_blocks(
+    block_cids: impl IntoIterator<Item = (Cid, Bytes)>,
+    commit_cid: Cid,
+) -> (Option<Bytes>, BTreeMap<Cid, Bytes>) {
+    let (commit_data, other_blocks): (Vec<_>, Vec<_>) = block_cids
+        .into_iter()
+        .partition(|(cid, _)| *cid == commit_cid);
+    let commit_bytes = commit_data.into_iter().next().map(|(_, data)| data);
+    let other = other_blocks.into_iter().collect();
+    (commit_bytes, other)
+}
+
+async fn finalize_commit_frame(
+    mut frame: CommitFrame,
+    commit_cid: Cid,
+    commit_bytes: Option<Bytes>,
+    other_blocks: BTreeMap<Cid, Bytes>,
+) -> Result<Vec<u8>, SyncFrameError> {
+    if let Some(ref cb) = commit_bytes
+        && let Some(rev) = extract_rev_from_commit_bytes(cb)
+    {
+        frame.rev = rev;
+    }
+    frame.blocks = write_car_blocks(commit_cid, commit_bytes, other_blocks).await?;
+    let capacity = frame.blocks.len() + 512;
+    serialize_event_frame(FrameType::Commit, &frame, capacity)
+}
+
+pub async fn format_event_for_sending(
+    state: &AppState,
+    event: SequencedEvent,
+) -> Result<Vec<u8>, SyncFrameError> {
+    match event.event_type {
+        RepoEventType::Identity => return format_identity_event(&event),
+        RepoEventType::Account => return format_account_event(&event),
+        RepoEventType::Sync => return format_sync_event(state, &event).await,
+        RepoEventType::Commit => {}
+    }
+    let ctx = prepare_commit_event(event)?;
+    let mut frame = ctx.frame;
+    if let Some(ref pc) = ctx.prev_cid
         && let Ok(Some(prev_bytes)) = state.block_store.get(pc).await
         && let Some(rev) = extract_rev_from_commit_bytes(&prev_bytes)
     {
         frame.since = Some(rev);
     }
-    let car_bytes = if !all_cids.is_empty() {
-        let fetched = state.block_store.get_many(&all_cids).await?;
-        let (commit_data, other_blocks): (Vec<_>, Vec<_>) = all_cids
-            .iter()
-            .zip(fetched.iter())
-            .filter_map(|(cid, data_opt)| data_opt.as_ref().map(|data| (*cid, data.clone())))
-            .partition(|(cid, _)| *cid == commit_cid);
-        let commit_bytes = commit_data.into_iter().next().map(|(_, data)| data);
-        if let Some(ref cb) = commit_bytes
-            && let Some(rev) = extract_rev_from_commit_bytes(cb)
-        {
-            frame.rev = rev;
-        }
-        let blocks: std::collections::BTreeMap<Cid, Bytes> = other_blocks.into_iter().collect();
-        write_car_blocks(commit_cid, commit_bytes, blocks).await?
-    } else {
-        Vec::new()
-    };
-    frame.blocks = car_bytes;
-    let header = FrameHeader {
-        op: 1,
-        t: FrameType::Commit,
-    };
-    let mut bytes = Vec::with_capacity(frame.blocks.len() + 512);
-    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
-    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
-    Ok(bytes)
+    if ctx.block_cids.is_empty() {
+        frame.blocks = Vec::new();
+        let capacity = frame.blocks.len() + 512;
+        return serialize_event_frame(FrameType::Commit, &frame, capacity);
+    }
+    let fetched = state.block_store.get_many(&ctx.block_cids).await?;
+    let resolved = ctx
+        .block_cids
+        .iter()
+        .zip(fetched.iter())
+        .filter_map(|(cid, data_opt)| data_opt.as_ref().map(|data| (*cid, data.clone())));
+    let (commit_bytes, other_blocks) = partition_blocks(resolved, ctx.commit_cid);
+    finalize_commit_frame(frame, ctx.commit_cid, commit_bytes, other_blocks).await
 }
 
 pub async fn prefetch_blocks_for_events(
@@ -413,21 +450,17 @@ fn format_sync_event_with_prefetched(
         Some(commit_bytes.clone()),
         BTreeMap::new(),
     ))?;
-    let frame = SyncFrame {
-        did: event.did.clone(),
-        rev,
-        blocks: car_bytes,
-        seq: event.seq.as_i64(),
-        time: format_atproto_time(event.created_at),
-    };
-    let header = FrameHeader {
-        op: 1,
-        t: FrameType::Sync,
-    };
-    let mut bytes = Vec::new();
-    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
-    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
-    Ok(bytes)
+    serialize_event_frame(
+        FrameType::Sync,
+        &SyncFrame {
+            did: event.did.clone(),
+            rev,
+            blocks: car_bytes,
+            seq: event.seq.as_i64(),
+            time: format_atproto_time(event.created_at),
+        },
+        512,
+    )
 }
 
 pub async fn format_event_with_prefetched_blocks(
@@ -440,94 +473,51 @@ pub async fn format_event_with_prefetched_blocks(
         RepoEventType::Sync => return format_sync_event_with_prefetched(&event, prefetched),
         RepoEventType::Commit => {}
     }
-    let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
-    let prev_cid_link = event.prev_cid.clone();
-    let prev_data_cid_link = event.prev_data_cid.clone();
-    let mut frame: CommitFrame =
-        event
-            .try_into()
-            .map_err(|e: crate::sync::frame::CommitFrameError| {
-                SyncFrameError::InvalidEvent(e.to_string())
-            })?;
-    if let Some(ref pdc) = prev_data_cid_link
-        && let Ok(cid) = Cid::from_str(pdc.as_str())
-    {
-        frame.prev_data = Some(cid);
-    }
-    let commit_cid = frame.commit;
-    let prev_cid = prev_cid_link
-        .as_ref()
-        .and_then(|c| Cid::from_str(c.as_str()).ok());
-    let mut all_cids: Vec<Cid> = block_cids_str
-        .iter()
-        .filter_map(|s| Cid::from_str(s).ok())
-        .filter(|c| Some(*c) != prev_cid)
-        .collect();
-    if !all_cids.contains(&commit_cid) {
-        all_cids.push(commit_cid);
-    }
-    if let Some(commit_bytes) = prefetched.get(&commit_cid)
-        && let Some(rev) = extract_rev_from_commit_bytes(commit_bytes)
-    {
-        frame.rev = rev;
-    }
-    if let Some(ref pc) = prev_cid
+    let ctx = prepare_commit_event(event)?;
+    let mut frame = ctx.frame;
+    if let Some(ref pc) = ctx.prev_cid
         && let Some(prev_bytes) = prefetched.get(pc)
         && let Some(rev) = extract_rev_from_commit_bytes(prev_bytes)
     {
         frame.since = Some(rev);
     }
-    let car_bytes = if !all_cids.is_empty() {
-        let (commit_data, other_blocks): (Vec<_>, Vec<_>) = all_cids
-            .into_iter()
-            .filter_map(|cid| prefetched.get(&cid).map(|data| (cid, data.clone())))
-            .partition(|(cid, _)| *cid == commit_cid);
-        let commit_bytes_for_car = commit_data.into_iter().next().map(|(_, data)| data);
-        let blocks: BTreeMap<Cid, Bytes> = other_blocks.into_iter().collect();
-        write_car_blocks(commit_cid, commit_bytes_for_car, blocks).await?
-    } else {
-        Vec::new()
-    };
-    frame.blocks = car_bytes;
-    let header = FrameHeader {
-        op: 1,
-        t: FrameType::Commit,
-    };
-    let mut bytes = Vec::with_capacity(frame.blocks.len() + 512);
-    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
-    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
-    Ok(bytes)
+    if ctx.block_cids.is_empty() {
+        frame.blocks = Vec::new();
+        let capacity = frame.blocks.len() + 512;
+        return serialize_event_frame(FrameType::Commit, &frame, capacity);
+    }
+    let resolved = ctx
+        .block_cids
+        .into_iter()
+        .filter_map(|cid| prefetched.get(&cid).map(|data| (cid, data.clone())));
+    let (commit_bytes, other_blocks) = partition_blocks(resolved, ctx.commit_cid);
+    finalize_commit_frame(frame, ctx.commit_cid, commit_bytes, other_blocks).await
 }
 
 pub fn format_info_frame(
     name: InfoFrameName,
     message: Option<&str>,
 ) -> Result<Vec<u8>, SyncFrameError> {
-    let header = FrameHeader {
-        op: 1,
-        t: FrameType::Info,
-    };
-    let frame = InfoFrame {
-        name,
-        message: message.map(String::from),
-    };
-    let mut bytes = Vec::with_capacity(128);
-    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
-    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
-    Ok(bytes)
+    serialize_event_frame(
+        FrameType::Info,
+        &InfoFrame {
+            name,
+            message: message.map(String::from),
+        },
+        128,
+    )
 }
 
 pub fn format_error_frame(
     error: ErrorFrameName,
     message: Option<&str>,
 ) -> Result<Vec<u8>, SyncFrameError> {
-    let header = ErrorFrameHeader { op: -1 };
-    let frame = ErrorFrameBody {
-        error,
-        message: message.map(String::from),
-    };
-    let mut bytes = Vec::with_capacity(128);
-    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
-    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
-    Ok(bytes)
+    serialize_cbor_pair(
+        &ErrorFrameHeader { op: -1 },
+        &ErrorFrameBody {
+            error,
+            message: message.map(String::from),
+        },
+        128,
+    )
 }
