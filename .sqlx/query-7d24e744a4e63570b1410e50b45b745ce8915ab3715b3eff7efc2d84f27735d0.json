@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT provider_username, last_login_at FROM external_identities WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "provider_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "last_login_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "7d24e744a4e63570b1410e50b45b745ce8915ab3715b3eff7efc2d84f27735d0"
+}

@@ -22,7 +22,7 @@ pub async fn require_verified_or_delegated<'a>(
     user: &'a AuthenticatedUser,
 ) -> Result<AccountVerified<'a>, ApiError> {
     let is_verified = state
-        .user_repo
+        .repos.user
         .has_verified_comms_channel(&user.did)
         .await
         .unwrap_or(false);
@@ -32,7 +32,7 @@ pub async fn require_verified_or_delegated<'a>(
     }
 
     let is_delegated = state
-        .delegation_repo
+        .repos.delegation
         .is_delegated_account(&user.did)
         .await
         .unwrap_or(false);
@@ -45,7 +45,7 @@ pub async fn require_verified_or_delegated<'a>(
 }
 
 pub async fn require_not_migrated(state: &AppState, did: &Did) -> Result<(), ApiError> {
-    match state.user_repo.is_account_migrated(did).await {
+    match state.repos.user.is_account_migrated(did).await {
         Ok(true) => Err(ApiError::AccountMigrated),
         Ok(false) => Ok(()),
         Err(e) => {

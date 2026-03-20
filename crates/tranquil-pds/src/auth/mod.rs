@@ -61,6 +61,16 @@ pub fn lxm_permits(lxm: &str, expected: &str) -> bool {
     lxm == "*" || lxm == expected
 }
 
+pub fn try_decrypt_user_key(
+    key_bytes: Option<&[u8]>,
+    encryption_version: Option<i32>,
+) -> Option<Vec<u8>> {
+    match (key_bytes, encryption_version) {
+        (Some(kb), Some(ev)) => crate::config::decrypt_key(kb, Some(ev)).ok(),
+        _ => None,
+    }
+}
+
 pub fn encrypt_totp_secret(secret: &[u8]) -> Result<Vec<u8>, crate::config::CryptoError> {
     crate::config::encrypt_key(secret)
 }
@@ -486,13 +496,10 @@ async fn validate_bearer_token_with_options_internal(
 
         let now = chrono::Utc::now();
         if oauth_token.expires_at > now {
-            let key_bytes = if let (Some(kb), Some(ev)) =
-                (&oauth_token.key_bytes, oauth_token.encryption_version)
-            {
-                crate::config::decrypt_key(kb, Some(ev)).ok()
-            } else {
-                None
-            };
+            let key_bytes = try_decrypt_user_key(
+                oauth_token.key_bytes.as_deref(),
+                oauth_token.encryption_version,
+            );
             let did: Did = oauth_token
                 .did
                 .parse()
@@ -592,13 +599,10 @@ pub async fn validate_token_with_dpop(
             if !allow_takendown && status.is_takendown() {
                 return Err(TokenValidationError::AccountTakedown);
             }
-            let key_bytes = if let (Some(kb), Some(ev)) =
-                (&user_info.key_bytes, user_info.encryption_version)
-            {
-                crate::config::decrypt_key(kb, Some(ev)).ok()
-            } else {
-                None
-            };
+            let key_bytes = try_decrypt_user_key(
+                user_info.key_bytes.as_deref(),
+                user_info.encryption_version,
+            );
             Ok(AuthenticatedUser {
                 did: result_did,
                 key_bytes,

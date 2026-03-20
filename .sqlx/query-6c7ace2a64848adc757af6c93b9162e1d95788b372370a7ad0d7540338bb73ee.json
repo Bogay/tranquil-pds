@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT state, request_uri, provider as \"provider: SsoProviderType\", action, nonce, code_verifier\n        FROM sso_auth_state\n        WHERE state = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider: SsoProviderType",
+        "type_info": {
+          "Custom": {
+            "name": "sso_provider_type",
+            "kind": {
+              "Enum": [
+                "github",
+                "discord",
+                "google",
+                "gitlab",
+                "oidc",
+                "apple"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "action",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "nonce",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "code_verifier",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "6c7ace2a64848adc757af6c93b9162e1d95788b372370a7ad0d7540338bb73ee"
+}

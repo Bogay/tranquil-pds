@@ -71,17 +71,6 @@ impl VerifiedResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct EnabledResponse {
-    pub enabled: bool,
-}
-
-impl EnabledResponse {
-    pub fn response(enabled: bool) -> impl IntoResponse {
-        Json(Self { enabled })
-    }
-}
-
-#[derive(Debug, Serialize)]
 pub struct StatusResponse {
     pub status: String,
 }
@@ -91,18 +80,6 @@ impl StatusResponse {
         Json(Self {
             status: status.into(),
         })
-    }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DidDocumentResponse {
-    pub did_document: serde_json::Value,
-}
-
-impl DidDocumentResponse {
-    pub fn response(did_document: serde_json::Value) -> impl IntoResponse {
-        Json(Self { did_document })
     }
 }
 

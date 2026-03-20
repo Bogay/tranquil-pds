@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::cid_types::CommitCid;
-use crate::repo::tracking::TrackingBlockStore;
+use crate::repo::TrackingBlockStore;
 use crate::state::AppState;
 use crate::types::{Did, Handle, Nsid, Rkey};
 use bytes::Bytes;
@@ -85,7 +85,7 @@ impl From<CommitError> for ApiError {
 
 pub async fn get_current_root_cid(state: &AppState, user_id: Uuid) -> Result<CommitCid, ApiError> {
     let root_cid_str = state
-        .repo_repo
+        .repos.repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
         .map_err(|e| {
@@ -98,29 +98,10 @@ pub async fn get_current_root_cid(state: &AppState, user_id: Uuid) -> Result<Com
 }
 
 pub fn extract_blob_cids(record: &Value) -> Vec<String> {
-    let mut blobs = Vec::new();
-    extract_blob_cids_recursive(record, &mut blobs);
-    blobs
-}
-
-fn extract_blob_cids_recursive(value: &Value, blobs: &mut Vec<String>) {
-    match value {
-        Value::Object(map) => {
-            if map.get("$type").and_then(|v| v.as_str()) == Some("blob")
-                && let Some(ref_obj) = map.get("ref")
-                && let Some(link) = ref_obj.get("$link").and_then(|v| v.as_str())
-            {
-                blobs.push(link.to_string());
-            }
-            map.values()
-                .for_each(|v| extract_blob_cids_recursive(v, blobs));
-        }
-        Value::Array(arr) => {
-            arr.iter()
-                .for_each(|v| extract_blob_cids_recursive(v, blobs));
-        }
-        _ => {}
-    }
+    crate::sync::import::find_blob_refs(record, 0)
+        .into_iter()
+        .map(|b| b.cid)
+        .collect()
 }
 
 use crate::types::AtUri;
@@ -187,7 +168,7 @@ pub async fn begin_repo_write(
     let write_lock = state.repo_write_locks.lock(user_id).await;
 
     let root_cid_str = state
-        .repo_repo
+        .repos.repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
         .map_err(|e| {
@@ -273,7 +254,7 @@ pub async fn finalize_repo_write(
     if let Some(controller_did) = params.controller_did
         && let Some(detail) = params.delegation_detail
         && let Err(e) = state
-            .delegation_repo
+            .repos.delegation
             .log_delegation_action(
                 params.did,
                 controller_did,
@@ -370,7 +351,7 @@ pub async fn commit_and_log(
         obsolete_cids,
     } = params;
     let key_row = state
-        .user_repo
+        .repos.user
         .get_user_key_by_id(user_id)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("Failed to fetch signing key: {}", e)))?
@@ -504,7 +485,7 @@ pub async fn commit_and_log(
     };
 
     let _result = state
-        .repo_repo
+        .repos.repo
         .apply_commit(input)
         .await
         .map_err(|e| match e {
@@ -526,7 +507,7 @@ pub async fn create_record_internal(
     record: &serde_json::Value,
 ) -> Result<(String, Cid), CommitError> {
     let user_id: Uuid = state
-        .user_repo
+        .repos.user
         .get_id_by_did(did)
         .await
         .map_err(|e| CommitError::DatabaseError(e.to_string()))?
@@ -535,7 +516,7 @@ pub async fn create_record_internal(
     let _write_lock = state.repo_write_locks.lock(user_id).await;
 
     let root_cid_link = state
-        .repo_repo
+        .repos.repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
         .map_err(|e| CommitError::DatabaseError(e.to_string()))?
@@ -629,7 +610,7 @@ pub async fn sequence_identity_event(
     handle: Option<&Handle>,
 ) -> Result<SequenceNumber, CommitError> {
     state
-        .repo_repo
+        .repos.repo
         .insert_identity_event(did, handle)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("identity event: {}", e)))
@@ -640,7 +621,7 @@ pub async fn sequence_account_event(
     status: tranquil_db_traits::AccountStatus,
 ) -> Result<SequenceNumber, CommitError> {
     state
-        .repo_repo
+        .repos.repo
         .insert_account_event(did, status)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("account event: {}", e)))
@@ -655,7 +636,7 @@ pub async fn sequence_sync_event(
         .parse()
         .map_err(|_| CommitError::InvalidCid(commit_cid.to_string()))?;
     state
-        .repo_repo
+        .repos.repo
         .insert_sync_event(did, &cid_link, rev)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("sync event: {}", e)))
@@ -671,7 +652,7 @@ pub async fn sequence_genesis_commit(
     let commit_cid_link = crate::types::CidLink::from(commit_cid);
     let mst_root_cid_link = crate::types::CidLink::from(mst_root_cid);
     state
-        .repo_repo
+        .repos.repo
         .insert_genesis_commit_event(did, &commit_cid_link, &mst_root_cid_link, rev)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("genesis commit event: {}", e)))

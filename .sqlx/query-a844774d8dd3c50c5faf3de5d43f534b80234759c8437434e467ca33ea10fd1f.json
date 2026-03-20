@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT preferred_comms_channel as \"preferred_comms_channel: String\", discord_username FROM users WHERE did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "preferred_comms_channel: String",
+        "type_info": {
+          "Custom": {
+            "name": "comms_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "discord_username",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "a844774d8dd3c50c5faf3de5d43f534b80234759c8437434e467ca33ea10fd1f"
+}

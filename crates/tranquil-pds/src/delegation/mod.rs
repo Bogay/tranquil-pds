@@ -26,7 +26,7 @@ pub struct ResolvedIdentity {
 
 pub async fn resolve_identity(state: &AppState, did: &Did) -> Option<ResolvedIdentity> {
     let is_local = state
-        .user_repo
+        .repos.user
         .get_by_did(did)
         .await
         .ok()

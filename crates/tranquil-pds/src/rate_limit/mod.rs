@@ -2,15 +2,20 @@ mod extractor;
 
 pub use extractor::*;
 
+use crate::state::RateLimitKind;
 use governor::{
-    Quota, RateLimiter,
+    RateLimiter,
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed, keyed::DefaultKeyedStateStore},
 };
-use std::{num::NonZeroU32, sync::Arc};
+use std::sync::Arc;
 
 pub type KeyedRateLimiter = RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>;
 pub type GlobalRateLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
+
+fn keyed_limiter(kind: RateLimitKind) -> Arc<KeyedRateLimiter> {
+    Arc::new(RateLimiter::keyed(kind.params().to_governor_quota()))
+}
 
 #[derive(Clone)]
 pub struct RateLimiters {
@@ -45,123 +50,67 @@ impl Default for RateLimiters {
 impl RateLimiters {
     pub fn new() -> Self {
         Self {
-            login: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(10).unwrap() },
-            ))),
-            oauth_token: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(300).unwrap() },
-            ))),
-            oauth_authorize: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(10).unwrap() },
-            ))),
-            password_reset: Arc::new(RateLimiter::keyed(Quota::per_hour(
-                const { NonZeroU32::new(5).unwrap() },
-            ))),
-            account_creation: Arc::new(RateLimiter::keyed(Quota::per_hour(
-                const { NonZeroU32::new(10).unwrap() },
-            ))),
-            refresh_session: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(60).unwrap() },
-            ))),
-            reset_password: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(10).unwrap() },
-            ))),
-            oauth_par: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(30).unwrap() },
-            ))),
-            oauth_introspect: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(30).unwrap() },
-            ))),
-            app_password: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(10).unwrap() },
-            ))),
-            email_update: Arc::new(RateLimiter::keyed(Quota::per_hour(
-                const { NonZeroU32::new(5).unwrap() },
-            ))),
-            totp_verify: Arc::new(RateLimiter::keyed(
-                Quota::with_period(std::time::Duration::from_secs(60))
-                    .unwrap()
-                    .allow_burst(const { NonZeroU32::new(5).unwrap() }),
-            )),
-            handle_update: Arc::new(RateLimiter::keyed(
-                Quota::with_period(std::time::Duration::from_secs(30))
-                    .unwrap()
-                    .allow_burst(const { NonZeroU32::new(10).unwrap() }),
-            )),
-            handle_update_daily: Arc::new(RateLimiter::keyed(
-                Quota::with_period(std::time::Duration::from_secs(1728))
-                    .unwrap()
-                    .allow_burst(const { NonZeroU32::new(50).unwrap() }),
-            )),
-            verification_check: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(60).unwrap() },
-            ))),
-            sso_initiate: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(10).unwrap() },
-            ))),
-            sso_callback: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(30).unwrap() },
-            ))),
-            sso_unlink: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(10).unwrap() },
-            ))),
-            oauth_register_complete: Arc::new(RateLimiter::keyed(
-                Quota::with_period(std::time::Duration::from_secs(60))
-                    .unwrap()
-                    .allow_burst(const { NonZeroU32::new(5).unwrap() }),
-            )),
-            handle_verification: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                const { NonZeroU32::new(10).unwrap() },
-            ))),
+            login: keyed_limiter(RateLimitKind::Login),
+            oauth_token: keyed_limiter(RateLimitKind::OAuthToken),
+            oauth_authorize: keyed_limiter(RateLimitKind::OAuthAuthorize),
+            password_reset: keyed_limiter(RateLimitKind::PasswordReset),
+            account_creation: keyed_limiter(RateLimitKind::AccountCreation),
+            refresh_session: keyed_limiter(RateLimitKind::RefreshSession),
+            reset_password: keyed_limiter(RateLimitKind::ResetPassword),
+            oauth_par: keyed_limiter(RateLimitKind::OAuthPar),
+            oauth_introspect: keyed_limiter(RateLimitKind::OAuthIntrospect),
+            app_password: keyed_limiter(RateLimitKind::AppPassword),
+            email_update: keyed_limiter(RateLimitKind::EmailUpdate),
+            totp_verify: keyed_limiter(RateLimitKind::TotpVerify),
+            handle_update: keyed_limiter(RateLimitKind::HandleUpdate),
+            handle_update_daily: keyed_limiter(RateLimitKind::HandleUpdateDaily),
+            verification_check: keyed_limiter(RateLimitKind::VerificationCheck),
+            sso_initiate: keyed_limiter(RateLimitKind::SsoInitiate),
+            sso_callback: keyed_limiter(RateLimitKind::SsoCallback),
+            sso_unlink: keyed_limiter(RateLimitKind::SsoUnlink),
+            oauth_register_complete: keyed_limiter(RateLimitKind::OAuthRegisterComplete),
+            handle_verification: keyed_limiter(RateLimitKind::HandleVerification),
         }
     }
 
+    pub fn override_limit(kind: RateLimitKind, limit: u32) -> Arc<KeyedRateLimiter> {
+        let mut params = kind.params();
+        params.limit = limit;
+        Arc::new(RateLimiter::keyed(params.to_governor_quota()))
+    }
+
     pub fn with_login_limit(mut self, per_minute: u32) -> Self {
-        self.login = Arc::new(RateLimiter::keyed(Quota::per_minute(
-            NonZeroU32::new(per_minute).unwrap_or(const { NonZeroU32::new(10).unwrap() }),
-        )));
+        self.login = Self::override_limit(RateLimitKind::Login, per_minute);
         self
     }
 
     pub fn with_oauth_token_limit(mut self, per_minute: u32) -> Self {
-        self.oauth_token = Arc::new(RateLimiter::keyed(Quota::per_minute(
-            NonZeroU32::new(per_minute).unwrap_or(const { NonZeroU32::new(30).unwrap() }),
-        )));
+        self.oauth_token = Self::override_limit(RateLimitKind::OAuthToken, per_minute);
         self
     }
 
     pub fn with_oauth_authorize_limit(mut self, per_minute: u32) -> Self {
-        self.oauth_authorize = Arc::new(RateLimiter::keyed(Quota::per_minute(
-            NonZeroU32::new(per_minute).unwrap_or(const { NonZeroU32::new(10).unwrap() }),
-        )));
+        self.oauth_authorize = Self::override_limit(RateLimitKind::OAuthAuthorize, per_minute);
         self
     }
 
     pub fn with_password_reset_limit(mut self, per_hour: u32) -> Self {
-        self.password_reset = Arc::new(RateLimiter::keyed(Quota::per_hour(
-            NonZeroU32::new(per_hour).unwrap_or(const { NonZeroU32::new(5).unwrap() }),
-        )));
+        self.password_reset = Self::override_limit(RateLimitKind::PasswordReset, per_hour);
         self
     }
 
     pub fn with_account_creation_limit(mut self, per_hour: u32) -> Self {
-        self.account_creation = Arc::new(RateLimiter::keyed(Quota::per_hour(
-            NonZeroU32::new(per_hour).unwrap_or(const { NonZeroU32::new(10).unwrap() }),
-        )));
+        self.account_creation = Self::override_limit(RateLimitKind::AccountCreation, per_hour);
         self
     }
 
     pub fn with_email_update_limit(mut self, per_hour: u32) -> Self {
-        self.email_update = Arc::new(RateLimiter::keyed(Quota::per_hour(
-            NonZeroU32::new(per_hour).unwrap_or(const { NonZeroU32::new(5).unwrap() }),
-        )));
+        self.email_update = Self::override_limit(RateLimitKind::EmailUpdate, per_hour);
         self
     }
 
     pub fn with_sso_initiate_limit(mut self, per_minute: u32) -> Self {
-        self.sso_initiate = Arc::new(RateLimiter::keyed(Quota::per_minute(
-            NonZeroU32::new(per_minute).unwrap_or(const { NonZeroU32::new(10).unwrap() }),
-        )));
+        self.sso_initiate = Self::override_limit(RateLimitKind::SsoInitiate, per_minute);
         self
     }
 }
@@ -178,6 +127,8 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_exhaustion() {
+        use governor::Quota;
+        use std::num::NonZeroU32;
         let limiter = RateLimiter::keyed(Quota::per_minute(const { NonZeroU32::new(2).unwrap() }));
         let key = "test_ip".to_string();
 
@@ -188,6 +139,8 @@ mod tests {
 
     #[test]
     fn test_different_keys_have_separate_limits() {
+        use governor::Quota;
+        use std::num::NonZeroU32;
         let limiter = RateLimiter::keyed(Quota::per_minute(const { NonZeroU32::new(1).unwrap() }));
 
         assert!(limiter.check_key(&"ip1".to_string()).is_ok());

@@ -229,8 +229,8 @@ async fn proxy_handler(
         let http_uri = crate::util::build_full_url(&format!("/xrpc{}", uri));
 
         match crate::auth::validate_token_with_dpop(
-            state.user_repo.as_ref(),
-            state.oauth_repo.as_ref(),
+            state.repos.user.as_ref(),
+            state.repos.oauth.as_ref(),
             &token,
             extracted.scheme,
             dpop_proof,
@@ -252,7 +252,7 @@ async fn proxy_handler(
 
                 let key_bytes = match auth_user.key_bytes {
                     Some(kb) => kb,
-                    None => match state.user_repo.get_user_info_by_did(&auth_user.did).await {
+                    None => match state.repos.user.get_user_info_by_did(&auth_user.did).await {
                         Ok(Some(info)) => match info.key_bytes {
                             Some(key_bytes_enc) => {
                                 match crate::config::decrypt_key(

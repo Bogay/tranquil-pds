@@ -25,21 +25,14 @@ static DISCORD_APP_ID: OnceLock<String> = OnceLock::new();
 static TELEGRAM_BOT_USERNAME: OnceLock<String> = OnceLock::new();
 
 pub fn generate_token_code() -> String {
-    generate_token_code_parts(2, 5)
-}
-
-pub fn generate_token_code_parts(parts: usize, part_len: usize) -> String {
     let mut rng = rand::thread_rng();
     let chars: Vec<char> = BASE32_ALPHABET.chars().collect();
-
-    (0..parts)
-        .map(|_| {
-            (0..part_len)
-                .map(|_| chars[rng.gen_range(0..chars.len())])
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("-")
+    let gen_segment = |rng: &mut rand::rngs::ThreadRng| -> String {
+        (0..5)
+            .map(|_| chars[rng.gen_range(0..chars.len())])
+            .collect()
+    };
+    format!("{}-{}", gen_segment(&mut rng), gen_segment(&mut rng))
 }
 
 pub fn parse_repeated_query_param(query: Option<&str>, key: &str) -> Vec<String> {
@@ -293,15 +286,6 @@ mod tests {
                 .filter(|&c| c != '-')
                 .all(|c| BASE32_ALPHABET.contains(c))
         );
-    }
-
-    #[test]
-    fn test_generate_token_code_parts() {
-        let code = generate_token_code_parts(3, 4);
-        let parts: Vec<&str> = code.split('-').collect();
-        assert_eq!(parts.len(), 3);
-
-        assert!(parts.iter().all(|part| part.len() == 4));
     }
 
     #[test]

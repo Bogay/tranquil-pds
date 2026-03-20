@@ -1,0 +1,81 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, did, provider as \"provider: SsoProviderType\", provider_user_id, provider_username, provider_email\n        FROM external_identities\n        WHERE provider = $1 AND provider_user_id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider: SsoProviderType",
+        "type_info": {
+          "Custom": {
+            "name": "sso_provider_type",
+            "kind": {
+              "Enum": [
+                "github",
+                "discord",
+                "google",
+                "gitlab",
+                "oidc",
+                "apple"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "provider_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_email",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        {
+          "Custom": {
+            "name": "sso_provider_type",
+            "kind": {
+              "Enum": [
+                "github",
+                "discord",
+                "google",
+                "gitlab",
+                "oidc",
+                "apple"
+              ]
+            }
+          }
+        },
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "59e63c5cf92985714e9586d1ce012efef733d4afaa4ea09974daf8303805e5d2"
+}

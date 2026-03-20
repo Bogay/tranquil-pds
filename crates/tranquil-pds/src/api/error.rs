@@ -56,7 +56,6 @@ pub enum ApiError {
     TotpAlreadyEnabled,
     TotpNotEnabled,
     InvalidCode(Option<String>),
-    InvalidChannel,
     IdentifierMismatch,
     NoPasskeys,
     NoChallengeInProgress,
@@ -182,7 +181,6 @@ impl ApiError {
             | Self::InvalidCollection
             | Self::InvalidRecord(_)
             | Self::TotpNotEnabled
-            | Self::InvalidChannel
             | Self::IdentifierMismatch
             | Self::NoPasskeys
             | Self::NoChallengeInProgress
@@ -272,7 +270,6 @@ impl ApiError {
             Self::TotpAlreadyEnabled => Cow::Borrowed("TotpAlreadyEnabled"),
             Self::TotpNotEnabled => Cow::Borrowed("TotpNotEnabled"),
             Self::InvalidCode(_) => Cow::Borrowed("InvalidCode"),
-            Self::InvalidChannel => Cow::Borrowed("InvalidChannel"),
             Self::IdentifierMismatch => Cow::Borrowed("IdentifierMismatch"),
             Self::NoPasskeys => Cow::Borrowed("NoPasskeys"),
             Self::NoChallengeInProgress => Cow::Borrowed("NoChallengeInProgress"),
@@ -390,7 +387,6 @@ impl ApiError {
             Self::Forbidden => "Forbidden".into(),
             Self::InvitesDisabled => "Invite codes are disabled on this server".into(),
             Self::InvalidCollection => "Invalid collection".into(),
-            Self::InvalidChannel => "Invalid notification channel".into(),
             Self::TotpAlreadyEnabled => "TOTP is already enabled".into(),
             Self::TotpNotEnabled => "TOTP is not enabled".into(),
             Self::DuplicateAppPassword => "An app password with this name already exists".into(),

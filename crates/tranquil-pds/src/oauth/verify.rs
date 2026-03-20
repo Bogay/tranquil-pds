@@ -302,7 +302,7 @@ impl FromRequestParts<AppState> for OAuthUser {
             .headers
             .get(crate::util::HEADER_DPOP)
             .and_then(|v| v.to_str().ok());
-        if let Ok(result) = try_legacy_auth(state.user_repo.as_ref(), token).await {
+        if let Ok(result) = try_legacy_auth(state.repos.user.as_ref(), token).await {
             return Ok(OAuthUser {
                 did: result.did,
                 client_id: None,
@@ -314,7 +314,7 @@ impl FromRequestParts<AppState> for OAuthUser {
         let http_method = parts.method.as_str();
         let http_uri = crate::util::build_full_url(&parts.uri.to_string());
         match verify_oauth_access_token(
-            state.oauth_repo.as_ref(),
+            state.repos.oauth.as_ref(),
             token,
             dpop_proof,
             http_method,

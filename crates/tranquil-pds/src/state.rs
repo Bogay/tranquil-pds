@@ -16,11 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
-use tranquil_db::{
-    BacklinkRepository, BlobRepository, DelegationRepository, InfraRepository, OAuthRepository,
-    PostgresRepositories, RepoEventNotifier, RepoRepository, SessionRepository, SsoRepository,
-    UserRepository,
-};
+use tranquil_db::PostgresRepositories;
 use tranquil_db_traits::SequencedEvent;
 
 static RATE_LIMITING_DISABLED: AtomicBool = AtomicBool::new(false);
@@ -36,15 +32,6 @@ pub fn init_rate_limit_override() {
 #[derive(Clone)]
 pub struct AppState {
     pub repos: Arc<PostgresRepositories>,
-    pub user_repo: Arc<dyn UserRepository>,
-    pub oauth_repo: Arc<dyn OAuthRepository>,
-    pub session_repo: Arc<dyn SessionRepository>,
-    pub delegation_repo: Arc<dyn DelegationRepository>,
-    pub repo_repo: Arc<dyn RepoRepository>,
-    pub blob_repo: Arc<dyn BlobRepository>,
-    pub infra_repo: Arc<dyn InfraRepository>,
-    pub backlink_repo: Arc<dyn BacklinkRepository>,
-    pub event_notifier: Arc<dyn RepoEventNotifier>,
     pub block_store: PostgresBlockStore,
     pub blob_store: Arc<dyn BlobStorage>,
     pub firehose_tx: broadcast::Sender<SequencedEvent>,
@@ -54,7 +41,6 @@ pub struct AppState {
     pub cache: Arc<dyn Cache>,
     pub distributed_rate_limiter: Arc<dyn DistributedRateLimiter>,
     pub did_resolver: Arc<DidResolver>,
-    pub sso_repo: Arc<dyn SsoRepository>,
     pub sso_manager: SsoManager,
     pub webauthn_config: Arc<WebAuthnConfig>,
     pub cross_pds_oauth: Arc<CrossPdsOAuthClient>,
@@ -67,6 +53,17 @@ pub struct AppState {
 pub struct RateLimitParams {
     pub limit: u32,
     pub window_ms: u64,
+}
+
+impl RateLimitParams {
+    pub fn to_governor_quota(self) -> governor::Quota {
+        use std::num::NonZeroU32;
+        let burst = NonZeroU32::new(self.limit).unwrap_or(NonZeroU32::MIN);
+        let period = std::time::Duration::from_millis(self.window_ms);
+        governor::Quota::with_period(period)
+            .expect("rate limit window must be non-zero")
+            .allow_burst(burst)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -119,7 +116,7 @@ impl RateLimitKind {
         }
     }
 
-    const fn params(&self) -> RateLimitParams {
+    pub const fn params(&self) -> RateLimitParams {
         match self {
             Self::Login => RateLimitParams {
                 limit: 10,
@@ -286,16 +283,6 @@ impl AppState {
         );
 
         Self {
-            user_repo: repos.user.clone(),
-            oauth_repo: repos.oauth.clone(),
-            session_repo: repos.session.clone(),
-            delegation_repo: repos.delegation.clone(),
-            repo_repo: repos.repo.clone(),
-            blob_repo: repos.blob.clone(),
-            infra_repo: repos.infra.clone(),
-            backlink_repo: repos.backlink.clone(),
-            event_notifier: repos.event_notifier.clone(),
-            sso_repo: repos.sso.clone(),
             repos,
             block_store,
             blob_store,

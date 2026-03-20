@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM sso_auth_state\n        WHERE state = $1 AND expires_at > NOW()\n        RETURNING state, request_uri\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_uri",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "aee3e8e1d8924d41bec7d866e274f8bb2ddef833eb03326103c2d0a17ee56154"
+}

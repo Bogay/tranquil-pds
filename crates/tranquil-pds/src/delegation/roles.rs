@@ -29,9 +29,9 @@ async fn check_delegation_flag(
     error_msg: &str,
 ) -> Result<bool, ApiError> {
     let result = if check_is_delegated {
-        state.delegation_repo.is_delegated_account(did).await
+        state.repos.delegation.is_delegated_account(did).await
     } else {
-        state.delegation_repo.controls_any_accounts(did).await
+        state.repos.delegation.controls_any_accounts(did).await
     };
     match result {
         Ok(true) => Err(ApiError::InvalidDelegation(error_msg.into())),

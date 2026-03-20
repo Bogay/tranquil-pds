@@ -1,6 +1,4 @@
-use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::Deref;
 
 pub const MAX_EMAIL_LENGTH: usize = 254;
 pub const MAX_LOCAL_PART_LENGTH: usize = 64;
@@ -11,56 +9,6 @@ const EMAIL_LOCAL_SPECIAL_CHARS: &str = ".!#$%&'*+/=?^_`{|}~-";
 pub const MIN_HANDLE_LENGTH: usize = 3;
 pub const MAX_HANDLE_LENGTH: usize = 253;
 pub const MAX_SERVICE_HANDLE_LOCAL_PART: usize = 18;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct ValidatedLocalHandle(String);
-
-impl ValidatedLocalHandle {
-    pub fn new(handle: impl AsRef<str>) -> Result<Self, HandleValidationError> {
-        let validated = validate_short_handle(handle.as_ref())?;
-        Ok(Self(validated))
-    }
-
-    pub fn new_allow_reserved(handle: impl AsRef<str>) -> Result<Self, HandleValidationError> {
-        let validated = validate_service_handle(handle.as_ref(), ReservedHandlePolicy::Allow)?;
-        Ok(Self(validated))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn into_inner(self) -> String {
-        self.0
-    }
-}
-
-impl Deref for ValidatedLocalHandle {
-    type Target = str;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl fmt::Display for ValidatedLocalHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl TryFrom<String> for ValidatedLocalHandle {
-    type Error = HandleValidationError;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl From<ValidatedLocalHandle> for String {
-    fn from(handle: ValidatedLocalHandle) -> Self {
-        handle.0
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmailValidationError {
@@ -98,66 +46,6 @@ impl fmt::Display for EmailValidationError {
 }
 
 impl std::error::Error for EmailValidationError {}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct ValidatedEmail(String);
-
-impl ValidatedEmail {
-    pub fn new(email: impl AsRef<str>) -> Result<Self, EmailValidationError> {
-        let email = email.as_ref().trim();
-        validate_email_detailed(email)?;
-        Ok(Self(email.to_string()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn into_inner(self) -> String {
-        self.0
-    }
-
-    pub fn local_part(&self) -> &str {
-        self.0
-            .rsplit_once('@')
-            .map(|(local, _)| local)
-            .unwrap_or("")
-    }
-
-    pub fn domain(&self) -> &str {
-        self.0
-            .rsplit_once('@')
-            .map(|(_, domain)| domain)
-            .unwrap_or("")
-    }
-}
-
-impl Deref for ValidatedEmail {
-    type Target = str;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl fmt::Display for ValidatedEmail {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl TryFrom<String> for ValidatedEmail {
-    type Error = EmailValidationError;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl From<ValidatedEmail> for String {
-    fn from(email: ValidatedEmail) -> Self {
-        email.0
-    }
-}
 
 fn validate_email_detailed(email: &str) -> Result<(), EmailValidationError> {
     if email.is_empty() {
@@ -386,44 +274,7 @@ pub fn validate_service_handle(
 }
 
 pub fn is_valid_email(email: &str) -> bool {
-    let email = email.trim();
-    if email.is_empty() || email.len() > MAX_EMAIL_LENGTH {
-        return false;
-    }
-    let parts: Vec<&str> = email.rsplitn(2, '@').collect();
-    if parts.len() != 2 {
-        return false;
-    }
-    let domain = parts[0];
-    let local = parts[1];
-    if local.is_empty() || local.len() > MAX_LOCAL_PART_LENGTH {
-        return false;
-    }
-    if local.starts_with('.') || local.ends_with('.') {
-        return false;
-    }
-    if local.contains("..") {
-        return false;
-    }
-    if !local
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || EMAIL_LOCAL_SPECIAL_CHARS.contains(c))
-    {
-        return false;
-    }
-    if domain.is_empty() || domain.len() > MAX_DOMAIN_LENGTH {
-        return false;
-    }
-    if !domain.contains('.') {
-        return false;
-    }
-    domain.split('.').all(|label| {
-        !label.is_empty()
-            && label.len() <= MAX_DOMAIN_LABEL_LENGTH
-            && !label.starts_with('-')
-            && !label.ends_with('-')
-            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-    })
+    validate_email_detailed(email.trim()).is_ok()
 }
 
 pub fn is_valid_telegram_username(username: &str) -> bool {

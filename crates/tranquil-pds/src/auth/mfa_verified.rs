@@ -76,12 +76,12 @@ pub async fn require_legacy_session_mfa<'a>(
 ) -> Result<MfaVerified<'a>, ApiError> {
     use crate::auth::reauth::check_legacy_session_mfa;
 
-    if check_legacy_session_mfa(&*state.session_repo, &user.did).await {
+    if check_legacy_session_mfa(&*state.repos.session, &user.did).await {
         Ok(MfaVerified::from_session_reauth(user))
     } else {
         let methods = crate::auth::reauth::get_available_reauth_methods(
-            &*state.user_repo,
-            &*state.session_repo,
+            &*state.repos.user,
+            &*state.repos.session,
             &user.did,
         )
         .await;
@@ -99,7 +99,7 @@ pub async fn require_reauth_window<'a>(
     use chrono::Utc;
 
     let status = state
-        .session_repo
+        .repos.session
         .get_session_mfa_status(&user.did)
         .await
         .ok()
@@ -114,8 +114,8 @@ pub async fn require_reauth_window<'a>(
                 }
             }
             let methods = crate::auth::reauth::get_available_reauth_methods(
-                &*state.user_repo,
-                &*state.session_repo,
+                &*state.repos.user,
+                &*state.repos.session,
                 &user.did,
             )
             .await;
@@ -125,8 +125,8 @@ pub async fn require_reauth_window<'a>(
         }
         None => {
             let methods = crate::auth::reauth::get_available_reauth_methods(
-                &*state.user_repo,
-                &*state.session_repo,
+                &*state.repos.user,
+                &*state.repos.session,
                 &user.did,
             )
             .await;
@@ -144,19 +144,19 @@ pub async fn require_reauth_window_if_available<'a>(
     use crate::auth::reauth::check_reauth_required_cached;
 
     let has_password = state
-        .user_repo
+        .repos.user
         .has_password_by_did(&user.did)
         .await
         .ok()
         .flatten()
         .unwrap_or(false);
     let has_passkeys = state
-        .user_repo
+        .repos.user
         .has_passkeys(&user.did)
         .await
         .unwrap_or(false);
     let has_totp = state
-        .user_repo
+        .repos.user
         .has_totp_enabled(&user.did)
         .await
         .unwrap_or(false);
@@ -167,10 +167,10 @@ pub async fn require_reauth_window_if_available<'a>(
         return Ok(None);
     }
 
-    if check_reauth_required_cached(&*state.session_repo, &state.cache, &user.did).await {
+    if check_reauth_required_cached(&*state.repos.session, &state.cache, &user.did).await {
         let methods = crate::auth::reauth::get_available_reauth_methods(
-            &*state.user_repo,
-            &*state.session_repo,
+            &*state.repos.user,
+            &*state.repos.session,
             &user.did,
         )
         .await;
@@ -188,7 +188,7 @@ pub async fn verify_password_mfa<'a>(
     password: &str,
 ) -> Result<MfaVerified<'a>, crate::api::error::ApiError> {
     let hash = state
-        .user_repo
+        .repos.user
         .get_password_hash_by_did(&user.did)
         .await
         .ok()
@@ -220,7 +220,7 @@ pub async fn verify_totp_mfa<'a>(
 
     if is_backup_code_format(code) {
         let backup_codes = state
-            .user_repo
+            .repos.user
             .get_unused_backup_codes(&user.did)
             .await
             .ok()
@@ -233,7 +233,7 @@ pub async fn verify_totp_mfa<'a>(
 
         return match matched {
             Some(row) => {
-                let _ = state.user_repo.mark_backup_code_used(row.id).await;
+                let _ = state.repos.user.mark_backup_code_used(row.id).await;
                 Ok(MfaVerified::from_recovery_code(user))
             }
             None => Err(crate::api::error::ApiError::InvalidCode(Some(
@@ -242,7 +242,7 @@ pub async fn verify_totp_mfa<'a>(
         };
     }
 
-    let verified_record = match state.user_repo.get_totp_record_state(&user.did).await {
+    let verified_record = match state.repos.user.get_totp_record_state(&user.did).await {
         Ok(Some(TotpRecordState::Verified(record))) => record,
         _ => {
             return Err(crate::api::error::ApiError::TotpNotEnabled);
@@ -256,7 +256,7 @@ pub async fn verify_totp_mfa<'a>(
     .map_err(|_| crate::api::error::ApiError::InternalError(None))?;
 
     if verify_totp_code(&secret, code) {
-        let _ = state.user_repo.update_totp_last_used(&user.did).await;
+        let _ = state.repos.user.update_totp_last_used(&user.did).await;
         Ok(MfaVerified::from_totp(user))
     } else {
         Err(crate::api::error::ApiError::InvalidCode(Some(

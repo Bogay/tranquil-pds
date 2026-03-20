@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM sso_pending_registration\n        WHERE token = $1 AND expires_at > NOW()\n        RETURNING token\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1c84643fd6bc57c76517849a64d2d877df337e823d4c2c2b077f695bbfc9e9ac"
+}

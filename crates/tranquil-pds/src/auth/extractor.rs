@@ -232,7 +232,7 @@ async fn verify_oauth_token_and_build_user(
     uri: &str,
 ) -> Result<AuthenticatedUser, AuthError> {
     match crate::oauth::verify::verify_oauth_access_token(
-        state.oauth_repo.as_ref(),
+        state.repos.oauth.as_ref(),
         token,
         dpop_proof,
         method,
@@ -242,7 +242,7 @@ async fn verify_oauth_token_and_build_user(
     {
         Ok(result) => {
             let user_info = state
-                .user_repo
+                .repos.user
                 .get_user_info_by_did(&result.did)
                 .await
                 .ok()
@@ -254,9 +254,10 @@ async fn verify_oauth_token_and_build_user(
             );
             Ok(AuthenticatedUser {
                 did: result.did,
-                key_bytes: user_info.key_bytes.and_then(|kb| {
-                    crate::config::decrypt_key(&kb, user_info.encryption_version).ok()
-                }),
+                key_bytes: super::try_decrypt_user_key(
+                    user_info.key_bytes.as_deref(),
+                    user_info.encryption_version,
+                ),
                 is_admin: user_info.is_admin,
                 status,
                 scope: result.scope,
@@ -320,7 +321,7 @@ async fn extract_auth_internal(
         .unwrap_or_else(|| parts.uri.path().to_string());
     let uri = build_full_url(&original_uri);
 
-    match validate_bearer_token_for_service_auth(state.user_repo.as_ref(), &extracted.token).await {
+    match validate_bearer_token_for_service_auth(state.repos.user.as_ref(), &extracted.token).await {
         Ok(user) if !user.auth_source.is_oauth() => {
             return Ok(ExtractedAuth::User(user));
         }
