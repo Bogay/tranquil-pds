@@ -69,7 +69,7 @@ pub async fn create_session(
         input.identifier, normalized_identifier
     );
     let row = match state
-        .user_repo
+        .repos.user
         .get_login_full_by_identifier(normalized_identifier.as_str())
         .await
     {
@@ -98,7 +98,7 @@ pub async fn create_session(
         }
     };
     let credential = crate::common::verify_credential(
-        state.session_repo.as_ref(),
+        state.repos.session.as_ref(),
         row.id,
         &input.password,
         row.password_hash.as_deref(),
@@ -130,7 +130,7 @@ pub async fn create_session(
     }
     let is_verified = row.channel_verification.has_any_verified();
     let is_delegated = state
-        .delegation_repo
+        .repos.delegation
         .is_delegated_account(&row.did)
         .await
         .unwrap_or(false);
@@ -181,8 +181,8 @@ pub async fn create_session(
         Ok(tranquil_pds::auth::legacy_2fa::Legacy2faOutcome::ChallengeSent(code)) => {
             let hostname = &tranquil_config::get().server.hostname;
             if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_2fa_code(
-                state.user_repo.as_ref(),
-                state.infra_repo.as_ref(),
+                state.repos.user.as_ref(),
+                state.repos.infra.as_ref(),
                 row.id,
                 code.as_str(),
                 hostname,
@@ -269,7 +269,7 @@ pub async fn create_session(
         app_password_name: app_password_name.clone(),
     };
     let (insert_result, did_doc) = tokio::join!(
-        state.session_repo.create_session(&session_data),
+        state.repos.session.create_session(&session_data),
         did_resolver.resolve_did_document(&did_for_doc)
     );
     if let Err(e) = insert_result {
@@ -284,8 +284,8 @@ pub async fn create_session(
         );
         let hostname = &tranquil_config::get().server.hostname;
         if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_legacy_login(
-            state.user_repo.as_ref(),
-            state.infra_repo.as_ref(),
+            state.repos.user.as_ref(),
+            state.repos.infra.as_ref(),
             row.id,
             hostname,
             client_ip,
@@ -359,7 +359,7 @@ pub async fn get_session(
     let did_for_doc = auth.did.clone();
     let did_resolver = state.did_resolver.clone();
     let (db_result, did_doc) = tokio::join!(
-        state.user_repo.get_session_info_by_did(&auth.did),
+        state.repos.user.get_session_info_by_did(&auth.did),
         did_resolver.resolve_did_document(&did_for_doc)
     );
     match db_result {
@@ -422,7 +422,7 @@ pub async fn delete_session(
 ) -> Result<Json<EmptyResponse>, ApiError> {
     let jti = tranquil_pds::auth::extract_jti_from_headers(&headers)
         .ok_or(ApiError::AuthenticationRequired)?;
-    match state.session_repo.delete_session_by_access_jti(&jti).await {
+    match state.repos.session.delete_session_by_access_jti(&jti).await {
         Ok(rows) if rows > 0 => {
             let session_cache_key = tranquil_pds::cache_keys::session_key(&auth.did, &jti);
             let _ = state.cache.delete(&session_cache_key).await;
@@ -476,7 +476,7 @@ pub async fn refresh_session(
         }
     };
     if let Ok(Some(_)) = state
-        .session_repo
+        .repos.session
         .check_refresh_token_used(&refresh_jti)
         .await
     {
@@ -486,7 +486,7 @@ pub async fn refresh_session(
         )));
     }
     let session_row = match state
-        .session_repo
+        .repos.session
         .get_session_for_refresh(&refresh_jti)
         .await
     {
@@ -548,7 +548,7 @@ pub async fn refresh_session(
         new_refresh_expires_at: new_refresh_meta.expires_at,
     };
     match state
-        .session_repo
+        .repos.session
         .refresh_session_atomic(&refresh_data)
         .await
     {
@@ -576,7 +576,7 @@ pub async fn refresh_session(
     let did_for_doc = session_row.did.clone();
     let did_resolver = state.did_resolver.clone();
     let (db_result, did_doc) = tokio::join!(
-        state.user_repo.get_session_info_by_did(&session_row.did),
+        state.repos.user.get_session_info_by_did(&session_row.did),
         did_resolver.resolve_did_document(&did_for_doc)
     );
     match db_result {
@@ -639,7 +639,7 @@ pub async fn confirm_signup(
     Json(input): Json<ConfirmSignupInput>,
 ) -> Result<Json<ConfirmSignupOutput>, ApiError> {
     info!("confirm_signup called for DID: {}", input.did);
-    let row = match state.user_repo.get_confirm_signup_by_did(&input.did).await {
+    let row = match state.repos.user.get_confirm_signup_by_did(&input.did).await {
         Ok(Some(row)) => row,
         Ok(None) => {
             warn!("User not found for confirm_signup: {}", input.did);
@@ -702,7 +702,7 @@ pub async fn confirm_signup(
     };
 
     if let Err(e) = state
-        .user_repo
+        .repos.user
         .set_channel_verified(&input.did, row.channel)
         .await
     {
@@ -726,8 +726,8 @@ pub async fn confirm_signup(
 
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_welcome(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
         row.id,
         hostname,
     )
@@ -757,7 +757,7 @@ pub struct AutoResendResult {
 pub async fn auto_resend_verification(state: &AppState, did: &Did) -> Option<AutoResendResult> {
     let debounce_key = tranquil_pds::cache_keys::auto_verify_sent_key(did.as_str());
     let debounced = state.cache.get(&debounce_key).await.is_some();
-    let row = match state.user_repo.get_resend_verification_by_did(did).await {
+    let row = match state.repos.user.get_resend_verification_by_did(did).await {
         Ok(Some(row)) => row,
         Ok(None) => return None,
         Err(e) => {
@@ -821,7 +821,7 @@ pub async fn resend_verification(
 ) -> Result<Json<SuccessResponse>, ApiError> {
     info!("resend_verification called for DID: {}", input.did);
     let row = match state
-        .user_repo
+        .repos.user
         .get_resend_verification_by_did(&input.did)
         .await
     {
@@ -895,13 +895,13 @@ pub async fn list_sessions(
     let current_jti = tranquil_pds::auth::extract_jti_from_headers(&headers);
 
     let jwt_rows = state
-        .session_repo
+        .repos.session
         .list_sessions_by_did(&auth.did)
         .await
         .log_db_err("fetching JWT sessions")?;
 
     let oauth_rows = state
-        .oauth_repo
+        .repos.oauth
         .list_sessions_by_did(&auth.did)
         .await
         .log_db_err("fetching OAuth sessions")?;
@@ -962,13 +962,13 @@ pub async fn revoke_session(
             .map(SessionId::new)
             .map_err(|_| ApiError::InvalidRequest("Invalid session ID".into()))?;
         let access_jti = state
-            .session_repo
+            .repos.session
             .get_session_access_jti_by_id(session_id, &auth.did)
             .await
             .log_db_err("in revoke_session")?
             .ok_or(ApiError::SessionNotFound)?;
         state
-            .session_repo
+            .repos.session
             .delete_session_by_id(session_id)
             .await
             .log_db_err("deleting session")?;
@@ -983,7 +983,7 @@ pub async fn revoke_session(
             .map(TokenFamilyId::new)
             .map_err(|_| ApiError::InvalidRequest("Invalid session ID".into()))?;
         let deleted = state
-            .oauth_repo
+            .repos.oauth
             .delete_session_by_id(session_id, &auth.did)
             .await
             .log_db_err("deleting OAuth session")?;
@@ -1007,24 +1007,24 @@ pub async fn revoke_all_sessions(
 
     if auth.is_oauth() {
         state
-            .session_repo
+            .repos.session
             .delete_sessions_by_did(&auth.did)
             .await
             .log_db_err("revoking JWT sessions")?;
         let jti_typed = TokenId::from(jti.clone());
         state
-            .oauth_repo
+            .repos.oauth
             .delete_sessions_by_did_except(&auth.did, &jti_typed)
             .await
             .log_db_err("revoking OAuth sessions")?;
     } else {
         state
-            .session_repo
+            .repos.session
             .delete_sessions_by_did_except_jti(&auth.did, &jti)
             .await
             .log_db_err("revoking JWT sessions")?;
         state
-            .oauth_repo
+            .repos.oauth
             .delete_sessions_by_did(&auth.did)
             .await
             .log_db_err("revoking OAuth sessions")?;
@@ -1046,7 +1046,7 @@ pub async fn get_legacy_login_preference(
     auth: Auth<Active>,
 ) -> Result<Json<LegacyLoginPreferenceOutput>, ApiError> {
     let pref = state
-        .user_repo
+        .repos.user
         .get_legacy_login_pref(&auth.did)
         .await
         .log_db_err("getting legacy login pref")?
@@ -1079,7 +1079,7 @@ pub async fn update_legacy_login_preference(
     let reauth_mfa = require_reauth_window(&state, &auth).await?;
 
     let updated = state
-        .user_repo
+        .repos.user
         .update_legacy_login(reauth_mfa.did(), input.allow_legacy_login)
         .await
         .log_db_err("updating legacy login")?;
@@ -1117,7 +1117,7 @@ pub async fn update_locale(
     }
 
     let updated = state
-        .user_repo
+        .repos.user
         .update_locale(&auth.did, &input.preferred_locale)
         .await
         .log_db_err("updating locale")?;

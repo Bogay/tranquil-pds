@@ -66,7 +66,7 @@ pub async fn upload_blob(
     };
 
     if state
-        .user_repo
+        .repos.user
         .is_account_migrated(&did)
         .await
         .unwrap_or(false)
@@ -78,7 +78,7 @@ pub async fn upload_blob(
         get_header_str(&headers, http::header::CONTENT_TYPE).unwrap_or("application/octet-stream");
 
     let user_id = state
-        .user_repo
+        .repos.user
         .get_id_by_did(&did)
         .await
         .log_db_err("fetching user id for blob upload")?
@@ -143,7 +143,7 @@ pub async fn upload_blob(
     );
 
     match state
-        .blob_repo
+        .repos.blob
         .insert_blob(
             &cid_link,
             &mime_type,
@@ -163,7 +163,7 @@ pub async fn upload_blob(
 
     if let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
         let _ = state.blob_store.delete(&temp_key).await;
-        if let Err(db_err) = state.blob_repo.delete_blob_by_cid(&cid_link).await {
+        if let Err(db_err) = state.repos.blob.delete_blob_by_cid(&cid_link).await {
             error!(
                 "Failed to clean up orphaned blob record after copy failure: {:?}",
                 db_err
@@ -177,7 +177,7 @@ pub async fn upload_blob(
 
     if let Some(ref controller) = controller_did
         && let Err(e) = state
-            .delegation_repo
+            .repos.delegation
             .log_delegation_action(
                 &did,
                 controller,
@@ -236,7 +236,7 @@ pub async fn list_missing_blobs(
 ) -> Result<Json<ListMissingBlobsOutput>, ApiError> {
     let did = &auth.did;
     let user = state
-        .user_repo
+        .repos.user
         .get_by_did(did)
         .await
         .log_db_err("fetching user")?
@@ -245,7 +245,7 @@ pub async fn list_missing_blobs(
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
     let cursor = params.cursor.as_deref();
     let missing = state
-        .blob_repo
+        .repos.blob
         .list_missing_blobs(user.id, cursor, limit + 1)
         .await
         .log_db_err("fetching missing blobs")?;

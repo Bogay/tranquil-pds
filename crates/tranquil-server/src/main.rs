@@ -127,7 +127,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     tranquil_sync::listener::start_sequencer_listener(state.clone()).await;
 
-    let backfill_repo_repo = state.repo_repo.clone();
+    let backfill_repo_repo = state.repos.repo.clone();
     let backfill_block_store = state.block_store.clone();
     tokio::spawn(async move {
         tokio::join!(
@@ -141,7 +141,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
     });
 
-    let mut comms_service = CommsService::new(state.infra_repo.clone());
+    let mut comms_service = CommsService::new(state.repos.infra.clone());
     let mut deferred_discord_endpoint: Option<(DiscordSender, String, String)> = None;
 
     let cfg = tranquil_config::get();
@@ -249,10 +249,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let scheduled_handle = tokio::spawn(start_scheduled_tasks(
-        state.user_repo.clone(),
-        state.blob_repo.clone(),
+        state.repos.user.clone(),
+        state.repos.blob.clone(),
         state.blob_store.clone(),
-        state.sso_repo.clone(),
+        state.repos.sso.clone(),
         shutdown.clone(),
     ));
 

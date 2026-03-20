@@ -26,7 +26,7 @@ pub async fn get_notification_prefs(
     auth: Auth<Active>,
 ) -> Result<Json<NotificationPrefsOutput>, ApiError> {
     let prefs = state
-        .user_repo
+        .repos.user
         .get_notification_prefs(&auth.did)
         .await
         .log_db_err("get notification prefs")?
@@ -65,14 +65,14 @@ pub async fn get_notification_history(
     auth: Auth<Active>,
 ) -> Result<Json<GetNotificationHistoryOutput>, ApiError> {
     let user_id = state
-        .user_repo
+        .repos.user
         .get_id_by_did(&auth.did)
         .await
         .log_db_err("get user id by did")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let rows = state
-        .infra_repo
+        .repos.infra
         .get_notification_history(user_id, 50)
         .await
         .log_db_err("get notification history")?;
@@ -146,7 +146,7 @@ pub async fn request_channel_verification(
             let hostname = &tranquil_config::get().server.hostname;
             let handle_str = handle.unwrap_or("user");
             tranquil_pds::comms::comms_repo::enqueue_email_update(
-                state.infra_repo.as_ref(),
+                state.repos.infra.as_ref(),
                 user_id,
                 identifier,
                 handle_str,
@@ -165,7 +165,7 @@ pub async fn request_channel_verification(
                 hostname, encoded_token, encoded_identifier
             );
             let prefs = state
-                .user_repo
+                .repos.user
                 .get_comms_prefs(user_id)
                 .await
                 .ok()
@@ -185,7 +185,7 @@ pub async fn request_channel_verification(
             );
             let recipient = match channel {
                 CommsChannel::Telegram => state
-                    .user_repo
+                    .repos.user
                     .get_telegram_chat_id(user_id)
                     .await
                     .ok()
@@ -195,7 +195,7 @@ pub async fn request_channel_verification(
                 _ => identifier.to_string(),
             };
             state
-                .infra_repo
+                .repos.infra
                 .enqueue_comms(
                     Some(user_id),
                     channel,
@@ -238,17 +238,17 @@ async fn process_messaging_channel_update(
         }
         match channel {
             CommsChannel::Discord => state
-                .user_repo
+                .repos.user
                 .clear_discord(user_id)
                 .await
                 .log_db_err("clear discord")?,
             CommsChannel::Telegram => state
-                .user_repo
+                .repos.user
                 .clear_telegram(user_id)
                 .await
                 .log_db_err("clear telegram")?,
             CommsChannel::Signal => state
-                .user_repo
+                .repos.user
                 .clear_signal(user_id)
                 .await
                 .log_db_err("clear signal")?,
@@ -281,17 +281,17 @@ async fn process_messaging_channel_update(
 
     match channel {
         CommsChannel::Discord => state
-            .user_repo
+            .repos.user
             .set_unverified_discord(user_id, &clean)
             .await
             .log_db_err("set unverified discord")?,
         CommsChannel::Telegram => state
-            .user_repo
+            .repos.user
             .set_unverified_telegram(user_id, &clean)
             .await
             .log_db_err("set unverified telegram")?,
         CommsChannel::Signal => state
-            .user_repo
+            .repos.user
             .set_unverified_signal(user_id, &clean)
             .await
             .log_db_err("set unverified signal")?,
@@ -313,7 +313,7 @@ pub async fn update_notification_prefs(
     Json(input): Json<UpdateNotificationPrefsInput>,
 ) -> Result<Json<UpdateNotificationPrefsOutput>, ApiError> {
     let user_row = state
-        .user_repo
+        .repos.user
         .get_id_handle_email_by_did(&auth.did)
         .await
         .log_db_err("get user by did")?
@@ -324,7 +324,7 @@ pub async fn update_notification_prefs(
     let current_email = user_row.email;
 
     let current_prefs = state
-        .user_repo
+        .repos.user
         .get_notification_prefs(&auth.did)
         .await
         .log_db_err("get notification prefs for update")?
@@ -347,7 +347,7 @@ pub async fn update_notification_prefs(
 
     if input.preferred_channel.is_some() {
         state
-            .user_repo
+            .repos.user
             .update_preferred_comms_channel(&auth.did, effective_channel)
             .await
             .log_db_err("update preferred channel")?;

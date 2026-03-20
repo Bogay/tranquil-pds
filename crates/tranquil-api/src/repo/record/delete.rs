@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tracing::error;
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::auth::{Active, Auth, VerifyScope};
-use tranquil_pds::repo::tracking::TrackingBlockStore;
+use tranquil_pds::repo::TrackingBlockStore;
 use tranquil_pds::repo_ops::{
     CommitError, FinalizeParams, RecordOp, begin_repo_write, finalize_repo_write,
 };
@@ -101,7 +101,7 @@ pub async fn delete_record(
 
     let deleted_uri = AtUri::from_parts(&did, &input.collection, &input.rkey);
     if let Err(e) = state
-        .backlink_repo
+        .repos.backlink
         .remove_backlinks_by_uri(&deleted_uri)
         .await
     {
@@ -130,7 +130,7 @@ pub async fn delete_record_internal(
     let _write_lock = state.repo_write_locks.lock(user_id).await;
 
     let root_cid_str = state
-        .repo_repo
+        .repos.repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
         .map_err(|e| CommitError::DatabaseError(e.to_string()))?

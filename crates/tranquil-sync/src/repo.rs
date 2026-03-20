@@ -46,7 +46,7 @@ pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery
     };
 
     let _account =
-        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+        match assert_repo_availability(state.repos.repo.as_ref(), &did, RepoAccessLevel::Public)
             .await
         {
             Ok(a) => a,
@@ -123,7 +123,7 @@ pub async fn get_repo(
 ) -> Response {
     let did = query.did;
     let account =
-        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+        match assert_repo_availability(state.repos.repo.as_ref(), &did, RepoAccessLevel::Public)
             .await
         {
             Ok(a) => a,
@@ -143,7 +143,7 @@ pub async fn get_repo(
     }
 
     let car_bytes = match generate_repo_car_from_user_blocks(
-        state.repo_repo.as_ref(),
+        state.repos.repo.as_ref(),
         &state.block_store,
         account.user_id,
         &head_cid,
@@ -166,7 +166,7 @@ pub async fn get_repo(
 }
 
 async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str) -> Response {
-    let user_id = match state.user_repo.get_id_by_did(did).await {
+    let user_id = match state.repos.user.get_id_by_did(did).await {
         Ok(Some(id)) => id,
         Ok(None) => {
             return ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did)))
@@ -179,7 +179,7 @@ async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str
     };
 
     let block_cid_bytes = match state
-        .repo_repo
+        .repos.repo
         .get_user_block_cids_since_rev(user_id, since)
         .await
     {
@@ -252,7 +252,7 @@ pub async fn get_record(
 
     let did = query.did;
     let account =
-        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+        match assert_repo_availability(state.repos.repo.as_ref(), &did, RepoAccessLevel::Public)
             .await
         {
             Ok(a) => a,

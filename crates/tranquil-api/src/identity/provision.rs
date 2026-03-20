@@ -136,7 +136,7 @@ pub async fn resolve_signing_key(
     match signing_key_did {
         Some(key_did) => {
             let key = state
-                .infra_repo
+                .repos.infra
                 .get_reserved_signing_key(key_did)
                 .await
                 .map_err(|e| {
@@ -295,7 +295,7 @@ pub async fn create_and_store_session(
         app_password_name: None,
     };
     state
-        .session_repo
+        .repos.session
         .create_session(&session_data)
         .await
         .map_err(|e| {
@@ -320,8 +320,8 @@ pub async fn enqueue_signup_verification(
     let formatted = tranquil_pds::auth::verification_token::format_token_for_display(&token);
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
         user_id,
         channel,
         recipient,
@@ -346,8 +346,8 @@ pub async fn enqueue_migration_verification(
     let formatted = tranquil_pds::auth::verification_token::format_token_for_display(&token);
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_migration_verification(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
         user_id,
         channel,
         recipient,

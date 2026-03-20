@@ -68,8 +68,8 @@ async fn get_account_created_at(state: &AppState, headers: &HeaderMap) -> Option
     let http_uri = "/";
 
     let auth_user = match validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.oauth.as_ref(),
         &extracted.token,
         extracted.scheme,
         dpop_proof,
@@ -89,7 +89,7 @@ async fn get_account_created_at(state: &AppState, headers: &HeaderMap) -> Option
         }
     };
 
-    match state.user_repo.get_by_did(&auth_user.did).await {
+    match state.repos.user.get_by_did(&auth_user.did).await {
         Ok(Some(user)) => {
             tracing::debug!(created_at = ?user.created_at, "age assurance: got user");
             Some(user.created_at.to_rfc3339())

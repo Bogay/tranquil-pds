@@ -72,7 +72,7 @@ pub async fn get_service_auth(
         Some(kb) => kb.clone(),
         None => {
             warn!(did = %&auth.did, "getServiceAuth: no key_bytes in auth, fetching from DB");
-            match state.user_repo.get_user_info_by_did(&auth.did).await {
+            match state.repos.user.get_user_info_by_did(&auth.did).await {
                 Ok(Some(info)) => match info.key_bytes {
                     Some(key_bytes_enc) => {
                         match tranquil_pds::config::decrypt_key(

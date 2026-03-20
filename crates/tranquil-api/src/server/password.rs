@@ -1,5 +1,4 @@
 use axum::{Json, extract::State};
-use bcrypt::{DEFAULT_COST, hash};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use tracing::{error, info, warn};
@@ -42,7 +41,7 @@ pub async fn request_password_reset(
     let normalized_handle = NormalizedLoginIdentifier::normalize(identifier, hostname_for_handles);
 
     let multiple_accounts_warning = if is_email_lookup {
-        match state.user_repo.count_accounts_by_email(normalized).await {
+        match state.repos.user.count_accounts_by_email(normalized).await {
             Ok(count) if count > 1 => Some(count),
             _ => None,
         }
@@ -51,7 +50,7 @@ pub async fn request_password_reset(
     };
 
     let user_id = match state
-        .user_repo
+        .repos.user
         .get_id_by_email_or_handle(normalized, normalized_handle.as_str())
         .await
     {
@@ -73,7 +72,7 @@ pub async fn request_password_reset(
     let code = generate_reset_code();
     let expires_at = Utc::now() + Duration::minutes(10);
     if let Err(e) = state
-        .user_repo
+        .repos.user
         .set_password_reset_code(user_id, &code, expires_at)
         .await
     {
@@ -82,8 +81,8 @@ pub async fn request_password_reset(
     }
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_password_reset(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
         user_id,
         &code,
         hostname,
@@ -132,7 +131,7 @@ pub async fn reset_password(
     if let Err(e) = validate_password(password) {
         return Err(ApiError::InvalidRequest(e.to_string()));
     }
-    let user = match state.user_repo.get_user_by_reset_code(token).await {
+    let user = match state.repos.user.get_user_by_reset_code(token).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return Err(ApiError::InvalidToken(None));
@@ -147,26 +146,14 @@ pub async fn reset_password(
         return Err(ApiError::InvalidToken(None));
     };
     if Utc::now() > exp {
-        if let Err(e) = state.user_repo.clear_password_reset_code(user_id).await {
+        if let Err(e) = state.repos.user.clear_password_reset_code(user_id).await {
             error!("Failed to clear expired reset code: {:?}", e);
         }
         return Err(ApiError::ExpiredToken(None));
     }
-    let password_clone = password.to_string();
-    let password_hash =
-        match tokio::task::spawn_blocking(move || hash(password_clone, DEFAULT_COST)).await {
-            Ok(Ok(h)) => h,
-            Ok(Err(e)) => {
-                error!("Failed to hash password: {:?}", e);
-                return Err(ApiError::InternalError(None));
-            }
-            Err(e) => {
-                error!("Failed to spawn blocking task: {:?}", e);
-                return Err(ApiError::InternalError(None));
-            }
-        };
+    let password_hash = crate::common::hash_password_async(&password).await?;
     let result = match state
-        .user_repo
+        .repos.user
         .reset_password_with_sessions(user_id, &password_hash)
         .await
     {
@@ -189,11 +176,11 @@ pub async fn reset_password(
         }
     }))
     .await;
-    if let Ok(Some(prefs)) = state.user_repo.get_comms_prefs(user_id).await {
+    if let Ok(Some(prefs)) = state.repos.user.get_comms_prefs(user_id).await {
         let actual_channel =
             tranquil_pds::comms::resolve_delivery_channel(&prefs, user.preferred_comms_channel);
         if let Err(e) = state
-            .user_repo
+            .repos.user
             .set_channel_verified(&user.did, actual_channel)
             .await
         {
@@ -238,26 +225,16 @@ pub async fn change_password(
     let password_mfa = verify_password_mfa(&state, &auth, &input.current_password).await?;
 
     let user = state
-        .user_repo
+        .repos.user
         .get_id_and_password_hash_by_did(password_mfa.did())
         .await
         .log_db_err("in change_password")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let new_password_clone = input.new_password.to_string();
-    let new_hash = tokio::task::spawn_blocking(move || hash(new_password_clone, DEFAULT_COST))
-        .await
-        .map_err(|e| {
-            error!("Failed to spawn blocking task: {:?}", e);
-            ApiError::InternalError(None)
-        })?
-        .map_err(|e| {
-            error!("Failed to hash password: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+    let new_hash = crate::common::hash_password_async(&input.new_password).await?;
 
     state
-        .user_repo
+        .repos.user
         .update_password_hash(user.id, &new_hash)
         .await
         .log_db_err("updating password")?;
@@ -271,7 +248,7 @@ pub async fn get_password_status(
     auth: Auth<Active>,
 ) -> Result<Json<HasPasswordResponse>, ApiError> {
     let has = state
-        .user_repo
+        .repos.user
         .has_password_by_did(&auth.did)
         .await
         .log_db_err("checking password status")?
@@ -288,7 +265,7 @@ pub async fn remove_password(
     let reauth_mfa = require_reauth_window(&state, &auth).await?;
 
     let has_passkeys = state
-        .user_repo
+        .repos.user
         .has_passkeys(reauth_mfa.did())
         .await
         .unwrap_or(false);
@@ -299,7 +276,7 @@ pub async fn remove_password(
     }
 
     let user = state
-        .user_repo
+        .repos.user
         .get_password_info_by_did(reauth_mfa.did())
         .await
         .log_db_err("getting password info")?
@@ -312,7 +289,7 @@ pub async fn remove_password(
     }
 
     state
-        .user_repo
+        .repos.user
         .remove_user_password(user.id)
         .await
         .log_db_err("removing password")?;
@@ -345,7 +322,7 @@ pub async fn set_password(
     let did = reauth_mfa.as_ref().map(|m| m.did()).unwrap_or(&auth.did);
 
     let user = state
-        .user_repo
+        .repos.user
         .get_password_info_by_did(did)
         .await
         .log_db_err("getting password info")?
@@ -357,20 +334,10 @@ pub async fn set_password(
         ));
     }
 
-    let new_password_clone = new_password.to_string();
-    let new_hash = tokio::task::spawn_blocking(move || hash(new_password_clone, DEFAULT_COST))
-        .await
-        .map_err(|e| {
-            error!("Failed to spawn blocking task: {:?}", e);
-            ApiError::InternalError(None)
-        })?
-        .map_err(|e| {
-            error!("Failed to hash password: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+    let new_hash = crate::common::hash_password_async(&new_password).await?;
 
     state
-        .user_repo
+        .repos.user
         .set_new_user_password(user.id, &new_hash)
         .await
         .log_db_err("setting password")?;

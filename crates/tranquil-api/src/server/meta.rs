@@ -98,7 +98,7 @@ pub struct HealthOutput {
 }
 
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
-    match state.infra_repo.health_check().await {
+    match state.repos.infra.health_check().await {
         Ok(true) => (
             StatusCode::OK,
             Json(HealthOutput {

@@ -34,13 +34,13 @@ pub struct GetPreferencesOutput {
 }
 pub async fn get_preferences(State(state): State<AppState>, auth: Auth<Permissive>) -> Response {
     let has_full_access = auth.permissions().has_full_access();
-    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&auth.did).await {
+    let user_id: uuid::Uuid = match state.repos.user.get_id_by_did(&auth.did).await {
         Ok(Some(id)) => id,
         _ => {
             return ApiError::InternalError(Some("User not found".into())).into_response();
         }
     };
-    let prefs = match state.infra_repo.get_account_preferences(user_id).await {
+    let prefs = match state.repos.infra.get_account_preferences(user_id).await {
         Ok(rows) => rows,
         Err(_) => {
             return ApiError::InternalError(Some("Failed to fetch preferences".into()))
@@ -93,7 +93,7 @@ pub async fn put_preferences(
     Json(input): Json<PutPreferencesInput>,
 ) -> Response {
     let has_full_access = auth.permissions().has_full_access();
-    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&auth.did).await {
+    let user_id: uuid::Uuid = match state.repos.user.get_id_by_did(&auth.did).await {
         Ok(Some(id)) => id,
         _ => {
             return ApiError::InternalError(Some("User not found".into())).into_response();
@@ -188,7 +188,7 @@ pub async fn put_preferences(
         .collect();
 
     if state
-        .infra_repo
+        .repos.infra
         .replace_namespace_preferences(user_id, APP_BSKY_NAMESPACE, prefs_to_save)
         .await
         .is_err()

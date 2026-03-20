@@ -1,4 +1,4 @@
-use bcrypt::DEFAULT_COST;
+use bcrypt::{DEFAULT_COST, hash};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use tracing::error;
@@ -243,6 +243,20 @@ pub fn hash_or_internal_error(value: &str) -> Result<String, ApiError> {
         error!("Bcrypt hash error: {:?}", e);
         ApiError::InternalError(None)
     })
+}
+
+pub async fn hash_password_async(password: &str) -> Result<String, ApiError> {
+    let password = password.to_string();
+    tokio::task::spawn_blocking(move || hash(password, DEFAULT_COST))
+        .await
+        .map_err(|e| {
+            error!("Failed to spawn blocking task: {:?}", e);
+            ApiError::InternalError(None)
+        })?
+        .map_err(|e| {
+            error!("Failed to hash password: {:?}", e);
+            ApiError::InternalError(None)
+        })
 }
 
 pub fn validate_token_hash(

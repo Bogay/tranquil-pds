@@ -17,10 +17,10 @@ pub async fn get_server_stats(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
 ) -> Result<Json<ServerStatsOutput>, ApiError> {
-    let user_count = state.user_repo.count_users().await.unwrap_or(0);
-    let repo_count = state.repo_repo.count_repos().await.unwrap_or(0);
-    let record_count = state.repo_repo.count_all_records().await.unwrap_or(0);
-    let blob_storage_bytes = state.blob_repo.sum_blob_storage().await.unwrap_or(0);
+    let user_count = state.repos.user.count_users().await.unwrap_or(0);
+    let repo_count = state.repos.repo.count_repos().await.unwrap_or(0);
+    let record_count = state.repos.repo.count_all_records().await.unwrap_or(0);
+    let blob_storage_bytes = state.repos.blob.sum_blob_storage().await.unwrap_or(0);
 
     Ok(Json(ServerStatsOutput {
         user_count,

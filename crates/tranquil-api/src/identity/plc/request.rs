@@ -20,25 +20,25 @@ pub async fn request_plc_operation_signature(
         tranquil_pds::oauth::scopes::IdentityAttr::Wildcard,
     )?;
     let user_id = state
-        .user_repo
+        .repos.user
         .get_id_by_did(&auth.did)
         .await
         .log_db_err("fetching user id")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let _ = state.infra_repo.delete_plc_tokens_for_user(user_id).await;
+    let _ = state.repos.infra.delete_plc_tokens_for_user(user_id).await;
     let plc_token = generate_plc_token();
     let expires_at = Utc::now() + Duration::minutes(10);
     state
-        .infra_repo
+        .repos.infra
         .insert_plc_token(user_id, &plc_token, expires_at)
         .await
         .log_db_err("creating PLC token")?;
 
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_plc_operation(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
         user_id,
         &plc_token,
         hostname,

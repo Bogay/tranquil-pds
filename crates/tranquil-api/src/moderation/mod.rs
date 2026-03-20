@@ -107,7 +107,7 @@ async fn proxy_to_report_service(
 
     let key_bytes = match &auth_user.key_bytes {
         Some(kb) => kb.clone(),
-        None => match state.user_repo.get_with_key_by_did(&auth_user.did).await {
+        None => match state.repos.user.get_with_key_by_did(&auth_user.did).await {
             Ok(Some(user_with_key)) => {
                 match tranquil_pds::config::decrypt_key(
                     &user_with_key.key_bytes,
@@ -226,7 +226,7 @@ async fn create_report_locally(
     let subject_json = json!(input.subject);
 
     if let Err(e) = state
-        .infra_repo
+        .repos.infra
         .insert_report(
             report_id,
             input.reason_type.as_str(),

@@ -54,7 +54,7 @@ pub async fn resolve_handle(
             return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response();
         }
     };
-    let user = state.user_repo.get_by_handle(&handle).await;
+    let user = state.repos.user.get_by_handle(&handle).await;
     match user {
         Ok(Some(row)) => {
             let _ = state
@@ -165,7 +165,7 @@ async fn serve_handle_did_doc(state: &AppState, handle: &str, hostname: &str) ->
         Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
     };
     let user = match state
-        .user_repo
+        .repos.user
         .get_user_for_did_doc_build(&expected_did_typed)
         .await
     {
@@ -182,7 +182,7 @@ async fn serve_handle_did_doc(state: &AppState, handle: &str, hostname: &str) ->
     let did = expected_did;
 
     let overrides = state
-        .user_repo
+        .repos.user
         .get_did_web_overrides(user_id)
         .await
         .ok()
@@ -218,7 +218,7 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         }
     };
     let user = match state
-        .user_repo
+        .repos.user
         .get_did_web_info_by_handle(&current_handle_typed)
         .await
     {
@@ -246,7 +246,7 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
     }
 
     let overrides = state
-        .user_repo
+        .repos.user
         .get_did_web_overrides(user_id)
         .await
         .ok()
@@ -295,7 +295,7 @@ async fn build_override_or_key_verification_methods(
             .collect());
     }
 
-    let key_info = match state.user_repo.get_user_key_by_id(user_id).await {
+    let key_info = match state.repos.user.get_user_key_by_id(user_id).await {
         Ok(Some(k)) => k,
         _ => return Err(ApiError::InternalError(None).into_response()),
     };
@@ -468,7 +468,7 @@ pub async fn get_recommended_did_credentials(
     auth: Auth<NotTakendown>,
 ) -> Result<Json<GetRecommendedDidCredentialsOutput>, ApiError> {
     let handle = state
-        .user_repo
+        .repos.user
         .get_handle_by_did(&auth.did)
         .await
         .log_db_err("fetching handle for DID credentials")?
@@ -539,7 +539,7 @@ pub async fn update_handle(
     )
     .await?;
     let user_row = state
-        .user_repo
+        .repos.user
         .get_id_and_handle_by_did(&did)
         .await
         .log_db_err("fetching user for handle update")?
@@ -661,7 +661,7 @@ pub async fn update_handle(
         .parse()
         .map_err(|_| ApiError::InvalidHandle(Some("Invalid handle format".into())))?;
     let handle_exists = state
-        .user_repo
+        .repos.user
         .check_handle_exists(&handle_typed, user_id)
         .await
         .log_db_err("checking handle existence")?;
@@ -669,7 +669,7 @@ pub async fn update_handle(
         return Err(ApiError::HandleTaken);
     }
     state
-        .user_repo
+        .repos.user
         .update_handle(user_id, &handle_typed)
         .await
         .map_err(|e| {
@@ -706,7 +706,7 @@ pub async fn update_plc_handle(
     if !did.as_str().starts_with("did:plc:") {
         return Ok(());
     }
-    let user_row = match state.user_repo.get_user_with_key_by_did(did).await? {
+    let user_row = match state.repos.user.get_user_with_key_by_did(did).await? {
         Some(r) => r,
         None => return Ok(()),
     };
@@ -733,7 +733,7 @@ pub async fn well_known_atproto_did(State(state): State<AppState>, headers: Head
         Ok(h) => h,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid handle format").into_response(),
     };
-    let user = state.user_repo.get_by_handle(&handle).await;
+    let user = state.repos.user.get_by_handle(&handle).await;
     match user {
         Ok(Some(row)) => row.did.to_string().into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Handle not found").into_response(),

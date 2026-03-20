@@ -45,7 +45,7 @@ pub async fn get_subject_status(
         let did: Did = did_str
             .parse()
             .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
-        match state.user_repo.get_status_by_did(&did).await {
+        match state.repos.user.get_status_by_did(&did).await {
             Ok(Some(status)) => {
                 let deactivated = status.deactivated_at.map(|_| StatusAttr {
                     applied: true,
@@ -77,7 +77,7 @@ pub async fn get_subject_status(
         let cid: CidLink = uri_str
             .parse()
             .map_err(|_| ApiError::InvalidRequest("Invalid CID format".into()))?;
-        match state.repo_repo.get_record_by_cid(&cid).await {
+        match state.repos.repo.get_record_by_cid(&cid).await {
             Ok(Some(record)) => {
                 let takedown = record.takedown_ref.as_ref().map(|r| StatusAttr {
                     applied: true,
@@ -109,7 +109,7 @@ pub async fn get_subject_status(
         let did = params.did.as_ref().ok_or_else(|| {
             ApiError::InvalidRequest("Must provide a did to request blob state".into())
         })?;
-        match state.blob_repo.get_blob_with_takedown(&blob_cid).await {
+        match state.repos.blob.get_blob_with_takedown(&blob_cid).await {
             Ok(Some(blob)) => {
                 let takedown = blob.takedown_ref.as_ref().map(|r| StatusAttr {
                     applied: true,
@@ -172,7 +172,7 @@ pub async fn update_subject_status(
                         None
                     };
                     state
-                        .user_repo
+                        .repos.user
                         .set_user_takedown(&did, takedown_ref)
                         .await
                         .map_err(|e| {
@@ -182,9 +182,9 @@ pub async fn update_subject_status(
                 }
                 if let Some(deactivated) = &input.deactivated {
                     let result = if deactivated.applied {
-                        state.user_repo.deactivate_account(&did, None).await
+                        state.repos.user.deactivate_account(&did, None).await
                     } else {
-                        state.user_repo.activate_account(&did).await
+                        state.repos.user.activate_account(&did).await
                     };
                     result.map_err(|e| {
                         error!(
@@ -218,7 +218,7 @@ pub async fn update_subject_status(
                         warn!("Failed to sequence account event for deactivation: {}", e);
                     }
                 }
-                if let Ok(Some(handle)) = state.user_repo.get_handle_by_did(&did).await {
+                if let Ok(Some(handle)) = state.repos.user.get_handle_by_did(&did).await {
                     let _ = state
                         .cache
                         .delete(&tranquil_pds::cache_keys::handle_key(&handle))
@@ -249,7 +249,7 @@ pub async fn update_subject_status(
                         None
                     };
                     state
-                        .repo_repo
+                        .repos.repo
                         .set_record_takedown(&cid, takedown_ref)
                         .await
                         .map_err(|e| {
@@ -282,7 +282,7 @@ pub async fn update_subject_status(
                         None
                     };
                     state
-                        .blob_repo
+                        .repos.blob
                         .update_blob_takedown(&cid, takedown_ref)
                         .await
                         .map_err(|e| {

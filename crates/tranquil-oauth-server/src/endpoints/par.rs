@@ -115,12 +115,12 @@ pub async fn pushed_authorization_request(
     };
     let request_id_typed = RequestIdType::from(request_id.0.clone());
     state
-        .oauth_repo
+        .repos.oauth
         .create_authorization_request(&request_id_typed, &request_data)
         .await
         .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
     tokio::spawn({
-        let oauth_repo = state.oauth_repo.clone();
+        let oauth_repo = state.repos.oauth.clone();
         async move {
             if let Err(e) = oauth_repo.delete_expired_authorization_requests().await {
                 tracing::warn!("Failed to cleanup expired authorization requests: {:?}", e);

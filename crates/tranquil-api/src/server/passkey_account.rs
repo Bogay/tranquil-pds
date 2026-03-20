@@ -120,7 +120,7 @@ pub async fn create_passkey_account(
     }
 
     let is_bootstrap = state.bootstrap_invite_code.is_some()
-        && state.user_repo.count_users().await.unwrap_or(1) == 0;
+        && state.repos.user.count_users().await.unwrap_or(1) == 0;
 
     let _validated_invite_code = if is_bootstrap {
         match input.invite_code.as_deref() {
@@ -128,7 +128,7 @@ pub async fn create_passkey_account(
             _ => return Err(ApiError::InvalidInviteCode),
         }
     } else if let Some(ref code) = input.invite_code {
-        match state.infra_repo.validate_invite_code(code).await {
+        match state.repos.infra.validate_invite_code(code).await {
             Ok(validated) => Some(validated),
             Err(_) => return Err(ApiError::InvalidInviteCode),
         }
@@ -351,7 +351,7 @@ pub async fn create_passkey_account(
         birthdate_pref,
     };
 
-    let create_result = match state.user_repo.create_passkey_account(&create_input).await {
+    let create_result = match state.repos.user.create_passkey_account(&create_input).await {
         Ok(r) => r,
         Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
             return Err(ApiError::HandleNotAvailable(None));
@@ -405,7 +405,7 @@ pub async fn create_passkey_account(
                     controller_did: None,
                     app_password_name: None,
                 };
-                if let Err(e) = state.session_repo.create_session(&session_data).await {
+                if let Err(e) = state.repos.session.create_session(&session_data).await {
                     warn!(did = %did, "Failed to insert migration session: {:?}", e);
                 }
                 info!(did = %did, "Generated migration access token for BYOD passkey account");
@@ -451,7 +451,7 @@ pub async fn complete_passkey_setup(
     State(state): State<AppState>,
     Json(input): Json<CompletePasskeySetupInput>,
 ) -> Result<Json<CompletePasskeySetupOutput>, ApiError> {
-    let user = match state.user_repo.get_user_for_passkey_setup(&input.did).await {
+    let user = match state.repos.user.get_user_for_passkey_setup(&input.did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return Err(ApiError::AccountNotFound);
@@ -484,7 +484,7 @@ pub async fn complete_passkey_setup(
     let webauthn = &state.webauthn_config;
 
     let reg_state = match state
-        .user_repo
+        .repos.user
         .load_webauthn_challenge(&input.did, WebauthnChallengeType::Registration)
         .await
     {
@@ -530,7 +530,7 @@ pub async fn complete_passkey_setup(
         }
     };
     if let Err(e) = state
-        .user_repo
+        .repos.user
         .save_passkey(
             &input.did,
             &credential_id,
@@ -553,13 +553,13 @@ pub async fn complete_passkey_setup(
         app_password_name: app_password_name.clone(),
         app_password_hash: password_hash,
     };
-    if let Err(e) = state.user_repo.complete_passkey_setup(&setup_input).await {
+    if let Err(e) = state.repos.user.complete_passkey_setup(&setup_input).await {
         error!("Error completing passkey setup: {:?}", e);
         return Err(ApiError::InternalError(None));
     }
 
     let _ = state
-        .user_repo
+        .repos.user
         .delete_webauthn_challenge(&input.did, WebauthnChallengeType::Registration)
         .await;
 
@@ -577,7 +577,7 @@ pub async fn start_passkey_registration_for_setup(
     State(state): State<AppState>,
     Json(input): Json<StartPasskeyRegistrationInput>,
 ) -> Result<Json<OptionsResponse<serde_json::Value>>, ApiError> {
-    let user = match state.user_repo.get_user_for_passkey_setup(&input.did).await {
+    let user = match state.repos.user.get_user_for_passkey_setup(&input.did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return Err(ApiError::AccountNotFound);
@@ -610,7 +610,7 @@ pub async fn start_passkey_registration_for_setup(
     let webauthn = &state.webauthn_config;
 
     let existing_passkeys = state
-        .user_repo
+        .repos.user
         .get_passkeys_for_user(&input.did)
         .await
         .unwrap_or_default();
@@ -643,7 +643,7 @@ pub async fn start_passkey_registration_for_setup(
         }
     };
     if let Err(e) = state
-        .user_repo
+        .repos.user
         .save_webauthn_challenge(&input.did, WebauthnChallengeType::Registration, &state_json)
         .await
     {
@@ -682,7 +682,7 @@ pub async fn request_passkey_recovery(
         NormalizedLoginIdentifier::normalize(&input.email, hostname_for_handles);
 
     let user = match state
-        .user_repo
+        .repos.user
         .get_user_for_passkey_recovery(identifier, normalized_handle.as_str())
         .await
     {
@@ -697,7 +697,7 @@ pub async fn request_passkey_recovery(
     let expires_at = Utc::now() + Duration::hours(1);
 
     if let Err(e) = state
-        .user_repo
+        .repos.user
         .set_recovery_token(&user.did, &recovery_token_hash, expires_at)
         .await
     {
@@ -714,8 +714,8 @@ pub async fn request_passkey_recovery(
     );
 
     let _ = tranquil_pds::comms::comms_repo::enqueue_passkey_recovery(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
         user.id,
         &recovery_url,
         hostname,
@@ -742,7 +742,7 @@ pub async fn recover_passkey_account(
         return Err(ApiError::InvalidRequest(e.to_string()));
     }
 
-    let user = match state.user_repo.get_user_for_recovery(&input.did).await {
+    let user = match state.repos.user.get_user_for_recovery(&input.did).await {
         Ok(Some(u)) => u,
         _ => {
             return Err(ApiError::InvalidRecoveryLink);
@@ -771,7 +771,7 @@ pub async fn recover_passkey_account(
         password_hash,
     };
     let result = match state
-        .user_repo
+        .repos.user
         .recover_passkey_account(&recover_input)
         .await
     {
@@ -785,11 +785,11 @@ pub async fn recover_passkey_account(
     if result.passkeys_deleted > 0 {
         info!(did = %input.did, count = result.passkeys_deleted, "Deleted lost passkeys during account recovery");
     }
-    if let Ok(Some(prefs)) = state.user_repo.get_comms_prefs(user.id).await {
+    if let Ok(Some(prefs)) = state.repos.user.get_comms_prefs(user.id).await {
         let actual_channel =
             tranquil_pds::comms::resolve_delivery_channel(&prefs, user.preferred_comms_channel);
         if let Err(e) = state
-            .user_repo
+            .repos.user
             .set_channel_verified(&input.did, actual_channel)
             .await
         {

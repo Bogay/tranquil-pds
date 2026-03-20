@@ -24,20 +24,20 @@ pub async fn revoke_token(
     if let Some(token) = &request.token {
         let refresh_token = RefreshToken::from(token.clone());
         if let Some((db_id, _)) = state
-            .oauth_repo
+            .repos.oauth
             .get_token_by_refresh_token(&refresh_token)
             .await
             .map_err(tranquil_pds::oauth::db_err_to_oauth)?
         {
             state
-                .oauth_repo
+                .repos.oauth
                 .delete_token_family(db_id)
                 .await
                 .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
         } else {
             let token_id = TokenId::from(token.clone());
             state
-                .oauth_repo
+                .repos.oauth
                 .delete_token(&token_id)
                 .await
                 .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
@@ -104,7 +104,7 @@ pub async fn introspect_token(
         Err(_) => return Ok(Json(inactive_response)),
     };
     let token_id = TokenId::from(token_info.sid.clone());
-    let token_data = match state.oauth_repo.get_token_by_id(&token_id).await {
+    let token_data = match state.repos.oauth.get_token_by_id(&token_id).await {
         Ok(Some(data)) => data,
         _ => return Ok(Json(inactive_response)),
     };

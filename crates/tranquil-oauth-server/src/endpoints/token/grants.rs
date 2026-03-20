@@ -47,7 +47,7 @@ pub async fn handle_authorization_code_grant(
     };
     let auth_code = AuthorizationCode::from(code);
     let auth_request = state
-        .oauth_repo
+        .repos.oauth
         .consume_authorization_request_by_code(&auth_code)
         .await
         .map_err(tranquil_pds::oauth::db_err_to_oauth)?
@@ -104,7 +104,7 @@ pub async fn handle_authorization_code_grant(
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, Method::POST.as_str(), &token_endpoint, None)?;
         if !state
-            .oauth_repo
+            .repos.oauth
             .check_and_record_dpop_jti(&result.jti)
             .await
             .map_err(tranquil_pds::oauth::db_err_to_oauth)?
@@ -140,7 +140,7 @@ pub async fn handle_authorization_code_grant(
             .parse()
             .map_err(|_| OAuthError::InvalidRequest("Invalid controller DID format".to_string()))?;
         let grant = state
-            .delegation_repo
+            .repos.delegation
             .get_delegation(&did_parsed, &controller_parsed)
             .await
             .ok()
@@ -200,7 +200,7 @@ pub async fn handle_authorization_code_grant(
         controller_did: controller_did.clone(),
     };
     state
-        .oauth_repo
+        .repos.oauth
         .create_token(&token_data)
         .await
         .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
@@ -211,7 +211,7 @@ pub async fn handle_authorization_code_grant(
         "Authorization code grant completed, token created"
     );
     tokio::spawn({
-        let oauth_repo = state.oauth_repo.clone();
+        let oauth_repo = state.repos.oauth.clone();
         let did_clone = did.clone();
         async move {
             if let Ok(did_typed) = did_clone.parse::<tranquil_types::Did>()
@@ -267,7 +267,7 @@ pub async fn handle_refresh_token_grant(
     );
 
     let refresh_token_typed = RefreshTokenType::from(refresh_token_str.clone());
-    let lookup = lookup_refresh_token(state.oauth_repo.as_ref(), &refresh_token_typed).await?;
+    let lookup = lookup_refresh_token(state.repos.oauth.as_ref(), &refresh_token_typed).await?;
     let token_state = lookup.state();
     tracing::debug!(state = %token_state, "Refresh token state");
 
@@ -320,7 +320,7 @@ pub async fn handle_refresh_token_grant(
                 "Refresh token reuse detected, revoking token family"
             );
             state
-                .oauth_repo
+                .repos.oauth
                 .delete_token_family(original_token_id)
                 .await
                 .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
@@ -331,7 +331,7 @@ pub async fn handle_refresh_token_grant(
         RefreshTokenLookup::Expired { db_id } => {
             tracing::warn!(refresh_token_prefix = %token_prefix, "Refresh token has expired");
             state
-                .oauth_repo
+                .repos.oauth
                 .delete_token_family(db_id)
                 .await
                 .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
@@ -353,7 +353,7 @@ pub async fn handle_refresh_token_grant(
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, Method::POST.as_str(), &token_endpoint, None)?;
         if !state
-            .oauth_repo
+            .repos.oauth
             .check_and_record_dpop_jti(&result.jti)
             .await
             .map_err(tranquil_pds::oauth::db_err_to_oauth)?
@@ -386,7 +386,7 @@ pub async fn handle_refresh_token_grant(
     let new_expires_at = Utc::now() + Duration::days(refresh_expiry_days);
     let new_refresh_typed = RefreshTokenType::from(new_refresh_token.0.clone());
     state
-        .oauth_repo
+        .repos.oauth
         .rotate_token(db_id, &new_refresh_typed, new_expires_at)
         .await
         .map_err(tranquil_pds::oauth::db_err_to_oauth)?;

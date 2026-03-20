@@ -19,7 +19,7 @@ pub async fn delete_account(
 ) -> Result<Json<EmptyResponse>, ApiError> {
     let did = &input.did;
     let (user_id, handle) = state
-        .user_repo
+        .repos.user
         .get_id_and_handle_by_did(did)
         .await
         .log_db_err("in delete_account")?
@@ -27,7 +27,7 @@ pub async fn delete_account(
         .map(|row| (row.id, row.handle))?;
 
     state
-        .user_repo
+        .repos.user
         .admin_delete_account_complete(user_id, did)
         .await
         .log_db_err("deleting account")?;

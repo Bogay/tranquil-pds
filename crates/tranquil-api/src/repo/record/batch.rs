@@ -11,7 +11,7 @@ use tranquil_pds::auth::{
     Active, Auth, WriteOpKind, require_not_migrated, require_verified_or_delegated,
     verify_batch_write_scopes,
 };
-use tranquil_pds::repo::tracking::TrackingBlockStore;
+use tranquil_pds::repo::TrackingBlockStore;
 use tranquil_pds::repo_ops::{
     FinalizeParams, RecordOp, begin_repo_write, extract_blob_cids, finalize_repo_write,
 };
@@ -304,7 +304,7 @@ pub async fn apply_writes(
     require_verified_or_delegated(&state, batch_proof.user()).await?;
 
     let user_id: uuid::Uuid = state
-        .user_repo
+        .repos.user
         .get_id_by_did(&did)
         .await
         .log_db_err("fetching user for batch write")?

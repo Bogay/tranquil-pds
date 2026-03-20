@@ -9,7 +9,7 @@ use tracing::error;
 use tranquil_pds::state::AppState;
 
 pub async fn get_logo(State(state): State<AppState>) -> Response {
-    let logo_cid = match state.infra_repo.get_server_config("logo_cid").await {
+    let logo_cid = match state.repos.infra.get_server_config("logo_cid").await {
         Ok(cid) => cid,
         Err(e) => {
             error!("DB error fetching logo_cid: {:?}", e);
@@ -26,7 +26,7 @@ pub async fn get_logo(State(state): State<AppState>) -> Response {
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
 
-    let metadata = match state.blob_repo.get_blob_metadata(&cid).await {
+    let metadata = match state.repos.blob.get_blob_metadata(&cid).await {
         Ok(Some(m)) => m,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(e) => {

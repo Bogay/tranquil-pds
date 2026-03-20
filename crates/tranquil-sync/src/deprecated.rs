@@ -27,8 +27,8 @@ async fn check_admin_or_self(state: &AppState, headers: &HeaderMap, did: &Did) -
     let dpop_proof = tranquil_pds::util::get_header_str(headers, tranquil_pds::util::HEADER_DPOP);
     let http_uri = "/";
     match tranquil_pds::auth::validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.oauth.as_ref(),
         &extracted.token,
         extracted.scheme,
         dpop_proof,
@@ -68,7 +68,7 @@ pub async fn get_head(
     };
     let is_admin_or_self = check_admin_or_self(&state, &headers, &did).await;
     let account = match assert_repo_availability(
-        state.repo_repo.as_ref(),
+        state.repos.repo.as_ref(),
         &did,
         if is_admin_or_self {
             RepoAccessLevel::Privileged
@@ -108,7 +108,7 @@ pub async fn get_checkout(
     };
     let is_admin_or_self = check_admin_or_self(&state, &headers, &did).await;
     let account = match assert_repo_availability(
-        state.repo_repo.as_ref(),
+        state.repos.repo.as_ref(),
         &did,
         if is_admin_or_self {
             RepoAccessLevel::Privileged

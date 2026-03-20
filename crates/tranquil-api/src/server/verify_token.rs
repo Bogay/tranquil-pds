@@ -79,7 +79,7 @@ async fn handle_migration_verification(
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let user = state
-        .user_repo
+        .repos.user
         .get_verification_info(did)
         .await
         .log_db_err("during migration verification")?
@@ -92,13 +92,13 @@ async fn handle_migration_verification(
             }
             if !user.channel_verification.email {
                 state
-                    .user_repo
+                    .repos.user
                     .set_email_verified_flag(user.id)
                     .await
                     .log_db_err("updating email_verified status")?;
             }
         }
-        _ => common::set_channel_verified_flag(state.user_repo.as_ref(), user.id, channel).await?,
+        _ => common::set_channel_verified_flag(state.repos.user.as_ref(), user.id, channel).await?,
     };
 
     info!(did = %did, channel = ?channel, "Migration verification completed successfully");
@@ -118,7 +118,7 @@ async fn handle_channel_update(
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let user_id = state
-        .user_repo
+        .repos.user
         .get_id_by_did(did)
         .await
         .log_db_err("fetching user id")?
@@ -127,7 +127,7 @@ async fn handle_channel_update(
     match channel {
         CommsChannel::Email => {
             let success = state
-                .user_repo
+                .repos.user
                 .verify_email_channel(user_id, identifier)
                 .await
                 .log_db_err("updating email channel")?;
@@ -137,21 +137,21 @@ async fn handle_channel_update(
         }
         CommsChannel::Discord => {
             state
-                .user_repo
+                .repos.user
                 .verify_discord_channel(user_id, identifier)
                 .await
                 .log_db_err("updating discord channel")?;
         }
         CommsChannel::Telegram => {
             state
-                .user_repo
+                .repos.user
                 .verify_telegram_channel(user_id, identifier)
                 .await
                 .log_db_err("updating telegram channel")?;
         }
         CommsChannel::Signal => {
             state
-                .user_repo
+                .repos.user
                 .verify_signal_channel(user_id, identifier)
                 .await
                 .log_db_err("updating signal channel")?;
@@ -160,19 +160,7 @@ async fn handle_channel_update(
 
     info!(did = %did, channel = ?channel, "Channel verified successfully");
 
-    let recipient = resolve_verified_recipient(state, user_id, channel, identifier).await;
-    if let Err(e) = comms_repo::enqueue_channel_verified(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
-        user_id,
-        channel,
-        &recipient,
-        &tranquil_config::get().server.hostname,
-    )
-    .await
-    {
-        warn!(error = %e, "Failed to enqueue channel verified notification");
-    }
+    notify_channel_verified(state, user_id, channel, identifier).await;
 
     Ok(Json(VerifyTokenOutput {
         success: true,
@@ -182,15 +170,15 @@ async fn handle_channel_update(
     }))
 }
 
-async fn resolve_verified_recipient(
+async fn notify_channel_verified(
     state: &AppState,
     user_id: uuid::Uuid,
-    channel: tranquil_db_traits::CommsChannel,
+    channel: CommsChannel,
     identifier: &str,
-) -> String {
-    match channel {
-        tranquil_db_traits::CommsChannel::Telegram => state
-            .user_repo
+) {
+    let recipient = match channel {
+        CommsChannel::Telegram => state
+            .repos.user
             .get_telegram_chat_id(user_id)
             .await
             .ok()
@@ -198,6 +186,18 @@ async fn resolve_verified_recipient(
             .map(|id| id.to_string())
             .unwrap_or_else(|| identifier.to_string()),
         _ => identifier.to_string(),
+    };
+    if let Err(e) = comms_repo::enqueue_channel_verified(
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
+        user_id,
+        channel,
+        &recipient,
+        &tranquil_config::get().server.hostname,
+    )
+    .await
+    {
+        warn!(error = %e, "Failed to enqueue channel verified notification");
     }
 }
 
@@ -208,7 +208,7 @@ async fn handle_signup_verification(
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let user = state
-        .user_repo
+        .repos.user
         .get_verification_info(did)
         .await
         .log_db_err("during signup verification")?
@@ -225,23 +225,11 @@ async fn handle_signup_verification(
         }));
     }
 
-    common::set_channel_verified_flag(state.user_repo.as_ref(), user.id, channel).await?;
+    common::set_channel_verified_flag(state.repos.user.as_ref(), user.id, channel).await?;
 
     info!(did = %did, channel = ?channel, "Signup verified successfully");
 
-    let recipient = resolve_verified_recipient(state, user.id, channel, identifier).await;
-    if let Err(e) = comms_repo::enqueue_channel_verified(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
-        user.id,
-        channel,
-        &recipient,
-        &tranquil_config::get().server.hostname,
-    )
-    .await
-    {
-        warn!(error = %e, "Failed to enqueue channel verified notification");
-    }
+    notify_channel_verified(state, user.id, channel, identifier).await;
 
     Ok(Json(VerifyTokenOutput {
         success: true,

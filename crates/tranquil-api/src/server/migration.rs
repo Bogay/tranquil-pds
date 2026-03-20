@@ -42,7 +42,7 @@ pub async fn update_did_document(
     }
 
     let user = state
-        .user_repo
+        .repos.user
         .get_user_for_did_doc(&auth.did)
         .await
         .log_db_err("getting user")?
@@ -97,7 +97,7 @@ pub async fn update_did_document(
     let also_known_as: Option<Vec<String>> = input.also_known_as.clone();
 
     state
-        .user_repo
+        .repos.user
         .upsert_did_web_overrides(user.id, verification_methods_json, also_known_as)
         .await
         .log_db_err("upserting did_web_overrides")?;
@@ -105,7 +105,7 @@ pub async fn update_did_document(
     if let Some(ref endpoint) = input.service_endpoint {
         let endpoint_clean = endpoint.trim().trim_end_matches('/');
         state
-            .user_repo
+            .repos.user
             .update_migrated_to_pds(&auth.did, endpoint_clean)
             .await
             .log_db_err("updating service endpoint")?;
@@ -139,7 +139,7 @@ pub async fn get_did_document(
 async fn build_did_document(state: &AppState, did: &tranquil_pds::types::Did) -> serde_json::Value {
     let hostname = &tranquil_config::get().server.hostname;
 
-    let user = match state.user_repo.get_user_for_did_doc_build(did).await {
+    let user = match state.repos.user.get_user_for_did_doc_build(did).await {
         Ok(Some(row)) => row,
         _ => {
             return json!({
@@ -149,7 +149,7 @@ async fn build_did_document(state: &AppState, did: &tranquil_pds::types::Did) ->
     };
 
     let overrides = state
-        .user_repo
+        .repos.user
         .get_did_web_overrides(user.id)
         .await
         .ok()
@@ -193,7 +193,7 @@ async fn build_did_document(state: &AppState, did: &tranquil_pds::types::Did) ->
     }
 
     let key_info = state
-        .user_repo
+        .repos.user
         .get_user_key_by_id(user.id)
         .await
         .ok()

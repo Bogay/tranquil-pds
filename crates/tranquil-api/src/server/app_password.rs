@@ -1,7 +1,6 @@
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::error;
 use tranquil_db_traits::AppPasswordCreate;
 use tranquil_pds::api::EmptyResponse;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
@@ -32,14 +31,14 @@ pub async fn list_app_passwords(
     auth: Auth<Permissive>,
 ) -> Result<Json<ListAppPasswordsOutput>, ApiError> {
     let user = state
-        .user_repo
+        .repos.user
         .get_by_did(&auth.did)
         .await
         .log_db_err("getting user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let rows = state
-        .session_repo
+        .repos.session
         .list_app_passwords(user.id)
         .await
         .log_db_err("listing app passwords")?;
@@ -84,7 +83,7 @@ pub async fn create_app_password(
     Json(input): Json<CreateAppPasswordInput>,
 ) -> Result<Json<CreateAppPasswordOutput>, ApiError> {
     let user = state
-        .user_repo
+        .repos.user
         .get_by_did(&auth.did)
         .await
         .log_db_err("getting user")?
@@ -96,7 +95,7 @@ pub async fn create_app_password(
     }
 
     if state
-        .session_repo
+        .repos.session
         .get_app_password_by_name(user.id, name)
         .await
         .log_db_err("checking app password")?
@@ -107,7 +106,7 @@ pub async fn create_app_password(
 
     let (final_scopes, controller_did) = if let Some(ref controller) = auth.controller_did {
         let grant = state
-            .delegation_repo
+            .repos.delegation
             .get_delegation(&auth.did, controller)
             .await
             .ok()
@@ -133,18 +132,7 @@ pub async fn create_app_password(
 
     let password = generate_app_password();
 
-    let password_clone = password.clone();
-    let password_hash =
-        tokio::task::spawn_blocking(move || bcrypt::hash(&password_clone, bcrypt::DEFAULT_COST))
-            .await
-            .map_err(|e| {
-                error!("Failed to spawn blocking task: {:?}", e);
-                ApiError::InternalError(None)
-            })?
-            .map_err(|e| {
-                error!("Failed to hash password: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+    let password_hash = crate::common::hash_password_async(&password).await?;
 
     let privilege = tranquil_db_traits::AppPasswordPrivilege::from_privileged_flag(
         input.privileged.unwrap_or(false),
@@ -161,14 +149,14 @@ pub async fn create_app_password(
     };
 
     state
-        .session_repo
+        .repos.session
         .create_app_password(&create_data)
         .await
         .log_db_err("creating app password")?;
 
     if let Some(ref controller) = controller_did {
         let _ = state
-            .delegation_repo
+            .repos.delegation
             .log_delegation_action(
                 &auth.did,
                 controller,
@@ -204,7 +192,7 @@ pub async fn revoke_app_password(
     Json(input): Json<RevokeAppPasswordInput>,
 ) -> Result<Json<EmptyResponse>, ApiError> {
     let user = state
-        .user_repo
+        .repos.user
         .get_by_did(&auth.did)
         .await
         .log_db_err("getting user")?
@@ -216,13 +204,13 @@ pub async fn revoke_app_password(
     }
 
     let sessions_to_invalidate = state
-        .session_repo
+        .repos.session
         .get_session_jtis_by_app_password(&auth.did, name)
         .await
         .unwrap_or_default();
 
     state
-        .session_repo
+        .repos.session
         .delete_sessions_by_app_password(&auth.did, name)
         .await
         .log_db_err("revoking sessions for app password")?;
@@ -237,7 +225,7 @@ pub async fn revoke_app_password(
     .await;
 
     state
-        .session_repo
+        .repos.session
         .delete_app_password(user.id, name)
         .await
         .log_db_err("revoking app password")?;

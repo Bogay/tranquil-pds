@@ -28,14 +28,14 @@ pub async fn start_passkey_registration(
     let webauthn = &state.webauthn_config;
 
     let handle = state
-        .user_repo
+        .repos.user
         .get_handle_by_did(&auth.did)
         .await
         .log_db_err("fetching user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let existing_passkeys = state
-        .user_repo
+        .repos.user
         .get_passkeys_for_user(&auth.did)
         .await
         .log_db_err("fetching existing passkeys")?;
@@ -60,7 +60,7 @@ pub async fn start_passkey_registration(
     })?;
 
     state
-        .user_repo
+        .repos.user
         .save_webauthn_challenge(&auth.did, WebauthnChallengeType::Registration, &state_json)
         .await
         .log_db_err("saving registration state")?;
@@ -94,7 +94,7 @@ pub async fn finish_passkey_registration(
     let webauthn = &state.webauthn_config;
 
     let reg_state_json = state
-        .user_repo
+        .repos.user
         .load_webauthn_challenge(&auth.did, WebauthnChallengeType::Registration)
         .await
         .log_db_err("loading registration state")?
@@ -125,7 +125,7 @@ pub async fn finish_passkey_registration(
     })?;
 
     let passkey_id = state
-        .user_repo
+        .repos.user
         .save_passkey(
             &auth.did,
             passkey.cred_id(),
@@ -136,7 +136,7 @@ pub async fn finish_passkey_registration(
         .log_db_err("saving passkey")?;
 
     if let Err(e) = state
-        .user_repo
+        .repos.user
         .delete_webauthn_challenge(&auth.did, WebauthnChallengeType::Registration)
         .await
     {
@@ -177,7 +177,7 @@ pub async fn list_passkeys(
     auth: Auth<Active>,
 ) -> Result<Json<ListPasskeysOutput>, ApiError> {
     let passkeys = state
-        .user_repo
+        .repos.user
         .get_passkeys_for_user(&auth.did)
         .await
         .log_db_err("fetching passkeys")?;
@@ -215,7 +215,7 @@ pub async fn delete_passkey(
 
     let id: uuid::Uuid = input.id.parse().map_err(|_| ApiError::InvalidId)?;
 
-    match state.user_repo.delete_passkey(id, reauth_mfa.did()).await {
+    match state.repos.user.delete_passkey(id, reauth_mfa.did()).await {
         Ok(true) => {
             info!(did = %session_mfa.did(), passkey_id = %id, "Passkey deleted");
             Ok(Json(EmptyResponse {}))
@@ -243,7 +243,7 @@ pub async fn update_passkey(
     let id: uuid::Uuid = input.id.parse().map_err(|_| ApiError::InvalidId)?;
 
     match state
-        .user_repo
+        .repos.user
         .update_passkey_name(id, &auth.did, &input.friendly_name)
         .await
     {
@@ -260,5 +260,5 @@ pub async fn update_passkey(
 }
 
 pub async fn has_passkeys_for_user(state: &AppState, did: &tranquil_pds::types::Did) -> bool {
-    state.user_repo.has_passkeys(did).await.unwrap_or(false)
+    state.repos.user.has_passkeys(did).await.unwrap_or(false)
 }

@@ -72,7 +72,7 @@ pub async fn list_trusted_devices(
     auth: Auth<Active>,
 ) -> Result<Json<ListTrustedDevicesOutput>, ApiError> {
     let rows = state
-        .oauth_repo
+        .repos.oauth
         .list_trusted_devices(&auth.did)
         .await
         .log_db_err("listing trusted devices")?;
@@ -108,7 +108,7 @@ pub async fn revoke_trusted_device(
     Json(input): Json<RevokeTrustedDeviceInput>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     match state
-        .oauth_repo
+        .repos.oauth
         .device_belongs_to_user(&input.device_id, &auth.did)
         .await
     {
@@ -123,7 +123,7 @@ pub async fn revoke_trusted_device(
     }
 
     state
-        .oauth_repo
+        .repos.oauth
         .revoke_device_trust(&input.device_id)
         .await
         .log_db_err("revoking device trust")?;
@@ -145,7 +145,7 @@ pub async fn update_trusted_device(
     Json(input): Json<UpdateTrustedDeviceInput>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     match state
-        .oauth_repo
+        .repos.oauth
         .device_belongs_to_user(&input.device_id, &auth.did)
         .await
     {
@@ -160,7 +160,7 @@ pub async fn update_trusted_device(
     }
 
     state
-        .oauth_repo
+        .repos.oauth
         .update_device_friendly_name(&input.device_id, input.friendly_name.as_deref())
         .await
         .log_db_err("updating device friendly name")?;

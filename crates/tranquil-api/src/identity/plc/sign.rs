@@ -55,25 +55,25 @@ pub async fn sign_plc_operation(
     })?;
 
     let user_id = state
-        .user_repo
+        .repos.user
         .get_id_by_did(did)
         .await
         .log_db_err("fetching user id")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let token_expiry = state
-        .infra_repo
+        .repos.infra
         .get_plc_token_expiry(user_id, token)
         .await
         .log_db_err("fetching PLC token expiry")?
         .ok_or_else(|| ApiError::InvalidToken(Some("Invalid or expired token".into())))?;
 
     if Utc::now() > token_expiry {
-        let _ = state.infra_repo.delete_plc_token(user_id, token).await;
+        let _ = state.repos.infra.delete_plc_token(user_id, token).await;
         return Err(ApiError::ExpiredToken(Some("Token has expired".into())));
     }
     let key_row = state
-        .user_repo
+        .repos.user
         .get_user_key_by_id(user_id)
         .await
         .log_db_err("fetching user key")?
@@ -136,7 +136,7 @@ pub async fn sign_plc_operation(
         ApiError::InternalError(None)
     })?;
 
-    let _ = state.infra_repo.delete_plc_token(user_id, token).await;
+    let _ = state.repos.infra.delete_plc_token(user_id, token).await;
     info!("Signed PLC operation for user {}", did);
     Ok(Json(SignPlcOperationOutput {
         operation: signed_op,

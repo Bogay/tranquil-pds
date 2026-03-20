@@ -73,7 +73,7 @@ async fn handle_socket_inner(
     if let Some(cursor) = params.cursor {
         let cursor_seq = SequenceNumber::from_raw(cursor);
         let current_seq = state
-            .repo_repo
+            .repos.repo
             .get_max_seq()
             .await
             .unwrap_or(SequenceNumber::ZERO);
@@ -91,7 +91,7 @@ async fn handle_socket_inner(
         let backfill_time = chrono::Utc::now() - chrono::Duration::hours(get_backfill_hours());
 
         let first_event = state
-            .repo_repo
+            .repos.repo
             .get_events_since_cursor(cursor_seq, 1)
             .await
             .ok()
@@ -110,7 +110,7 @@ async fn handle_socket_inner(
             }
 
             let earliest = state
-                .repo_repo
+                .repos.repo
                 .get_min_seq_since(backfill_time)
                 .await
                 .ok()
@@ -125,7 +125,7 @@ async fn handle_socket_inner(
 
         loop {
             let events = state
-                .repo_repo
+                .repos.repo
                 .get_events_since_cursor(current_cursor, BACKFILL_BATCH_SIZE)
                 .await;
             match events {
@@ -171,7 +171,7 @@ async fn handle_socket_inner(
             }
         }
 
-        let cutover_events = state.repo_repo.get_events_since_seq(last_seen, None).await;
+        let cutover_events = state.repos.repo.get_events_since_seq(last_seen, None).await;
 
         if let Ok(events) = cutover_events
             && !events.is_empty()

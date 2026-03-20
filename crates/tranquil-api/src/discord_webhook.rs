@@ -169,7 +169,7 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
     );
 
     match state
-        .user_repo
+        .repos.user
         .store_discord_user_id(&discord_username, &discord_user_id, handle.as_deref())
         .await
     {
@@ -180,8 +180,8 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
                 "Verified Discord user and stored user ID"
             );
             if let Err(e) = comms_repo::enqueue_channel_verified(
-                state.user_repo.as_ref(),
-                state.infra_repo.as_ref(),
+                state.repos.user.as_ref(),
+                state.repos.infra.as_ref(),
                 user_id,
                 tranquil_db_traits::CommsChannel::Discord,
                 &discord_user_id,

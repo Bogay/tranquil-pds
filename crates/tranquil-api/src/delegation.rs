@@ -24,7 +24,7 @@ pub async fn list_controllers(
     auth: Auth<Active>,
 ) -> Result<Json<ControllersOutput<Vec<tranquil_db_traits::ControllerInfo>>>, ApiError> {
     let controllers = state
-        .delegation_repo
+        .repos.delegation
         .get_delegations_for_account(&auth.did)
         .await
         .map_err(|e| {
@@ -99,7 +99,7 @@ pub async fn add_controller(
 
     if resolved.is_local
         && state
-            .delegation_repo
+            .repos.delegation
             .is_delegated_account(&input.controller_did)
             .await
             .unwrap_or(false)
@@ -110,7 +110,7 @@ pub async fn add_controller(
     }
 
     match state
-        .delegation_repo
+        .repos.delegation
         .create_delegation(
             can_add.did(),
             &input.controller_did,
@@ -121,7 +121,7 @@ pub async fn add_controller(
     {
         Ok(_) => {
             let _ = state
-                .delegation_repo
+                .repos.delegation
                 .log_delegation_action(
                     can_add.did(),
                     can_add.did(),
@@ -158,13 +158,13 @@ pub async fn remove_controller(
     Json(input): Json<RemoveControllerInput>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     match state
-        .delegation_repo
+        .repos.delegation
         .revoke_delegation(&auth.did, &input.controller_did, &auth.did)
         .await
     {
         Ok(true) => {
             let revoked_app_passwords = state
-                .session_repo
+                .repos.session
                 .delete_app_passwords_by_controller(&auth.did, &input.controller_did)
                 .await
                 .unwrap_or(0)
@@ -172,13 +172,13 @@ pub async fn remove_controller(
                 .unwrap_or(0usize);
 
             let revoked_oauth_tokens = state
-                .oauth_repo
+                .repos.oauth
                 .revoke_tokens_for_controller(&auth.did, &input.controller_did)
                 .await
                 .unwrap_or(0);
 
             let _ = state
-                .delegation_repo
+                .repos.delegation
                 .log_delegation_action(
                     &auth.did,
                     &auth.did,
@@ -217,13 +217,13 @@ pub async fn update_controller_scopes(
     Json(input): Json<UpdateControllerScopesInput>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     match state
-        .delegation_repo
+        .repos.delegation
         .update_delegation_scopes(&auth.did, &input.controller_did, &input.granted_scopes)
         .await
     {
         Ok(true) => {
             let _ = state
-                .delegation_repo
+                .repos.delegation
                 .log_delegation_action(
                     &auth.did,
                     &auth.did,
@@ -254,7 +254,7 @@ pub async fn list_controlled_accounts(
     auth: Auth<Active>,
 ) -> Result<Json<AccountsOutput<Vec<tranquil_db_traits::DelegatedAccountInfo>>>, ApiError> {
     let accounts = state
-        .delegation_repo
+        .repos.delegation
         .get_accounts_controlled_by(&auth.did)
         .await
         .map_err(|e| {
@@ -286,7 +286,7 @@ pub async fn get_audit_log(
     let offset = params.offset.max(0);
 
     let entries = state
-        .delegation_repo
+        .repos.delegation
         .get_audit_log_for_account(&auth.did, limit, offset)
         .await
         .map_err(|e| {
@@ -295,7 +295,7 @@ pub async fn get_audit_log(
         })?;
 
     let total = state
-        .delegation_repo
+        .repos.delegation
         .count_audit_log_entries(&auth.did)
         .await
         .unwrap_or_default();
@@ -349,7 +349,7 @@ pub async fn create_delegated_account(
     }
 
     let validated_invite_code = if let Some(ref code) = input.invite_code {
-        match state.infra_repo.validate_invite_code(code).await {
+        match state.repos.infra.validate_invite_code(code).await {
             Ok(validated) => Some(validated),
             Err(_) => return Err(ApiError::InvalidInviteCode),
         }
@@ -387,7 +387,7 @@ pub async fn create_delegated_account(
     };
 
     let user_id = match state
-        .user_repo
+        .repos.user
         .create_delegated_account(&create_input)
         .await
     {
@@ -406,7 +406,7 @@ pub async fn create_delegated_account(
 
     if let Some(validated) = validated_invite_code
         && let Err(e) = state
-            .infra_repo
+            .repos.infra
             .record_invite_code_use(&validated, user_id)
             .await
     {
@@ -423,7 +423,7 @@ pub async fn create_delegated_account(
     .await;
 
     let _ = state
-        .delegation_repo
+        .repos.delegation
         .log_delegation_action(
             &did,
             &auth.did,
@@ -461,7 +461,7 @@ pub async fn resolve_controller(
     } else {
         let local_handle: Option<Handle> = identifier.parse().ok();
         let local_user = match local_handle {
-            Some(ref h) => state.user_repo.get_by_handle(h).await.ok().flatten(),
+            Some(ref h) => state.repos.user.get_by_handle(h).await.ok().flatten(),
             None => None,
         };
         match local_user {

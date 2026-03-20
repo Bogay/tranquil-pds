@@ -22,10 +22,6 @@ use tranquil_pds::state::AppState;
 
 const EMAIL_UPDATE_TTL: Duration = Duration::from_secs(30 * 60);
 
-fn email_update_cache_key(did: &str) -> String {
-    tranquil_pds::cache_keys::email_update_key(did)
-}
-
 fn hash_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
@@ -37,6 +33,16 @@ struct PendingEmailUpdate {
     new_email: String,
     token_hash: String,
     authorized: bool,
+}
+
+async fn get_pending_email_update(
+    cache: &dyn tranquil_pds::cache::Cache,
+    did: &str,
+) -> Option<PendingEmailUpdate> {
+    cache
+        .get(&tranquil_pds::cache_keys::email_update_key(did))
+        .await
+        .and_then(|json| serde_json::from_str(&json).ok())
 }
 
 #[derive(Deserialize)]
@@ -55,7 +61,7 @@ pub async fn request_email_update(
     auth.check_account_scope(AccountAttr::Email, AccountAction::Manage)?;
 
     let user = state
-        .user_repo
+        .repos.user
         .get_email_info_by_did(&auth.did)
         .await
         .log_db_err("getting email info")?
@@ -92,7 +98,7 @@ pub async fn request_email_update(
                     authorized: false,
                 };
                 if let Ok(json) = serde_json::to_string(&pending) {
-                    let cache_key = email_update_cache_key(&auth.did);
+                    let cache_key = tranquil_pds::cache_keys::email_update_key(&auth.did);
                     if let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await {
                         warn!("Failed to cache pending email update: {:?}", e);
                     }
@@ -102,8 +108,8 @@ pub async fn request_email_update(
 
         let hostname = &tranquil_config::get().server.hostname;
         if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_short_token_email(
-            state.user_repo.as_ref(),
-            state.infra_repo.as_ref(),
+            state.repos.user.as_ref(),
+            state.repos.infra.as_ref(),
             user.id,
             &token,
             hostname,
@@ -135,7 +141,7 @@ pub async fn confirm_email(
 
     let did = &auth.did;
     let user = state
-        .user_repo
+        .repos.user
         .get_email_info_by_did(did)
         .await
         .log_db_err("getting email info")?
@@ -179,7 +185,7 @@ pub async fn confirm_email(
     }
 
     state
-        .user_repo
+        .repos.user
         .set_email_verified(user.id, true)
         .await
         .log_db_err("confirming email")?;
@@ -206,7 +212,7 @@ pub async fn update_email(
 
     let did = &auth.did;
     let user = state
-        .user_repo
+        .repos.user
         .get_email_info_by_did(did)
         .await
         .log_db_err("getting email info")?
@@ -253,7 +259,7 @@ pub async fn update_email(
             }
 
             state
-                .infra_repo
+                .repos.infra
                 .upsert_account_preference(user_id, "email_auth_factor", json!(email_auth_factor))
                 .await
                 .map_err(|e| {
@@ -267,7 +273,7 @@ pub async fn update_email(
     if email_verified {
         let mut authorized_via_link = false;
 
-        let cache_key = email_update_cache_key(did);
+        let cache_key = tranquil_pds::cache_keys::email_update_key(did);
         if let Some(pending_json) = state.cache.get(&cache_key).await
             && let Ok(pending) = serde_json::from_str::<PendingEmailUpdate>(&pending_json)
             && pending.authorized
@@ -336,7 +342,7 @@ pub async fn update_email(
     }
 
     state
-        .user_repo
+        .repos.user
         .update_email(user_id, &new_email)
         .await
         .log_db_err("updating email")?;
@@ -350,8 +356,8 @@ pub async fn update_email(
         tranquil_pds::auth::verification_token::format_token_for_display(&verification_token);
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
         user_id,
         tranquil_db_traits::CommsChannel::Email,
         &new_email,
@@ -364,7 +370,7 @@ pub async fn update_email(
     }
 
     if let Err(e) = state
-        .infra_repo
+        .repos.infra
         .upsert_account_preference(
             user_id,
             "email_auth_factor",
@@ -390,7 +396,7 @@ pub async fn check_email_verified(
     Json(input): Json<CheckEmailVerifiedInput>,
 ) -> Result<Json<VerifiedResponse>, ApiError> {
     let verified = state
-        .user_repo
+        .repos.user
         .check_email_verified_by_identifier(&input.identifier)
         .await
         .map_err(|e| {
@@ -414,7 +420,7 @@ pub async fn check_channel_verified(
     Json(input): Json<CheckChannelVerifiedInput>,
 ) -> Result<Json<VerifiedResponse>, ApiError> {
     let verified = state
-        .user_repo
+        .repos.user
         .check_channel_verified_by_did(&input.did, input.channel)
         .await
         .map_err(|e| {
@@ -470,23 +476,13 @@ pub async fn authorize_email_update(
     let did = token_data.did;
     info!("authorize_email_update: token valid for did={}", did);
 
-    let cache_key = email_update_cache_key(&did);
-    let pending_json = match state.cache.get(&cache_key).await {
-        Some(json) => json,
+    let cache_key = tranquil_pds::cache_keys::email_update_key(&did);
+    let mut pending = match get_pending_email_update(state.cache.as_ref(), &did).await {
+        Some(p) => p,
         None => {
-            warn!(
-                "authorize_email_update: no pending email update in cache for did={}",
-                did
-            );
+            warn!("authorize_email_update: no pending email update in cache for did={}", did);
             return ApiError::InvalidRequest("No pending email update found".into())
                 .into_response();
-        }
-    };
-
-    let mut pending: PendingEmailUpdate = match serde_json::from_str(&pending_json) {
-        Ok(p) => p,
-        Err(_) => {
-            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -528,21 +524,9 @@ pub async fn check_email_update_status(
 ) -> Result<Json<EmailUpdateStatusOutput>, ApiError> {
     auth.check_account_scope(AccountAttr::Email, AccountAction::Read)?;
 
-    let cache_key = email_update_cache_key(&auth.did);
-    let pending_json = match state.cache.get(&cache_key).await {
-        Some(json) => json,
+    let pending = match get_pending_email_update(state.cache.as_ref(), &auth.did).await {
+        Some(p) => p,
         None => {
-            return Ok(Json(EmailUpdateStatusOutput {
-                pending: false,
-                authorized: false,
-                new_email: None,
-            }));
-        }
-    };
-
-    let pending: PendingEmailUpdate = match serde_json::from_str(&pending_json) {
-        Ok(p) => p,
-        Err(_) => {
             return Ok(Json(EmailUpdateStatusOutput {
                 pending: false,
                 authorized: false,
@@ -574,7 +558,7 @@ pub async fn check_email_in_use(
     }
 
     let count = state
-        .user_repo
+        .repos.user
         .count_accounts_by_email(&email)
         .await
         .map_err(|e| {

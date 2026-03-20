@@ -6,7 +6,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use bcrypt::{DEFAULT_COST, hash};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info};
@@ -68,14 +67,14 @@ async fn try_reactivate_migration(
         new_email: email.clone(),
     };
     match state
-        .user_repo
+        .repos.user
         .reactivate_migration_account(&reactivate_input)
         .await
     {
         Ok(reactivated) => {
             info!(did = %did, old_handle = %reactivated.old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
             let secret_key_bytes = match state
-                .user_repo
+                .repos.user
                 .get_user_key_by_id(reactivated.user_id)
                 .await
             {
@@ -130,7 +129,7 @@ async fn try_reactivate_migration(
                 controller_did: None,
                 app_password_name: None,
             };
-            if let Err(e) = state.session_repo.create_session(&session_data).await {
+            if let Err(e) = state.repos.session.create_session(&session_data).await {
                 error!("Error creating session: {:?}", e);
                 return Some(ApiError::InternalError(None).into_response());
             }
@@ -395,7 +394,7 @@ pub async fn create_account(
         Err(_) => return ApiError::InvalidHandle(None).into_response(),
     };
     let handle_available = match state
-        .user_repo
+        .repos.user
         .check_handle_available_for_new_account(&handle_typed)
         .await
     {
@@ -410,7 +409,7 @@ pub async fn create_account(
     }
 
     let is_bootstrap = state.bootstrap_invite_code.is_some()
-        && state.user_repo.count_users().await.unwrap_or(1) == 0;
+        && state.repos.user.count_users().await.unwrap_or(1) == 0;
 
     if is_bootstrap {
         match input.invite_code.as_deref() {
@@ -431,7 +430,7 @@ pub async fn create_account(
         if let Some(code) = &input.invite_code
             && !code.trim().is_empty()
         {
-            let valid = match state.user_repo.check_and_consume_invite_code(code).await {
+            let valid = match state.repos.user.check_and_consume_invite_code(code).await {
                 Ok(v) => v,
                 Err(e) => {
                     error!("Error checking invite code: {:?}", e);
@@ -448,19 +447,10 @@ pub async fn create_account(
         return ApiError::InvalidRequest(e.to_string()).into_response();
     }
 
-    let password_clone = input.password.clone();
-    let password_hash =
-        match tokio::task::spawn_blocking(move || hash(&password_clone, DEFAULT_COST)).await {
-            Ok(Ok(h)) => h,
-            Ok(Err(e)) => {
-                error!("Error hashing password: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-            Err(e) => {
-                error!("Failed to spawn blocking task: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+    let password_hash = match crate::common::hash_password_async(&input.password).await {
+        Ok(h) => h,
+        Err(e) => return e.into_response(),
+    };
 
     let deactivated_at: Option<chrono::DateTime<chrono::Utc>> = if is_migration || is_did_web_byod {
         Some(chrono::Utc::now())
@@ -527,7 +517,7 @@ pub async fn create_account(
         birthdate_pref,
     };
 
-    let create_result = match state.user_repo.create_password_account(&create_input).await {
+    let create_result = match state.repos.user.create_password_account(&create_input).await {
         Ok(r) => r,
         Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
             return ApiError::HandleNotAvailable(None).into_response();

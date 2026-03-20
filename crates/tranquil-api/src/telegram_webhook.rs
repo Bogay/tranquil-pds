@@ -71,7 +71,7 @@ pub async fn handle_telegram_webhook(
                 "Received /start from Telegram user"
             );
             match state
-                .user_repo
+                .repos.user
                 .store_telegram_chat_id(&username, from.id, handle.as_deref())
                 .await
             {
@@ -82,8 +82,8 @@ pub async fn handle_telegram_webhook(
                         "Verified Telegram user and stored chat_id"
                     );
                     if let Err(e) = comms_repo::enqueue_channel_verified(
-                        state.user_repo.as_ref(),
-                        state.infra_repo.as_ref(),
+                        state.repos.user.as_ref(),
+                        state.repos.infra.as_ref(),
                         user_id,
                         tranquil_db_traits::CommsChannel::Telegram,
                         &from.id.to_string(),

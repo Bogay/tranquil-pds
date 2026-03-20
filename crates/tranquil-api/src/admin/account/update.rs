@@ -30,7 +30,7 @@ pub async fn update_account_email(
         .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
 
     match state
-        .user_repo
+        .repos.user
         .admin_update_email(&account_did, email)
         .await
     {
@@ -71,9 +71,9 @@ pub async fn update_account_handle(
     } else {
         input_handle.to_string()
     };
-    let old_handle = state.user_repo.get_handle_by_did(did).await.ok().flatten();
+    let old_handle = state.repos.user.get_handle_by_did(did).await.ok().flatten();
     let user_id = state
-        .user_repo
+        .repos.user
         .get_id_by_did(did)
         .await
         .ok()
@@ -81,14 +81,14 @@ pub async fn update_account_handle(
         .ok_or(ApiError::AccountNotFound)?;
     let handle_for_check: Handle = handle.parse().map_err(|_| ApiError::InvalidHandle(None))?;
     if let Ok(true) = state
-        .user_repo
+        .repos.user
         .check_handle_exists(&handle_for_check, user_id)
         .await
     {
         return Err(ApiError::HandleTaken);
     }
     match state
-        .user_repo
+        .repos.user
         .admin_update_handle(did, &handle_for_check)
         .await
     {
@@ -146,13 +146,10 @@ pub async fn update_account_password(
     if password.is_empty() {
         return Err(ApiError::InvalidRequest("password is required".into()));
     }
-    let password_hash = bcrypt::hash(password, bcrypt::DEFAULT_COST).map_err(|e| {
-        error!("Failed to hash password: {:?}", e);
-        ApiError::InternalError(None)
-    })?;
+    let password_hash = crate::common::hash_or_internal_error(password)?;
 
     match state
-        .user_repo
+        .repos.user
         .admin_update_password(did, &password_hash)
         .await
     {

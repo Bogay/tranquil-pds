@@ -59,7 +59,7 @@ pub async fn resend_migration_verification(
         .unwrap_or(tranquil_db_traits::CommsChannel::Email);
     let identifier = input.identifier.trim().to_lowercase();
 
-    let user = match state.user_repo.get_by_email(&identifier).await {
+    let user = match state.repos.user.get_by_email(&identifier).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return Ok(Json(ResendMigrationVerificationOutput { sent: true }));

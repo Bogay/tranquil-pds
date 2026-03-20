@@ -69,7 +69,7 @@ pub async fn get_account_info(
     Query(params): Query<GetAccountInfoParams>,
 ) -> Result<Json<AccountInfo>, ApiError> {
     let account = state
-        .infra_repo
+        .repos.infra
         .get_admin_account_info_by_did(&params.did)
         .await
         .log_db_err("in get_account_info")?
@@ -98,7 +98,7 @@ pub async fn get_account_info(
 
 async fn get_invited_by(state: &AppState, user_id: uuid::Uuid) -> Option<InviteCodeInfo> {
     let code = state
-        .infra_repo
+        .repos.infra
         .get_invite_code_used_by_user(user_id)
         .await
         .ok()??;
@@ -111,7 +111,7 @@ async fn get_invites_for_user(
     user_id: uuid::Uuid,
 ) -> Option<Vec<InviteCodeInfo>> {
     let invite_codes = state
-        .infra_repo
+        .repos.infra
         .get_invites_created_by_user(user_id)
         .await
         .ok()?;
@@ -123,7 +123,7 @@ async fn get_invites_for_user(
     let code_strings: Vec<String> = invite_codes.iter().map(|ic| ic.code.clone()).collect();
 
     let uses = state
-        .infra_repo
+        .repos.infra
         .get_invite_code_uses_batch(&code_strings)
         .await
         .ok()?;
@@ -154,10 +154,10 @@ async fn get_invites_for_user(
 }
 
 async fn get_invite_code_info(state: &AppState, code: &str) -> Option<InviteCodeInfo> {
-    let info = state.infra_repo.get_invite_code_info(code).await.ok()??;
+    let info = state.repos.infra.get_invite_code_info(code).await.ok()??;
 
     let uses = state
-        .infra_repo
+        .repos.infra
         .get_invite_code_uses(code)
         .await
         .ok()
@@ -197,7 +197,7 @@ pub async fn get_account_infos(
 
     let dids_typed: Vec<Did> = dids.iter().filter_map(|d| d.parse().ok()).collect();
     let accounts = state
-        .infra_repo
+        .repos.infra
         .get_admin_account_infos_by_dids(&dids_typed)
         .await
         .log_db_err("fetching account infos")?;
@@ -205,7 +205,7 @@ pub async fn get_account_infos(
     let user_ids: Vec<uuid::Uuid> = accounts.iter().map(|u| u.id).collect();
 
     let all_invite_codes = state
-        .infra_repo
+        .repos.infra
         .get_invite_codes_by_users(&user_ids)
         .await
         .unwrap_or_default();
@@ -217,7 +217,7 @@ pub async fn get_account_infos(
 
     let all_invite_uses = if !all_codes.is_empty() {
         state
-            .infra_repo
+            .repos.infra
             .get_invite_code_uses_batch(&all_codes)
             .await
             .unwrap_or_default()
@@ -226,7 +226,7 @@ pub async fn get_account_infos(
     };
 
     let invited_by_map: HashMap<uuid::Uuid, String> = state
-        .infra_repo
+        .repos.infra
         .get_invite_code_uses_by_users(&user_ids)
         .await
         .unwrap_or_default()

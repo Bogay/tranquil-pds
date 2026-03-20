@@ -41,24 +41,24 @@ pub async fn check_account_status(
 ) -> Result<Json<CheckAccountStatusOutput>, ApiError> {
     let did = &auth.did;
     let user_id = state
-        .user_repo
+        .repos.user
         .get_id_by_did(did)
         .await
         .log_db_err("fetching user ID for account status")?
         .ok_or(ApiError::InternalError(None))?;
     let is_active = state
-        .user_repo
+        .repos.user
         .is_account_active_by_did(did)
         .await
         .ok()
         .flatten()
         .unwrap_or(false);
-    let repo_info = state.repo_repo.get_repo(user_id).await.ok().flatten();
+    let repo_info = state.repos.repo.get_repo(user_id).await.ok().flatten();
     let (repo_commit, repo_rev_from_db) = repo_info
         .map(|r| (r.repo_root_cid.to_string(), r.repo_rev))
         .unwrap_or_else(|| (String::new(), None));
     let block_count: i64 = state
-        .repo_repo
+        .repos.repo
         .count_user_blocks(user_id)
         .await
         .unwrap_or(0);
@@ -80,19 +80,19 @@ pub async fn check_account_status(
     } else {
         String::new()
     };
-    let record_count: i64 = state.repo_repo.count_records(user_id).await.unwrap_or(0);
+    let record_count: i64 = state.repos.repo.count_records(user_id).await.unwrap_or(0);
     let imported_blobs: i64 = state
-        .blob_repo
+        .repos.blob
         .count_blobs_by_user(user_id)
         .await
         .unwrap_or(0);
     let expected_blobs: i64 = state
-        .blob_repo
+        .repos.blob
         .count_distinct_record_blobs(user_id)
         .await
         .unwrap_or(0);
     let valid_did =
-        is_valid_did_for_service(state.user_repo.as_ref(), state.cache.clone(), did).await;
+        is_valid_did_for_service(state.repos.user.as_ref(), state.cache.clone(), did).await;
     Ok(Json(CheckAccountStatusOutput {
         activated: is_active,
         valid_did,
@@ -319,7 +319,7 @@ pub async fn activate_account(
     );
     let did_validation_start = std::time::Instant::now();
     if let Err(e) = assert_valid_did_document_for_service(
-        state.user_repo.as_ref(),
+        state.repos.user.as_ref(),
         state.cache.clone(),
         &did,
         true,
@@ -339,12 +339,12 @@ pub async fn activate_account(
         did_validation_start.elapsed()
     );
 
-    let handle = state.user_repo.get_handle_by_did(&did).await.ok().flatten();
+    let handle = state.repos.user.get_handle_by_did(&did).await.ok().flatten();
     info!(
         "[MIGRATION] activateAccount: Activating account did={} handle={:?}",
         did, handle
     );
-    let result = state.user_repo.activate_account(&did).await;
+    let result = state.repos.user.activate_account(&did).await;
     match result {
         Ok(_) => {
             info!(
@@ -406,7 +406,7 @@ pub async fn activate_account(
                 info!("[MIGRATION] activateAccount: Identity event sequenced successfully");
             }
             let repo_root = state
-                .repo_repo
+                .repos.repo
                 .get_repo_root_by_did(&did)
                 .await
                 .ok()
@@ -480,9 +480,9 @@ pub async fn deactivate_account(
 
     let did = auth.did.clone();
 
-    let handle = state.user_repo.get_handle_by_did(&did).await.ok().flatten();
+    let handle = state.repos.user.get_handle_by_did(&did).await.ok().flatten();
 
-    let result = state.user_repo.deactivate_account(&did, delete_after).await;
+    let result = state.repos.user.deactivate_account(&did, delete_after).await;
 
     match result {
         Ok(true) => {
@@ -518,7 +518,7 @@ pub async fn request_account_delete(
     let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
     let user_id = state
-        .user_repo
+        .repos.user
         .get_id_by_did(session_mfa.did())
         .await
         .ok()
@@ -527,14 +527,14 @@ pub async fn request_account_delete(
     let confirmation_token = Uuid::new_v4().to_string();
     let expires_at = Utc::now() + Duration::minutes(15);
     state
-        .infra_repo
+        .repos.infra
         .create_deletion_request(&confirmation_token, session_mfa.did(), expires_at)
         .await
         .log_db_err("creating deletion token")?;
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_account_deletion(
-        state.user_repo.as_ref(),
-        state.infra_repo.as_ref(),
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
         user_id,
         &confirmation_token,
         hostname,
@@ -572,7 +572,7 @@ pub async fn delete_account(
         return Err(ApiError::InvalidToken(Some("token is required".into())));
     }
     let user = state
-        .user_repo
+        .repos.user
         .get_user_for_deletion(did)
         .await
         .map_err(|e| {
@@ -582,7 +582,7 @@ pub async fn delete_account(
         .ok_or(ApiError::InvalidRequest("account not found".into()))?;
     let (user_id, password_hash, handle) = (user.id, user.password_hash, user.handle);
     if crate::common::verify_credential(
-        state.session_repo.as_ref(),
+        state.repos.session.as_ref(),
         user_id,
         password,
         password_hash.as_deref(),
@@ -595,7 +595,7 @@ pub async fn delete_account(
         )));
     }
     let deletion_request = state
-        .infra_repo
+        .repos.infra
         .get_deletion_request(token)
         .await
         .map_err(|e| {
@@ -611,11 +611,11 @@ pub async fn delete_account(
         )));
     }
     if Utc::now() > deletion_request.expires_at {
-        let _ = state.infra_repo.delete_deletion_request(token).await;
+        let _ = state.repos.infra.delete_deletion_request(token).await;
         return Err(ApiError::ExpiredToken(None));
     }
     state
-        .user_repo
+        .repos.user
         .delete_account_complete(user_id, did)
         .await
         .map_err(|e| {
@@ -630,7 +630,7 @@ pub async fn delete_account(
     .await;
     match account_seq {
         Ok(seq) => {
-            if let Err(e) = state.repo_repo.delete_sequences_except(did, seq).await {
+            if let Err(e) = state.repos.repo.delete_sequences_except(did, seq).await {
                 warn!(
                     "Failed to cleanup sequences for deleted account {}: {}",
                     did, e

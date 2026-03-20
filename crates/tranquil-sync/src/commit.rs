@@ -43,7 +43,7 @@ pub async fn get_latest_commit(
     let did = params.did;
 
     let account =
-        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+        match assert_repo_availability(state.repos.repo.as_ref(), &did, RepoAccessLevel::Public)
             .await
         {
             Ok(a) => a,
@@ -104,7 +104,7 @@ pub async fn list_repos(
     let cursor_did: Option<Did> = params.cursor.as_ref().and_then(|s| s.parse().ok());
     let cursor_ref = cursor_did.as_ref();
     let result = state
-        .repo_repo
+        .repos.repo
         .list_repos_paginated(cursor_ref, limit + 1)
         .await;
     match result {
@@ -175,7 +175,7 @@ pub async fn get_repo_status(
 ) -> Response {
     let did = params.did;
 
-    let account = match get_account_with_status(state.repo_repo.as_ref(), &did).await {
+    let account = match get_account_with_status(state.repos.repo.as_ref(), &did).await {
         Ok(Some(a)) => a,
         Ok(None) => {
             return ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did)))

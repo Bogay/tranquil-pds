@@ -33,13 +33,13 @@ pub async fn get_reauth_status(
     auth: Auth<Active>,
 ) -> Result<Json<ReauthStatusOutput>, ApiError> {
     let last_reauth_at = state
-        .session_repo
+        .repos.session
         .get_last_reauth_at(&auth.did)
         .await
         .log_db_err("getting last reauth")?;
 
     let reauth_required = is_reauth_required(last_reauth_at);
-    let available_methods = get_available_reauth_methods(&*state.user_repo, &auth.did).await;
+    let available_methods = get_available_reauth_methods(&*state.repos.user, &auth.did).await;
 
     Ok(Json(ReauthStatusOutput {
         last_reauth_at,
@@ -66,7 +66,7 @@ pub async fn reauth_password(
     Json(input): Json<PasswordReauthInput>,
 ) -> Result<Json<ReauthOutput>, ApiError> {
     let password_hash = state
-        .user_repo
+        .repos.user
         .get_password_hash_by_did(&auth.did)
         .await
         .log_db_err("fetching password hash")?
@@ -76,7 +76,7 @@ pub async fn reauth_password(
 
     if !password_valid {
         let app_password_hashes = state
-            .session_repo
+            .repos.session
             .get_app_password_hashes_by_did(&auth.did)
             .await
             .unwrap_or_default();
@@ -91,7 +91,7 @@ pub async fn reauth_password(
         }
     }
 
-    let reauthed_at = update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.did)
+    let reauthed_at = update_last_reauth_cached(&*state.repos.session, &state.cache, &auth.did)
         .await
         .log_db_err("updating reauth")?;
 
@@ -127,7 +127,7 @@ pub async fn reauth_totp(
         )));
     }
 
-    let reauthed_at = update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.did)
+    let reauthed_at = update_last_reauth_cached(&*state.repos.session, &state.cache, &auth.did)
         .await
         .log_db_err("updating reauth")?;
 
@@ -146,7 +146,7 @@ pub async fn reauth_passkey_start(
     auth: Auth<Active>,
 ) -> Result<Json<PasskeyReauthStartOutput>, ApiError> {
     let stored_passkeys = state
-        .user_repo
+        .repos.user
         .get_passkeys_for_user(&auth.did)
         .await
         .log_db_err("getting passkeys")?;
@@ -179,7 +179,7 @@ pub async fn reauth_passkey_start(
     })?;
 
     state
-        .user_repo
+        .repos.user
         .save_webauthn_challenge(
             &auth.did,
             WebauthnChallengeType::Authentication,
@@ -204,7 +204,7 @@ pub async fn reauth_passkey_finish(
     Json(input): Json<PasskeyReauthFinishInput>,
 ) -> Result<Json<ReauthOutput>, ApiError> {
     let auth_state_json = state
-        .user_repo
+        .repos.user
         .load_webauthn_challenge(&auth.did, WebauthnChallengeType::Authentication)
         .await
         .log_db_err("loading authentication state")?
@@ -232,7 +232,7 @@ pub async fn reauth_passkey_finish(
 
     let cred_id_bytes = auth_result.cred_id().as_ref();
     match state
-        .user_repo
+        .repos.user
         .update_passkey_counter(
             cred_id_bytes,
             i32::try_from(auth_result.counter()).unwrap_or(i32::MAX),
@@ -242,7 +242,7 @@ pub async fn reauth_passkey_finish(
         Ok(false) => {
             warn!(did = %&auth.did, "Passkey counter anomaly detected - possible cloned key");
             let _ = state
-                .user_repo
+                .repos.user
                 .delete_webauthn_challenge(&auth.did, WebauthnChallengeType::Authentication)
                 .await;
             return Err(ApiError::PasskeyCounterAnomaly);
@@ -254,11 +254,11 @@ pub async fn reauth_passkey_finish(
     }
 
     let _ = state
-        .user_repo
+        .repos.user
         .delete_webauthn_challenge(&auth.did, WebauthnChallengeType::Authentication)
         .await;
 
-    let reauthed_at = update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.did)
+    let reauthed_at = update_last_reauth_cached(&*state.repos.session, &state.cache, &auth.did)
         .await
         .log_db_err("updating reauth")?;
 

@@ -27,14 +27,14 @@ pub async fn get_blob(
     let cid = params.cid;
 
     let _account =
-        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+        match assert_repo_availability(state.repos.repo.as_ref(), &did, RepoAccessLevel::Public)
             .await
         {
             Ok(a) => a,
             Err(e) => return e.into_response(),
         };
 
-    let blob_result = state.blob_repo.get_blob_metadata(&cid).await;
+    let blob_result = state.repos.blob.get_blob_metadata(&cid).await;
     match blob_result {
         Ok(Some(metadata)) => match state.blob_store.get(&metadata.storage_key).await {
             Ok(data) => Response::builder()
@@ -80,7 +80,7 @@ pub async fn list_blobs(
     let did = params.did;
 
     let account =
-        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+        match assert_repo_availability(state.repos.repo.as_ref(), &did, RepoAccessLevel::Public)
             .await
         {
             Ok(a) => a,
@@ -93,7 +93,7 @@ pub async fn list_blobs(
 
     let cids_result: Result<Vec<String>, _> = if let Some(since) = &params.since {
         state
-            .blob_repo
+            .repos.blob
             .list_blobs_since_rev(&did, since)
             .await
             .map(|cids| {
@@ -107,7 +107,7 @@ pub async fn list_blobs(
             })
     } else {
         state
-            .blob_repo
+            .repos.blob
             .list_blobs_by_user(user_id, Some(cursor_cid), limit + 1)
             .await
             .map(|cids| cids.into_iter().map(|c| c.to_string()).collect())

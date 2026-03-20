@@ -1,5 +1,4 @@
 use axum::{Json, extract::State};
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use tranquil_pds::api::ApiError;
@@ -7,24 +6,7 @@ use tranquil_pds::api::error::DbResultExt;
 use tranquil_pds::auth::{Admin, Auth, NotTakendown};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::Did;
-
-const BASE32_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
-
-pub(crate) fn gen_random_token() -> String {
-    let mut rng = rand::thread_rng();
-    let gen_segment = |rng: &mut rand::rngs::ThreadRng, len: usize| -> String {
-        (0..len)
-            .map(|_| BASE32_ALPHABET[rng.gen_range(0..32)] as char)
-            .collect()
-    };
-    format!("{}-{}", gen_segment(&mut rng, 5), gen_segment(&mut rng, 5))
-}
-
-pub fn gen_invite_code() -> String {
-    let hostname = &tranquil_config::get().server.hostname;
-    let hostname_prefix = hostname.replace('.', "-");
-    format!("{}-{}", hostname_prefix, gen_random_token())
-}
+use tranquil_pds::util::gen_invite_code;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,7 +40,7 @@ pub async fn create_invite_code(
     let code = gen_invite_code();
 
     match state
-        .infra_repo
+        .repos.infra
         .create_invite_code(&code, input.use_count, Some(&for_account))
         .await
     {
@@ -115,7 +97,7 @@ pub async fn create_invite_codes(
     };
 
     let admin_user_id = state
-        .user_repo
+        .repos.user
         .get_any_admin_user_id()
         .await
         .log_db_err("looking up admin user")?
@@ -125,7 +107,7 @@ pub async fn create_invite_codes(
         })?;
 
     let result = futures::future::try_join_all(for_accounts.into_iter().map(|account| {
-        let infra_repo = state.infra_repo.clone();
+        let infra_repo = state.repos.infra.clone();
         let use_count = input.use_count;
         async move {
             let codes: Vec<String> = (0..code_count).map(|_| gen_invite_code()).collect();
@@ -192,7 +174,7 @@ pub async fn get_account_invite_codes(
     let include_used = params.include_used.unwrap_or(true);
 
     let codes_info = state
-        .infra_repo
+        .repos.infra
         .get_invite_codes_for_account(&auth.did)
         .await
         .log_db_err("fetching invite codes")?;
@@ -203,7 +185,7 @@ pub async fn get_account_invite_codes(
         .collect();
 
     let codes = futures::future::join_all(filtered_codes.into_iter().map(|info| {
-        let infra_repo = state.infra_repo.clone();
+        let infra_repo = state.repos.infra.clone();
         async move {
             let uses = infra_repo
                 .get_invite_code_uses(&info.code)

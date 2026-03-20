@@ -60,12 +60,12 @@ pub async fn get_record(
     _headers: HeaderMap,
     Query(input): Query<GetRecordInput>,
 ) -> Response {
-    let user_id = match common::resolve_repo_user_id(state.user_repo.as_ref(), &input.repo).await {
+    let user_id = match common::resolve_repo_user_id(state.repos.user.as_ref(), &input.repo).await {
         Ok(id) => id,
         Err(e) => return e.into_response(),
     };
     let record_row = state
-        .repo_repo
+        .repos.repo
         .get_record_cid(user_id, &input.collection, &input.rkey)
         .await;
     let record_cid_link = match record_row {
@@ -128,7 +128,7 @@ pub async fn list_records(
     State(state): State<AppState>,
     Query(input): Query<ListRecordsInput>,
 ) -> Response {
-    let user_id = match common::resolve_repo_user_id(state.user_repo.as_ref(), &input.repo).await {
+    let user_id = match common::resolve_repo_user_id(state.repos.user.as_ref(), &input.repo).await {
         Ok(id) => id,
         Err(e) => return e.into_response(),
     };
@@ -139,7 +139,7 @@ pub async fn list_records(
         .as_ref()
         .and_then(|c| c.parse::<tranquil_pds::types::Rkey>().ok());
     let rows = match state
-        .repo_repo
+        .repos.repo
         .list_records(
             user_id,
             &input.collection,

@@ -29,7 +29,7 @@ pub async fn create_totp_secret(
 ) -> Result<Json<CreateTotpSecretOutput>, ApiError> {
     use tranquil_db_traits::TotpRecordState;
 
-    match state.user_repo.get_totp_record_state(&auth.did).await {
+    match state.repos.user.get_totp_record_state(&auth.did).await {
         Ok(Some(TotpRecordState::Verified(_))) => return Err(ApiError::TotpAlreadyEnabled),
         Ok(Some(TotpRecordState::Unverified(_))) | Ok(None) => {}
         Err(e) => {
@@ -41,7 +41,7 @@ pub async fn create_totp_secret(
     let secret = generate_totp_secret();
 
     let handle = state
-        .user_repo
+        .repos.user
         .get_handle_by_did(&auth.did)
         .await
         .log_db_err("fetching handle")?
@@ -61,7 +61,7 @@ pub async fn create_totp_secret(
     })?;
 
     state
-        .user_repo
+        .repos.user
         .upsert_totp_secret(&auth.did, &encrypted_secret, ENCRYPTION_VERSION)
         .await
         .log_db_err("storing TOTP secret")?;
@@ -102,7 +102,7 @@ pub async fn enable_totp(
     )
     .await?;
 
-    let unverified_record = match state.user_repo.get_totp_record_state(&auth.did).await {
+    let unverified_record = match state.repos.user.get_totp_record_state(&auth.did).await {
         Ok(Some(TotpRecordState::Unverified(record))) => record,
         Ok(Some(TotpRecordState::Verified(_))) => return Err(ApiError::TotpAlreadyEnabled),
         Ok(None) => return Err(ApiError::TotpNotEnabled),
@@ -139,7 +139,7 @@ pub async fn enable_totp(
         })?;
 
     state
-        .user_repo
+        .repos.user
         .enable_totp_with_backup_codes(&auth.did, &backup_hashes)
         .await
         .log_db_err("enabling TOTP")?;
@@ -173,7 +173,7 @@ pub async fn disable_totp(
     let totp_mfa = verify_totp_mfa(&state, &auth, &input.code).await?;
 
     state
-        .user_repo
+        .repos.user
         .delete_totp_and_backup_codes(totp_mfa.did())
         .await
         .log_db_err("deleting TOTP")?;
@@ -199,7 +199,7 @@ pub async fn get_totp_status(
 ) -> Result<Json<GetTotpStatusOutput>, ApiError> {
     use tranquil_db_traits::TotpRecordState;
 
-    let enabled = match state.user_repo.get_totp_record_state(&auth.did).await {
+    let enabled = match state.repos.user.get_totp_record_state(&auth.did).await {
         Ok(Some(TotpRecordState::Verified(_))) => true,
         Ok(Some(TotpRecordState::Unverified(_))) | Ok(None) => false,
         Err(e) => {
@@ -209,7 +209,7 @@ pub async fn get_totp_status(
     };
 
     let backup_count = state
-        .user_repo
+        .repos.user
         .count_unused_backup_codes(&auth.did)
         .await
         .log_db_err("counting backup codes")?;
@@ -259,7 +259,7 @@ pub async fn regenerate_backup_codes(
         })?;
 
     state
-        .user_repo
+        .repos.user
         .replace_backup_codes(totp_mfa.did(), &backup_hashes)
         .await
         .log_db_err("replacing backup codes")?;
@@ -276,7 +276,7 @@ async fn verify_backup_code_for_user(
 ) -> bool {
     let code = code.trim().to_uppercase();
 
-    let backup_codes = match state.user_repo.get_unused_backup_codes(did).await {
+    let backup_codes = match state.repos.user.get_unused_backup_codes(did).await {
         Ok(codes) => codes,
         Err(e) => {
             warn!("Failed to fetch backup codes: {:?}", e);
@@ -290,7 +290,7 @@ async fn verify_backup_code_for_user(
 
     match matched {
         Some(row) => {
-            let _ = state.user_repo.mark_backup_code_used(row.id).await;
+            let _ = state.repos.user.mark_backup_code_used(row.id).await;
             true
         }
         None => false,
@@ -310,7 +310,7 @@ pub async fn verify_totp_or_backup_for_user(
         return verify_backup_code_for_user(state, did, code).await;
     }
 
-    let verified_record = match state.user_repo.get_totp_record_state(did).await {
+    let verified_record = match state.repos.user.get_totp_record_state(did).await {
         Ok(Some(TotpRecordState::Verified(record))) => record,
         _ => return false,
     };
@@ -324,7 +324,7 @@ pub async fn verify_totp_or_backup_for_user(
     };
 
     if verify_totp_code(&secret, code) {
-        let _ = state.user_repo.update_totp_last_used(did).await;
+        let _ = state.repos.user.update_totp_last_used(did).await;
         return true;
     }
 
@@ -332,5 +332,5 @@ pub async fn verify_totp_or_backup_for_user(
 }
 
 pub async fn has_totp_enabled(state: &AppState, did: &tranquil_pds::types::Did) -> bool {
-    state.user_repo.has_totp_enabled(did).await.unwrap_or(false)
+    state.repos.user.has_totp_enabled(did).await.unwrap_or(false)
 }

@@ -18,12 +18,12 @@ pub async fn describe_repo(
     State(state): State<AppState>,
     Query(input): Query<DescribeRepoInput>,
 ) -> Response {
-    let resolved = match common::resolve_repo(state.user_repo.as_ref(), &input.repo).await {
+    let resolved = match common::resolve_repo(state.repos.user.as_ref(), &input.repo).await {
         Ok(r) => r,
         Err(e) => return e.into_response(),
     };
     let collections = state
-        .repo_repo
+        .repos.repo
         .list_collections(resolved.user_id)
         .await
         .unwrap_or_default();

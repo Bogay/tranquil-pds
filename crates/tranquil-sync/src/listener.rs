@@ -8,7 +8,7 @@ static LAST_BROADCAST_SEQ: AtomicI64 = AtomicI64::new(0);
 
 pub async fn start_sequencer_listener(state: AppState) {
     let initial_seq = state
-        .repo_repo
+        .repos.repo
         .get_max_seq()
         .await
         .unwrap_or(SequenceNumber::ZERO);
@@ -30,14 +30,14 @@ pub async fn start_sequencer_listener(state: AppState) {
 
 async fn listen_loop(state: AppState) -> anyhow::Result<()> {
     let mut receiver = state
-        .event_notifier
+        .repos.event_notifier
         .subscribe()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to events: {:?}", e))?;
     info!("Connected to database and listening for repo updates");
     let catchup_start = SequenceNumber::from_raw(LAST_BROADCAST_SEQ.load(Ordering::SeqCst));
     let events = state
-        .repo_repo
+        .repos.repo
         .get_events_since_seq(catchup_start, None)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to fetch catchup events: {:?}", e))?;
@@ -70,7 +70,7 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
         }
         if seq_id > last_seq + 1 {
             let gap_events = state
-                .repo_repo
+                .repos.repo
                 .get_events_in_seq_range(
                     SequenceNumber::from_raw(last_seq),
                     SequenceNumber::from_raw(seq_id),
@@ -88,7 +88,7 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
             }
         }
         let event = state
-            .repo_repo
+            .repos.repo
             .get_event_by_seq(SequenceNumber::from_raw(seq_id))
             .await
             .ok()
