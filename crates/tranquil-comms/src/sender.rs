@@ -6,7 +6,6 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tokio::time::timeout;
 
 use super::types::{CommsChannel, QueuedComms};
 
@@ -58,6 +57,49 @@ async fn retry_delay(attempt: u32) {
     tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 }
 
+async fn send_http_with_retry<F, Fut>(service_name: &str, send_request: F) -> Result<(), SendError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
+{
+    let mut last_error = None;
+    for attempt in 0..MAX_RETRIES {
+        match send_request().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    return Ok(());
+                }
+                let status = response.status();
+                if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
+                    last_error = Some(format!("{service_name} API returned {status}"));
+                    retry_delay(attempt).await;
+                    continue;
+                }
+                let body = response.text().await.unwrap_or_default();
+                return Err(SendError::ExternalService(format!(
+                    "{service_name} API returned {status}: {body}",
+                )));
+            }
+            Err(e) => {
+                if e.is_timeout() {
+                    if attempt < MAX_RETRIES - 1 {
+                        last_error = Some(format!("{service_name} request timed out"));
+                        retry_delay(attempt).await;
+                        continue;
+                    }
+                    return Err(SendError::Timeout);
+                }
+                return Err(SendError::ExternalService(format!(
+                    "{service_name} request failed: {e}",
+                )));
+            }
+        }
+    }
+    Err(SendError::MaxRetriesExceeded(
+        last_error.unwrap_or_else(|| "unknown error".to_string()),
+    ))
+}
+
 pub fn sanitize_header_value(value: &str) -> String {
     value.replace(['\r', '\n'], " ").trim().to_string()
 }
@@ -90,22 +132,7 @@ pub fn is_valid_phone_number(number: &str) -> bool {
 }
 
 pub fn is_valid_signal_username(username: &str) -> bool {
-    if username.len() < 6 || username.len() > 35 {
-        return false;
-    }
-    let Some((base, discriminator)) = username.rsplit_once('.') else {
-        return false;
-    };
-    if base.len() < 3 || base.len() > 32 {
-        return false;
-    }
-    if !base.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return false;
-    }
-    if !base.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
-        return false;
-    }
-    discriminator.len() == 2 && discriminator.chars().all(|c| c.is_ascii_digit())
+    tranquil_signal::SignalUsername::parse(username).is_ok()
 }
 
 pub struct EmailSender {
@@ -414,51 +441,14 @@ impl CommsSender for DiscordSender {
         let payload = json!({ "content": content });
         let url = format!("{}/channels/{}/messages", DISCORD_API_BASE, channel_id);
 
-        let mut last_error = None;
-        for attempt in 0..MAX_RETRIES {
-            let result = self
-                .http_client
+        send_http_with_retry("Discord", || {
+            self.http_client
                 .post(&url)
                 .header("Authorization", self.auth_header())
                 .json(&payload)
                 .send()
-                .await;
-            match result {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        return Ok(());
-                    }
-                    let status = response.status();
-                    if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
-                        last_error = Some(format!("Discord API returned {}", status));
-                        retry_delay(attempt).await;
-                        continue;
-                    }
-                    let body = response.text().await.unwrap_or_default();
-                    return Err(SendError::ExternalService(format!(
-                        "Discord API returned {}: {}",
-                        status, body
-                    )));
-                }
-                Err(e) => {
-                    if e.is_timeout() {
-                        if attempt < MAX_RETRIES - 1 {
-                            last_error = Some("Discord request timed out".to_string());
-                            retry_delay(attempt).await;
-                            continue;
-                        }
-                        return Err(SendError::Timeout);
-                    }
-                    return Err(SendError::ExternalService(format!(
-                        "Discord request failed: {}",
-                        e
-                    )));
-                }
-            }
-        }
-        Err(SendError::MaxRetriesExceeded(
-            last_error.unwrap_or_else(|| "Unknown error".to_string()),
-        ))
+        })
+        .await
     }
 }
 
@@ -552,79 +542,22 @@ impl CommsSender for TelegramSender {
             "text": text,
             "parse_mode": "HTML"
         });
-        let mut last_error = None;
-        for attempt in 0..MAX_RETRIES {
-            let result = self.http_client.post(&url).json(&payload).send().await;
-            match result {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        return Ok(());
-                    }
-                    let status = response.status();
-                    if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
-                        last_error = Some(format!("Telegram API returned {}", status));
-                        retry_delay(attempt).await;
-                        continue;
-                    }
-                    let body = response.text().await.unwrap_or_default();
-                    return Err(SendError::ExternalService(format!(
-                        "Telegram API returned {}: {}",
-                        status, body
-                    )));
-                }
-                Err(e) => {
-                    if e.is_timeout() {
-                        if attempt < MAX_RETRIES - 1 {
-                            last_error = Some("Telegram request timed out".to_string());
-                            retry_delay(attempt).await;
-                            continue;
-                        }
-                        return Err(SendError::Timeout);
-                    }
-                    return Err(SendError::ExternalService(format!(
-                        "Telegram request failed: {}",
-                        e
-                    )));
-                }
-            }
-        }
-        Err(SendError::MaxRetriesExceeded(
-            last_error.unwrap_or_else(|| "Unknown error".to_string()),
-        ))
+
+        send_http_with_retry("Telegram", || {
+            self.http_client.post(&url).json(&payload).send()
+        })
+        .await
     }
 }
 
 pub struct SignalSender {
-    signal_cli_path: String,
-    sender_number: String,
+    slot: std::sync::Arc<tranquil_signal::SignalSlot>,
 }
 
 impl SignalSender {
-    pub fn new(signal_cli_path: String, sender_number: String) -> Self {
-        Self {
-            signal_cli_path,
-            sender_number,
-        }
+    pub fn new(slot: std::sync::Arc<tranquil_signal::SignalSlot>) -> Self {
+        Self { slot }
     }
-
-    pub fn from_config(cfg: &tranquil_config::TranquilConfig) -> Option<Self> {
-        let signal_cli_path = cfg.signal.cli_path.clone();
-        let sender_number = cfg.signal.sender_number.clone()?;
-        Some(Self::new(signal_cli_path, sender_number))
-    }
-}
-
-const SIGNAL_TIMEOUT_SECS: u64 = 30;
-
-fn is_retryable_signal_error(stderr: &str) -> bool {
-    let lower = stderr.to_lowercase();
-    lower.contains("timeout")
-        || lower.contains("timed out")
-        || lower.contains("connection refused")
-        || lower.contains("network")
-        || lower.contains("temporarily")
-        || lower.contains("try again")
-        || lower.contains("rate limit")
 }
 
 #[async_trait]
@@ -634,67 +567,46 @@ impl CommsSender for SignalSender {
     }
 
     async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
-        let recipient = &notification.recipient;
-        if !is_valid_signal_username(recipient) {
-            return Err(SendError::InvalidRecipient(format!(
-                "Invalid Signal username format: {}",
-                recipient
-            )));
-        }
+        let username = tranquil_signal::SignalUsername::parse(&notification.recipient)
+            .map_err(|e| SendError::InvalidRecipient(e.to_string()))?;
+
+        let client = self
+            .slot
+            .client()
+            .await
+            .ok_or(SendError::NotConfigured(CommsChannel::Signal))?;
+
         let subject = notification.subject.as_deref().unwrap_or("Notification");
-        let message = format!("{}\n\n{}", subject, notification.body);
+        let raw_message = format!("{}\n\n{}", subject, notification.body);
+        let message = tranquil_signal::MessageBody::new(raw_message)
+            .map_err(|e| SendError::InvalidRecipient(e.to_string()))?;
 
         let mut last_error = None;
         for attempt in 0..MAX_RETRIES {
-            let cmd_future = Command::new(&self.signal_cli_path)
-                .arg("-u")
-                .arg(&self.sender_number)
-                .arg("send")
-                .arg("--username")
-                .arg(recipient)
-                .arg("-m")
-                .arg(&message)
-                .output();
-
-            let result = timeout(Duration::from_secs(SIGNAL_TIMEOUT_SECS), cmd_future).await;
-
-            match result {
-                Ok(Ok(output)) if output.status.success() => return Ok(()),
-                Ok(Ok(output)) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if is_retryable_signal_error(&stderr) && attempt < MAX_RETRIES - 1 {
-                        last_error = Some(format!("signal-cli failed: {}", stderr));
-                        retry_delay(attempt).await;
-                        continue;
+            match client.send(&username, message.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    let err_str = e.to_string();
+                    match &e {
+                        tranquil_signal::SignalError::UsernameNotFound(_)
+                        | tranquil_signal::SignalError::UsernameLookup(_)
+                        | tranquil_signal::SignalError::NotLinked => {
+                            return Err(SendError::ExternalService(format!(
+                                "signal send failed: {err_str}"
+                            )));
+                        }
+                        _ => {
+                            last_error = Some(err_str);
+                            if attempt < MAX_RETRIES - 1 {
+                                retry_delay(attempt).await;
+                            }
+                        }
                     }
-                    return Err(SendError::ExternalService(format!(
-                        "signal-cli failed: {}",
-                        stderr
-                    )));
-                }
-                Ok(Err(e)) => {
-                    if attempt < MAX_RETRIES - 1 {
-                        last_error = Some(format!("signal-cli spawn failed: {}", e));
-                        retry_delay(attempt).await;
-                        continue;
-                    }
-                    return Err(SendError::ProcessSpawn {
-                        command: self.signal_cli_path.clone(),
-                        source: e,
-                    });
-                }
-                Err(_) => {
-                    if attempt < MAX_RETRIES - 1 {
-                        last_error = Some("signal-cli timed out".to_string());
-                        retry_delay(attempt).await;
-                        continue;
-                    }
-                    return Err(SendError::Timeout);
                 }
             }
         }
         Err(SendError::MaxRetriesExceeded(
-            last_error.unwrap_or_else(|| "Unknown error".to_string()),
+            last_error.unwrap_or_else(|| "unknown error".to_string()),
         ))
     }
 }
