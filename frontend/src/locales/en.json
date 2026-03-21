@@ -490,7 +490,20 @@
     "invitesEnabled": "User invites enabled",
     "invitesDisabled": "User invites disabled",
     "userDeleted": "User account deleted",
-    "failedToLoadConfig": "Failed to load server configuration"
+    "failedToLoadConfig": "Failed to load server configuration",
+    "signalIntegration": "Signal",
+    "signalLinked": "Linked",
+    "signalNotLinked": "Not linked",
+    "signalLinkDevice": "Link Device",
+    "signalUnlinkDevice": "Unlink",
+    "signalLinking": "Scan with Signal",
+    "signalLinkSuccess": "Signal device linked",
+    "signalUnlinkSuccess": "Signal device unlinked",
+    "signalUnlinkConfirm": "Unlink Signal device? Notifications will stop.",
+    "signalLinkFailed": "Failed to link Signal device",
+    "signalLinkTimedOut": "Signal linking timed out",
+    "signalUnlinkFailed": "Failed to unlink Signal device",
+    "signalFailedToLoad": "Failed to load Signal status"
   },
   "oauth": {
     "login": {

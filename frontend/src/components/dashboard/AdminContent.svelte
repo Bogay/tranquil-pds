@@ -65,8 +65,27 @@
   let logoPreview = $state<string | null>(null)
   let serverConfigLoading = $state(false)
 
+  let signalEnabled = $state(false)
+  let signalLinked = $state(false)
+  let signalQr = $state<string | null>(null)
+  let signalLoading = $state(false)
+  let signalPollTimer: ReturnType<typeof setInterval> | null = null
+  let signalLinkTimeout: ReturnType<typeof setTimeout> | null = null
+
+  function stopSignalPolling() {
+    if (signalPollTimer) {
+      clearInterval(signalPollTimer)
+      signalPollTimer = null
+    }
+    if (signalLinkTimeout) {
+      clearTimeout(signalLinkTimeout)
+      signalLinkTimeout = null
+    }
+  }
+
   onMount(async () => {
-    await Promise.all([loadStats(), loadServerConfig(), loadUsers(true)])
+    await Promise.all([loadStats(), loadServerConfig(), loadUsers(true), loadSignalStatus()])
+    return () => stopSignalPolling()
   })
 
   async function loadStats() {
@@ -210,6 +229,64 @@
       logoChanged
   }
 
+  let signalPollErrors = $state(0)
+
+  async function loadSignalStatus() {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    try {
+      const status = await api.getSignalStatus(session.accessJwt)
+      signalEnabled = status.enabled
+      signalLinked = status.linked
+      signalPollErrors = 0
+      if (signalLinked && signalQr) {
+        signalQr = null
+        stopSignalPolling()
+        toast.success($_('admin.signalLinkSuccess'))
+      }
+    } catch (e) {
+      signalPollErrors += 1
+      if (signalPollErrors >= 3 && signalQr) {
+        stopSignalPolling()
+        signalQr = null
+        toast.error(e instanceof ApiError ? e.message : $_('admin.signalFailedToLoad'))
+      }
+    }
+  }
+
+  async function linkSignal() {
+    signalLoading = true
+    try {
+      const result = await api.linkSignalDevice(session.accessJwt)
+      signalQr = result.qrBase64
+      signalPollTimer = setInterval(() => loadSignalStatus(), 2000)
+      signalLinkTimeout = setTimeout(() => {
+        if (!signalLinked) {
+          signalQr = null
+          stopSignalPolling()
+          toast.error($_('admin.signalLinkTimedOut'))
+        }
+      }, 130_000)
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : $_('admin.signalLinkFailed'))
+    } finally {
+      signalLoading = false
+    }
+  }
+
+  async function unlinkSignal() {
+    if (!confirm($_('admin.signalUnlinkConfirm'))) return
+    signalLoading = true
+    try {
+      await api.unlinkSignalDevice(session.accessJwt)
+      signalLinked = false
+      toast.success($_('admin.signalUnlinkSuccess'))
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : $_('admin.signalUnlinkFailed'))
+    } finally {
+      signalLoading = false
+    }
+  }
+
   async function showUserDetail(user: User) {
     selectedUser = user
     userDetailLoading = true
@@ -322,6 +399,34 @@
       </button>
     </form>
   </section>
+
+  {#if signalEnabled}
+    <section class="config-section">
+      <div class="section-header-row">
+        <h3>{$_('admin.signalIntegration')}</h3>
+        {#if signalLinked}
+          <span class="badge verified">{$_('admin.signalLinked')}</span>
+        {:else if !signalQr}
+          <span class="badge unverified">{$_('admin.signalNotLinked')}</span>
+        {/if}
+      </div>
+
+      {#if signalQr}
+        <div class="qr-container">
+          <p>{$_('admin.signalLinking')}</p>
+          <img src="data:image/png;base64,{signalQr}" alt="Signal QR" class="qr-code" />
+        </div>
+      {:else if signalLinked}
+        <button type="button" class="danger sm" onclick={unlinkSignal} disabled={signalLoading}>
+          {$_('admin.signalUnlinkDevice')}
+        </button>
+      {:else}
+        <button type="button" onclick={linkSignal} disabled={signalLoading}>
+          {signalLoading ? $_('common.loading') : $_('admin.signalLinkDevice')}
+        </button>
+      {/if}
+    </section>
+  {/if}
 
   <section class="stats-section">
     <div class="section-header-row">

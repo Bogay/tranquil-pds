@@ -248,6 +248,15 @@ export interface ServerStats {
   blobStorageBytes: number;
 }
 
+export interface SignalStatus {
+  enabled: boolean;
+  linked: boolean;
+}
+
+export interface SignalLinkResult {
+  qrBase64: string;
+}
+
 export interface ServerConfig {
   serverName: string;
   primaryColor: string | null;

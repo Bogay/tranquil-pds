@@ -73,9 +73,7 @@ struct PermissionEntry {
     aud: Option<String>,
 }
 
-pub async fn expand_include_scopes(
-    scope_string: &str,
-) -> Result<String, ScopeExpansionError> {
+pub async fn expand_include_scopes(scope_string: &str) -> Result<String, ScopeExpansionError> {
     let futures: Vec<_> = scope_string
         .split_whitespace()
         .map(|scope| async move {
@@ -571,8 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_expand_include_scopes_fails_on_unresolvable_nsid() {
-        let result =
-            expand_include_scopes("atproto include:nonexistent.fake.permissionSet").await;
+        let result = expand_include_scopes("atproto include:nonexistent.fake.permissionSet").await;
         assert!(result.is_err());
     }
 

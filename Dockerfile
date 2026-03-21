@@ -4,7 +4,7 @@ COPY frontend/ ./
 RUN deno task build
 
 FROM rust:1.92-alpine AS builder
-RUN apk add --no-cache ca-certificates musl-dev pkgconfig openssl-dev openssl-libs-static mold clang
+RUN apk add --no-cache ca-certificates musl-dev pkgconfig openssl-dev openssl-libs-static mold clang protoc
 ENV RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=mold"
 WORKDIR /app
 ARG SLIM="false"
@@ -29,6 +29,7 @@ COPY crates/tranquil-pds ./crates/tranquil-pds
 COPY crates/tranquil-sync ./crates/tranquil-sync
 COPY crates/tranquil-api ./crates/tranquil-api
 COPY crates/tranquil-oauth-server ./crates/tranquil-oauth-server
+COPY crates/tranquil-signal ./crates/tranquil-signal
 COPY crates/tranquil-server ./crates/tranquil-server
 COPY migrations ./crates/tranquil-pds/migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -40,23 +41,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     fi && \
     cp target/release/tranquil-server /tmp/tranquil-pds
 
-FROM alpine:3.23 AS signal-cli
-RUN apk add --no-cache curl tar
-ARG SIGNAL_CLI_VERSION=0.13.24
-RUN curl -fsSL "https://github.com/AsamK/signal-cli/releases/download/v${SIGNAL_CLI_VERSION}/signal-cli-${SIGNAL_CLI_VERSION}-Linux-native.tar.gz" \
-    | tar xz -C /usr/local/bin
-
-FROM debian:trixie-slim
-RUN apt-get update && apt-get install -y --no-install-recommends msmtp ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
+FROM alpine:3.23
+RUN apk add --no-cache msmtp ca-certificates \
     && ln -sf /usr/bin/msmtp /usr/sbin/sendmail
-COPY --from=signal-cli /usr/local/bin/signal-cli /usr/local/bin/signal-cli
-VOLUME /var/lib/signal-cli
 COPY --from=builder /tmp/tranquil-pds /usr/local/bin/tranquil-pds
 COPY --from=frontend /app/dist /var/lib/tranquil-pds/frontend
 COPY migrations /app/migrations
 WORKDIR /app
-ENV SIGNAL_CLI_CONFIG=/var/lib/signal-cli
 ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=3000
 EXPOSE 3000

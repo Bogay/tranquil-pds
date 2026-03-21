@@ -123,14 +123,6 @@ in {
               description = "Path to the sendmail executable to use for sending emails.";
             };
           };
-
-          signal = {
-            cli_path = mkOption {
-              type = types.path;
-              default = lib.getExe pkgs.signal-cli;
-              description = "Path to the signal-cli executable to use for sending Signal notifications.";
-            };
-          };
         };
       };
 

@@ -155,11 +155,9 @@ pub async fn handle_authorization_code_grant(
 
     let final_scope = if let Some(ref scope) = raw_scope {
         if scope.contains("include:") {
-            Some(
-                expand_include_scopes(scope)
-                    .await
-                    .map_err(|e| OAuthError::InvalidScope(format!("Failed to expand permission set: {e}")))?,
-            )
+            Some(expand_include_scopes(scope).await.map_err(|e| {
+                OAuthError::InvalidScope(format!("Failed to expand permission set: {e}"))
+            })?)
         } else {
             raw_scope
         }

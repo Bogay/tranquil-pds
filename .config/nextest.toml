@@ -30,6 +30,10 @@ filter = "binary(ripple_cluster)"
 test-group = "serial-env-tests"
 
 [[profile.default.overrides]]
+filter = "package(tranquil-signal)"
+test-group = "serial-env-tests"
+
+[[profile.default.overrides]]
 filter = "binary(whole_story)"
 test-group = "heavy-load-tests"
 
@@ -51,6 +55,10 @@ test-group = "serial-env-tests"
 
 [[profile.ci.overrides]]
 filter = "binary(ripple_cluster)"
+test-group = "serial-env-tests"
+
+[[profile.ci.overrides]]
+filter = "package(tranquil-signal)"
 test-group = "serial-env-tests"
 
 [[profile.ci.overrides]]

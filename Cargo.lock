@@ -7073,6 +7073,7 @@ dependencies = [
  "futures",
  "hex",
  "http 1.4.0",
+ "image",
  "infer",
  "ipld-core",
  "jacquard-common",
@@ -7080,6 +7081,7 @@ dependencies = [
  "k256",
  "multibase",
  "multihash",
+ "qrcodegen",
  "rand 0.8.5",
  "reqwest",
  "serde",
@@ -7096,6 +7098,7 @@ dependencies = [
  "tranquil-lexicon",
  "tranquil-pds",
  "tranquil-scopes",
+ "tranquil-signal",
  "tranquil-types",
  "urlencoding",
  "uuid",
@@ -7148,10 +7151,13 @@ dependencies = [
  "base64 0.22.1",
  "reqwest",
  "serde_json",
+ "sqlx",
  "thiserror 2.0.17",
  "tokio",
+ "tracing",
  "tranquil-config",
  "tranquil-db-traits",
+ "tranquil-signal",
  "uuid",
 ]
 
@@ -7375,6 +7381,7 @@ dependencies = [
  "tranquil-repo",
  "tranquil-ripple",
  "tranquil-scopes",
+ "tranquil-signal",
  "tranquil-storage",
  "tranquil-sync",
  "tranquil-types",
@@ -7455,6 +7462,7 @@ dependencies = [
  "tranquil-config",
  "tranquil-oauth-server",
  "tranquil-pds",
+ "tranquil-signal",
  "tranquil-sync",
 ]
 

@@ -141,3 +141,4 @@ curve25519-dalek = { git = "https://github.com/signalapp/curve25519-dalek", tag 
 lto = "fat"
 strip = true
 codegen-units = 1
+panic = "abort"

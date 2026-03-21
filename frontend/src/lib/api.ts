@@ -69,6 +69,8 @@ import type {
   ServerConfig,
   ServerDescription,
   ServerStats,
+  SignalLinkResult,
+  SignalStatus,
   Session,
   SsoLinkedAccount,
   StartPasskeyRegistrationResponse,
@@ -707,6 +709,18 @@ export const api = {
 
   getServerStats(token: AccessToken): Promise<ServerStats> {
     return xrpc("_admin.getServerStats", { token });
+  },
+
+  getSignalStatus(token: AccessToken): Promise<SignalStatus> {
+    return xrpc("_admin.getSignalStatus", { token });
+  },
+
+  linkSignalDevice(token: AccessToken): Promise<SignalLinkResult> {
+    return xrpc("_admin.linkSignalDevice", { method: "POST", token });
+  },
+
+  unlinkSignalDevice(token: AccessToken): Promise<void> {
+    return xrpc("_admin.unlinkSignalDevice", { method: "POST", token });
   },
 
   getServerConfig(): Promise<ServerConfig> {
