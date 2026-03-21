@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM signal_sessions WHERE address = $1 AND identity = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f464d947e93274cbc974f8a6f31d8a47eb676df857fa83f08ed1937cf8a6d9d"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM signal_kyber_pre_keys\n                 WHERE id = $1 AND identity = $2 AND is_last_resort = FALSE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c749d53e4e38dd53aa2ac59ba2b15b641ace056515c34ec977bf47d74dfd7072"
+}

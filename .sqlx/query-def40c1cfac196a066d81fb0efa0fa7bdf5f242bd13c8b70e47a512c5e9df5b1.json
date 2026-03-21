@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO signal_signed_pre_keys (id, identity, record)\n             VALUES ($1, $2, $3)\n             ON CONFLICT (id, identity) DO UPDATE SET record = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "def40c1cfac196a066d81fb0efa0fa7bdf5f242bd13c8b70e47a512c5e9df5b1"
+}

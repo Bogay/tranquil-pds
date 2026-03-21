@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM signal_kv WHERE key = 'master_key'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "6cb39ddd462ae93fe97d930ce64425ed16271adc4ca066c4d51bb742beffc22b"
+}

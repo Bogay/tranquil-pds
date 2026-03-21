@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM signal_identities",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "252d42bb50ef918fe414d036979daba055dbadd3cd7e1bdcce4526867be79930"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM signal_base_keys_seen",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "222836500a964ee6fd238ddb128691215cd15d2ede9a1a19e7a580e4d6644ce8"
+}

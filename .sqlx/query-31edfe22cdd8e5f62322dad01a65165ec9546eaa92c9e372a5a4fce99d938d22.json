@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO signal_base_keys_seen\n                 (kyber_pre_key_id, signed_pre_key_id, identity, base_key)\n                 VALUES ($1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "31edfe22cdd8e5f62322dad01a65165ec9546eaa92c9e372a5a4fce99d938d22"
+}

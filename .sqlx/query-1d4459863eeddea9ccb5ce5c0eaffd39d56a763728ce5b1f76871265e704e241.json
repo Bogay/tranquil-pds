@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO signal_kyber_pre_keys (id, identity, record, is_last_resort)\n             VALUES ($1, $2, $3, FALSE)\n             ON CONFLICT (id, identity) DO UPDATE SET record = $3, is_last_resort = FALSE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1d4459863eeddea9ccb5ce5c0eaffd39d56a763728ce5b1f76871265e704e241"
+}

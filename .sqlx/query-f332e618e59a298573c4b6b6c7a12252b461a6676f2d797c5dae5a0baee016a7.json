@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT record FROM signal_sessions\n             WHERE address = $1 AND device_id = $2 AND identity = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f332e618e59a298573c4b6b6c7a12252b461a6676f2d797c5dae5a0baee016a7"
+}

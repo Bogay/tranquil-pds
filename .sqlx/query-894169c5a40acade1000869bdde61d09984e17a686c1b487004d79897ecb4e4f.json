@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO signal_profile_keys (uuid, key) VALUES ($1, $2)\n             ON CONFLICT (uuid) DO UPDATE SET key = $2\n             RETURNING (xmax = 0) AS \"inserted!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "inserted!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "894169c5a40acade1000869bdde61d09984e17a686c1b487004d79897ecb4e4f"
+}

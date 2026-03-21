@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO signal_identities (address, identity, record)\n             VALUES ($1, $2, $3)\n             ON CONFLICT (address, identity) DO UPDATE SET record = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62dc57cf7ad007a6458df06619fe7e0bf5ffeba195e55793f6bf6d170e053226"
+}

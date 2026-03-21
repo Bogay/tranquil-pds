@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO signal_kv (key, value) VALUES ($1, $2)\n             ON CONFLICT (key) DO UPDATE SET value = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "29c834b7870cdbcdcc2d2c9259a04326e20433237ebe25e33dbd39952ae9f976"
+}

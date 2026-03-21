@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO signal_kv (key, value) VALUES ('sender_certificate', $1)\n             ON CONFLICT (key) DO UPDATE SET value = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5cd556968671fc8ecf57dd7fd40f65e3a168f17bd389ce2cf7ddee27d810cf1d"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT MAX(id) FROM signal_kyber_pre_keys\n             WHERE identity = $1 AND is_last_resort = TRUE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "max",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9da9a790efa51edd6abcb4b0991b307c3ba7f0a929e114a4e0cb2ffb88adfbbb"
+}

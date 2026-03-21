@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE signal_kyber_pre_keys\n             SET stale_at = $1\n             WHERE identity = $2 AND is_last_resort = FALSE AND stale_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "adabc98c853ae77678ad6cf1747384706154334cc507eb7542a8b5490f5a1e2a"
+}

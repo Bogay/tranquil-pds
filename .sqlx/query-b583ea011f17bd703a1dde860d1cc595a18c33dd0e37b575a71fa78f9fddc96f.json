@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT record FROM signal_sender_keys\n             WHERE address = $1 AND device_id = $2 AND identity = $3 AND distribution_id = $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b583ea011f17bd703a1dde860d1cc595a18c33dd0e37b575a71fa78f9fddc96f"
+}

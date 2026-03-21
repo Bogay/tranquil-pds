@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM signal_sender_keys",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "4011d789a6b619231f4e2b917753f0b4452f21243e1d95d47dbaa91cac019e64"
+}

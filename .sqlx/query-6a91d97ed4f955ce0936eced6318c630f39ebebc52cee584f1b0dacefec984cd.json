@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT record FROM signal_kyber_pre_keys\n             WHERE identity = $1 AND is_last_resort = TRUE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6a91d97ed4f955ce0936eced6318c630f39ebebc52cee584f1b0dacefec984cd"
+}
