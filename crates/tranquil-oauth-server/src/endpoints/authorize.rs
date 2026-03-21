@@ -1432,7 +1432,16 @@ pub async fn consent_get(
         requested_scope_str.to_string()
     };
 
-    let expanded_scope_str = expand_include_scopes(&effective_scope_str).await;
+    let expanded_scope_str = match expand_include_scopes(&effective_scope_str).await {
+        Ok(s) => s,
+        Err(e) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_scope",
+                &format!("Failed to expand permission set: {e}"),
+            );
+        }
+    };
     let requested_scopes: Vec<&str> = expanded_scope_str.split_whitespace().collect();
     let consent_client_id = ClientId::from(request_data.parameters.client_id.clone());
     let preferences = state

@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use tokio::sync::RwLock;
-use tracing::{debug, warn};
+use tracing::debug;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScopeExpansionError {
@@ -73,26 +73,27 @@ struct PermissionEntry {
     aud: Option<String>,
 }
 
-pub async fn expand_include_scopes(scope_string: &str) -> String {
+pub async fn expand_include_scopes(
+    scope_string: &str,
+) -> Result<String, ScopeExpansionError> {
     let futures: Vec<_> = scope_string
         .split_whitespace()
         .map(|scope| async move {
             match scope.strip_prefix("include:") {
                 Some(rest) => {
                     let (nsid_base, aud) = parse_include_scope(rest);
-                    expand_permission_set(nsid_base, aud)
-                        .await
-                        .unwrap_or_else(|e| {
-                            warn!(nsid = nsid_base, error = %e, "Failed to expand permission set, keeping original");
-                            scope.to_string()
-                        })
+                    expand_permission_set(nsid_base, aud).await
                 }
-                None => scope.to_string(),
+                None => Ok(scope.to_string()),
             }
         })
         .collect();
 
-    futures::future::join_all(futures).await.join(" ")
+    futures::future::join_all(futures)
+        .await
+        .into_iter()
+        .collect::<Result<Vec<String>, ScopeExpansionError>>()
+        .map(|v| v.join(" "))
 }
 
 fn parse_include_scope(rest: &str) -> (&str, Option<&str>) {
@@ -553,15 +554,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_expand_include_scopes_passthrough_non_include() {
-        let result = expand_include_scopes("atproto transition:generic").await;
+        let result = expand_include_scopes("atproto transition:generic")
+            .await
+            .unwrap();
         assert_eq!(result, "atproto transition:generic");
     }
 
     #[tokio::test]
     async fn test_expand_include_scopes_mixed_with_regular() {
-        let result = expand_include_scopes("atproto repo:app.bsky.feed.post?action=create").await;
+        let result = expand_include_scopes("atproto repo:app.bsky.feed.post?action=create")
+            .await
+            .unwrap();
         assert!(result.contains("atproto"));
         assert!(result.contains("repo:app.bsky.feed.post?action=create"));
+    }
+
+    #[tokio::test]
+    async fn test_expand_include_scopes_fails_on_unresolvable_nsid() {
+        let result =
+            expand_include_scopes("atproto include:nonexistent.fake.permissionSet").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_expand_include_scopes_fails_even_with_valid_scopes_present() {
+        let result = expand_include_scopes(
+            "atproto include:nonexistent.fake.permissionSet repo:app.bsky.feed.post?action=create",
+        )
+        .await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
