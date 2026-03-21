@@ -10,6 +10,7 @@ tranquil-sync = { workspace = true }
 tranquil-api = { workspace = true }
 tranquil-oauth-server = { workspace = true }
 tranquil-config = { workspace = true }
+tranquil-signal = { workspace = true }
 
 axum = { workspace = true }
 clap = { workspace = true }

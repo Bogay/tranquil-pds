@@ -60,6 +60,7 @@ pub struct AppState {
     pub cross_pds_oauth: Arc<CrossPdsOAuthClient>,
     pub shutdown: CancellationToken,
     pub bootstrap_invite_code: Option<String>,
+    pub signal_sender: Option<Arc<tranquil_signal::SignalSlot>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -310,6 +311,7 @@ impl AppState {
             webauthn_config,
             shutdown,
             bootstrap_invite_code: None,
+            signal_sender: None,
         }
     }
 
@@ -325,6 +327,11 @@ impl AppState {
     ) -> Self {
         self.cache = cache;
         self.distributed_rate_limiter = distributed_rate_limiter;
+        self
+    }
+
+    pub fn with_signal_sender(mut self, slot: Arc<tranquil_signal::SignalSlot>) -> Self {
+        self.signal_sender = Some(slot);
         self
     }
 

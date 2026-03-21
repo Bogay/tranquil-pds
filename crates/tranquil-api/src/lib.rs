@@ -330,6 +330,12 @@ pub fn api_routes() -> axum::Router<AppState> {
             get(admin::get_invite_codes),
         )
         .route("/_admin.getServerStats", get(admin::get_server_stats))
+        .route("/_admin.getSignalStatus", get(admin::get_signal_status))
+        .route("/_admin.linkSignalDevice", post(admin::link_signal_device))
+        .route(
+            "/_admin.unlinkSignalDevice",
+            post(admin::unlink_signal_device),
+        )
         .route("/_server.getConfig", get(admin::get_server_config))
         .route(
             "/_admin.updateServerConfig",

@@ -14,7 +14,7 @@ fn get_available_comms_channels() -> Vec<CommsChannel> {
     if cfg.telegram.bot_token.is_some() {
         channels.push(CommsChannel::Telegram);
     }
-    if cfg.signal.sender_number.is_some() {
+    if cfg.signal.enabled {
         channels.push(CommsChannel::Signal);
     }
     channels

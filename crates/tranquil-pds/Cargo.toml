@@ -15,6 +15,7 @@ tranquil-scopes = { workspace = true }
 tranquil-auth = { workspace = true }
 tranquil-oauth = { workspace = true }
 tranquil-comms = { workspace = true }
+tranquil-signal = { workspace = true }
 tranquil-db = { workspace = true }
 tranquil-db-traits = { workspace = true }
 tranquil-lexicon = { workspace = true, features = ["resolve"] }

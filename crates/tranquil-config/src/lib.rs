@@ -678,13 +678,8 @@ pub struct TelegramConfig {
 
 #[derive(Debug, Config)]
 pub struct SignalConfig {
-    /// Path to the `signal-cli` binary.
-    #[config(env = "SIGNAL_CLI_PATH", default = "/usr/local/bin/signal-cli")]
-    pub cli_path: String,
-
-    /// Sender phone number. When unset, Signal integration is disabled.
-    #[config(env = "SIGNAL_SENDER_NUMBER")]
-    pub sender_number: Option<String>,
+    #[config(env = "SIGNAL_ENABLED", default = false)]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Config)]

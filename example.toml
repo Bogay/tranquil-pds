@@ -320,17 +320,11 @@
 #webhook_secret =
 
 [signal]
-# Path to the `signal-cli` binary.
+# Protocol state is stored in postgres' signal_* tables.
+# Link a device via the admin API before enabling.
 #
-# Can also be specified via environment variable `SIGNAL_CLI_PATH`.
-#
-# Default value: "/usr/local/bin/signal-cli"
-#cli_path = "/usr/local/bin/signal-cli"
-
-# Sender phone number. When unset, Signal integration is disabled.
-#
-# Can also be specified via environment variable `SIGNAL_SENDER_NUMBER`.
-#sender_number =
+# Can also be specified via environment variable `SIGNAL_ENABLED`.
+#enabled = false
 
 [notifications]
 # Polling interval in milliseconds for the comms queue.

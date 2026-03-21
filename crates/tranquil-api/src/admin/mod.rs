@@ -2,6 +2,7 @@ pub mod account;
 pub mod config;
 pub mod invite;
 pub mod server_stats;
+pub mod signal;
 pub mod status;
 
 pub use account::{
@@ -13,4 +14,5 @@ pub use invite::{
     disable_account_invites, disable_invite_codes, enable_account_invites, get_invite_codes,
 };
 pub use server_stats::get_server_stats;
+pub use signal::{get_signal_status, link_signal_device, unlink_signal_device};
 pub use status::{get_subject_status, update_subject_status};

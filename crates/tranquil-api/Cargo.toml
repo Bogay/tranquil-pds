@@ -12,12 +12,15 @@ tranquil-db = { workspace = true }
 tranquil-db-traits = { workspace = true }
 tranquil-lexicon = { workspace = true, features = ["resolve"] }
 tranquil-scopes = { workspace = true }
+tranquil-signal = { workspace = true }
 
 anyhow = { workspace = true }
 axum = { workspace = true }
 backon = { workspace = true }
 base32 = { workspace = true }
 base64 = { workspace = true }
+image = { workspace = true }
+qrcodegen = { workspace = true }
 bcrypt = { workspace = true }
 bs58 = { workspace = true }
 bytes = { workspace = true }
