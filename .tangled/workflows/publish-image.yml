@@ -20,4 +20,5 @@ steps:
 
   - name: Publish image
     command: |
-      podman push --creds "$ATCR_USERNAME:$ATCR_PASSWORD" tranquil-pds:latest atcr.io/tranquild-pds/tranquil
+      podman push --creds "$ATCR_USERNAME:$ATCR_PASSWORD" tranquil-pds:latest "atcr.io/tranquil-pds/tranquil:latest"
+      podman push --creds "$ATCR_USERNAME:$ATCR_PASSWORD" "tranquil-pds:$TANGLED_COMMIT_SHA" "atcr.io/tranquil-pds/tranquil:$TANGLED_COMMIT_SHA"
