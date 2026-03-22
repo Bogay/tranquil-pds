@@ -3,6 +3,7 @@
   rustPlatform,
   pkg-config,
   openssl,
+  protobuf,
 }: let
   toml = (lib.importTOML ./Cargo.toml).workspace.package;
 in rustPlatform.buildRustPackage {
@@ -24,6 +25,7 @@ in rustPlatform.buildRustPackage {
 
   nativeBuildInputs = [
     pkg-config
+    protobuf
   ];
 
   buildInputs = [
