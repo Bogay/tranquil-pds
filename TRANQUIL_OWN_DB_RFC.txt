@@ -1,0 +1,169 @@
+tranquil-store: embedded storage engine for Tranquil PDS
+RFC draft, 2026-03-22
+By Lewis!
+
+-- TLDR --
+
+Add an embedded storage engine as an alternative to postgres (and leapfrog SQLite-per-actor)
+that treats Tranquil's 3 types of storage workloads as 3 separate problems:
+
+- BlockStore: bitcask-esque append log for immutable CID-keyed blocks [4]
+- MetaStore: Fjall LSM keyspaces for mutable metadata [5]
+- EventLog: segmented append log for the firehose
+
+Group commit across users, content dedup, sub-ms firehose delivery.
+We will use deterministic simulation testing [18][19].
+Postgres will of course stay as the existing alternative backend.
+
+-- Intro --
+
+The ref PDS hits structural limits around 300k accounts [2].
+SQLite-per-actor means no cross-user write batching.
+
+tranquil-store is an embedded rust library. It lives in-process, no external deps.
+Postgres remains supported; we plan to enable a storage transition path
+such that users can seamlessly snapshot-n-switch between the backends.
+
+The BlockStore is a bitcask-style append log [4] with a Fjall key index [5] that
+maps each CID to a (file, offset, length) tuple. We use key-value separation
+as per WiscKey [6]. Because blocks are immutable and keyed by CID, the value log
+never needs compaction. An LRU hot tier keeps frequently-accessed blocks in
+mem, and hint files allow fast index reconstruction on restart [4].
+
+The main throughput enabler is group commit [7]. The ref PDS fsyncs once per user
+per mutation [1], but BlockStore batches all concurrent commits into a single
+write-and-sync cycle.
+
+Content dedup occurs naturally: identical MST subtrees across users share
+one CID-keyed block instead of N copies [3].
+
+MetaStore uses Fjall [5] keyspaces for all mutable data. We chose Fjall over
+redb and LMDB because both of those are single-writer [8][9]. Each keyspace
+compacts independently.
+
+For cross-store atomicity we use an intent log. Each mutation writes a single
+intent record containing the BlockStore refcount updates, MetaStore changes,
+and the serialized EventLog payload, fsynced via the group commit. After fsync,
+the changes are applied to MetaStore and the event is appended to the EventLog,
+then the intent is marked committed. Recovery replays any incomplete intents,
+re-applying both metadata changes and event appends. This gives us crash-atomic
+mutations across all three stores without full MVCC, since mutations
+are already serialized per-user [3].
+
+EventLog stores the firehose as segmented append-only files. Live subscribers
+receive events via tokio broadcast, and consumers that are catching up will
+read from mmap'ed segments [10]. Each event receives a monotonic u64 sequence number.
+Segment headers store the base sequence number; a per-segment index maps sequence
+ranges to byte offsets. This decouples consumer cursors from physical layout,
+allowing transparent addition of per-segment zstd compression per the loom-v2
+spec [11] without invalidating checkpoints. Retention is just deleting old
+segments! :P
+
+GC uses refcounted key index entries. GC is epoch-gated by the group commit
+cycle: a block is only eligible for collection if its refcount reached zero in
+a prior completed commit cycle. This prevents races between concurrent dedup
+(which skips the block write but increments the refcount in the same batch) and
+collection. Blocks past the epoch gate are collected by rewriting any data
+files that fall below a liveness threshold.
+
+For serialization we use postcard on disk and rkyv [12] for in-mem caches
+only. All data files carry a version tag.
+
+Memory is divided into fixed slices from a configurable total budget: Fjall
+block cache, BlockStore hot tier, and CID index each receive a configured
+percentage. Actual usage per component is exposed as metrics. The EventLog's
+mmap pages live in the OS page cache and are excluded from the budget.
+
+Backup acquires the group commit lock, which quiesces all writes at the next
+commit boundary. Under the lock, the system notes the EventLog position, the
+BlockStore file list, and takes a Fjall snapshot, then releases the lock.
+Sealed data files and segments are immutable and can be copied without
+co-ordination after the snapshot. The quiesce window is bounded by one commit
+cycle. Point-in-time recovery replays the EventLog against a prior snapshot.
+For continuous replication, a background process tails the EventLog and copies
+sealed files to remote storage.
+
+-- Runtime --
+
+The storage core runs on tokio. It is synchronous internally, accessed through
+dedicated handler threads that communicate via async channels [13]. Requests
+are dispatched by hashing the DID, which gives us per-user write serialization
+without locks. Global operations use round-robin. All disk IO goes through
+pread/pwrite directly [13].
+
+We rejected io_uring for three reasons: it creates orphan kernel operations
+when futures are cancelled [22], it is blocked by default in both Docker [16]
+and Podman [17] seccomp profiles, and it accounts for 60% of Google's kernel
+vulnerability rewards [15].
+
+We also rejected thread-per-core runtimes (glommio, etc.) because they are
+incompatible with the tokio ecosystem. DID-sharded handler threads give us
+the same shared-nothing property without a runtime split.
+
+-- Testing --
+
+We use deterministic simulation testing, following FoundationDB [18] and
+TigerBeetle's VOPR [19]. All IO sits behind a StorageIO trait, and tests use an
+in-memory implementation that injects faults: partial writes, bit flips, sync
+failures, and misdirected writes. A single seed controls the entire fault
+schedule, so any failure reproduces exactly [20][21].
+
+-- Why these choices --
+
+Bitcask for blocks:
+Key-val separation [6] using Bitcask [4] for immutable CID blocks:
+O(1) writes, O(1) reads, zero write amplification, & no compaction!
+
+Fjall for metadata:
+Only pure-Rust embedded engine with concurrent writers [5].
+Otherwise we'd write our own.
+
+Segmented log for events:
+Write once -> scan forward -> delete by age.
+Quite straightforward!
+
+Postcard on disk:
+rkyv is apparently faster [12] but couples on-disk format to library version.
+
+Tokio & handler threads:
+spawn_blocking & pread matches io_uring without security/compat costs [13][14][15][16].
+
+Deterministic simulation:
+Catches bug classes conventional testing can't reach [18][19].
+StorageIO trait is needed anyway; but being harness-first is a one-time cost [20][21].
+
+-- References --
+
+[1]  Bluesky PDS SQLite migration. github.com/bluesky-social/atproto/pull/1705
+[2]  G. Orosz. Building Bluesky: a Distributed Social Network. Pragmatic Engineer, April 2024.
+     newsletter.pragmaticengineer.com/p/bluesky
+     K. Suder. Introduction to AT Protocol. August 2025. mackuba.eu/2025/08/20/introduction-to-atproto
+     Bluesky PDS "Going to Production" guide. atproto.com/guides/going-to-production
+[3]  AT Protocol repository spec. atproto.com/specs/repository
+[4]  Bitcask: A Log-Structured Hash Table for Fast KV Data. Riak, 2010. riak.com/assets/bitcask-intro.pdf
+[5]  Fjall: LSM-based embedded storage engine. github.com/fjall-rs/fjall
+[6]  Lu et al. WiscKey: Separating Keys from Values in SSD-Conscious Storage. USENIX FAST 2016.
+     usenix.org/conference/fast16/technical-sessions/presentation/lu
+[7]  Phil Eaton. A Write-Ahead Log Is Not a Universal Part of Durability. July 2024.
+     notes.eatonphil.com/2024-07-01-a-write-ahead-log-is-not-a-universal-part-of-durability.html
+[8]  redb design document. github.com/cberner/redb/blob/master/docs/design.md
+[9]  LMDB source repository. github.com/LMDB/lmdb
+[10] Crotty et al. Are You Sure You Want to Use MMAP in Your DBMS? CIDR 2022.
+     cs.brown.edu/people/acrotty/pubs/p13-crotty.pdf
+[11] ybzeek. RFC: com.atproto.sync.getZstdStream (zstd-compressed relay streams).
+     github.com/bluesky-social/atproto/discussions/4582
+[12] rkyv: zero-copy deserialization framework for Rust. rkyv.org
+[13] Tonbo. Exploring Better Async Rust Disk IO. tonbo.io/blog/exploring-better-async-rust-disk-io
+[14] Iroh. Async Rust Challenges in Iroh. iroh.computer/blog/async-rust-challenges-in-iroh
+[15] Google restricting io_uring. phoronix.com/news/Google-Restricting-IO_uring
+[16] Docker 4.42.0 and io_uring. forums.docker.com/t/4-42-0-and-io-uring/148620
+[17] Podman io_uring discussion. github.com/containers/podman/discussions/27772
+[18] FoundationDB simulation testing. apple.github.io/foundationdb/testing.html
+[19] TigerBeetle VOPR. tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness
+[20] DST in Rust (S2). s2.dev/blog/dst
+[21] Phil Eaton. What's the big deal about Deterministic Simulation Testing? August 2024.
+     notes.eatonphil.com/2024-08-20-deterministic-simulation-testing.html
+[22] Tonbo. Async Rust Is Not Safe with io_uring. tonbo.io/blog/async-rust-is-not-safe-with-io-uring
+
+Thank you for reading! Let's do some great work together.
+
