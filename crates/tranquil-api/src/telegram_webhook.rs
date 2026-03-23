@@ -71,7 +71,8 @@ pub async fn handle_telegram_webhook(
                 "Received /start from Telegram user"
             );
             match state
-                .repos.user
+                .repos
+                .user
                 .store_telegram_chat_id(&username, from.id, handle.as_deref())
                 .await
             {

@@ -599,10 +599,8 @@ pub async fn validate_token_with_dpop(
             if !allow_takendown && status.is_takendown() {
                 return Err(TokenValidationError::AccountTakedown);
             }
-            let key_bytes = try_decrypt_user_key(
-                user_info.key_bytes.as_deref(),
-                user_info.encryption_version,
-            );
+            let key_bytes =
+                try_decrypt_user_key(user_info.key_bytes.as_deref(), user_info.encryption_version);
             Ok(AuthenticatedUser {
                 did: result_did,
                 key_bytes,

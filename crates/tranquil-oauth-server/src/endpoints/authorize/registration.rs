@@ -16,7 +16,8 @@ pub async fn register_complete(
 
     let request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&request_id)
         .await
     {
@@ -50,7 +51,8 @@ pub async fn register_complete(
 
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&request_id)
             .await;
         return (
@@ -114,7 +116,8 @@ pub async fn register_complete(
     }
 
     let password_hashes = match state
-        .repos.session
+        .repos
+        .session
         .get_app_password_hashes_by_did(&did)
         .await
     {
@@ -202,7 +205,8 @@ pub async fn register_complete(
     }
 
     if let Err(e) = state
-        .repos.oauth
+        .repos
+        .oauth
         .set_authorization_did(&request_id, &did, None)
         .await
     {
@@ -257,7 +261,8 @@ pub async fn register_complete(
     let code = Code::generate();
     let auth_code = AuthorizationCode::from(code.0.clone());
     if let Err(e) = state
-        .repos.oauth
+        .repos
+        .oauth
         .update_authorization_request(&request_id, &did, None, &auth_code)
         .await
     {
@@ -317,7 +322,8 @@ pub async fn establish_session(
             };
 
             if let Err(e) = state
-                .repos.oauth
+                .repos
+                .oauth
                 .create_device(&device_typed, &device_data)
                 .await
             {
@@ -333,7 +339,8 @@ pub async fn establish_session(
             }
 
             if let Err(e) = state
-                .repos.oauth
+                .repos
+                .oauth
                 .upsert_account_device(did, &device_typed)
                 .await
             {

@@ -28,14 +28,16 @@ pub async fn start_passkey_registration(
     let webauthn = &state.webauthn_config;
 
     let handle = state
-        .repos.user
+        .repos
+        .user
         .get_handle_by_did(&auth.did)
         .await
         .log_db_err("fetching user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let existing_passkeys = state
-        .repos.user
+        .repos
+        .user
         .get_passkeys_for_user(&auth.did)
         .await
         .log_db_err("fetching existing passkeys")?;
@@ -60,7 +62,8 @@ pub async fn start_passkey_registration(
     })?;
 
     state
-        .repos.user
+        .repos
+        .user
         .save_webauthn_challenge(&auth.did, WebauthnChallengeType::Registration, &state_json)
         .await
         .log_db_err("saving registration state")?;
@@ -94,7 +97,8 @@ pub async fn finish_passkey_registration(
     let webauthn = &state.webauthn_config;
 
     let reg_state_json = state
-        .repos.user
+        .repos
+        .user
         .load_webauthn_challenge(&auth.did, WebauthnChallengeType::Registration)
         .await
         .log_db_err("loading registration state")?
@@ -125,7 +129,8 @@ pub async fn finish_passkey_registration(
     })?;
 
     let passkey_id = state
-        .repos.user
+        .repos
+        .user
         .save_passkey(
             &auth.did,
             passkey.cred_id(),
@@ -136,7 +141,8 @@ pub async fn finish_passkey_registration(
         .log_db_err("saving passkey")?;
 
     if let Err(e) = state
-        .repos.user
+        .repos
+        .user
         .delete_webauthn_challenge(&auth.did, WebauthnChallengeType::Registration)
         .await
     {
@@ -177,7 +183,8 @@ pub async fn list_passkeys(
     auth: Auth<Active>,
 ) -> Result<Json<ListPasskeysOutput>, ApiError> {
     let passkeys = state
-        .repos.user
+        .repos
+        .user
         .get_passkeys_for_user(&auth.did)
         .await
         .log_db_err("fetching passkeys")?;
@@ -243,7 +250,8 @@ pub async fn update_passkey(
     let id: uuid::Uuid = input.id.parse().map_err(|_| ApiError::InvalidId)?;
 
     match state
-        .repos.user
+        .repos
+        .user
         .update_passkey_name(id, &auth.did, &input.friendly_name)
         .await
     {

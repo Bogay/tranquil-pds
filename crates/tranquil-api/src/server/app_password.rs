@@ -31,14 +31,16 @@ pub async fn list_app_passwords(
     auth: Auth<Permissive>,
 ) -> Result<Json<ListAppPasswordsOutput>, ApiError> {
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_by_did(&auth.did)
         .await
         .log_db_err("getting user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let rows = state
-        .repos.session
+        .repos
+        .session
         .list_app_passwords(user.id)
         .await
         .log_db_err("listing app passwords")?;
@@ -83,7 +85,8 @@ pub async fn create_app_password(
     Json(input): Json<CreateAppPasswordInput>,
 ) -> Result<Json<CreateAppPasswordOutput>, ApiError> {
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_by_did(&auth.did)
         .await
         .log_db_err("getting user")?
@@ -95,7 +98,8 @@ pub async fn create_app_password(
     }
 
     if state
-        .repos.session
+        .repos
+        .session
         .get_app_password_by_name(user.id, name)
         .await
         .log_db_err("checking app password")?
@@ -106,7 +110,8 @@ pub async fn create_app_password(
 
     let (final_scopes, controller_did) = if let Some(ref controller) = auth.controller_did {
         let grant = state
-            .repos.delegation
+            .repos
+            .delegation
             .get_delegation(&auth.did, controller)
             .await
             .ok()
@@ -149,14 +154,16 @@ pub async fn create_app_password(
     };
 
     state
-        .repos.session
+        .repos
+        .session
         .create_app_password(&create_data)
         .await
         .log_db_err("creating app password")?;
 
     if let Some(ref controller) = controller_did {
         let _ = state
-            .repos.delegation
+            .repos
+            .delegation
             .log_delegation_action(
                 &auth.did,
                 controller,
@@ -192,7 +199,8 @@ pub async fn revoke_app_password(
     Json(input): Json<RevokeAppPasswordInput>,
 ) -> Result<Json<EmptyResponse>, ApiError> {
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_by_did(&auth.did)
         .await
         .log_db_err("getting user")?
@@ -204,13 +212,15 @@ pub async fn revoke_app_password(
     }
 
     let sessions_to_invalidate = state
-        .repos.session
+        .repos
+        .session
         .get_session_jtis_by_app_password(&auth.did, name)
         .await
         .unwrap_or_default();
 
     state
-        .repos.session
+        .repos
+        .session
         .delete_sessions_by_app_password(&auth.did, name)
         .await
         .log_db_err("revoking sessions for app password")?;
@@ -225,7 +235,8 @@ pub async fn revoke_app_password(
     .await;
 
     state
-        .repos.session
+        .repos
+        .session
         .delete_app_password(user.id, name)
         .await
         .log_db_err("revoking app password")?;

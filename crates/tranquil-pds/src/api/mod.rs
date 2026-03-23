@@ -8,7 +8,7 @@ pub use error::ApiError;
 pub use proxy_client::{AtUriParts, proxy_client, validate_at_uri, validate_limit};
 pub use responses::{
     AccountsOutput, AuditLogOutput, ControllersOutput, DidResponse, EmailUpdateStatusOutput,
-    EmptyResponse, HasPasswordResponse, InUseOutput, OptionsResponse,
-    PasswordResetOutput, PreferredLocaleOutput, PresetsOutput, StatusResponse, SuccessResponse,
-    TokenRequiredResponse, VerifiedResponse,
+    EmptyResponse, HasPasswordResponse, InUseOutput, OptionsResponse, PasswordResetOutput,
+    PreferredLocaleOutput, PresetsOutput, StatusResponse, SuccessResponse, TokenRequiredResponse,
+    VerifiedResponse,
 };

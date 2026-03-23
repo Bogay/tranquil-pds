@@ -451,7 +451,12 @@ pub async fn complete_passkey_setup(
     State(state): State<AppState>,
     Json(input): Json<CompletePasskeySetupInput>,
 ) -> Result<Json<CompletePasskeySetupOutput>, ApiError> {
-    let user = match state.repos.user.get_user_for_passkey_setup(&input.did).await {
+    let user = match state
+        .repos
+        .user
+        .get_user_for_passkey_setup(&input.did)
+        .await
+    {
         Ok(Some(u)) => u,
         Ok(None) => {
             return Err(ApiError::AccountNotFound);
@@ -484,7 +489,8 @@ pub async fn complete_passkey_setup(
     let webauthn = &state.webauthn_config;
 
     let reg_state = match state
-        .repos.user
+        .repos
+        .user
         .load_webauthn_challenge(&input.did, WebauthnChallengeType::Registration)
         .await
     {
@@ -530,7 +536,8 @@ pub async fn complete_passkey_setup(
         }
     };
     if let Err(e) = state
-        .repos.user
+        .repos
+        .user
         .save_passkey(
             &input.did,
             &credential_id,
@@ -559,7 +566,8 @@ pub async fn complete_passkey_setup(
     }
 
     let _ = state
-        .repos.user
+        .repos
+        .user
         .delete_webauthn_challenge(&input.did, WebauthnChallengeType::Registration)
         .await;
 
@@ -577,7 +585,12 @@ pub async fn start_passkey_registration_for_setup(
     State(state): State<AppState>,
     Json(input): Json<StartPasskeyRegistrationInput>,
 ) -> Result<Json<OptionsResponse<serde_json::Value>>, ApiError> {
-    let user = match state.repos.user.get_user_for_passkey_setup(&input.did).await {
+    let user = match state
+        .repos
+        .user
+        .get_user_for_passkey_setup(&input.did)
+        .await
+    {
         Ok(Some(u)) => u,
         Ok(None) => {
             return Err(ApiError::AccountNotFound);
@@ -610,7 +623,8 @@ pub async fn start_passkey_registration_for_setup(
     let webauthn = &state.webauthn_config;
 
     let existing_passkeys = state
-        .repos.user
+        .repos
+        .user
         .get_passkeys_for_user(&input.did)
         .await
         .unwrap_or_default();
@@ -643,7 +657,8 @@ pub async fn start_passkey_registration_for_setup(
         }
     };
     if let Err(e) = state
-        .repos.user
+        .repos
+        .user
         .save_webauthn_challenge(&input.did, WebauthnChallengeType::Registration, &state_json)
         .await
     {
@@ -682,7 +697,8 @@ pub async fn request_passkey_recovery(
         NormalizedLoginIdentifier::normalize(&input.email, hostname_for_handles);
 
     let user = match state
-        .repos.user
+        .repos
+        .user
         .get_user_for_passkey_recovery(identifier, normalized_handle.as_str())
         .await
     {
@@ -697,7 +713,8 @@ pub async fn request_passkey_recovery(
     let expires_at = Utc::now() + Duration::hours(1);
 
     if let Err(e) = state
-        .repos.user
+        .repos
+        .user
         .set_recovery_token(&user.did, &recovery_token_hash, expires_at)
         .await
     {
@@ -771,7 +788,8 @@ pub async fn recover_passkey_account(
         password_hash,
     };
     let result = match state
-        .repos.user
+        .repos
+        .user
         .recover_passkey_account(&recover_input)
         .await
     {
@@ -789,7 +807,8 @@ pub async fn recover_passkey_account(
         let actual_channel =
             tranquil_pds::comms::resolve_delivery_channel(&prefs, user.preferred_comms_channel);
         if let Err(e) = state
-            .repos.user
+            .repos
+            .user
             .set_channel_verified(&input.did, actual_channel)
             .await
         {

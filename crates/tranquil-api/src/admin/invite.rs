@@ -32,7 +32,8 @@ pub async fn disable_invite_codes(
         let accounts_typed: Vec<tranquil_types::Did> =
             accounts.iter().filter_map(|a| a.parse().ok()).collect();
         if let Err(e) = state
-            .repos.infra
+            .repos
+            .infra
             .disable_invite_codes_by_account(&accounts_typed)
             .await
         {
@@ -87,7 +88,8 @@ pub async fn get_invite_codes(
     };
 
     let codes_rows = state
-        .repos.infra
+        .repos
+        .infra
         .list_invite_codes(params.cursor.as_deref(), limit, sort_order)
         .await
         .log_db_err("fetching invite codes")?;
@@ -96,7 +98,8 @@ pub async fn get_invite_codes(
     let code_strings: Vec<String> = codes_rows.iter().map(|r| r.code.clone()).collect();
 
     let creator_dids: std::collections::HashMap<uuid::Uuid, tranquil_types::Did> = state
-        .repos.infra
+        .repos
+        .infra
         .get_user_dids_by_ids(&user_ids)
         .await
         .unwrap_or_default()
@@ -108,7 +111,8 @@ pub async fn get_invite_codes(
     } else {
         common::group_invite_uses_by_code(
             state
-                .repos.infra
+                .repos
+                .infra
                 .get_invite_code_uses_batch(&code_strings)
                 .await
                 .unwrap_or_default(),
@@ -168,7 +172,8 @@ pub async fn disable_account_invites(
         .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
 
     match state
-        .repos.user
+        .repos
+        .user
         .set_invites_disabled(&account_did, true)
         .await
     {
@@ -200,7 +205,8 @@ pub async fn enable_account_invites(
         .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
 
     match state
-        .repos.user
+        .repos
+        .user
         .set_invites_disabled(&account_did, false)
         .await
     {

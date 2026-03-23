@@ -115,7 +115,8 @@ pub async fn pushed_authorization_request(
     };
     let request_id_typed = RequestIdType::from(request_id.0.clone());
     state
-        .repos.oauth
+        .repos
+        .oauth
         .create_authorization_request(&request_id_typed, &request_data)
         .await
         .map_err(tranquil_pds::oauth::db_err_to_oauth)?;

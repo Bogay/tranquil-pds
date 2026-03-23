@@ -79,7 +79,8 @@ async fn handle_migration_verification(
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_verification_info(did)
         .await
         .log_db_err("during migration verification")?
@@ -92,7 +93,8 @@ async fn handle_migration_verification(
             }
             if !user.channel_verification.email {
                 state
-                    .repos.user
+                    .repos
+                    .user
                     .set_email_verified_flag(user.id)
                     .await
                     .log_db_err("updating email_verified status")?;
@@ -118,7 +120,8 @@ async fn handle_channel_update(
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let user_id = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(did)
         .await
         .log_db_err("fetching user id")?
@@ -127,7 +130,8 @@ async fn handle_channel_update(
     match channel {
         CommsChannel::Email => {
             let success = state
-                .repos.user
+                .repos
+                .user
                 .verify_email_channel(user_id, identifier)
                 .await
                 .log_db_err("updating email channel")?;
@@ -137,21 +141,24 @@ async fn handle_channel_update(
         }
         CommsChannel::Discord => {
             state
-                .repos.user
+                .repos
+                .user
                 .verify_discord_channel(user_id, identifier)
                 .await
                 .log_db_err("updating discord channel")?;
         }
         CommsChannel::Telegram => {
             state
-                .repos.user
+                .repos
+                .user
                 .verify_telegram_channel(user_id, identifier)
                 .await
                 .log_db_err("updating telegram channel")?;
         }
         CommsChannel::Signal => {
             state
-                .repos.user
+                .repos
+                .user
                 .verify_signal_channel(user_id, identifier)
                 .await
                 .log_db_err("updating signal channel")?;
@@ -178,7 +185,8 @@ async fn notify_channel_verified(
 ) {
     let recipient = match channel {
         CommsChannel::Telegram => state
-            .repos.user
+            .repos
+            .user
             .get_telegram_chat_id(user_id)
             .await
             .ok()
@@ -208,7 +216,8 @@ async fn handle_signup_verification(
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_verification_info(did)
         .await
         .log_db_err("during signup verification")?

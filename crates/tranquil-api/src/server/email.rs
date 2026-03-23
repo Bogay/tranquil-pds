@@ -61,7 +61,8 @@ pub async fn request_email_update(
     auth.check_account_scope(AccountAttr::Email, AccountAction::Manage)?;
 
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_email_info_by_did(&auth.did)
         .await
         .log_db_err("getting email info")?
@@ -141,7 +142,8 @@ pub async fn confirm_email(
 
     let did = &auth.did;
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_email_info_by_did(did)
         .await
         .log_db_err("getting email info")?
@@ -185,7 +187,8 @@ pub async fn confirm_email(
     }
 
     state
-        .repos.user
+        .repos
+        .user
         .set_email_verified(user.id, true)
         .await
         .log_db_err("confirming email")?;
@@ -212,7 +215,8 @@ pub async fn update_email(
 
     let did = &auth.did;
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_email_info_by_did(did)
         .await
         .log_db_err("getting email info")?
@@ -259,7 +263,8 @@ pub async fn update_email(
             }
 
             state
-                .repos.infra
+                .repos
+                .infra
                 .upsert_account_preference(user_id, "email_auth_factor", json!(email_auth_factor))
                 .await
                 .map_err(|e| {
@@ -342,7 +347,8 @@ pub async fn update_email(
     }
 
     state
-        .repos.user
+        .repos
+        .user
         .update_email(user_id, &new_email)
         .await
         .log_db_err("updating email")?;
@@ -370,7 +376,8 @@ pub async fn update_email(
     }
 
     if let Err(e) = state
-        .repos.infra
+        .repos
+        .infra
         .upsert_account_preference(
             user_id,
             "email_auth_factor",
@@ -396,7 +403,8 @@ pub async fn check_email_verified(
     Json(input): Json<CheckEmailVerifiedInput>,
 ) -> Result<Json<VerifiedResponse>, ApiError> {
     let verified = state
-        .repos.user
+        .repos
+        .user
         .check_email_verified_by_identifier(&input.identifier)
         .await
         .map_err(|e| {
@@ -420,7 +428,8 @@ pub async fn check_channel_verified(
     Json(input): Json<CheckChannelVerifiedInput>,
 ) -> Result<Json<VerifiedResponse>, ApiError> {
     let verified = state
-        .repos.user
+        .repos
+        .user
         .check_channel_verified_by_did(&input.did, input.channel)
         .await
         .map_err(|e| {
@@ -480,7 +489,10 @@ pub async fn authorize_email_update(
     let mut pending = match get_pending_email_update(state.cache.as_ref(), &did).await {
         Some(p) => p,
         None => {
-            warn!("authorize_email_update: no pending email update in cache for did={}", did);
+            warn!(
+                "authorize_email_update: no pending email update in cache for did={}",
+                did
+            );
             return ApiError::InvalidRequest("No pending email update found".into())
                 .into_response();
         }
@@ -558,7 +570,8 @@ pub async fn check_email_in_use(
     }
 
     let count = state
-        .repos.user
+        .repos
+        .user
         .count_accounts_by_email(&email)
         .await
         .map_err(|e| {

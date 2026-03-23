@@ -34,7 +34,8 @@ pub async fn import_repo(
     }
     let did = &auth.did;
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_by_did(did)
         .await
         .log_db_err("fetching user")?
@@ -44,7 +45,8 @@ pub async fn import_repo(
     }
     let user_id = user.id;
     let expected_root_cid = state
-        .repos.repo
+        .repos
+        .repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
         .map_err(|e| {
@@ -232,7 +234,8 @@ pub async fn import_repo(
                     blob_refs.into_iter().unzip();
 
                 match state
-                    .repos.blob
+                    .repos
+                    .blob
                     .insert_record_blobs(user_id, &record_uris, &blob_cids)
                     .await
                 {
@@ -248,7 +251,8 @@ pub async fn import_repo(
                 }
             }
             let key_row = state
-                .repos.user
+                .repos
+                .user
                 .get_user_with_key_by_did(did)
                 .await
                 .map_err(|e| {
@@ -289,7 +293,8 @@ pub async fn import_repo(
                 })?;
             let new_root_cid_link = CidLink::from(&new_root_cid);
             state
-                .repos.repo
+                .repos
+                .repo
                 .update_repo_root(user_id, &new_root_cid_link, &new_rev_str)
                 .await
                 .map_err(|e| {
@@ -299,7 +304,8 @@ pub async fn import_repo(
             let mut all_block_cids: Vec<Vec<u8>> = blocks.keys().map(|c| c.to_bytes()).collect();
             all_block_cids.push(new_root_cid.to_bytes());
             state
-                .repos.repo
+                .repos
+                .repo
                 .insert_user_blocks(user_id, &all_block_cids, &new_rev_str)
                 .await
                 .map_err(|e| {
@@ -322,7 +328,8 @@ pub async fn import_repo(
                     "birthDate": "1998-05-06T00:00:00.000Z"
                 });
                 if let Err(e) = state
-                    .repos.infra
+                    .repos
+                    .infra
                     .insert_account_preference_if_not_exists(
                         user_id,
                         "app.bsky.actor.defs#personalDetailsPref",

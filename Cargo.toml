@@ -22,6 +22,7 @@ members = [
     "crates/tranquil-api",
     "crates/tranquil-lexicon",
     "crates/tranquil-signal",
+    "crates/tranquil-store",
 ]
 
 [workspace.package]
@@ -51,6 +52,7 @@ tranquil-sync = { path = "crates/tranquil-sync" }
 tranquil-oauth-server = { path = "crates/tranquil-oauth-server" }
 tranquil-api = { path = "crates/tranquil-api" }
 tranquil-signal = { path = "crates/tranquil-signal" }
+tranquil-store = { path = "crates/tranquil-store" }
 
 presage = { git = "https://github.com/whisperfish/presage", rev = "fe3ed54c4844ae51c3a9fa49cf80a7816a31a425", default-features = false }
 

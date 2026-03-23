@@ -41,13 +41,15 @@ pub async fn check_account_status(
 ) -> Result<Json<CheckAccountStatusOutput>, ApiError> {
     let did = &auth.did;
     let user_id = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(did)
         .await
         .log_db_err("fetching user ID for account status")?
         .ok_or(ApiError::InternalError(None))?;
     let is_active = state
-        .repos.user
+        .repos
+        .user
         .is_account_active_by_did(did)
         .await
         .ok()
@@ -58,7 +60,8 @@ pub async fn check_account_status(
         .map(|r| (r.repo_root_cid.to_string(), r.repo_rev))
         .unwrap_or_else(|| (String::new(), None));
     let block_count: i64 = state
-        .repos.repo
+        .repos
+        .repo
         .count_user_blocks(user_id)
         .await
         .unwrap_or(0);
@@ -82,12 +85,14 @@ pub async fn check_account_status(
     };
     let record_count: i64 = state.repos.repo.count_records(user_id).await.unwrap_or(0);
     let imported_blobs: i64 = state
-        .repos.blob
+        .repos
+        .blob
         .count_blobs_by_user(user_id)
         .await
         .unwrap_or(0);
     let expected_blobs: i64 = state
-        .repos.blob
+        .repos
+        .blob
         .count_distinct_record_blobs(user_id)
         .await
         .unwrap_or(0);
@@ -339,7 +344,13 @@ pub async fn activate_account(
         did_validation_start.elapsed()
     );
 
-    let handle = state.repos.user.get_handle_by_did(&did).await.ok().flatten();
+    let handle = state
+        .repos
+        .user
+        .get_handle_by_did(&did)
+        .await
+        .ok()
+        .flatten();
     info!(
         "[MIGRATION] activateAccount: Activating account did={} handle={:?}",
         did, handle
@@ -406,7 +417,8 @@ pub async fn activate_account(
                 info!("[MIGRATION] activateAccount: Identity event sequenced successfully");
             }
             let repo_root = state
-                .repos.repo
+                .repos
+                .repo
                 .get_repo_root_by_did(&did)
                 .await
                 .ok()
@@ -480,9 +492,19 @@ pub async fn deactivate_account(
 
     let did = auth.did.clone();
 
-    let handle = state.repos.user.get_handle_by_did(&did).await.ok().flatten();
+    let handle = state
+        .repos
+        .user
+        .get_handle_by_did(&did)
+        .await
+        .ok()
+        .flatten();
 
-    let result = state.repos.user.deactivate_account(&did, delete_after).await;
+    let result = state
+        .repos
+        .user
+        .deactivate_account(&did, delete_after)
+        .await;
 
     match result {
         Ok(true) => {
@@ -518,7 +540,8 @@ pub async fn request_account_delete(
     let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
     let user_id = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(session_mfa.did())
         .await
         .ok()
@@ -527,7 +550,8 @@ pub async fn request_account_delete(
     let confirmation_token = Uuid::new_v4().to_string();
     let expires_at = Utc::now() + Duration::minutes(15);
     state
-        .repos.infra
+        .repos
+        .infra
         .create_deletion_request(&confirmation_token, session_mfa.did(), expires_at)
         .await
         .log_db_err("creating deletion token")?;
@@ -572,7 +596,8 @@ pub async fn delete_account(
         return Err(ApiError::InvalidToken(Some("token is required".into())));
     }
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_user_for_deletion(did)
         .await
         .map_err(|e| {
@@ -595,7 +620,8 @@ pub async fn delete_account(
         )));
     }
     let deletion_request = state
-        .repos.infra
+        .repos
+        .infra
         .get_deletion_request(token)
         .await
         .map_err(|e| {
@@ -615,7 +641,8 @@ pub async fn delete_account(
         return Err(ApiError::ExpiredToken(None));
     }
     state
-        .repos.user
+        .repos
+        .user
         .delete_account_complete(user_id, did)
         .await
         .map_err(|e| {

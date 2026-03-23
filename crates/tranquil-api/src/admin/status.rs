@@ -172,7 +172,8 @@ pub async fn update_subject_status(
                         None
                     };
                     state
-                        .repos.user
+                        .repos
+                        .user
                         .set_user_takedown(&did, takedown_ref)
                         .await
                         .map_err(|e| {
@@ -249,7 +250,8 @@ pub async fn update_subject_status(
                         None
                     };
                     state
-                        .repos.repo
+                        .repos
+                        .repo
                         .set_record_takedown(&cid, takedown_ref)
                         .await
                         .map_err(|e| {
@@ -282,7 +284,8 @@ pub async fn update_subject_status(
                         None
                     };
                     state
-                        .repos.blob
+                        .repos
+                        .blob
                         .update_blob_takedown(&cid, takedown_ref)
                         .await
                         .map_err(|e| {

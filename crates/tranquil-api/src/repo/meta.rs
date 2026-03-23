@@ -23,7 +23,8 @@ pub async fn describe_repo(
         Err(e) => return e.into_response(),
     };
     let collections = state
-        .repos.repo
+        .repos
+        .repo
         .list_collections(resolved.user_id)
         .await
         .unwrap_or_default();

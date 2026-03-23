@@ -304,7 +304,8 @@ pub async fn apply_writes(
     require_verified_or_delegated(&state, batch_proof.user()).await?;
 
     let user_id: uuid::Uuid = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(&did)
         .await
         .log_db_err("fetching user for batch write")?

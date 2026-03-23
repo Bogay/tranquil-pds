@@ -50,7 +50,8 @@ pub async fn consent_get(
 ) -> Response {
     let consent_request_id = RequestId::from(query.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&consent_request_id)
         .await
     {
@@ -105,7 +106,8 @@ pub async fn consent_get(
         .and_then(|s| s.parse().ok());
     let delegation_grant = if let Some(ref ctrl_did) = controller_did_parsed {
         state
-            .repos.delegation
+            .repos
+            .delegation
             .get_delegation(&did, ctrl_did)
             .await
             .ok()
@@ -136,7 +138,8 @@ pub async fn consent_get(
     let requested_scopes: Vec<&str> = expanded_scope_str.split_whitespace().collect();
     let consent_client_id = ClientId::from(request_data.parameters.client_id.clone());
     let preferences = state
-        .repos.oauth
+        .repos
+        .oauth
         .get_scope_preferences(&did, &consent_client_id)
         .await
         .unwrap_or_default();
@@ -206,7 +209,8 @@ pub async fn consent_get(
         .collect();
 
     let account_handle = state
-        .repos.user
+        .repos
+        .user
         .get_handle_by_did(&did)
         .await
         .ok()
@@ -216,7 +220,8 @@ pub async fn consent_get(
     let (is_delegation, controller_did_resp, controller_handle, delegation_level) =
         if let Some(ref ctrl_did) = controller_did_parsed {
             let ctrl_handle = state
-                .repos.user
+                .repos
+                .user
                 .get_handle_by_did(ctrl_did)
                 .await
                 .ok()
@@ -273,7 +278,8 @@ pub async fn consent_post(
     );
     let consent_post_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&consent_post_request_id)
         .await
     {
@@ -302,7 +308,8 @@ pub async fn consent_post(
         },
         Err(_) => {
             let _ = state
-                .repos.oauth
+                .repos
+                .oauth
                 .delete_authorization_request(&consent_post_request_id)
                 .await;
             return json_error(
@@ -327,7 +334,8 @@ pub async fn consent_post(
 
     let delegation_grant = match controller_did_parsed.as_ref() {
         Some(ctrl_did) => state
-            .repos.delegation
+            .repos
+            .delegation
             .get_delegation(&did, ctrl_did)
             .await
             .ok()
@@ -397,12 +405,14 @@ pub async fn consent_post(
             .collect();
         let consent_post_client_id = ClientId::from(request_data.parameters.client_id.clone());
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .upsert_scope_preferences(&did, &consent_post_client_id, &preferences)
             .await;
     }
     if let Err(e) = state
-        .repos.oauth
+        .repos
+        .oauth
         .update_request_scope(&consent_post_request_id, &approved_scope_str)
         .await
     {
@@ -415,7 +425,8 @@ pub async fn consent_post(
         .map(|d| DeviceIdType::new(d.0.clone()));
     let consent_post_code = AuthorizationCode::from(code.0.clone());
     if state
-        .repos.oauth
+        .repos
+        .oauth
         .update_authorization_request(
             &consent_post_request_id,
             &did,
@@ -458,7 +469,8 @@ pub async fn authorize_renew(
 ) -> Response {
     let request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&request_id)
         .await
     {
@@ -499,7 +511,8 @@ pub async fn authorize_renew(
     let staleness = now - request_data.expires_at;
     if staleness.num_seconds() > MAX_RENEWAL_STALENESS_SECONDS {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&request_id)
             .await;
         return json_error(
@@ -511,7 +524,8 @@ pub async fn authorize_renew(
 
     let new_expires_at = now + chrono::Duration::seconds(RENEW_EXPIRY_SECONDS);
     match state
-        .repos.oauth
+        .repos
+        .oauth
         .extend_authorization_request_expiry(&request_id, new_expires_at)
         .await
     {

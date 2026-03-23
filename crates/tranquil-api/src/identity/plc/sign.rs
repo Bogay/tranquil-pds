@@ -55,14 +55,16 @@ pub async fn sign_plc_operation(
     })?;
 
     let user_id = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(did)
         .await
         .log_db_err("fetching user id")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let token_expiry = state
-        .repos.infra
+        .repos
+        .infra
         .get_plc_token_expiry(user_id, token)
         .await
         .log_db_err("fetching PLC token expiry")?
@@ -73,7 +75,8 @@ pub async fn sign_plc_operation(
         return Err(ApiError::ExpiredToken(Some("Token has expired".into())));
     }
     let key_row = state
-        .repos.user
+        .repos
+        .user
         .get_user_key_by_id(user_id)
         .await
         .log_db_err("fetching user key")?

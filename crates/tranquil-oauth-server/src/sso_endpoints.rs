@@ -112,7 +112,8 @@ pub async fn sso_initiate(
         _ => {
             let request_id = RequestId::new(request_uri.clone());
             let _request_data = state
-                .repos.oauth
+                .repos
+                .oauth
                 .get_authorization_request(&request_id)
                 .await?
                 .ok_or(ApiError::InvalidRequest(
@@ -135,7 +136,8 @@ pub async fn sso_initiate(
         })?;
 
     state
-        .repos.sso
+        .repos
+        .sso
         .create_sso_auth_state(
             &sso_state,
             &request_uri,
@@ -363,7 +365,8 @@ async fn handle_sso_login(
     user_info: &tranquil_pds::sso::providers::SsoUserInfo,
 ) -> Response {
     let identity = match state
-        .repos.sso
+        .repos
+        .sso
         .get_external_identity_by_provider(provider, &user_info.provider_user_id)
         .await
     {
@@ -371,7 +374,8 @@ async fn handle_sso_login(
         Ok(None) => {
             let token = generate_registration_token();
             if let Err(e) = state
-                .repos.sso
+                .repos
+                .sso
                 .create_pending_registration(
                     &token,
                     request_uri,
@@ -398,7 +402,12 @@ async fn handle_sso_login(
         }
     };
 
-    let is_verified = match state.repos.user.get_session_info_by_did(&identity.did).await {
+    let is_verified = match state
+        .repos
+        .user
+        .get_session_info_by_did(&identity.did)
+        .await
+    {
         Ok(Some(info)) => info.channel_verification.has_any_verified(),
         Ok(None) => {
             tracing::error!("User not found for SSO login: {}", identity.did);
@@ -423,7 +432,8 @@ async fn handle_sso_login(
     }
 
     if let Err(e) = state
-        .repos.sso
+        .repos
+        .sso
         .update_external_identity_login(
             identity.id,
             user_info.username.as_deref(),
@@ -436,7 +446,8 @@ async fn handle_sso_login(
 
     let request_id = RequestId::new(request_uri.to_string());
     if let Err(e) = state
-        .repos.oauth
+        .repos
+        .oauth
         .set_authorization_did(&request_id, &identity.did, None)
         .await
     {
@@ -478,7 +489,8 @@ async fn handle_sso_link(
     user_info: &tranquil_pds::sso::providers::SsoUserInfo,
 ) -> Response {
     let existing = state
-        .repos.sso
+        .repos
+        .sso
         .get_external_identity_by_provider(provider, &user_info.provider_user_id)
         .await;
 
@@ -517,7 +529,8 @@ async fn handle_sso_link(
     }
 
     if let Err(e) = state
-        .repos.sso
+        .repos
+        .sso
         .create_external_identity(
             &did,
             provider,
@@ -551,7 +564,8 @@ async fn handle_sso_register(
     user_info: &tranquil_pds::sso::providers::SsoUserInfo,
 ) -> Response {
     match state
-        .repos.sso
+        .repos
+        .sso
         .get_external_identity_by_provider(provider, &user_info.provider_user_id)
         .await
     {
@@ -569,7 +583,8 @@ async fn handle_sso_register(
 
     let token = generate_registration_token();
     if let Err(e) = state
-        .repos.sso
+        .repos
+        .sso
         .create_pending_registration(
             &token,
             request_uri,
@@ -612,7 +627,8 @@ pub async fn get_linked_accounts(
     auth: tranquil_pds::auth::Auth<tranquil_pds::auth::Active>,
 ) -> Result<Json<LinkedAccountsResponse>, ApiError> {
     let identities = state
-        .repos.sso
+        .repos
+        .sso
         .get_external_identities_by_did(&auth.did)
         .await?;
 
@@ -657,7 +673,8 @@ pub async fn unlink_account(
     let id = uuid::Uuid::parse_str(&input.id).map_err(|_| ApiError::InvalidId)?;
 
     let has_password = state
-        .repos.user
+        .repos
+        .user
         .has_password_by_did(&auth.did)
         .await?
         .unwrap_or(false);
@@ -667,7 +684,8 @@ pub async fn unlink_account(
 
     if !has_password && !has_passkeys {
         let identities = state
-            .repos.sso
+            .repos
+            .sso
             .get_external_identities_by_did(&auth.did)
             .await?;
 
@@ -680,7 +698,8 @@ pub async fn unlink_account(
     }
 
     let deleted = state
-        .repos.sso
+        .repos
+        .sso
         .delete_external_identity(id, &auth.did)
         .await?;
 
@@ -718,7 +737,8 @@ pub async fn get_pending_registration(
     }
 
     let pending = state
-        .repos.sso
+        .repos
+        .sso
         .get_pending_registration(&query.token)
         .await?
         .ok_or(ApiError::SsoSessionExpired)?;
@@ -780,7 +800,8 @@ pub async fn check_handle_available(
     };
 
     let db_available = state
-        .repos.user
+        .repos
+        .user
         .check_handle_available_for_new_account(&handle_typed)
         .await
         .unwrap_or(false);
@@ -850,7 +871,8 @@ pub async fn complete_registration(
     }
 
     let pending_preview = state
-        .repos.sso
+        .repos
+        .sso
         .get_pending_registration(&input.token)
         .await?
         .ok_or(ApiError::SsoSessionExpired)?;
@@ -977,7 +999,8 @@ pub async fn complete_registration(
     let handle_typed: tranquil_pds::types::Handle =
         handle.parse().map_err(|_| ApiError::InvalidHandle(None))?;
     let reserved = state
-        .repos.user
+        .repos
+        .user
         .reserve_handle(&handle_typed, client_ip)
         .await
         .unwrap_or(false);
@@ -1178,7 +1201,8 @@ pub async fn complete_registration(
     };
 
     let _ = state
-        .repos.user
+        .repos
+        .user
         .release_handle_reservation(&handle_typed)
         .await;
 
@@ -1216,8 +1240,7 @@ pub async fn complete_registration(
 
     let app_password = generate_app_password();
     let app_password_name = "bsky.app".to_string();
-    let app_password_hash =
-        tranquil_api::common::hash_or_internal_error(&app_password)?;
+    let app_password_hash = tranquil_api::common::hash_or_internal_error(&app_password)?;
 
     let app_password_data = tranquil_db_traits::AppPasswordCreate {
         user_id: create_result.user_id,
@@ -1228,7 +1251,8 @@ pub async fn complete_registration(
         created_by_controller_did: None,
     };
     if let Err(e) = state
-        .repos.session
+        .repos
+        .session
         .create_app_password(&app_password_data)
         .await
     {
@@ -1240,7 +1264,8 @@ pub async fn complete_registration(
     if !is_standalone {
         let request_id = RequestId::new(pending_preview.request_uri.clone());
         if let Err(e) = state
-            .repos.oauth
+            .repos
+            .oauth
             .set_authorization_did(&request_id, &did_typed, None)
             .await
         {
@@ -1259,7 +1284,8 @@ pub async fn complete_registration(
     );
 
     let user_id = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(&did_typed)
         .await
         .unwrap_or(None);
@@ -1270,7 +1296,8 @@ pub async fn complete_registration(
 
     if channel_auto_verified {
         let _ = state
-            .repos.user
+            .repos
+            .user
             .set_channel_verified(&did_typed, tranquil_db_traits::CommsChannel::Email)
             .await;
         tracing::info!(did = %did, "Auto-verified email from SSO provider");

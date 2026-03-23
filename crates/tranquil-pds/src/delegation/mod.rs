@@ -30,7 +30,8 @@ pub async fn resolve_identity(
     did: &Did,
 ) -> Result<ResolvedIdentity, DidResolutionError> {
     let is_local = state
-        .repos.user
+        .repos
+        .user
         .get_by_did(did)
         .await
         .ok()

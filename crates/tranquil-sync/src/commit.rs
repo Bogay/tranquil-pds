@@ -104,7 +104,8 @@ pub async fn list_repos(
     let cursor_did: Option<Did> = params.cursor.as_ref().and_then(|s| s.parse().ok());
     let cursor_ref = cursor_did.as_ref();
     let result = state
-        .repos.repo
+        .repos
+        .repo
         .list_repos_paginated(cursor_ref, limit + 1)
         .await;
     match result {

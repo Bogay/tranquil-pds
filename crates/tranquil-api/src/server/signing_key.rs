@@ -44,7 +44,8 @@ pub async fn reserve_signing_key(
     let expires_at = Utc::now() + Duration::hours(24);
     let private_bytes: &[u8] = &private_key_bytes;
     match state
-        .repos.infra
+        .repos
+        .infra
         .reserve_signing_key(
             input.did.as_ref(),
             &public_key_did_key,

@@ -242,7 +242,8 @@ async fn verify_oauth_token_and_build_user(
     {
         Ok(result) => {
             let user_info = state
-                .repos.user
+                .repos
+                .user
                 .get_user_info_by_did(&result.did)
                 .await
                 .ok()
@@ -321,7 +322,8 @@ async fn extract_auth_internal(
         .unwrap_or_else(|| parts.uri.path().to_string());
     let uri = build_full_url(&original_uri);
 
-    match validate_bearer_token_for_service_auth(state.repos.user.as_ref(), &extracted.token).await {
+    match validate_bearer_token_for_service_auth(state.repos.user.as_ref(), &extracted.token).await
+    {
         Ok(user) if !user.auth_source.is_oauth() => {
             return Ok(ExtractedAuth::User(user));
         }

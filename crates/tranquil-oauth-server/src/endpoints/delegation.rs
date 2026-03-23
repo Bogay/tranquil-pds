@@ -25,7 +25,8 @@ fn parse_did(s: &str, label: &str) -> Result<Did, Response> {
 async fn get_auth_request(state: &AppState, request_uri: &str) -> Result<RequestData, Response> {
     let request_id = RequestId::from(request_uri.to_string());
     match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&request_id)
         .await
     {
@@ -43,7 +44,8 @@ async fn get_delegation_grant(
     controller_did: &Did,
 ) -> Result<tranquil_db_traits::DelegationGrant, Response> {
     match state
-        .repos.delegation
+        .repos
+        .delegation
         .get_delegation(delegated_did, controller_did)
         .await
     {
@@ -65,7 +67,8 @@ async fn finalize_delegation_auth(
     user_agent: Option<&str>,
 ) -> Response {
     let _ = state
-        .repos.delegation
+        .repos
+        .delegation
         .log_delegation_action(
             delegated_did,
             controller_did,
@@ -87,12 +90,14 @@ async fn bind_delegation_to_request(
 ) -> Result<(), Response> {
     let request_id = RequestId::from(request_uri.to_string());
     state
-        .repos.oauth
+        .repos
+        .oauth
         .set_request_did(&request_id, delegated_did)
         .await
         .map_err(|_| DelegationAuthResponse::err("Failed to update authorization request"))?;
     state
-        .repos.oauth
+        .repos
+        .oauth
         .set_controller_did(&request_id, controller_did)
         .await
         .map_err(|_| DelegationAuthResponse::err("Failed to update authorization request"))?;
@@ -211,7 +216,8 @@ pub async fn delegation_auth(
 
     let is_cross_pds = form.auth_method.as_deref() == Some("cross_pds");
     let controller_local = state
-        .repos.user
+        .repos
+        .user
         .get_auth_info_by_did(&controller_did)
         .await
         .ok()
@@ -562,7 +568,8 @@ pub async fn delegation_callback(
     }
 
     let _ = state
-        .repos.delegation
+        .repos
+        .delegation
         .log_delegation_action(
             delegated_did,
             controller_did,

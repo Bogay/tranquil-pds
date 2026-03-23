@@ -38,14 +38,16 @@ pub async fn submit_plc_operation(
     let hostname = &tranquil_config::get().server.hostname;
     let public_url = format!("https://{}", hostname);
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_id_and_handle_by_did(did)
         .await
         .log_db_err("fetching user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let key_row = state
-        .repos.user
+        .repos
+        .user
         .get_user_key_by_id(user.id)
         .await
         .log_db_err("fetching user key")?
@@ -128,7 +130,8 @@ pub async fn submit_plc_operation(
     .map_err(ApiError::from)?;
 
     match state
-        .repos.repo
+        .repos
+        .repo
         .insert_identity_event(did, Some(&user.handle))
         .await
     {

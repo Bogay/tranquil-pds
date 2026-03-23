@@ -20,7 +20,8 @@ pub async fn check_user_has_passkeys(
         BareLoginIdentifier::from_identifier(&query.identifier, hostname_for_handles);
 
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_login_check_by_handle_or_email(bare_identifier.as_str())
         .await;
 
@@ -52,7 +53,8 @@ pub async fn check_user_security_status(
         NormalizedLoginIdentifier::normalize(&query.identifier, hostname_for_handles);
 
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_login_check_by_handle_or_email(normalized_identifier.as_str())
         .await;
 
@@ -68,7 +70,8 @@ pub async fn check_user_security_status(
             let totp = tranquil_api::server::has_totp_enabled(&state, &u.did).await;
             let has_pw = u.password_hash.is_some();
             let has_controllers = state
-                .repos.delegation
+                .repos
+                .delegation
                 .is_delegated_account(&u.did)
                 .await
                 .unwrap_or(false);
@@ -113,7 +116,8 @@ pub async fn passkey_start(
 ) -> Response {
     let passkey_start_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&passkey_start_request_id)
         .await
     {
@@ -142,7 +146,8 @@ pub async fn passkey_start(
 
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&passkey_start_request_id)
             .await;
         return (
@@ -160,7 +165,8 @@ pub async fn passkey_start(
         NormalizedLoginIdentifier::normalize(&form.identifier, hostname_for_handles);
 
     let user = match state
-        .repos.user
+        .repos
+        .user
         .get_login_info_by_handle_or_email(normalized_username.as_str())
         .await
     {
@@ -299,7 +305,8 @@ pub async fn passkey_start(
     };
 
     if let Err(e) = state
-        .repos.user
+        .repos
+        .user
         .save_webauthn_challenge(
             &user.did,
             WebauthnChallengeType::Authentication,
@@ -322,7 +329,8 @@ pub async fn passkey_start(
         Some(delegated_did_str) => match delegated_did_str.parse::<tranquil_types::Did>() {
             Ok(delegated_did) if delegated_did != user.did => {
                 match state
-                    .repos.delegation
+                    .repos
+                    .delegation
                     .get_delegation(&delegated_did, &user.did)
                     .await
                 {
@@ -359,7 +367,8 @@ pub async fn passkey_start(
             "Passkey auth with delegated_did param - setting delegation flow"
         );
         if state
-            .repos.oauth
+            .repos
+            .oauth
             .set_authorization_did(&passkey_start_request_id, &delegated_did, None)
             .await
             .is_err()
@@ -367,7 +376,8 @@ pub async fn passkey_start(
             return OAuthError::ServerError("An error occurred.".into()).into_response();
         }
         if state
-            .repos.oauth
+            .repos
+            .oauth
             .set_controller_did(&passkey_start_request_id, &user.did)
             .await
             .is_err()
@@ -381,7 +391,8 @@ pub async fn passkey_start(
             "Passkey auth in delegation flow - preserving delegated DID"
         );
         if state
-            .repos.oauth
+            .repos
+            .oauth
             .set_controller_did(&passkey_start_request_id, &user.did)
             .await
             .is_err()
@@ -389,7 +400,8 @@ pub async fn passkey_start(
             return OAuthError::ServerError("An error occurred.".into()).into_response();
         }
     } else if state
-        .repos.oauth
+        .repos
+        .oauth
         .set_authorization_did(&passkey_start_request_id, &user.did, None)
         .await
         .is_err()
@@ -415,7 +427,8 @@ pub async fn passkey_finish(
 ) -> Response {
     let passkey_finish_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&passkey_finish_request_id)
         .await
     {
@@ -444,7 +457,8 @@ pub async fn passkey_finish(
 
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&passkey_finish_request_id)
             .await;
         return (
@@ -491,7 +505,8 @@ pub async fn passkey_finish(
     let passkey_owner_did = controller_did.as_ref().unwrap_or(&did);
 
     let auth_state_json = match state
-        .repos.user
+        .repos
+        .user
         .load_webauthn_challenge(passkey_owner_did, WebauthnChallengeType::Authentication)
         .await
     {
@@ -570,7 +585,8 @@ pub async fn passkey_finish(
     };
 
     if let Err(e) = state
-        .repos.user
+        .repos
+        .user
         .delete_webauthn_challenge(passkey_owner_did, WebauthnChallengeType::Authentication)
         .await
     {
@@ -580,7 +596,8 @@ pub async fn passkey_finish(
     if auth_result.needs_update() {
         let cred_id_bytes = auth_result.cred_id().as_slice();
         match state
-            .repos.user
+            .repos
+            .user
             .update_passkey_counter(
                 cred_id_bytes,
                 i32::try_from(auth_result.counter()).unwrap_or(i32::MAX),
@@ -640,7 +657,8 @@ pub async fn passkey_finish(
     let passkey_final_device_id = device_id.clone();
     let passkey_final_code = AuthorizationCode::from(code.0.clone());
     if state
-        .repos.oauth
+        .repos
+        .oauth
         .update_authorization_request(
             &passkey_finish_request_id,
             &did,
@@ -691,7 +709,8 @@ pub async fn authorize_passkey_start(
 ) -> Response {
     let auth_passkey_start_request_id = RequestId::from(query.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&auth_passkey_start_request_id)
         .await
     {
@@ -720,7 +739,8 @@ pub async fn authorize_passkey_start(
 
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&auth_passkey_start_request_id)
             .await;
         return (
@@ -822,7 +842,8 @@ pub async fn authorize_passkey_start(
     };
 
     if let Err(e) = state
-        .repos.user
+        .repos
+        .user
         .save_webauthn_challenge(&did, WebauthnChallengeType::Authentication, &state_json)
         .await
     {
@@ -858,7 +879,8 @@ pub async fn authorize_passkey_finish(
     let passkey_finish_request_id = RequestId::from(form.request_uri.clone());
 
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&passkey_finish_request_id)
         .await
     {
@@ -887,7 +909,8 @@ pub async fn authorize_passkey_finish(
 
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&passkey_finish_request_id)
             .await;
         return (
@@ -929,7 +952,8 @@ pub async fn authorize_passkey_finish(
     };
 
     let auth_state_json = match state
-        .repos.user
+        .repos
+        .user
         .load_webauthn_challenge(&did, WebauthnChallengeType::Authentication)
         .await
     {
@@ -1003,12 +1027,14 @@ pub async fn authorize_passkey_finish(
     };
 
     let _ = state
-        .repos.user
+        .repos
+        .user
         .delete_webauthn_challenge(&did, WebauthnChallengeType::Authentication)
         .await;
 
     match state
-        .repos.user
+        .repos
+        .user
         .update_passkey_counter(
             credential.id.as_ref(),
             i32::try_from(auth_result.counter()).unwrap_or(i32::MAX),
@@ -1033,7 +1059,8 @@ pub async fn authorize_passkey_finish(
     }
 
     let has_totp = state
-        .repos.user
+        .repos
+        .user
         .has_totp_enabled(&did)
         .await
         .unwrap_or(false);
@@ -1064,11 +1091,13 @@ pub async fn authorize_passkey_finish(
             };
 
             let _ = state
-                .repos.oauth
+                .repos
+                .oauth
                 .delete_2fa_challenge_by_request_uri(&passkey_finish_request_id)
                 .await;
             match state
-                .repos.oauth
+                .repos
+                .oauth
                 .create_2fa_challenge(&did, &passkey_finish_request_id)
                 .await
             {

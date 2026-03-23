@@ -40,7 +40,8 @@ pub async fn create_invite_code(
     let code = gen_invite_code();
 
     match state
-        .repos.infra
+        .repos
+        .infra
         .create_invite_code(&code, input.use_count, Some(&for_account))
         .await
     {
@@ -97,7 +98,8 @@ pub async fn create_invite_codes(
     };
 
     let admin_user_id = state
-        .repos.user
+        .repos
+        .user
         .get_any_admin_user_id()
         .await
         .log_db_err("looking up admin user")?
@@ -174,7 +176,8 @@ pub async fn get_account_invite_codes(
     let include_used = params.include_used.unwrap_or(true);
 
     let codes_info = state
-        .repos.infra
+        .repos
+        .infra
         .get_invite_codes_for_account(&auth.did)
         .await
         .log_db_err("fetching invite codes")?;

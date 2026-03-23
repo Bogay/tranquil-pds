@@ -66,7 +66,8 @@ pub async fn upload_blob(
     };
 
     if state
-        .repos.user
+        .repos
+        .user
         .is_account_migrated(&did)
         .await
         .unwrap_or(false)
@@ -78,7 +79,8 @@ pub async fn upload_blob(
         get_header_str(&headers, http::header::CONTENT_TYPE).unwrap_or("application/octet-stream");
 
     let user_id = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(&did)
         .await
         .log_db_err("fetching user id for blob upload")?
@@ -143,7 +145,8 @@ pub async fn upload_blob(
     );
 
     match state
-        .repos.blob
+        .repos
+        .blob
         .insert_blob(
             &cid_link,
             &mime_type,
@@ -177,7 +180,8 @@ pub async fn upload_blob(
 
     if let Some(ref controller) = controller_did
         && let Err(e) = state
-            .repos.delegation
+            .repos
+            .delegation
             .log_delegation_action(
                 &did,
                 controller,
@@ -236,7 +240,8 @@ pub async fn list_missing_blobs(
 ) -> Result<Json<ListMissingBlobsOutput>, ApiError> {
     let did = &auth.did;
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_by_did(did)
         .await
         .log_db_err("fetching user")?
@@ -245,7 +250,8 @@ pub async fn list_missing_blobs(
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
     let cursor = params.cursor.as_deref();
     let missing = state
-        .repos.blob
+        .repos
+        .blob
         .list_missing_blobs(user.id, cursor, limit + 1)
         .await
         .log_db_err("fetching missing blobs")?;

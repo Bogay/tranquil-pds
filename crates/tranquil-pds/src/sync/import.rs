@@ -222,8 +222,7 @@ fn walk_mst_node(
                 if let Some(record_cid) = entry.value
                     && let Ok(full_key) = String::from_utf8(current_key.clone())
                     && let Some(record_block) = blocks.get(&record_cid)
-                    && let Ok(record_value) =
-                        serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
+                    && let Ok(record_value) = serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
                 {
                     let blob_refs = find_blob_refs_ipld(&record_value, 0);
                     let parts: Vec<&str> = full_key.split('/').collect();

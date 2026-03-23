@@ -55,7 +55,8 @@ pub async fn search_accounts(
     let handle_filter = params.handle.as_deref().map(|h| format!("%{}%", h));
     let cursor_did: Option<Did> = params.cursor.as_ref().and_then(|c| c.parse().ok());
     let rows = state
-        .repos.user
+        .repos
+        .user
         .search_accounts(
             cursor_did.as_ref(),
             email_filter.as_deref(),

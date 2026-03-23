@@ -245,7 +245,8 @@ pub async fn authorize_deny(
 ) -> Response {
     let deny_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&deny_request_id)
         .await
     {
@@ -272,7 +273,8 @@ pub async fn authorize_deny(
         }
     };
     let _ = state
-        .repos.oauth
+        .repos
+        .oauth
         .delete_authorization_request(&deny_request_id)
         .await;
     let redirect_uri = &request_data.parameters.redirect_uri;
@@ -294,7 +296,6 @@ pub async fn authorize_deny(
 pub struct AuthorizeDenyForm {
     pub request_uri: String,
 }
-
 
 mod consent;
 mod login;

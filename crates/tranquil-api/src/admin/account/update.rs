@@ -30,7 +30,8 @@ pub async fn update_account_email(
         .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
 
     match state
-        .repos.user
+        .repos
+        .user
         .admin_update_email(&account_did, email)
         .await
     {
@@ -73,7 +74,8 @@ pub async fn update_account_handle(
     };
     let old_handle = state.repos.user.get_handle_by_did(did).await.ok().flatten();
     let user_id = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(did)
         .await
         .ok()
@@ -81,14 +83,16 @@ pub async fn update_account_handle(
         .ok_or(ApiError::AccountNotFound)?;
     let handle_for_check: Handle = handle.parse().map_err(|_| ApiError::InvalidHandle(None))?;
     if let Ok(true) = state
-        .repos.user
+        .repos
+        .user
         .check_handle_exists(&handle_for_check, user_id)
         .await
     {
         return Err(ApiError::HandleTaken);
     }
     match state
-        .repos.user
+        .repos
+        .user
         .admin_update_handle(did, &handle_for_check)
         .await
     {
@@ -149,7 +153,8 @@ pub async fn update_account_password(
     let password_hash = crate::common::hash_or_internal_error(password)?;
 
     match state
-        .repos.user
+        .repos
+        .user
         .admin_update_password(did, &password_hash)
         .await
     {

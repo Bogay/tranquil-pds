@@ -136,7 +136,8 @@ pub async fn resolve_signing_key(
     match signing_key_did {
         Some(key_did) => {
             let key = state
-                .repos.infra
+                .repos
+                .infra
                 .get_reserved_signing_key(key_did)
                 .await
                 .map_err(|e| {
@@ -295,7 +296,8 @@ pub async fn create_and_store_session(
         app_password_name: None,
     };
     state
-        .repos.session
+        .repos
+        .session
         .create_session(&session_data)
         .await
         .map_err(|e| {

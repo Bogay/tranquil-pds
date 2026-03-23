@@ -169,7 +169,8 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
     );
 
     match state
-        .repos.user
+        .repos
+        .user
         .store_discord_user_id(&discord_username, &discord_user_id, handle.as_deref())
         .await
     {

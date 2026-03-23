@@ -179,7 +179,8 @@ async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str
     };
 
     let block_cid_bytes = match state
-        .repos.repo
+        .repos
+        .repo
         .get_user_block_cids_since_rev(user_id, since)
         .await
     {

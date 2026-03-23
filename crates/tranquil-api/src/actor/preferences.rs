@@ -188,7 +188,8 @@ pub async fn put_preferences(
         .collect();
 
     if state
-        .repos.infra
+        .repos
+        .infra
         .replace_namespace_preferences(user_id, APP_BSKY_NAMESPACE, prefs_to_save)
         .await
         .is_err()

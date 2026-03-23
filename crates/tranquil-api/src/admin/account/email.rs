@@ -31,7 +31,8 @@ pub async fn send_email(
         return Err(ApiError::InvalidRequest("content is required".into()));
     }
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_by_did(&input.recipient_did)
         .await
         .log_db_err("in send_email")?
@@ -45,7 +46,8 @@ pub async fn send_email(
         .clone()
         .unwrap_or_else(|| format!("Message from {}", hostname));
     let result = state
-        .repos.infra
+        .repos
+        .infra
         .enqueue_comms(
             Some(user_id),
             tranquil_db_traits::CommsChannel::Email,

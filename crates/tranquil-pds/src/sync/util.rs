@@ -221,7 +221,14 @@ fn serialize_event_frame<P: serde::Serialize>(
     payload: &P,
     capacity: usize,
 ) -> Result<Vec<u8>, SyncFrameError> {
-    serialize_cbor_pair(&FrameHeader { op: 1, t: frame_type }, payload, capacity)
+    serialize_cbor_pair(
+        &FrameHeader {
+            op: 1,
+            t: frame_type,
+        },
+        payload,
+        capacity,
+    )
 }
 
 fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameError> {

@@ -67,14 +67,16 @@ async fn try_reactivate_migration(
         new_email: email.clone(),
     };
     match state
-        .repos.user
+        .repos
+        .user
         .reactivate_migration_account(&reactivate_input)
         .await
     {
         Ok(reactivated) => {
             info!(did = %did, old_handle = %reactivated.old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
             let secret_key_bytes = match state
-                .repos.user
+                .repos
+                .user
                 .get_user_key_by_id(reactivated.user_id)
                 .await
             {
@@ -399,7 +401,8 @@ pub async fn create_account(
         Err(_) => return ApiError::InvalidHandle(None).into_response(),
     };
     let handle_available = match state
-        .repos.user
+        .repos
+        .user
         .check_handle_available_for_new_account(&handle_typed)
         .await
     {
@@ -522,7 +525,12 @@ pub async fn create_account(
         birthdate_pref,
     };
 
-    let create_result = match state.repos.user.create_password_account(&create_input).await {
+    let create_result = match state
+        .repos
+        .user
+        .create_password_account(&create_input)
+        .await
+    {
         Ok(r) => r,
         Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
             return ApiError::HandleNotAvailable(None).into_response();

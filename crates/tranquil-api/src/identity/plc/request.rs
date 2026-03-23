@@ -20,7 +20,8 @@ pub async fn request_plc_operation_signature(
         tranquil_pds::oauth::scopes::IdentityAttr::Wildcard,
     )?;
     let user_id = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(&auth.did)
         .await
         .log_db_err("fetching user id")?
@@ -30,7 +31,8 @@ pub async fn request_plc_operation_signature(
     let plc_token = generate_plc_token();
     let expires_at = Utc::now() + Duration::minutes(10);
     state
-        .repos.infra
+        .repos
+        .infra
         .insert_plc_token(user_id, &plc_token, expires_at)
         .await
         .log_db_err("creating PLC token")?;

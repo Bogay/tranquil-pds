@@ -42,7 +42,8 @@ pub async fn update_did_document(
     }
 
     let user = state
-        .repos.user
+        .repos
+        .user
         .get_user_for_did_doc(&auth.did)
         .await
         .log_db_err("getting user")?
@@ -97,7 +98,8 @@ pub async fn update_did_document(
     let also_known_as: Option<Vec<String>> = input.also_known_as.clone();
 
     state
-        .repos.user
+        .repos
+        .user
         .upsert_did_web_overrides(user.id, verification_methods_json, also_known_as)
         .await
         .log_db_err("upserting did_web_overrides")?;
@@ -105,7 +107,8 @@ pub async fn update_did_document(
     if let Some(ref endpoint) = input.service_endpoint {
         let endpoint_clean = endpoint.trim().trim_end_matches('/');
         state
-            .repos.user
+            .repos
+            .user
             .update_migrated_to_pds(&auth.did, endpoint_clean)
             .await
             .log_db_err("updating service endpoint")?;
@@ -149,7 +152,8 @@ async fn build_did_document(state: &AppState, did: &tranquil_pds::types::Did) ->
     };
 
     let overrides = state
-        .repos.user
+        .repos
+        .user
         .get_did_web_overrides(user.id)
         .await
         .ok()
@@ -193,7 +197,8 @@ async fn build_did_document(state: &AppState, did: &tranquil_pds::types::Did) ->
     }
 
     let key_info = state
-        .repos.user
+        .repos
+        .user
         .get_user_key_by_id(user.id)
         .await
         .ok()

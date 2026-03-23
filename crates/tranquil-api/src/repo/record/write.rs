@@ -46,7 +46,8 @@ pub async fn prepare_repo_write<A: RepoScopeAction>(
     let _account_verified = require_verified_or_delegated(state, user).await?;
 
     let user_id = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(principal_did.as_did())
         .await
         .log_db_err("fetching user for repo write")?
@@ -128,7 +129,8 @@ pub async fn create_record(
 
         if !backlinks.is_empty() {
             let conflicts = state
-                .repos.backlink
+                .repos
+                .backlink
                 .get_backlink_conflicts(user_id, &input.collection, &backlinks)
                 .await
                 .log_db_err("checking backlink conflicts")?;
@@ -244,7 +246,11 @@ pub async fn create_record(
     let created_uri = AtUri::from_parts(&did, &input.collection, &rkey);
     let backlinks = extract_backlinks(&created_uri, &input.record);
     if !backlinks.is_empty()
-        && let Err(e) = state.repos.backlink.add_backlinks(user_id, &backlinks).await
+        && let Err(e) = state
+            .repos
+            .backlink
+            .add_backlinks(user_id, &backlinks)
+            .await
     {
         error!("Failed to add backlinks for {}: {}", created_uri, e);
     }

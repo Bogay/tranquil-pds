@@ -65,7 +65,8 @@ pub async fn get_record(
         Err(e) => return e.into_response(),
     };
     let record_row = state
-        .repos.repo
+        .repos
+        .repo
         .get_record_cid(user_id, &input.collection, &input.rkey)
         .await;
     let record_cid_link = match record_row {
@@ -139,7 +140,8 @@ pub async fn list_records(
         .as_ref()
         .and_then(|c| c.parse::<tranquil_pds::types::Rkey>().ok());
     let rows = match state
-        .repos.repo
+        .repos
+        .repo
         .list_records(
             user_id,
             &input.collection,

@@ -93,7 +93,8 @@ pub async fn list_blobs(
 
     let cids_result: Result<Vec<String>, _> = if let Some(since) = &params.since {
         state
-            .repos.blob
+            .repos
+            .blob
             .list_blobs_since_rev(&did, since)
             .await
             .map(|cids| {
@@ -107,7 +108,8 @@ pub async fn list_blobs(
             })
     } else {
         state
-            .repos.blob
+            .repos
+            .blob
             .list_blobs_by_user(user_id, Some(cursor_cid), limit + 1)
             .await
             .map(|cids| cids.into_iter().map(|c| c.to_string()).collect())

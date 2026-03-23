@@ -24,20 +24,23 @@ pub async fn revoke_token(
     if let Some(token) = &request.token {
         let refresh_token = RefreshToken::from(token.clone());
         if let Some((db_id, _)) = state
-            .repos.oauth
+            .repos
+            .oauth
             .get_token_by_refresh_token(&refresh_token)
             .await
             .map_err(tranquil_pds::oauth::db_err_to_oauth)?
         {
             state
-                .repos.oauth
+                .repos
+                .oauth
                 .delete_token_family(db_id)
                 .await
                 .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
         } else {
             let token_id = TokenId::from(token.clone());
             state
-                .repos.oauth
+                .repos
+                .oauth
                 .delete_token(&token_id)
                 .await
                 .map_err(tranquil_pds::oauth::db_err_to_oauth)?;

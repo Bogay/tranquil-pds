@@ -22,7 +22,8 @@ pub async fn require_verified_or_delegated<'a>(
     user: &'a AuthenticatedUser,
 ) -> Result<AccountVerified<'a>, ApiError> {
     let is_verified = state
-        .repos.user
+        .repos
+        .user
         .has_verified_comms_channel(&user.did)
         .await
         .unwrap_or(false);
@@ -32,7 +33,8 @@ pub async fn require_verified_or_delegated<'a>(
     }
 
     let is_delegated = state
-        .repos.delegation
+        .repos
+        .delegation
         .is_delegated_account(&user.did)
         .await
         .unwrap_or(false);

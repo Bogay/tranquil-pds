@@ -85,7 +85,8 @@ impl From<CommitError> for ApiError {
 
 pub async fn get_current_root_cid(state: &AppState, user_id: Uuid) -> Result<CommitCid, ApiError> {
     let root_cid_str = state
-        .repos.repo
+        .repos
+        .repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
         .map_err(|e| {
@@ -168,7 +169,8 @@ pub async fn begin_repo_write(
     let write_lock = state.repo_write_locks.lock(user_id).await;
 
     let root_cid_str = state
-        .repos.repo
+        .repos
+        .repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
         .map_err(|e| {
@@ -254,7 +256,8 @@ pub async fn finalize_repo_write(
     if let Some(controller_did) = params.controller_did
         && let Some(detail) = params.delegation_detail
         && let Err(e) = state
-            .repos.delegation
+            .repos
+            .delegation
             .log_delegation_action(
                 params.did,
                 controller_did,
@@ -351,7 +354,8 @@ pub async fn commit_and_log(
         obsolete_cids,
     } = params;
     let key_row = state
-        .repos.user
+        .repos
+        .user
         .get_user_key_by_id(user_id)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("Failed to fetch signing key: {}", e)))?
@@ -485,7 +489,8 @@ pub async fn commit_and_log(
     };
 
     let _result = state
-        .repos.repo
+        .repos
+        .repo
         .apply_commit(input)
         .await
         .map_err(|e| match e {
@@ -507,7 +512,8 @@ pub async fn create_record_internal(
     record: &serde_json::Value,
 ) -> Result<(String, Cid), CommitError> {
     let user_id: Uuid = state
-        .repos.user
+        .repos
+        .user
         .get_id_by_did(did)
         .await
         .map_err(|e| CommitError::DatabaseError(e.to_string()))?
@@ -516,7 +522,8 @@ pub async fn create_record_internal(
     let _write_lock = state.repo_write_locks.lock(user_id).await;
 
     let root_cid_link = state
-        .repos.repo
+        .repos
+        .repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
         .map_err(|e| CommitError::DatabaseError(e.to_string()))?
@@ -610,7 +617,8 @@ pub async fn sequence_identity_event(
     handle: Option<&Handle>,
 ) -> Result<SequenceNumber, CommitError> {
     state
-        .repos.repo
+        .repos
+        .repo
         .insert_identity_event(did, handle)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("identity event: {}", e)))
@@ -621,7 +629,8 @@ pub async fn sequence_account_event(
     status: tranquil_db_traits::AccountStatus,
 ) -> Result<SequenceNumber, CommitError> {
     state
-        .repos.repo
+        .repos
+        .repo
         .insert_account_event(did, status)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("account event: {}", e)))
@@ -636,7 +645,8 @@ pub async fn sequence_sync_event(
         .parse()
         .map_err(|_| CommitError::InvalidCid(commit_cid.to_string()))?;
     state
-        .repos.repo
+        .repos
+        .repo
         .insert_sync_event(did, &cid_link, rev)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("sync event: {}", e)))
@@ -652,7 +662,8 @@ pub async fn sequence_genesis_commit(
     let commit_cid_link = crate::types::CidLink::from(commit_cid);
     let mst_root_cid_link = crate::types::CidLink::from(mst_root_cid);
     state
-        .repos.repo
+        .repos
+        .repo
         .insert_genesis_commit_event(did, &commit_cid_link, &mst_root_cid_link, rev)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("genesis commit event: {}", e)))

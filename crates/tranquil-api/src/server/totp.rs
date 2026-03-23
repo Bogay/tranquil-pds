@@ -41,7 +41,8 @@ pub async fn create_totp_secret(
     let secret = generate_totp_secret();
 
     let handle = state
-        .repos.user
+        .repos
+        .user
         .get_handle_by_did(&auth.did)
         .await
         .log_db_err("fetching handle")?
@@ -61,7 +62,8 @@ pub async fn create_totp_secret(
     })?;
 
     state
-        .repos.user
+        .repos
+        .user
         .upsert_totp_secret(&auth.did, &encrypted_secret, ENCRYPTION_VERSION)
         .await
         .log_db_err("storing TOTP secret")?;
@@ -139,7 +141,8 @@ pub async fn enable_totp(
         })?;
 
     state
-        .repos.user
+        .repos
+        .user
         .enable_totp_with_backup_codes(&auth.did, &backup_hashes)
         .await
         .log_db_err("enabling TOTP")?;
@@ -173,7 +176,8 @@ pub async fn disable_totp(
     let totp_mfa = verify_totp_mfa(&state, &auth, &input.code).await?;
 
     state
-        .repos.user
+        .repos
+        .user
         .delete_totp_and_backup_codes(totp_mfa.did())
         .await
         .log_db_err("deleting TOTP")?;
@@ -209,7 +213,8 @@ pub async fn get_totp_status(
     };
 
     let backup_count = state
-        .repos.user
+        .repos
+        .user
         .count_unused_backup_codes(&auth.did)
         .await
         .log_db_err("counting backup codes")?;
@@ -259,7 +264,8 @@ pub async fn regenerate_backup_codes(
         })?;
 
     state
-        .repos.user
+        .repos
+        .user
         .replace_backup_codes(totp_mfa.did(), &backup_hashes)
         .await
         .log_db_err("replacing backup codes")?;
@@ -332,5 +338,10 @@ pub async fn verify_totp_or_backup_for_user(
 }
 
 pub async fn has_totp_enabled(state: &AppState, did: &tranquil_pds::types::Did) -> bool {
-    state.repos.user.has_totp_enabled(did).await.unwrap_or(false)
+    state
+        .repos
+        .user
+        .has_totp_enabled(did)
+        .await
+        .unwrap_or(false)
 }

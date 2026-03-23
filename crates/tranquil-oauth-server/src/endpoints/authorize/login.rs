@@ -25,7 +25,8 @@ pub async fn authorize_get(
     };
     let request_id = RequestId::from(request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&request_id)
         .await
     {
@@ -61,7 +62,8 @@ pub async fn authorize_get(
     };
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&request_id)
             .await;
         if wants_json(&headers) {
@@ -104,14 +106,16 @@ pub async fn authorize_get(
         tracing::info!(normalized = %normalized, "Normalized login_hint");
 
         match state
-            .repos.user
+            .repos
+            .user
             .get_login_check_by_handle_or_email(normalized.as_str())
             .await
         {
             Ok(Some(user)) => {
                 tracing::info!(did = %user.did, has_password = user.password_hash.is_some(), "Found user for login_hint");
                 let is_delegated = state
-                    .repos.delegation
+                    .repos
+                    .delegation
                     .is_delegated_account(&user.did)
                     .await
                     .unwrap_or(false);
@@ -121,7 +125,8 @@ pub async fn authorize_get(
                 if is_delegated {
                     tracing::info!("Redirecting to delegation auth");
                     if let Err(e) = state
-                        .repos.oauth
+                        .repos
+                        .oauth
                         .set_request_did(&request_id, &user.did)
                         .await
                     {
@@ -159,7 +164,8 @@ pub async fn authorize_get(
     if !force_new_account
         && let Some(device_id) = extract_device_cookie(&headers)
         && let Ok(accounts) = state
-            .repos.oauth
+            .repos
+            .oauth
             .get_device_accounts(&device_id.clone())
             .await
         && !accounts.is_empty()
@@ -191,14 +197,16 @@ pub async fn authorize_get_json(
         .ok_or_else(|| OAuthError::InvalidRequest("request_uri is required".to_string()))?;
     let request_id_json = RequestId::from(request_uri.clone());
     let request_data = state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&request_id_json)
         .await
         .map_err(tranquil_pds::oauth::db_err_to_oauth)?
         .ok_or_else(|| OAuthError::InvalidRequest("Invalid or expired request_uri".to_string()))?;
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&request_id_json)
             .await;
         return Err(OAuthError::InvalidRequest(
@@ -307,7 +315,8 @@ pub async fn authorize_post(
     let json_response = wants_json(&headers);
     let form_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&form_request_id)
         .await
     {
@@ -344,7 +353,8 @@ pub async fn authorize_post(
     };
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&form_request_id)
             .await;
         if json_response {
@@ -389,7 +399,8 @@ pub async fn authorize_post(
         "Normalized username for lookup"
     );
     let user = match state
-        .repos.user
+        .repos
+        .user
         .get_login_info_by_handle_or_email(normalized_username.as_str())
         .await
     {
@@ -411,7 +422,8 @@ pub async fn authorize_post(
     }
     if user.account_type.is_delegated() {
         if state
-            .repos.oauth
+            .repos
+            .oauth
             .set_authorization_did(&form_request_id, &user.did, None)
             .await
             .is_err()
@@ -439,7 +451,8 @@ pub async fn authorize_post(
 
     if !user.password_required {
         if state
-            .repos.oauth
+            .repos
+            .oauth
             .set_authorization_did(&form_request_id, &user.did, None)
             .await
             .is_err()
@@ -522,7 +535,8 @@ pub async fn authorize_post(
             }
         } else {
             if state
-                .repos.oauth
+                .repos
+                .oauth
                 .set_authorization_did(&form_request_id, &user.did, None)
                 .await
                 .is_err()
@@ -543,11 +557,13 @@ pub async fn authorize_post(
     }
     if user.two_factor_enabled {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_2fa_challenge_by_request_uri(&form_request_id)
             .await;
         match state
-            .repos.oauth
+            .repos
+            .oauth
             .create_2fa_challenge(&user.did, &form_request_id)
             .await
         {
@@ -602,7 +618,8 @@ pub async fn authorize_post(
                 last_seen_at: Utc::now(),
             };
             if state
-                .repos.oauth
+                .repos
+                .oauth
                 .create_device(&new_device_id_typed, &device_data)
                 .await
                 .is_ok()
@@ -613,13 +630,15 @@ pub async fn authorize_post(
             new_device_id_typed
         };
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .upsert_account_device(&user.did, &final_device_id)
             .await;
     }
     let set_auth_device_id = device_id.clone();
     if state
-        .repos.oauth
+        .repos
+        .oauth
         .set_authorization_did(&form_request_id, &user.did, set_auth_device_id.as_ref())
         .await
         .is_err()
@@ -673,7 +692,8 @@ pub async fn authorize_post(
     let auth_post_device_id = device_id.clone();
     let auth_post_code = AuthorizationCode::from(code.0.clone());
     if state
-        .repos.oauth
+        .repos
+        .oauth
         .update_authorization_request(
             &form_request_id,
             &user.did,
@@ -738,7 +758,8 @@ pub async fn authorize_select(
     };
     let select_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&select_request_id)
         .await
     {
@@ -760,7 +781,8 @@ pub async fn authorize_select(
     };
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&select_request_id)
             .await;
         return json_error(
@@ -791,7 +813,8 @@ pub async fn authorize_select(
     };
     let verify_device_id = device_id.clone();
     let account_valid = match state
-        .repos.oauth
+        .repos
+        .oauth
         .verify_account_on_device(&verify_device_id, &did)
         .await
     {
@@ -851,7 +874,8 @@ pub async fn authorize_select(
                 .await;
         if !device_is_trusted {
             if state
-                .repos.oauth
+                .repos
+                .oauth
                 .set_authorization_did(&select_request_id, &did, Some(&select_early_device_typed))
                 .await
                 .is_err()
@@ -872,11 +896,13 @@ pub async fn authorize_select(
     }
     if user.two_factor_enabled {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_2fa_challenge_by_request_uri(&select_request_id)
             .await;
         match state
-            .repos.oauth
+            .repos
+            .oauth
             .create_2fa_challenge(&did, &select_request_id)
             .await
         {
@@ -915,12 +941,14 @@ pub async fn authorize_select(
     }
     let select_device_typed = device_id.clone();
     let _ = state
-        .repos.oauth
+        .repos
+        .oauth
         .upsert_account_device(&did, &select_device_typed)
         .await;
 
     if state
-        .repos.oauth
+        .repos
+        .oauth
         .set_authorization_did(&select_request_id, &did, Some(&select_device_typed))
         .await
         .is_err()

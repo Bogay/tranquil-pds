@@ -99,7 +99,8 @@ pub async fn require_reauth_window<'a>(
     use chrono::Utc;
 
     let status = state
-        .repos.session
+        .repos
+        .session
         .get_session_mfa_status(&user.did)
         .await
         .ok()
@@ -144,19 +145,22 @@ pub async fn require_reauth_window_if_available<'a>(
     use crate::auth::reauth::check_reauth_required_cached;
 
     let has_password = state
-        .repos.user
+        .repos
+        .user
         .has_password_by_did(&user.did)
         .await
         .ok()
         .flatten()
         .unwrap_or(false);
     let has_passkeys = state
-        .repos.user
+        .repos
+        .user
         .has_passkeys(&user.did)
         .await
         .unwrap_or(false);
     let has_totp = state
-        .repos.user
+        .repos
+        .user
         .has_totp_enabled(&user.did)
         .await
         .unwrap_or(false);
@@ -188,7 +192,8 @@ pub async fn verify_password_mfa<'a>(
     password: &str,
 ) -> Result<MfaVerified<'a>, crate::api::error::ApiError> {
     let hash = state
-        .repos.user
+        .repos
+        .user
         .get_password_hash_by_did(&user.did)
         .await
         .ok()
@@ -220,7 +225,8 @@ pub async fn verify_totp_mfa<'a>(
 
     if is_backup_code_format(code) {
         let backup_codes = state
-            .repos.user
+            .repos
+            .user
             .get_unused_backup_codes(&user.did)
             .await
             .ok()

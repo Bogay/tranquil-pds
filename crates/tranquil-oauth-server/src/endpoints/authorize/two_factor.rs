@@ -44,7 +44,8 @@ pub async fn authorize_2fa_get(
         );
     }
     let _request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&twofa_request_id)
         .await
     {
@@ -88,7 +89,8 @@ pub async fn authorize_2fa_post(
     };
     let twofa_post_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
-        .repos.oauth
+        .repos
+        .oauth
         .get_authorization_request(&twofa_post_request_id)
         .await
     {
@@ -110,7 +112,8 @@ pub async fn authorize_2fa_post(
     };
     if request_data.expires_at < Utc::now() {
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .delete_authorization_request(&twofa_post_request_id)
             .await;
         return json_error(
@@ -120,7 +123,8 @@ pub async fn authorize_2fa_post(
         );
     }
     let challenge = state
-        .repos.oauth
+        .repos
+        .oauth
         .get_2fa_challenge(&twofa_post_request_id)
         .await
         .ok()
@@ -162,7 +166,8 @@ pub async fn authorize_2fa_post(
         let twofa_totp_device_id = device_id.clone();
         let twofa_totp_code = AuthorizationCode::from(code.0.clone());
         if state
-            .repos.oauth
+            .repos
+            .oauth
             .update_authorization_request(
                 &twofa_post_request_id,
                 &challenge.did,
@@ -250,7 +255,8 @@ pub async fn authorize_2fa_post(
                     last_seen_at: Utc::now(),
                 };
                 if state
-                    .repos.oauth
+                    .repos
+                    .oauth
                     .create_device(&new_device_id_typed, &device_data)
                     .await
                     .is_ok()
@@ -262,7 +268,8 @@ pub async fn authorize_2fa_post(
             }
         };
         let _ = state
-            .repos.oauth
+            .repos
+            .oauth
             .upsert_account_device(&did, &trust_device_id)
             .await;
         let _ =
@@ -305,7 +312,8 @@ pub async fn authorize_2fa_post(
     let twofa_final_device_id = device_id.clone();
     let twofa_final_code = AuthorizationCode::from(code.0.clone());
     if state
-        .repos.oauth
+        .repos
+        .oauth
         .update_authorization_request(
             &twofa_post_request_id,
             &did,

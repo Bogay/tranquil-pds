@@ -53,7 +53,8 @@ pub async fn get_server_config(
     ];
 
     let rows = state
-        .repos.infra
+        .repos
+        .infra
         .get_server_configs(keys)
         .await
         .log_db_err("fetching server config")?;
@@ -86,7 +87,8 @@ pub async fn update_server_config(
             ));
         }
         state
-            .repos.infra
+            .repos
+            .infra
             .upsert_server_config("server_name", trimmed)
             .await
             .log_db_err("upserting server_name")?;
@@ -95,13 +97,15 @@ pub async fn update_server_config(
     if let Some(ref color) = req.primary_color {
         if color.is_empty() {
             state
-                .repos.infra
+                .repos
+                .infra
                 .delete_server_config("primary_color")
                 .await
                 .log_db_err("deleting primary_color")?;
         } else if is_valid_hex_color(color) {
             state
-                .repos.infra
+                .repos
+                .infra
                 .upsert_server_config("primary_color", color)
                 .await
                 .log_db_err("upserting primary_color")?;
@@ -115,13 +119,15 @@ pub async fn update_server_config(
     if let Some(ref color) = req.primary_color_dark {
         if color.is_empty() {
             state
-                .repos.infra
+                .repos
+                .infra
                 .delete_server_config("primary_color_dark")
                 .await
                 .log_db_err("deleting primary_color_dark")?;
         } else if is_valid_hex_color(color) {
             state
-                .repos.infra
+                .repos
+                .infra
                 .upsert_server_config("primary_color_dark", color)
                 .await
                 .log_db_err("upserting primary_color_dark")?;
@@ -135,13 +141,15 @@ pub async fn update_server_config(
     if let Some(ref color) = req.secondary_color {
         if color.is_empty() {
             state
-                .repos.infra
+                .repos
+                .infra
                 .delete_server_config("secondary_color")
                 .await
                 .log_db_err("deleting secondary_color")?;
         } else if is_valid_hex_color(color) {
             state
-                .repos.infra
+                .repos
+                .infra
                 .upsert_server_config("secondary_color", color)
                 .await
                 .log_db_err("upserting secondary_color")?;
@@ -155,13 +163,15 @@ pub async fn update_server_config(
     if let Some(ref color) = req.secondary_color_dark {
         if color.is_empty() {
             state
-                .repos.infra
+                .repos
+                .infra
                 .delete_server_config("secondary_color_dark")
                 .await
                 .log_db_err("deleting secondary_color_dark")?;
         } else if is_valid_hex_color(color) {
             state
-                .repos.infra
+                .repos
+                .infra
                 .upsert_server_config("secondary_color_dark", color)
                 .await
                 .log_db_err("upserting secondary_color_dark")?;
@@ -174,7 +184,8 @@ pub async fn update_server_config(
 
     if let Some(ref logo_cid) = req.logo_cid {
         let old_logo_cid = state
-            .repos.infra
+            .repos
+            .infra
             .get_server_config("logo_cid")
             .await
             .ok()
@@ -189,8 +200,11 @@ pub async fn update_server_config(
         if let Some(old_cid_str) = should_delete_old {
             match CidLink::new(old_cid_str) {
                 Ok(old_cid) => {
-                    if let Ok(Some(storage_key)) =
-                        state.repos.infra.get_blob_storage_key_by_cid(&old_cid).await
+                    if let Ok(Some(storage_key)) = state
+                        .repos
+                        .infra
+                        .get_blob_storage_key_by_cid(&old_cid)
+                        .await
                     {
                         if let Err(e) = state.blob_store.delete(&storage_key).await {
                             error!("Failed to delete old logo blob from storage: {:?}", e);
@@ -211,13 +225,15 @@ pub async fn update_server_config(
 
         if logo_cid.is_empty() {
             state
-                .repos.infra
+                .repos
+                .infra
                 .delete_server_config("logo_cid")
                 .await
                 .log_db_err("deleting logo_cid")?;
         } else {
             state
-                .repos.infra
+                .repos
+                .infra
                 .upsert_server_config("logo_cid", logo_cid)
                 .await
                 .log_db_err("upserting logo_cid")?;

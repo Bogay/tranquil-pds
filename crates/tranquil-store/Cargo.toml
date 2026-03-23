@@ -1,0 +1,44 @@
+[package]
+name = "tranquil-store"
+description = "Embedded storage engine for tranquil-pds (experimental)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+serde = { workspace = true }
+postcard = { version = "1", features = ["alloc"] }
+parking_lot = { workspace = true }
+fjall = "3"
+flume = "0.11"
+tokio = { workspace = true, features = ["sync", "rt"] }
+bytes = "1"
+memmap2 = "0.9"
+tracing = { workspace = true }
+jacquard-repo = { workspace = true }
+cid = { workspace = true }
+multihash = { workspace = true }
+sha2 = { workspace = true }
+
+[features]
+test-harness = []
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+futures = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros", "time"] }
+jacquard-common = { workspace = true }
+tranquil-repo = { workspace = true }
+tranquil-db = { workspace = true }
+sqlx = { workspace = true }
+k256 = { workspace = true }
+rand = { workspace = true }
+serde_ipld_dagcbor = { workspace = true }
+tikv-jemallocator = "0.6"
+
+[[bench]]
+name = "blockstore"
+harness = false
