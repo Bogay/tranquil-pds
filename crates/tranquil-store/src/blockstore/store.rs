@@ -10,6 +10,7 @@ use jacquard_repo::storage::BlockStore;
 use multihash::Multihash;
 use sha2::{Digest, Sha256};
 
+use crate::fsync_order::PostBlockstoreHook;
 use crate::io::{OpenOptions, RealIO, StorageIO};
 
 use super::data_file::{BLOCK_RECORD_OVERHEAD, CID_SIZE, ReadBlockRecord};
@@ -101,6 +102,13 @@ impl Drop for WriterHandle {
 
 impl TranquilBlockStore {
     pub fn open(config: BlockStoreConfig) -> Result<Self, RepoError> {
+        Self::open_with_hook(config, None)
+    }
+
+    pub fn open_with_hook(
+        config: BlockStoreConfig,
+        post_sync_hook: Option<Arc<dyn PostBlockstoreHook>>,
+    ) -> Result<Self, RepoError> {
         if config.data_dir == config.index_dir {
             return Err(RepoError::storage(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -126,9 +134,13 @@ impl TranquilBlockStore {
 
         let manager_for_writer =
             DataFileManager::new(RealIO::new(), config.data_dir.clone(), config.max_file_size);
-        let writer =
-            GroupCommitWriter::spawn(manager_for_writer, Arc::clone(&index), config.group_commit)
-                .map_err(commit_error_to_repo)?;
+        let writer = GroupCommitWriter::spawn_with_hook(
+            manager_for_writer,
+            Arc::clone(&index),
+            config.group_commit,
+            post_sync_hook,
+        )
+        .map_err(commit_error_to_repo)?;
         let sender = writer.sender().clone();
 
         let manager_for_reader = Arc::new(DataFileManager::new(

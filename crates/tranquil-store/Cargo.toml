@@ -17,6 +17,11 @@ tokio = { workspace = true, features = ["sync", "rt"] }
 bytes = "1"
 memmap2 = "0.9"
 tracing = { workspace = true }
+chrono = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tranquil-db-traits = { workspace = true }
+tranquil-types = { workspace = true }
 jacquard-repo = { workspace = true }
 cid = { workspace = true }
 multihash = { workspace = true }
@@ -41,4 +46,20 @@ tikv-jemallocator = "0.6"
 
 [[bench]]
 name = "blockstore"
+harness = false
+
+[[bench]]
+name = "eventlog"
+harness = false
+
+[[bench]]
+name = "metastore"
+harness = false
+
+[[bench]]
+name = "metastore_scale"
+harness = false
+
+[[bench]]
+name = "profile_reads"
 harness = false

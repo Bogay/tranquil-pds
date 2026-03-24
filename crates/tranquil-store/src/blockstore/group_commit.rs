@@ -4,6 +4,9 @@ use std::io;
 use std::sync::Arc;
 use std::thread;
 
+use crate::fsync_order::PostBlockstoreHook;
+
+use super::BlocksSynced;
 use crate::io::{FileId, OpenOptions, StorageIO};
 
 use super::data_file::{CID_SIZE, DataFileWriter};
@@ -110,6 +113,15 @@ impl GroupCommitWriter {
         index: Arc<KeyIndex>,
         config: GroupCommitConfig,
     ) -> Result<Self, CommitError> {
+        Self::spawn_with_hook(manager, index, config, None)
+    }
+
+    pub fn spawn_with_hook<S: StorageIO + 'static>(
+        manager: DataFileManager<S>,
+        index: Arc<KeyIndex>,
+        config: GroupCommitConfig,
+        post_sync_hook: Option<Arc<dyn PostBlockstoreHook>>,
+    ) -> Result<Self, CommitError> {
         let cursor = index.read_write_cursor().map_err(CommitError::from)?;
         let mut state = initialize_active_state(&manager, cursor)?;
 
@@ -118,7 +130,14 @@ impl GroupCommitWriter {
         let handle = thread::Builder::new()
             .name("blockstore-group-commit".into())
             .spawn(move || {
-                commit_loop(&manager, &*index, &receiver, &config, &mut state);
+                commit_loop(
+                    &manager,
+                    &index,
+                    &receiver,
+                    &config,
+                    &mut state,
+                    post_sync_hook.as_deref(),
+                );
             })
             .map_err(|e| CommitError::from(io::Error::other(e)))?;
 
@@ -284,6 +303,7 @@ fn commit_loop<S: StorageIO>(
     receiver: &flume::Receiver<CommitRequest>,
     config: &GroupCommitConfig,
     state: &mut ActiveState,
+    post_sync_hook: Option<&dyn PostBlockstoreHook>,
 ) {
     loop {
         let first = match receiver.recv() {
@@ -302,16 +322,28 @@ fn commit_loop<S: StorageIO>(
 
         let result = process_batch(manager, index, &batch, state);
 
+        if let Ok((ref _dedup, ref proof)) = result {
+            run_post_sync_hook(post_sync_hook, proof);
+        }
+
         if let Err(ref e) = result {
             tracing::warn!(error = %e, "commit batch failed");
         }
 
-        dispatch_responses(batch, result);
+        dispatch_responses(batch, result.map(|(dedup, _proof)| dedup));
 
         if shutdown_after {
-            drain_and_process_remaining(manager, index, receiver, state);
+            drain_and_process_remaining(manager, index, receiver, state, post_sync_hook);
             return;
         }
+    }
+}
+
+fn run_post_sync_hook(hook: Option<&dyn PostBlockstoreHook>, proof: &BlocksSynced) {
+    if let Some(hook) = hook
+        && let Err(e) = hook.on_blocks_synced(proof)
+    {
+        tracing::error!(error = %e, "post-blockstore sync hook failed");
     }
 }
 
@@ -320,6 +352,7 @@ fn drain_and_process_remaining<S: StorageIO>(
     index: &KeyIndex,
     receiver: &flume::Receiver<CommitRequest>,
     state: &mut ActiveState,
+    post_sync_hook: Option<&dyn PostBlockstoreHook>,
 ) {
     let entries: Vec<BatchEntry> = std::iter::from_fn(|| receiver.try_recv().ok())
         .filter_map(|req| classify_request(req).ok())
@@ -330,7 +363,12 @@ fn drain_and_process_remaining<S: StorageIO>(
     }
 
     let result = process_batch(manager, index, &entries, state);
-    dispatch_responses(entries, result);
+
+    if let Ok((ref _dedup, ref proof)) = result {
+        run_post_sync_hook(post_sync_hook, proof);
+    }
+
+    dispatch_responses(entries, result.map(|(dedup, _proof)| dedup));
 }
 
 struct RotationState {
@@ -343,7 +381,7 @@ fn process_batch<S: StorageIO>(
     index: &KeyIndex,
     batch: &[BatchEntry],
     state: &mut ActiveState,
-) -> Result<HashMap<[u8; CID_SIZE], BlockLocation>, CommitError> {
+) -> Result<(HashMap<[u8; CID_SIZE], BlockLocation>, BlocksSynced), CommitError> {
     let mut dedup: HashMap<[u8; CID_SIZE], BlockLocation> = HashMap::new();
     let mut index_entries: Vec<([u8; CID_SIZE], BlockLocation)> = Vec::new();
     let mut all_decrements: Vec<[u8; CID_SIZE]> = Vec::new();
@@ -446,7 +484,7 @@ fn process_batch<S: StorageIO>(
         .batch_put(&index_entries, &all_decrements, cursor)
         .map_err(CommitError::from)?;
 
-    Ok(dedup)
+    Ok((dedup, BlocksSynced::new()))
 }
 
 fn dispatch_responses(

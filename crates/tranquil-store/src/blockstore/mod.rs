@@ -32,6 +32,14 @@ use std::path::Path;
 
 use crate::io::StorageIO;
 
+pub struct BlocksSynced(());
+
+impl BlocksSynced {
+    pub(in crate::blockstore) fn new() -> Self {
+        Self(())
+    }
+}
+
 pub(crate) fn list_files_by_extension<S: StorageIO>(
     io: &S,
     dir: &Path,

@@ -1,4 +1,6 @@
 pub mod blockstore;
+pub mod eventlog;
+pub mod fsync_order;
 mod harness;
 mod io;
 mod record;
@@ -16,4 +18,4 @@ pub use record::{
     FILE_MAGIC, FORMAT_VERSION, HEADER_SIZE, MAX_RECORD_PAYLOAD, RECORD_OVERHEAD, ReadRecord,
     RecordReader, RecordWriter,
 };
-pub use sim::{FaultConfig, SimulatedIO};
+pub use sim::{FaultConfig, OpRecord, SimulatedIO};
