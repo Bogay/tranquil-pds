@@ -73,7 +73,8 @@ async fn handle_socket_inner(
     if let Some(cursor) = params.cursor {
         let cursor_seq = SequenceNumber::from_raw(cursor);
         let current_seq = state
-            .repos.repo
+            .repos
+            .repo
             .get_max_seq()
             .await
             .unwrap_or(SequenceNumber::ZERO);
@@ -91,7 +92,8 @@ async fn handle_socket_inner(
         let backfill_time = chrono::Utc::now() - chrono::Duration::hours(get_backfill_hours());
 
         let first_event = state
-            .repos.repo
+            .repos
+            .repo
             .get_events_since_cursor(cursor_seq, 1)
             .await
             .ok()
@@ -110,7 +112,8 @@ async fn handle_socket_inner(
             }
 
             let earliest = state
-                .repos.repo
+                .repos
+                .repo
                 .get_min_seq_since(backfill_time)
                 .await
                 .ok()
@@ -125,7 +128,8 @@ async fn handle_socket_inner(
 
         loop {
             let events = state
-                .repos.repo
+                .repos
+                .repo
                 .get_events_since_cursor(current_cursor, BACKFILL_BATCH_SIZE)
                 .await;
             match events {
@@ -204,42 +208,48 @@ async fn handle_socket_inner(
     let max_lag_before_disconnect: u64 = tranquil_config::get().firehose.max_lag;
     loop {
         tokio::select! {
-            result = rx.recv() => {
-                match result {
-                    Ok(event) => {
-                        if event.seq <= last_seen {
-                            continue;
-                        }
-                        last_seen = event.seq;
-                        if let Err(e) = send_event(socket, state, event).await {
-                            warn!("Failed to send event: {}", e);
-                            break;
-                        }
-                        tranquil_pds::metrics::record_firehose_event();
+            result = rx.recv() => match result {
+                Ok(event) => {
+                    if event.seq <= last_seen {
+                        continue;
                     }
-                    Err(RecvError::Lagged(skipped)) => {
-                        warn!(skipped = skipped, "Firehose subscriber lagged behind");
-                        if skipped > max_lag_before_disconnect {
-                            warn!(skipped = skipped, max_lag = max_lag_before_disconnect,
-                                "Disconnecting slow firehose consumer");
-                            break;
-                        }
+                    last_seen = event.seq;
+                    if let Err(e) = send_event(socket, state, event).await {
+                        warn!("Failed to send event: {}", e);
+                        break;
                     }
-                    Err(RecvError::Closed) => {
-                        info!("Firehose channel closed");
+                    tranquil_pds::metrics::record_firehose_event();
+                }
+                Err(RecvError::Lagged(skipped)) => {
+                    warn!(skipped = skipped, "Firehose subscriber lagged behind");
+                    if skipped > max_lag_before_disconnect {
+                        warn!(skipped = skipped, max_lag = max_lag_before_disconnect,
+                            "Disconnecting slow firehose consumer");
                         break;
                     }
                 }
-            }
-            Some(Ok(msg)) = socket.next() => {
-                if let Message::Close(_) = msg {
-                    info!("Client closed connection");
+                Err(RecvError::Closed) => {
+                    info!("Firehose channel closed");
                     break;
                 }
-            }
-            else => {
-                break;
-            }
+            },
+            next = socket.next() => match next {
+                None => {
+                    info!("Client closed connection abruptly");
+                    break;
+                }
+                Some(msg) => {
+                    let Ok(msg) = msg else {
+                        info!("Client closed connection abruptly");
+                        break;
+                    };
+
+                    if let Message::Close(_) = msg {
+                        info!("Client closed connection");
+                        break;
+                    }
+                }
+            },
         }
     }
     Ok(())
