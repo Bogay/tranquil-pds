@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM backlinks WHERE uri = ANY($1::text[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cffe4c37fe949fbdc3d5cd83ccec5655aae248a0a69dc260d1da9cf1d9ed2c49"
+}

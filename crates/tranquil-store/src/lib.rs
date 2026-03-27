@@ -3,6 +3,7 @@ pub mod eventlog;
 pub mod fsync_order;
 mod harness;
 mod io;
+pub mod metastore;
 mod record;
 #[cfg(any(test, feature = "test-harness"))]
 mod sim;

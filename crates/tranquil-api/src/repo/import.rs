@@ -195,6 +195,16 @@ pub async fn import_repo(
     }
     let max_blocks = tranquil_config::get().import.max_blocks as usize;
     let _write_lock = state.repo_write_locks.lock(user_id).await;
+
+    state
+        .block_store
+        .put_many(blocks.clone())
+        .await
+        .map_err(|e| {
+            error!("Failed to store import blocks: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
+
     match apply_import(
         &state.repos.repo,
         user_id,

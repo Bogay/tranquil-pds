@@ -5,6 +5,7 @@ use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey};
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::backlink::Backlink;
 use crate::sequence::SequenceNumber;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
@@ -279,6 +280,8 @@ pub struct ApplyCommitInput {
     pub obsolete_block_cids: Vec<Vec<u8>>,
     pub record_upserts: Vec<RecordUpsert>,
     pub record_deletes: Vec<RecordDelete>,
+    pub backlinks_to_add: Vec<Backlink>,
+    pub backlinks_to_remove: Vec<AtUri>,
     pub commit_event: CommitEventData,
 }
 
@@ -300,6 +303,8 @@ pub trait RepoRepository: Send + Sync {
     async fn create_repo(
         &self,
         user_id: Uuid,
+        did: &Did,
+        handle: &Handle,
         repo_root_cid: &CidLink,
         repo_rev: &str,
     ) -> Result<(), DbError>;
@@ -312,6 +317,14 @@ pub trait RepoRepository: Send + Sync {
     ) -> Result<(), DbError>;
 
     async fn update_repo_rev(&self, user_id: Uuid, repo_rev: &str) -> Result<(), DbError>;
+
+    async fn update_repo_status(
+        &self,
+        did: &Did,
+        takedown: Option<bool>,
+        takedown_ref: Option<&str>,
+        deactivated: Option<bool>,
+    ) -> Result<(), DbError>;
 
     async fn delete_repo(&self, user_id: Uuid) -> Result<(), DbError>;
 
@@ -399,6 +412,11 @@ pub trait RepoRepository: Send + Sync {
     ) -> Result<Vec<Vec<u8>>, DbError>;
 
     async fn count_user_blocks(&self, user_id: Uuid) -> Result<i64, DbError>;
+
+    async fn find_unreferenced_blocks(
+        &self,
+        candidate_cids: &[Vec<u8>],
+    ) -> Result<Vec<Vec<u8>>, DbError>;
 
     async fn insert_commit_event(&self, data: &CommitEventData) -> Result<SequenceNumber, DbError>;
 

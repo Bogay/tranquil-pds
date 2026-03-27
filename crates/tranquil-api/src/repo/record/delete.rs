@@ -76,6 +76,7 @@ pub async fn delete_record(
     };
 
     let modified_keys = [key];
+    let deleted_uri = AtUri::from_parts(&did, &input.collection, &input.rkey);
 
     let commit_result = finalize_repo_write(
         &state,
@@ -95,19 +96,11 @@ pub async fn delete_record(
             ops: vec![op],
             modified_keys: &modified_keys,
             blob_cids: &[],
+            backlinks_to_add: vec![],
+            backlinks_to_remove: vec![deleted_uri],
         },
     )
     .await?;
-
-    let deleted_uri = AtUri::from_parts(&did, &input.collection, &input.rkey);
-    if let Err(e) = state
-        .repos
-        .backlink
-        .remove_backlinks_by_uri(&deleted_uri)
-        .await
-    {
-        error!("Failed to remove backlinks for {}: {}", deleted_uri, e);
-    }
 
     Ok(Json(DeleteRecordOutput {
         commit: Some(CommitInfo {
@@ -216,6 +209,7 @@ pub async fn delete_record_internal(
 
     let written_cids_str: Vec<String> = written_cids.iter().map(ToString::to_string).collect();
 
+    let deleted_uri = AtUri::from_parts(did.as_str(), collection.as_str(), rkey.as_str());
     commit_and_log(
         state,
         CommitParams {
@@ -228,6 +222,8 @@ pub async fn delete_record_internal(
             blocks_cids: &written_cids_str,
             blobs: &[],
             obsolete_cids,
+            backlinks_to_add: vec![],
+            backlinks_to_remove: vec![deleted_uri],
         },
     )
     .await?;

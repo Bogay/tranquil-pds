@@ -180,6 +180,32 @@
 # Can also be specified via environment variable `S3_ENDPOINT`.
 #s3_endpoint =
 
+# Repository backend: `postgres` by default, or `tranquil-store`, our embedded db.
+# tranquil-store is EXPERIMENTAL!!!! RISK OF TOTAL DATA LOSS.
+#
+# Can also be specified via environment variable `REPO_BACKEND`.
+#
+# Default value: "postgres"
+#repo_backend = "postgres"
+
+[tranquil_store]
+# Directory for tranquil-store data: the metastore, eventlog, and blockstore.
+#
+# Can also be specified via environment variable `TRANQUIL_STORE_DATA_DIR`.
+#
+# Default value: "/var/lib/tranquil-pds/store"
+#data_dir = "/var/lib/tranquil-pds/store"
+
+# Fjall block cache size in megabytes. Defaults to 20% of system RAM when unset.
+#
+# Can also be specified via environment variable `TRANQUIL_STORE_MEMORY_BUDGET_MB`.
+#memory_budget_mb =
+
+# Number of handler threads. Defaults to available_parallelism / 2.
+#
+# Can also be specified via environment variable `TRANQUIL_STORE_HANDLER_THREADS`.
+#handler_threads =
+
 [cache]
 # Cache backend: `ripple` (default, built-in gossip) or `valkey`.
 #
@@ -482,3 +508,11 @@
 #
 # Default value: 3600
 #delete_check_interval_secs = 3600
+
+# Interval in seconds between block garbage collection cycles.
+# Reclaims orphaned ipld blocks that were stored but never committed.
+#
+# Can also be specified via environment variable `BLOCK_GC_INTERVAL_SECS`.
+#
+# Default value: 21600
+#block_gc_interval_secs = 21600

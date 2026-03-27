@@ -143,6 +143,9 @@ pub struct TranquilConfig {
 
     #[config(nested)]
     pub scheduled: ScheduledConfig,
+
+    #[config(nested)]
+    pub tranquil_store: TranquilStoreConfig,
 }
 
 impl TranquilConfig {
@@ -248,6 +251,23 @@ impl TranquilConfig {
                  must both be set or both be unset"
                     .to_string(),
             );
+        }
+
+        // -- repo backend -----------------------------------------------------
+        if let Err(e) = self.storage.repo_backend.parse::<RepoBackend>() {
+            errors.push(e);
+        }
+
+        // -- tranquil-store ---------------------------------------------------
+        if let Some(mb) = self.tranquil_store.memory_budget_mb
+            && mb == 0
+        {
+            errors.push("tranquil_store.memory_budget_mb must be at least 1".to_string());
+        }
+        if let Some(threads) = self.tranquil_store.handler_threads
+            && threads == 0
+        {
+            errors.push("tranquil_store.handler_threads must be at least 1".to_string());
         }
 
         // -- cache ------------------------------------------------------------
@@ -561,6 +581,35 @@ impl SecretsConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepoBackend {
+    Postgres,
+    TranquilStore,
+}
+
+impl std::str::FromStr for RepoBackend {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "postgres" => Ok(Self::Postgres),
+            "tranquil-store" => Ok(Self::TranquilStore),
+            other => Err(format!(
+                "unknown repo backend \"{other}\", expected \"postgres\" or \"tranquil-store\""
+            )),
+        }
+    }
+}
+
+impl fmt::Display for RepoBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Postgres => f.write_str("postgres"),
+            Self::TranquilStore => f.write_str("tranquil-store"),
+        }
+    }
+}
+
 #[derive(Debug, Config)]
 pub struct StorageConfig {
     /// Storage backend: `filesystem` or `s3`.
@@ -578,6 +627,17 @@ pub struct StorageConfig {
     /// Custom S3 endpoint URL (for MinIO, R2, etc.).
     #[config(env = "S3_ENDPOINT")]
     pub s3_endpoint: Option<String>,
+
+    #[config(env = "REPO_BACKEND", default = "postgres")]
+    pub repo_backend: String,
+}
+
+impl StorageConfig {
+    pub fn repo_backend(&self) -> RepoBackend {
+        self.repo_backend
+            .parse()
+            .expect("repo_backend must be validated before use")
+    }
 }
 
 #[derive(Debug, Config)]
@@ -996,6 +1056,29 @@ pub struct ScheduledConfig {
     /// Interval in seconds between scheduled delete checks.
     #[config(env = "SCHEDULED_DELETE_CHECK_INTERVAL_SECS", default = 3600)]
     pub delete_check_interval_secs: u64,
+
+    /// Interval in seconds between block garbage collection cycles.
+    #[config(env = "BLOCK_GC_INTERVAL_SECS", default = 21600)]
+    pub block_gc_interval_secs: u64,
+}
+
+#[derive(Debug, Config)]
+pub struct TranquilStoreConfig {
+    /// Directory for tranquil-store data (metastore, eventlog).
+    #[config(
+        env = "TRANQUIL_STORE_DATA_DIR",
+        default = "/var/lib/tranquil-pds/store"
+    )]
+    pub data_dir: String,
+
+    /// Fjall block cache size in megabytes. Defaults to 20% of system RAM
+    /// when unset.
+    #[config(env = "TRANQUIL_STORE_MEMORY_BUDGET_MB")]
+    pub memory_budget_mb: Option<u64>,
+
+    /// Number of handler threads. Defaults to available_parallelism / 2.
+    #[config(env = "TRANQUIL_STORE_HANDLER_THREADS")]
+    pub handler_threads: Option<usize>,
 }
 
 /// Generate a TOML configuration template with all available options,

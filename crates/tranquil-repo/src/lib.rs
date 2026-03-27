@@ -24,6 +24,32 @@ impl PostgresBlockStore {
     }
 }
 
+impl PostgresBlockStore {
+    pub async fn get_oldest_block_cids(&self, limit: i64) -> Result<Vec<Vec<u8>>, RepoError> {
+        let rows = sqlx::query!(
+            "SELECT cid FROM blocks ORDER BY created_at ASC LIMIT $1",
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(RepoError::storage)?;
+        Ok(rows.into_iter().map(|r| r.cid).collect())
+    }
+
+    pub async fn delete_blocks(&self, cids: &[Vec<u8>]) -> Result<u64, RepoError> {
+        match cids.is_empty() {
+            true => Ok(0),
+            false => {
+                let result = sqlx::query!("DELETE FROM blocks WHERE cid = ANY($1)", cids,)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(RepoError::storage)?;
+                Ok(result.rows_affected())
+            }
+        }
+    }
+}
+
 impl BlockStore for PostgresBlockStore {
     async fn get(&self, cid: &Cid) -> Result<Option<Bytes>, RepoError> {
         let cid_bytes = cid.to_bytes();

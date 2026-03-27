@@ -6390,6 +6390,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "siphasher"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
+
+[[package]]
 name = "sketches-ddsketch"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7705,6 +7711,7 @@ dependencies = [
  "tranquil-scopes",
  "tranquil-signal",
  "tranquil-storage",
+ "tranquil-store",
  "tranquil-sync",
  "tranquil-types",
  "urlencoding",
@@ -7833,12 +7840,14 @@ dependencies = [
  "bytes",
  "chrono",
  "cid",
+ "dashmap",
  "fjall",
  "flume 0.11.1",
  "futures",
  "jacquard-common",
  "jacquard-repo",
  "k256",
+ "lsm-tree",
  "memmap2",
  "multihash",
  "parking_lot",
@@ -7849,14 +7858,18 @@ dependencies = [
  "serde_ipld_dagcbor",
  "serde_json",
  "sha2",
+ "siphasher",
+ "smallvec",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tranquil-db",
  "tranquil-db-traits",
  "tranquil-repo",
  "tranquil-types",
+ "uuid",
  "xxhash-rust",
 ]
 

@@ -253,6 +253,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state.repos.blob.clone(),
         state.blob_store.clone(),
         state.repos.sso.clone(),
+        state.repos.repo.clone(),
+        state.block_store.clone(),
         shutdown.clone(),
     ));
 

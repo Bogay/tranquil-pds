@@ -195,11 +195,22 @@ pub async fn update_subject_status(
                         ApiError::InternalError(Some("Failed to update deactivation status".into()))
                     })?;
                 }
+                let takedown_update = input.takedown.as_ref().map(|t| t.applied);
+                let takedown_ref = input.takedown.as_ref().and_then(|t| t.r#ref.as_deref());
+                let deactivated_update = input.deactivated.as_ref().map(|d| d.applied);
+                if (takedown_update.is_some() || deactivated_update.is_some())
+                    && let Err(e) = state
+                        .repos
+                        .repo
+                        .update_repo_status(&did, takedown_update, takedown_ref, deactivated_update)
+                        .await
+                {
+                    warn!("failed to sync status to repo backend: {e:?}");
+                }
                 if let Some(takedown) = &input.takedown {
-                    let status = if takedown.applied {
-                        tranquil_db_traits::AccountStatus::Takendown
-                    } else {
-                        tranquil_db_traits::AccountStatus::Active
+                    let status = match takedown.applied {
+                        true => tranquil_db_traits::AccountStatus::Takendown,
+                        false => tranquil_db_traits::AccountStatus::Active,
                     };
                     if let Err(e) =
                         tranquil_pds::repo_ops::sequence_account_event(&state, &did, status).await
@@ -208,10 +219,9 @@ pub async fn update_subject_status(
                     }
                 }
                 if let Some(deactivated) = &input.deactivated {
-                    let status = if deactivated.applied {
-                        tranquil_db_traits::AccountStatus::Deactivated
-                    } else {
-                        tranquil_db_traits::AccountStatus::Active
+                    let status = match deactivated.applied {
+                        true => tranquil_db_traits::AccountStatus::Deactivated,
+                        false => tranquil_db_traits::AccountStatus::Active,
                     };
                     if let Err(e) =
                         tranquil_pds::repo_ops::sequence_account_event(&state, &did, status).await

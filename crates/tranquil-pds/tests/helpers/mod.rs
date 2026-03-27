@@ -302,30 +302,54 @@ pub async fn create_repost(
 
 #[allow(dead_code)]
 pub async fn set_account_takedown(did: &str, takedown_ref: Option<&str>) {
-    let pool = get_test_db_pool().await;
-    sqlx::query!(
-        "UPDATE users SET takedown_ref = $1 WHERE did = $2",
-        takedown_ref,
-        did
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to update takedown_ref");
+    let client = client();
+    let (admin_jwt, _) = create_admin_account_and_login(&client).await;
+    let applied = takedown_ref.is_some();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.admin.updateSubjectStatus",
+            base_url().await,
+        ))
+        .bearer_auth(&admin_jwt)
+        .json(&json!({
+            "subject": {
+                "$type": "com.atproto.admin.defs#repoRef",
+                "did": did
+            },
+            "takedown": {
+                "applied": applied,
+                "ref": takedown_ref
+            }
+        }))
+        .send()
+        .await
+        .expect("Failed to send takedown request");
+    assert_eq!(res.status(), StatusCode::OK, "Failed to set takedown");
 }
 
 #[allow(dead_code)]
 pub async fn set_account_deactivated(did: &str, deactivated: bool) {
-    let pool = get_test_db_pool().await;
-    let deactivated_at: Option<chrono::DateTime<Utc>> =
-        if deactivated { Some(Utc::now()) } else { None };
-    sqlx::query!(
-        "UPDATE users SET deactivated_at = $1 WHERE did = $2",
-        deactivated_at,
-        did
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to update deactivated_at");
+    let client = client();
+    let (admin_jwt, _) = create_admin_account_and_login(&client).await;
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.admin.updateSubjectStatus",
+            base_url().await,
+        ))
+        .bearer_auth(&admin_jwt)
+        .json(&json!({
+            "subject": {
+                "$type": "com.atproto.admin.defs#repoRef",
+                "did": did
+            },
+            "deactivated": {
+                "applied": deactivated
+            }
+        }))
+        .send()
+        .await
+        .expect("Failed to send deactivation request");
+    assert_eq!(res.status(), StatusCode::OK, "Failed to set deactivation");
 }
 
 #[allow(dead_code)]

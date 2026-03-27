@@ -6,6 +6,7 @@ use jacquard_repo::{mst::Mst, storage::BlockStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
+use tranquil_db_traits::Backlink;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{
     Active, Auth, WriteOpKind, require_not_migrated, require_verified_or_delegated,
@@ -13,7 +14,8 @@ use tranquil_pds::auth::{
 };
 use tranquil_pds::repo::TrackingBlockStore;
 use tranquil_pds::repo_ops::{
-    FinalizeParams, RecordOp, begin_repo_write, extract_blob_cids, finalize_repo_write,
+    FinalizeParams, RecordOp, begin_repo_write, extract_backlinks, extract_blob_cids,
+    finalize_repo_write,
 };
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
@@ -27,6 +29,8 @@ struct WriteAccumulator {
     ops: Vec<RecordOp>,
     modified_keys: Vec<String>,
     all_blob_cids: Vec<String>,
+    backlinks_to_add: Vec<Backlink>,
+    backlinks_to_remove: Vec<AtUri>,
 }
 
 async fn process_single_write(
@@ -42,6 +46,8 @@ async fn process_single_write(
         mut ops,
         mut modified_keys,
         mut all_blob_cids,
+        mut backlinks_to_add,
+        mut backlinks_to_remove,
     } = acc;
 
     match write {
@@ -79,6 +85,7 @@ async fn process_single_write(
                 .await
                 .map_err(|_| ApiError::InternalError(Some("Failed to add to MST".into())))?;
             let uri = AtUri::from_parts(did, collection, &rkey);
+            backlinks_to_add.extend(extract_backlinks(&uri, value));
             results.push(WriteResult::CreateResult {
                 uri,
                 cid: record_cid.to_string(),
@@ -95,6 +102,8 @@ async fn process_single_write(
                 ops,
                 modified_keys,
                 all_blob_cids,
+                backlinks_to_add,
+                backlinks_to_remove,
             })
         }
         WriteOp::Update {
@@ -131,6 +140,8 @@ async fn process_single_write(
                 .await
                 .map_err(|_| ApiError::InternalError(Some("Failed to update MST".into())))?;
             let uri = AtUri::from_parts(did, collection, rkey);
+            backlinks_to_remove.push(uri.clone());
+            backlinks_to_add.extend(extract_backlinks(&uri, value));
             results.push(WriteResult::UpdateResult {
                 uri,
                 cid: record_cid.to_string(),
@@ -148,6 +159,8 @@ async fn process_single_write(
                 ops,
                 modified_keys,
                 all_blob_cids,
+                backlinks_to_add,
+                backlinks_to_remove,
             })
         }
         WriteOp::Delete { collection, rkey } => {
@@ -158,6 +171,7 @@ async fn process_single_write(
                 .delete(&key)
                 .await
                 .map_err(|_| ApiError::InternalError(Some("Failed to delete from MST".into())))?;
+            backlinks_to_remove.push(AtUri::from_parts(did, collection, rkey));
             results.push(WriteResult::DeleteResult {});
             ops.push(RecordOp::Delete {
                 collection: collection.clone(),
@@ -170,6 +184,8 @@ async fn process_single_write(
                 ops,
                 modified_keys,
                 all_blob_cids,
+                backlinks_to_add,
+                backlinks_to_remove,
             })
         }
     }
@@ -189,6 +205,8 @@ async fn process_writes(
         ops: Vec::new(),
         modified_keys: Vec::new(),
         all_blob_cids: Vec::new(),
+        backlinks_to_add: Vec::new(),
+        backlinks_to_remove: Vec::new(),
     };
     stream::iter(writes.iter().map(Ok::<_, ApiError>))
         .try_fold(initial_acc, |acc, write| async move {
@@ -319,6 +337,8 @@ pub async fn apply_writes(
         ops,
         modified_keys,
         all_blob_cids,
+        backlinks_to_add,
+        backlinks_to_remove,
     } = process_writes(
         &input.writes,
         mst,
@@ -373,6 +393,8 @@ pub async fn apply_writes(
             ops,
             modified_keys: &modified_keys,
             blob_cids: &all_blob_cids,
+            backlinks_to_add,
+            backlinks_to_remove,
         },
     )
     .await?;

@@ -18,6 +18,7 @@ use tranquil_pds::delegation::{
 use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{Did, Handle};
+use tranquil_types::CidLink;
 
 pub async fn list_controllers(
     State(state): State<AppState>,
@@ -418,6 +419,22 @@ pub async fn create_delegated_account(
             return Err(ApiError::InternalError(None));
         }
     };
+
+    state
+        .repos
+        .repo
+        .create_repo(
+            user_id,
+            &did,
+            &handle,
+            &CidLink::from(&repo.commit_cid),
+            &repo.repo_rev,
+        )
+        .await
+        .map_err(|e| {
+            error!("failed to register repo in backend: {e:?}");
+            ApiError::InternalError(None)
+        })?;
 
     if let Some(validated) = validated_invite_code
         && let Err(e) = state

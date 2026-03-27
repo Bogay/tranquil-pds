@@ -12,6 +12,7 @@ use crate::sso::{SsoConfig, SsoManager};
 use crate::storage::{BlobStorage, create_blob_storage};
 use sqlx::PgPool;
 use std::error::Error;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::broadcast;
@@ -262,7 +263,14 @@ impl AppState {
         AuthConfig::init();
         init_rate_limit_override();
 
-        let repos = Arc::new(PostgresRepositories::new(db.clone()));
+        let mut repos = PostgresRepositories::new(db.clone());
+
+        let cfg = tranquil_config::get();
+        if cfg.storage.repo_backend() == tranquil_config::RepoBackend::TranquilStore {
+            wire_tranquil_store(&mut repos, &cfg.tranquil_store);
+        }
+
+        let repos = Arc::new(repos);
         let block_store = PostgresBlockStore::new(db);
         let blob_store = create_blob_storage().await;
 
@@ -376,4 +384,70 @@ impl AppState {
 
         true
     }
+}
+
+fn wire_tranquil_store(
+    repos: &mut PostgresRepositories,
+    store_cfg: &tranquil_config::TranquilStoreConfig,
+) {
+    use tranquil_store::RealIO;
+    use tranquil_store::eventlog::{EventLog, EventLogBridge, EventLogConfig};
+    use tranquil_store::metastore::client::MetastoreClient;
+    use tranquil_store::metastore::handler::HandlerPool;
+    use tranquil_store::metastore::partitions::Partition;
+    use tranquil_store::metastore::{Metastore, MetastoreConfig};
+
+    let base_dir = PathBuf::from(&store_cfg.data_dir);
+    let data_dir = match std::env::var("TRANQUIL_PDS_TEST_INFRA_READY").as_deref() {
+        Ok("1") => base_dir.join(format!("pid-{}", std::process::id())),
+        _ => base_dir,
+    };
+    let metastore_dir = data_dir.join("metastore");
+    let segments_dir = data_dir.join("eventlog").join("segments");
+
+    std::fs::create_dir_all(&metastore_dir).expect("failed to create metastore directory");
+    std::fs::create_dir_all(&segments_dir).expect("failed to create eventlog segments directory");
+
+    let metastore_config = store_cfg
+        .memory_budget_mb
+        .map(|mb| MetastoreConfig {
+            cache_size_bytes: mb.saturating_mul(1024 * 1024),
+        })
+        .unwrap_or_default();
+
+    let metastore =
+        Metastore::open(&metastore_dir, metastore_config).expect("failed to open metastore");
+
+    let event_log = EventLog::open(
+        EventLogConfig {
+            segments_dir,
+            ..EventLogConfig::default()
+        },
+        RealIO::new(),
+    )
+    .expect("failed to open eventlog");
+    let event_log = Arc::new(event_log);
+
+    let bridge = Arc::new(EventLogBridge::new(Arc::clone(&event_log)));
+
+    let indexes = metastore.partition(Partition::Indexes).clone();
+    let event_ops = metastore.event_ops(Arc::clone(&bridge));
+    let recovered = event_ops
+        .recover_metastore_mutations(&indexes)
+        .expect("metastore crash recovery failed");
+    if recovered > 0 {
+        tracing::info!(recovered, "replayed metastore mutations from eventlog");
+    }
+
+    let notifier = bridge.notifier();
+
+    let pool = HandlerPool::spawn::<RealIO>(metastore, bridge, None, store_cfg.handler_threads);
+
+    let client = MetastoreClient::<RealIO>::new(Arc::new(pool));
+
+    tracing::info!(data_dir = %store_cfg.data_dir, "tranquil-store data directory");
+
+    repos.repo = Arc::new(client.clone());
+    repos.backlink = Arc::new(client);
+    repos.event_notifier = Arc::new(notifier);
 }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DidResolutionError {
@@ -55,10 +55,12 @@ pub struct ResolvedService {
     pub service_id: String,
 }
 
+type TimedCache<T> = RwLock<HashMap<Box<str>, (Instant, Arc<T>)>>;
+
 pub struct DidResolver {
-    did_doc_cache: RwLock<HashMap<Box<str>, (Instant, Arc<serde_json::Value>)>>,
-    parsed_did_doc_cache: RwLock<HashMap<Box<str>, (Instant, Arc<DidDocument>)>>,
-    service_cache: RwLock<HashMap<Box<str>, (Instant, Arc<ResolvedService>)>>,
+    did_doc_cache: TimedCache<serde_json::Value>,
+    parsed_did_doc_cache: TimedCache<DidDocument>,
+    service_cache: TimedCache<ResolvedService>,
     client: Client,
     cache_ttl: Duration,
     plc_directory_url: String,

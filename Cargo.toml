@@ -144,3 +144,7 @@ lto = "fat"
 strip = true
 codegen-units = 1
 panic = "abort"
+
+[profile.bench]
+debug = 1
+strip = false

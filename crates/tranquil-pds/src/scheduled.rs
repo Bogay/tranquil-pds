@@ -436,18 +436,25 @@ pub async fn start_scheduled_tasks(
     blob_repo: Arc<dyn BlobRepository>,
     blob_store: Arc<dyn BlobStorage>,
     sso_repo: Arc<dyn SsoRepository>,
+    repo_repo: Arc<dyn RepoRepository>,
+    block_store: PostgresBlockStore,
     shutdown: CancellationToken,
 ) {
-    let check_interval =
-        Duration::from_secs(tranquil_config::get().scheduled.delete_check_interval_secs);
+    let cfg = tranquil_config::get();
+    let check_interval = Duration::from_secs(cfg.scheduled.delete_check_interval_secs);
+    let gc_interval = Duration::from_secs(cfg.scheduled.block_gc_interval_secs);
 
     info!(
         check_interval_secs = check_interval.as_secs(),
+        gc_interval_secs = gc_interval.as_secs(),
         "Starting scheduled tasks service"
     );
 
     let mut ticker = interval(check_interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    let mut gc_ticker = interval(gc_interval);
+    gc_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -494,8 +501,61 @@ pub async fn start_scheduled_tasks(
                     }
                 }
             }
+            _ = gc_ticker.tick() => {
+                if let Err(e) = run_block_gc(repo_repo.as_ref(), &block_store).await {
+                    error!("Block GC error: {e}");
+                }
+            }
         }
     }
+}
+
+const BLOCK_GC_BATCH_SIZE: i64 = 1000;
+
+async fn run_block_gc(
+    repo_repo: &dyn RepoRepository,
+    block_store: &PostgresBlockStore,
+) -> anyhow::Result<()> {
+    let mut total_deleted: u64 = 0;
+
+    loop {
+        let candidates = block_store
+            .get_oldest_block_cids(BLOCK_GC_BATCH_SIZE)
+            .await
+            .context("failed to fetch candidate blocks")?;
+
+        match candidates.is_empty() {
+            true => break,
+            false => {
+                let batch_len = candidates.len();
+                let unreferenced = repo_repo
+                    .find_unreferenced_blocks(&candidates)
+                    .await
+                    .context("failed to check block references")?;
+
+                let deleted = match unreferenced.is_empty() {
+                    true => 0,
+                    false => block_store
+                        .delete_blocks(&unreferenced)
+                        .await
+                        .context("failed to delete unreferenced blocks")?,
+                };
+
+                total_deleted = total_deleted.saturating_add(deleted);
+
+                match unreferenced.len() == batch_len {
+                    true => continue,
+                    false => break,
+                }
+            }
+        }
+    }
+
+    match total_deleted > 0 {
+        true => info!(total_deleted, "Block GC cycle complete"),
+        false => debug!("Block GC cycle: no orphaned blocks found"),
+    }
+    Ok(())
 }
 
 async fn process_scheduled_deletions(

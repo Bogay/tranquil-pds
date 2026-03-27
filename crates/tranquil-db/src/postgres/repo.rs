@@ -46,9 +46,21 @@ impl PostgresRepoRepository {
 
 #[async_trait]
 impl RepoRepository for PostgresRepoRepository {
+    async fn update_repo_status(
+        &self,
+        _did: &Did,
+        _takedown: Option<bool>,
+        _takedown_ref: Option<&str>,
+        _deactivated: Option<bool>,
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
     async fn create_repo(
         &self,
         user_id: Uuid,
+        _did: &Did,
+        _handle: &Handle,
         repo_root_cid: &CidLink,
         repo_rev: &str,
     ) -> Result<(), DbError> {
@@ -604,6 +616,30 @@ impl RepoRepository for PostgresRepoRepository {
         .map_err(map_sqlx_error)?;
 
         Ok(count)
+    }
+
+    async fn find_unreferenced_blocks(
+        &self,
+        candidate_cids: &[Vec<u8>],
+    ) -> Result<Vec<Vec<u8>>, DbError> {
+        match candidate_cids.is_empty() {
+            true => Ok(Vec::new()),
+            false => {
+                let rows = sqlx::query!(
+                    r#"
+                    SELECT t.cid FROM UNNEST($1::bytea[]) AS t(cid)
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM user_blocks WHERE block_cid = t.cid
+                    )
+                    "#,
+                    candidate_cids,
+                )
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_sqlx_error)?;
+                Ok(rows.into_iter().filter_map(|r| r.cid).collect())
+            }
+        }
     }
 
     async fn get_user_block_cids_since_rev(
@@ -1362,6 +1398,53 @@ impl RepoRepository for PostgresRepoRepository {
             .bind(input.user_id)
             .bind(&collections)
             .bind(&rkeys)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| ApplyCommitError::Database(e.to_string()))?;
+        }
+
+        if !input.backlinks_to_remove.is_empty() {
+            let remove_uris: Vec<&str> = input
+                .backlinks_to_remove
+                .iter()
+                .map(|u| u.as_str())
+                .collect();
+            sqlx::query!(
+                "DELETE FROM backlinks WHERE uri = ANY($1::text[])",
+                &remove_uris as &[&str],
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| ApplyCommitError::Database(e.to_string()))?;
+        }
+
+        if !input.backlinks_to_add.is_empty() {
+            let uris: Vec<&str> = input
+                .backlinks_to_add
+                .iter()
+                .map(|b| b.uri.as_str())
+                .collect();
+            let paths: Vec<&str> = input
+                .backlinks_to_add
+                .iter()
+                .map(|b| b.path.as_str())
+                .collect();
+            let link_tos: Vec<&str> = input
+                .backlinks_to_add
+                .iter()
+                .map(|b| b.link_to.as_str())
+                .collect();
+            sqlx::query!(
+                r#"
+                INSERT INTO backlinks (uri, path, link_to, repo_id)
+                SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::text[]), $4
+                ON CONFLICT (uri, path) DO NOTHING
+                "#,
+                &uris as &[&str],
+                &paths as &[&str],
+                &link_tos as &[&str],
+                input.user_id,
+            )
             .execute(&mut *tx)
             .await
             .map_err(|e| ApplyCommitError::Database(e.to_string()))?;

@@ -49,11 +49,10 @@ pub async fn resolve_identity(
             None
         }
     });
-    let handle = did_doc.also_known_as.iter().find_map(|alias| {
-        alias
-            .strip_prefix("at://")
-            .and_then(|s| Some(s.to_string()))
-    });
+    let handle = did_doc
+        .also_known_as
+        .iter()
+        .find_map(|alias| alias.strip_prefix("at://").map(|s| s.to_string()));
 
     Ok(ResolvedIdentity {
         did: did.clone(),

@@ -23,6 +23,10 @@ impl SequenceNumber {
     pub fn is_valid(&self) -> bool {
         self.0 >= 0
     }
+
+    pub fn as_u64(&self) -> Option<u64> {
+        u64::try_from(self.0).ok()
+    }
 }
 
 impl fmt::Display for SequenceNumber {

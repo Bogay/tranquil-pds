@@ -178,7 +178,7 @@ pub async fn list_records(
     };
     let records: Vec<Value> = parsed_rows
         .iter()
-        .zip(blocks.into_iter())
+        .zip(blocks)
         .filter_map(|((_, rkey, cid_str), block_opt)| {
             block_opt.and_then(|block| {
                 serde_ipld_dagcbor::from_slice::<Ipld>(&block)

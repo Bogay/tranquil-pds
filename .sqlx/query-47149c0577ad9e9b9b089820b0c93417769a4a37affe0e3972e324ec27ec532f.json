@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO backlinks (uri, path, link_to, repo_id)\n                SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::text[]), $4\n                ON CONFLICT (uri, path) DO NOTHING\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "47149c0577ad9e9b9b089820b0c93417769a4a37affe0e3972e324ec27ec532f"
+}

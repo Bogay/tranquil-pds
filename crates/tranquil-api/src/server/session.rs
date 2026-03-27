@@ -313,7 +313,7 @@ pub async fn create_session(
             refresh_jwt: refresh_meta.token,
             handle,
             did: row.did,
-            did_doc: did_doc.ok().and_then(|f| Some((*f).clone())),
+            did_doc: did_doc.ok().map(|f| (*f).clone()),
             email: row.email,
             email_confirmed: Some(row.channel_verification.email),
             email_auth_factor: email_auth_factor_out,
@@ -406,7 +406,7 @@ pub async fn get_session(
                 status: account_state.status_for_session().map(String::from),
                 migrated_to_pds,
                 migrated_at,
-                did_doc: did_doc.ok().and_then(|f| Some((*f).clone())),
+                did_doc: did_doc.ok().map(|f| (*f).clone()),
             }))
         }
         Ok(None) => Err(ApiError::AuthenticationFailed(None)),
@@ -604,7 +604,7 @@ pub async fn refresh_session(
                 preferred_locale: u.preferred_locale,
                 is_admin: u.is_admin,
                 active: account_state.is_active(),
-                did_doc: did_doc.ok().and_then(|f| Some((*f).clone())),
+                did_doc: did_doc.ok().map(|f| (*f).clone()),
                 status: account_state.status_for_session().map(String::from),
             }))
         }

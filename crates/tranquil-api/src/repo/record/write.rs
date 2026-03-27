@@ -147,19 +147,27 @@ pub async fn create_record(
 
                 let prev_cid = match mst.get(&conflict_key).await {
                     Ok(Some(cid)) => cid,
-                    _ => continue,
-                };
-
-                mst = match mst.delete(&conflict_key).await {
-                    Ok(m) => m,
+                    Ok(None) => continue,
                     Err(e) => {
                         error!(
-                            "Failed to delete conflict from MST {}: {:?}",
+                            "Failed to read conflict record from MST {}: {:?}",
                             conflict_uri, e
                         );
-                        continue;
+                        return Err(ApiError::InternalError(Some(
+                            "Failed to read conflicting record from MST".into(),
+                        )));
                     }
                 };
+
+                mst = mst.delete(&conflict_key).await.map_err(|e| {
+                    error!(
+                        "Failed to delete conflict from MST {}: {:?}",
+                        conflict_uri, e
+                    );
+                    ApiError::InternalError(Some(
+                        "Failed to delete conflicting record from MST".into(),
+                    ))
+                })?;
 
                 ops.push(RecordOp::Delete {
                     collection: conflict_collection,
@@ -208,6 +216,9 @@ pub async fn create_record(
         .collect();
     let blob_cids = extract_blob_cids(&input.record);
 
+    let created_uri = AtUri::from_parts(&did, &input.collection, &rkey);
+    let backlinks_to_add = extract_backlinks(&created_uri, &input.record);
+
     let commit_result = finalize_repo_write(
         &state,
         ctx,
@@ -226,34 +237,11 @@ pub async fn create_record(
             ops,
             modified_keys: &modified_keys,
             blob_cids: &blob_cids,
+            backlinks_to_add,
+            backlinks_to_remove: conflict_uris_to_cleanup,
         },
     )
     .await?;
-
-    {
-        let backlink_repo = state.repos.backlink.clone();
-        futures::future::join_all(conflict_uris_to_cleanup.iter().map(|uri| {
-            let backlink_repo = backlink_repo.clone();
-            async move {
-                if let Err(e) = backlink_repo.remove_backlinks_by_uri(uri).await {
-                    error!("Failed to remove backlinks for {}: {}", uri, e);
-                }
-            }
-        }))
-        .await;
-    }
-
-    let created_uri = AtUri::from_parts(&did, &input.collection, &rkey);
-    let backlinks = extract_backlinks(&created_uri, &input.record);
-    if !backlinks.is_empty()
-        && let Err(e) = state
-            .repos
-            .backlink
-            .add_backlinks(user_id, &backlinks)
-            .await
-    {
-        error!("Failed to add backlinks for {}: {}", created_uri, e);
-    }
 
     Ok(Json(CreateRecordOutput {
         uri: created_uri,
@@ -379,6 +367,13 @@ pub async fn put_record(
     let modified_keys = [key];
     let blob_cids = extract_blob_cids(&input.record);
 
+    let record_uri = AtUri::from_parts(&did, &input.collection, &input.rkey);
+    let backlinks_to_add = extract_backlinks(&record_uri, &input.record);
+    let backlinks_to_remove = match is_update {
+        true => vec![record_uri.clone()],
+        false => vec![],
+    };
+
     let commit_result = finalize_repo_write(
         &state,
         ctx,
@@ -397,12 +392,14 @@ pub async fn put_record(
             ops: vec![op],
             modified_keys: &modified_keys,
             blob_cids: &blob_cids,
+            backlinks_to_add,
+            backlinks_to_remove,
         },
     )
     .await?;
 
     Ok(Json(PutRecordOutput {
-        uri: AtUri::from_parts(&did, &input.collection, &input.rkey),
+        uri: record_uri,
         cid: record_cid.to_string(),
         commit: Some(CommitInfo {
             cid: commit_result.commit_cid.to_string(),

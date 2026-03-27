@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT t.cid FROM UNNEST($1::bytea[]) AS t(cid)\n                    WHERE NOT EXISTS (\n                        SELECT 1 FROM user_blocks WHERE block_cid = t.cid\n                    )\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cid",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "ByteaArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "18fa821e4bd00ccf5d1d8395ba728e4905d69f9fe527b4d4b49c69deff52cea8"
+}

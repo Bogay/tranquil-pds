@@ -382,6 +382,14 @@ pub async fn activate_account(
                     did
                 );
             }
+            if let Err(e) = state
+                .repos
+                .repo
+                .update_repo_status(&did, None, None, Some(false))
+                .await
+            {
+                warn!("failed to sync activation to repo backend: {e:?}");
+            }
             info!(
                 "[MIGRATION] activateAccount: Sequencing account event (active=true) for did={}",
                 did
@@ -513,6 +521,14 @@ pub async fn deactivate_account(
                     .cache
                     .delete(&tranquil_pds::cache_keys::handle_key(h))
                     .await;
+            }
+            if let Err(e) = state
+                .repos
+                .repo
+                .update_repo_status(&did, None, None, Some(true))
+                .await
+            {
+                warn!("failed to sync deactivation to repo backend: {e:?}");
             }
             if let Err(e) = tranquil_pds::repo_ops::sequence_account_event(
                 &state,

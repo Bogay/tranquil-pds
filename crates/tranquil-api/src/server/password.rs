@@ -153,7 +153,7 @@ pub async fn reset_password(
         }
         return Err(ApiError::ExpiredToken(None));
     }
-    let password_hash = crate::common::hash_password_async(&password).await?;
+    let password_hash = crate::common::hash_password_async(password).await?;
     let result = match state
         .repos
         .user
@@ -345,7 +345,7 @@ pub async fn set_password(
         ));
     }
 
-    let new_hash = crate::common::hash_password_async(&new_password).await?;
+    let new_hash = crate::common::hash_password_async(new_password).await?;
 
     state
         .repos

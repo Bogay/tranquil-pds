@@ -159,6 +159,8 @@ pub struct FinalizeParams<'a> {
     pub ops: Vec<RecordOp>,
     pub modified_keys: &'a [String],
     pub blob_cids: &'a [String],
+    pub backlinks_to_add: Vec<Backlink>,
+    pub backlinks_to_remove: Vec<AtUri>,
 }
 
 pub async fn begin_repo_write(
@@ -249,6 +251,8 @@ pub async fn finalize_repo_write(
             blocks_cids: &written_cids_str,
             blobs: params.blob_cids,
             obsolete_cids: vec![ctx.current_root_cid],
+            backlinks_to_add: params.backlinks_to_add,
+            backlinks_to_remove: params.backlinks_to_remove,
         },
     )
     .await?;
@@ -331,6 +335,8 @@ pub struct CommitParams<'a> {
     pub blocks_cids: &'a [String],
     pub blobs: &'a [String],
     pub obsolete_cids: Vec<Cid>,
+    pub backlinks_to_add: Vec<Backlink>,
+    pub backlinks_to_remove: Vec<AtUri>,
 }
 
 pub async fn commit_and_log(
@@ -342,6 +348,8 @@ pub async fn commit_and_log(
         RepoEventType,
     };
 
+    let backlinks_to_add = params.backlinks_to_add;
+    let backlinks_to_remove = params.backlinks_to_remove;
     let CommitParams {
         did,
         user_id,
@@ -352,6 +360,7 @@ pub async fn commit_and_log(
         blocks_cids,
         blobs,
         obsolete_cids,
+        ..
     } = params;
     let key_row = state
         .repos
@@ -485,6 +494,8 @@ pub async fn commit_and_log(
         obsolete_block_cids: obsolete_bytes,
         record_upserts,
         record_deletes,
+        backlinks_to_add,
+        backlinks_to_remove,
         commit_event,
     };
 
@@ -592,6 +603,8 @@ pub async fn create_record_internal(
         .collect();
     let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
     let blob_cids = extract_blob_cids(record);
+    let record_uri = AtUri::from_parts(did.as_str(), collection.as_str(), rkey.as_str());
+    let backlinks = extract_backlinks(&record_uri, record);
     let result = commit_and_log(
         state,
         CommitParams {
@@ -604,6 +617,8 @@ pub async fn create_record_internal(
             blocks_cids: &written_cids_str,
             blobs: &blob_cids,
             obsolete_cids,
+            backlinks_to_add: backlinks,
+            backlinks_to_remove: vec![],
         },
     )
     .await?;
