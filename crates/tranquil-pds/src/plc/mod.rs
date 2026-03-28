@@ -45,6 +45,8 @@ pub enum ServiceType {
     Pds,
     #[serde(rename = "AtprotoAppView")]
     AppView,
+    #[serde(rename = "AtprotoLabeler")]
+    Labeler,
 }
 
 impl ServiceType {
@@ -52,6 +54,7 @@ impl ServiceType {
         match self {
             Self::Pds => "AtprotoPersonalDataServer",
             Self::AppView => "AtprotoAppView",
+            Self::Labeler => "AtprotoLabeler",
         }
     }
 
