@@ -186,9 +186,38 @@ pub struct ReservedSigningKey {
 }
 
 #[derive(Debug, Clone)]
+pub struct ReservedSigningKeyFull {
+    pub id: Uuid,
+    pub did: Option<Did>,
+    pub public_key_did_key: String,
+    pub private_key_bytes: Vec<u8>,
+    pub expires_at: DateTime<Utc>,
+    pub used_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct DeletionRequest {
     pub did: Did,
     pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeletionRequestWithToken {
+    pub token: String,
+    pub did: Did,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlcTokenInfo {
+    pub token: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PasswordResetInfo {
+    pub code: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 #[async_trait]
@@ -406,6 +435,41 @@ pub trait InfraRepository: Send + Sync {
         &self,
         user_ids: &[Uuid],
     ) -> Result<Vec<(Uuid, String)>, DbError>;
+
+    async fn get_deletion_request_by_did(
+        &self,
+        did: &Did,
+    ) -> Result<Option<DeletionRequestWithToken>, DbError>;
+
+    async fn get_latest_comms_for_user(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+        limit: i64,
+    ) -> Result<Vec<QueuedComms>, DbError>;
+
+    async fn count_comms_by_type(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+    ) -> Result<i64, DbError>;
+
+    async fn delete_comms_by_type_for_user(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+    ) -> Result<u64, DbError>;
+
+    async fn expire_deletion_request(&self, token: &str) -> Result<(), DbError>;
+
+    async fn get_reserved_signing_key_full(
+        &self,
+        public_key_did_key: &str,
+    ) -> Result<Option<ReservedSigningKeyFull>, DbError>;
+
+    async fn get_plc_tokens_by_did(&self, did: &Did) -> Result<Vec<PlcTokenInfo>, DbError>;
+
+    async fn count_plc_tokens_by_did(&self, did: &Did) -> Result<i64, DbError>;
 }
 
 #[derive(Debug, Clone)]

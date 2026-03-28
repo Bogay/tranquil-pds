@@ -15,8 +15,6 @@ use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{Did, Handle, PlainPassword};
 use tranquil_pds::validation::validate_password;
-use tranquil_types::CidLink;
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountInput {
@@ -548,21 +546,6 @@ pub async fn create_account(
         }
     };
     let user_id = create_result.user_id;
-    if let Err(e) = state
-        .repos
-        .repo
-        .create_repo(
-            user_id,
-            &did_for_commit,
-            &handle_typed,
-            &CidLink::from(&repo.commit_cid),
-            &repo.repo_rev,
-        )
-        .await
-    {
-        error!("failed to register repo in backend: {e:?}");
-        return ApiError::InternalError(None).into_response();
-    }
     if !is_migration && !is_did_web_byod {
         super::provision::sequence_new_account(
             &state,

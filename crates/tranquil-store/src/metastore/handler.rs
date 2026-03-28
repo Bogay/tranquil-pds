@@ -10,22 +10,23 @@ use tranquil_db_traits::{
     ApplyCommitResult, Backlink, BrokenGenesisCommit, CommitEventData, CommsChannel, CommsType,
     CompletePasskeySetupInput, CreateAccountError, CreateDelegatedAccountInput,
     CreatePasskeyAccountInput, CreatePasswordAccountInput, CreatePasswordAccountResult,
-    CreateSsoAccountInput, DbError, DelegationActionType, DeletionRequest, DidWebOverrides,
-    EventBlocksCids, ImportBlock, ImportRecord, ImportRepoError, InviteCodeError, InviteCodeInfo,
-    InviteCodeRow, InviteCodeSortOrder, InviteCodeUse, MigrationReactivationError,
-    MigrationReactivationInput, NotificationHistoryRow, NotificationPrefs, OAuthTokenWithUser,
-    PasswordResetResult, QueuedComms, ReactivatedAccountInfo, RecoverPasskeyAccountInput,
-    RecoverPasskeyAccountResult, RefreshSessionResult, ReservedSigningKey,
-    ScheduledDeletionAccount, ScopePreference, SequenceNumber, SequencedEvent, SessionId,
-    StoredBackupCode, StoredPasskey, TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus,
-    UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo,
-    UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
-    UserForPasskeySetup, UserForRecovery, UserForVerification, UserIdAndHandle,
-    UserIdAndPasswordHash, UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId,
-    UserLegacyLoginPref, UserLoginCheck, UserLoginFull, UserLoginInfo,
-    UserNeedingRecordBlobsBackfill, UserPasswordInfo, UserResendVerification, UserResetCodeInfo,
-    UserRow, UserSessionInfo, UserStatus, UserVerificationInfo, UserWithKey, UserWithoutBlocks,
-    ValidatedInviteCode, WebauthnChallengeType,
+    CreateSsoAccountInput, DbError, DelegationActionType, DeletionRequest,
+    DeletionRequestWithToken, DidWebOverrides, EventBlocksCids, ImportBlock, ImportRecord,
+    ImportRepoError, InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder,
+    InviteCodeUse, MigrationReactivationError, MigrationReactivationInput, NotificationHistoryRow,
+    NotificationPrefs, OAuthTokenWithUser, PasswordResetResult, PlcTokenInfo, QueuedComms,
+    ReactivatedAccountInfo, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
+    RefreshSessionResult, ReservedSigningKey, ReservedSigningKeyFull, ScheduledDeletionAccount,
+    ScopePreference, SequenceNumber, SequencedEvent, SessionId, StoredBackupCode, StoredPasskey,
+    TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus, UserAuthInfo, UserCommsPrefs,
+    UserConfirmSignup, UserDidWebInfo, UserEmailInfo, UserForDeletion, UserForDidDoc,
+    UserForDidDocBuild, UserForPasskeyRecovery, UserForPasskeySetup, UserForRecovery,
+    UserForVerification, UserIdAndHandle, UserIdAndPasswordHash, UserIdHandleEmail,
+    UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref, UserLoginCheck,
+    UserLoginFull, UserLoginInfo, UserNeedingRecordBlobsBackfill, UserPasswordInfo,
+    UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus,
+    UserVerificationInfo, UserWithKey, UserWithoutBlocks, ValidatedInviteCode,
+    WebauthnChallengeType,
 };
 use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
@@ -1127,6 +1128,11 @@ pub enum UserRequest {
         password_hash: String,
         tx: Tx<u64>,
     },
+    SetAdminStatus {
+        did: Did,
+        is_admin: bool,
+        tx: Tx<()>,
+    },
     GetNotificationPrefs {
         did: Did,
         tx: Tx<Option<NotificationPrefs>>,
@@ -1559,6 +1565,24 @@ pub enum UserRequest {
         input: RecoverPasskeyAccountInput,
         tx: Tx<RecoverPasskeyAccountResult>,
     },
+    GetPasswordResetInfo {
+        email: String,
+        tx: Tx<Option<tranquil_db_traits::PasswordResetInfo>>,
+    },
+    EnableTotpVerified {
+        did: Did,
+        encrypted_secret: Vec<u8>,
+        tx: Tx<()>,
+    },
+    SetTwoFactorEnabled {
+        did: Did,
+        enabled: bool,
+        tx: Tx<()>,
+    },
+    ExpirePasswordResetCode {
+        email: String,
+        tx: Tx<()>,
+    },
 }
 
 impl UserRequest {
@@ -1585,6 +1609,7 @@ impl UserRequest {
             | Self::AdminUpdateEmail { did, .. }
             | Self::AdminUpdateHandle { did, .. }
             | Self::AdminUpdatePassword { did, .. }
+            | Self::SetAdminStatus { did, .. }
             | Self::GetNotificationPrefs { did, .. }
             | Self::GetIdHandleEmailByDid { did, .. }
             | Self::UpdatePreferredCommsChannel { did, .. }
@@ -1662,7 +1687,9 @@ impl UserRequest {
                 input: RecoverPasskeyAccountInput { did, .. },
                 ..
             }
-            | Self::SetRecoveryToken { did, .. } => did_to_routing(did.as_str()),
+            | Self::SetRecoveryToken { did, .. }
+            | Self::EnableTotpVerified { did, .. }
+            | Self::SetTwoFactorEnabled { did, .. } => did_to_routing(did.as_str()),
 
             Self::GetCommsPrefs { user_id, .. }
             | Self::GetUserKeyById { user_id, .. }
@@ -1729,7 +1756,9 @@ impl UserRequest {
             | Self::GetUserForPasskeyRecovery { .. }
             | Self::GetAccountsScheduledForDeletion { .. }
             | Self::CleanupExpiredHandleReservations { .. }
-            | Self::CheckAndConsumeInviteCode { .. } => Routing::Global,
+            | Self::CheckAndConsumeInviteCode { .. }
+            | Self::GetPasswordResetInfo { .. }
+            | Self::ExpirePasswordResetCode { .. } => Routing::Global,
         }
     }
 }
@@ -1969,6 +1998,42 @@ pub enum InfraRequest {
         user_ids: Vec<Uuid>,
         tx: Tx<Vec<(Uuid, String)>>,
     },
+    GetDeletionRequestByDid {
+        did: Did,
+        tx: Tx<Option<DeletionRequestWithToken>>,
+    },
+    GetLatestCommsForUser {
+        user_id: Uuid,
+        comms_type: CommsType,
+        limit: i64,
+        tx: Tx<Vec<QueuedComms>>,
+    },
+    CountCommsByType {
+        user_id: Uuid,
+        comms_type: CommsType,
+        tx: Tx<i64>,
+    },
+    DeleteCommsByTypeForUser {
+        user_id: Uuid,
+        comms_type: CommsType,
+        tx: Tx<u64>,
+    },
+    ExpireDeletionRequest {
+        token: String,
+        tx: Tx<()>,
+    },
+    GetReservedSigningKeyFull {
+        public_key_did_key: String,
+        tx: Tx<Option<ReservedSigningKeyFull>>,
+    },
+    GetPlcTokensByDid {
+        did: Did,
+        tx: Tx<Vec<PlcTokenInfo>>,
+    },
+    CountPlcTokensByDid {
+        did: Did,
+        tx: Tx<i64>,
+    },
 }
 
 impl InfraRequest {
@@ -1986,7 +2051,10 @@ impl InfraRequest {
             | Self::GetInvitesCreatedByUser { user_id, .. }
             | Self::GetInviteCodeUsedByUser { user_id, .. }
             | Self::DeleteInviteCodeUsesByUser { user_id, .. }
-            | Self::DeleteInviteCodesByUser { user_id, .. } => {
+            | Self::DeleteInviteCodesByUser { user_id, .. }
+            | Self::GetLatestCommsForUser { user_id, .. }
+            | Self::CountCommsByType { user_id, .. }
+            | Self::DeleteCommsByTypeForUser { user_id, .. } => {
                 uuid_to_routing(user_hashes, user_id)
             }
             Self::CreateInviteCodesBatch {
@@ -2003,7 +2071,10 @@ impl InfraRequest {
             }
             Self::DeleteDeletionRequestsByDid { did, .. }
             | Self::CreateDeletionRequest { did, .. }
-            | Self::GetAdminAccountInfoByDid { did, .. } => did_to_routing(did.as_str()),
+            | Self::GetAdminAccountInfoByDid { did, .. }
+            | Self::GetDeletionRequestByDid { did, .. }
+            | Self::GetPlcTokensByDid { did, .. }
+            | Self::CountPlcTokensByDid { did, .. } => did_to_routing(did.as_str()),
             Self::GetBlobStorageKeyByCid { cid, .. } | Self::DeleteBlobByCid { cid, .. } => {
                 cid_to_routing(cid)
             }
@@ -2279,6 +2350,10 @@ pub enum OAuthRequest {
         except_token_id: TokenId,
         tx: Tx<u64>,
     },
+    Get2faChallengeCode {
+        request_uri: RequestId,
+        tx: Tx<Option<String>>,
+    },
 }
 
 impl OAuthRequest {
@@ -2342,7 +2417,8 @@ impl OAuthRequest {
             | Self::RevokeDeviceTrust { .. }
             | Self::UpdateDeviceFriendlyName { .. }
             | Self::TrustDevice { .. }
-            | Self::ExtendDeviceTrust { .. } => Routing::Global,
+            | Self::ExtendDeviceTrust { .. }
+            | Self::Get2faChallengeCode { .. } => Routing::Global,
         }
     }
 }
@@ -4266,6 +4342,106 @@ fn dispatch_infra<S: StorageIO>(state: &HandlerState<S>, req: InfraRequest) {
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
+        InfraRequest::GetDeletionRequestByDid { did, tx } => {
+            let result = state
+                .metastore
+                .infra_ops()
+                .get_deletion_request_by_did(&did)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        InfraRequest::GetLatestCommsForUser {
+            user_id,
+            comms_type,
+            limit,
+            tx,
+        } => {
+            let result = state
+                .metastore
+                .infra_ops()
+                .get_latest_comms_for_user(user_id, comms_type, limit)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        InfraRequest::CountCommsByType {
+            user_id,
+            comms_type,
+            tx,
+        } => {
+            let result = state
+                .metastore
+                .infra_ops()
+                .count_comms_by_type(user_id, comms_type)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        InfraRequest::DeleteCommsByTypeForUser {
+            user_id,
+            comms_type,
+            tx,
+        } => {
+            let result = state
+                .metastore
+                .infra_ops()
+                .delete_comms_by_type_for_user(user_id, comms_type)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        InfraRequest::ExpireDeletionRequest { token, tx } => {
+            let result = state
+                .metastore
+                .infra_ops()
+                .expire_deletion_request(&token)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        InfraRequest::GetReservedSigningKeyFull {
+            public_key_did_key,
+            tx,
+        } => {
+            let result = state
+                .metastore
+                .infra_ops()
+                .get_reserved_signing_key_full(&public_key_did_key)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        InfraRequest::GetPlcTokensByDid { did, tx } => {
+            let result = (|| {
+                let user_id = state
+                    .metastore
+                    .user_ops()
+                    .get_id_by_did(&did)
+                    .map_err(metastore_to_db)?;
+                match user_id {
+                    Some(uid) => state
+                        .metastore
+                        .infra_ops()
+                        .get_plc_tokens_for_user(uid)
+                        .map_err(metastore_to_db),
+                    None => Ok(Vec::new()),
+                }
+            })();
+            let _ = tx.send(result);
+        }
+        InfraRequest::CountPlcTokensByDid { did, tx } => {
+            let result = (|| {
+                let user_id = state
+                    .metastore
+                    .user_ops()
+                    .get_id_by_did(&did)
+                    .map_err(metastore_to_db)?;
+                match user_id {
+                    Some(uid) => state
+                        .metastore
+                        .infra_ops()
+                        .count_plc_tokens_for_user(uid)
+                        .map_err(metastore_to_db),
+                    None => Ok(0),
+                }
+            })();
+            let _ = tx.send(result);
+        }
     }
 }
 
@@ -4818,6 +4994,14 @@ fn dispatch_oauth<S: StorageIO>(state: &HandlerState<S>, req: OAuthRequest) {
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
+        OAuthRequest::Get2faChallengeCode { request_uri, tx } => {
+            let result = state
+                .metastore
+                .oauth_ops()
+                .get_2fa_challenge_code(&request_uri)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
     }
 }
 
@@ -5045,6 +5229,12 @@ fn dispatch_user<S: StorageIO>(state: &HandlerState<S>, req: UserRequest) {
         } => {
             let _ = tx.send(
                 user.admin_update_password(&did, &password_hash)
+                    .map_err(metastore_to_db),
+            );
+        }
+        UserRequest::SetAdminStatus { did, is_admin, tx } => {
+            let _ = tx.send(
+                user.set_admin_status(&did, is_admin)
                     .map_err(metastore_to_db),
             );
         }
@@ -5567,16 +5757,44 @@ fn dispatch_user<S: StorageIO>(state: &HandlerState<S>, req: UserRequest) {
             );
         }
         UserRequest::DeleteAccountWithFirehose { user_id, did, tx } => {
-            let _ = tx.send(
-                user.delete_account_with_firehose(user_id, &did)
-                    .map_err(metastore_to_db),
-            );
+            let result = user
+                .delete_account_complete(user_id, &did)
+                .map_err(metastore_to_db)
+                .and_then(|()| {
+                    state
+                        .event_ops
+                        .insert_account_event(&did, AccountStatus::Deleted)
+                });
+            let _ = tx.send(result.map(|seq| seq.as_i64()));
         }
         UserRequest::CreatePasswordAccount { input, tx } => {
             let _ = tx.send(user.create_password_account(&input));
         }
         UserRequest::CreateDelegatedAccount { input, tx } => {
-            let _ = tx.send(user.create_delegated_account(&input));
+            let result = user.create_delegated_account(&input).and_then(|account| {
+                let scope =
+                    tranquil_db_traits::DbScope::new(&input.controller_scopes).map_err(|e| {
+                        tranquil_db_traits::CreateAccountError::Database(format!(
+                            "invalid delegation scope: {e}"
+                        ))
+                    })?;
+                state
+                    .metastore
+                    .delegation_ops()
+                    .create_delegation(
+                        &input.did,
+                        &input.controller_did,
+                        &scope,
+                        &input.controller_did,
+                    )
+                    .map_err(|e| {
+                        tranquil_db_traits::CreateAccountError::Database(format!(
+                            "delegation grant creation failed: {e}"
+                        ))
+                    })?;
+                Ok(account)
+            });
+            let _ = tx.send(result);
         }
         UserRequest::CreatePasskeyAccount { input, tx } => {
             let _ = tx.send(user.create_passkey_account(&input));
@@ -5632,6 +5850,34 @@ fn dispatch_user<S: StorageIO>(state: &HandlerState<S>, req: UserRequest) {
         UserRequest::RecoverPasskeyAccount { input, tx } => {
             let _ = tx.send(
                 user.recover_passkey_account(&input)
+                    .map_err(metastore_to_db),
+            );
+        }
+        UserRequest::GetPasswordResetInfo { email, tx } => {
+            let _ = tx.send(
+                user.get_password_reset_info(&email)
+                    .map_err(metastore_to_db),
+            );
+        }
+        UserRequest::EnableTotpVerified {
+            did,
+            encrypted_secret,
+            tx,
+        } => {
+            let _ = tx.send(
+                user.enable_totp_verified(&did, &encrypted_secret)
+                    .map_err(metastore_to_db),
+            );
+        }
+        UserRequest::SetTwoFactorEnabled { did, enabled, tx } => {
+            let _ = tx.send(
+                user.set_two_factor_enabled(&did, enabled)
+                    .map_err(metastore_to_db),
+            );
+        }
+        UserRequest::ExpirePasswordResetCode { email, tx } => {
+            let _ = tx.send(
+                user.expire_password_reset_code(&email)
                     .map_err(metastore_to_db),
             );
         }

@@ -1,32 +1,37 @@
 mod common;
-use common::{base_url, client, create_account_and_login, get_test_db_pool};
+use common::{base_url, client, create_account_and_login, get_test_repos};
 use serde_json::{Value, json};
+use tranquil_db_traits::{CommsChannel, CommsType};
+use tranquil_types::Did;
 
 #[tokio::test]
 async fn test_get_notification_history() {
     let client = client();
     let base = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
     let (token, did) = create_account_and_login(&client).await;
 
-    let user_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE did = $1")
-        .bind(&did)
-        .fetch_one(pool)
+    let user_id = repos
+        .user
+        .get_id_by_did(&Did::new(did).unwrap())
         .await
+        .expect("DB error")
         .expect("User not found");
 
     for i in 0..3 {
-        sqlx::query(
-            r#"INSERT INTO comms_queue (user_id, channel, comms_type, recipient, subject, body)
-               VALUES ($1, 'email', 'welcome', $2, $3, $4)"#,
-        )
-        .bind(user_id)
-        .bind("test@example.com")
-        .bind(format!("Subject {}", i))
-        .bind(format!("Body {}", i))
-        .execute(pool)
-        .await
-        .expect("Failed to enqueue");
+        repos
+            .infra
+            .enqueue_comms(
+                Some(user_id),
+                CommsChannel::Email,
+                CommsType::Welcome,
+                "test@example.com",
+                Some(&format!("Subject {}", i)),
+                &format!("Body {}", i),
+                None,
+            )
+            .await
+            .expect("Failed to enqueue");
     }
 
     let resp = client
@@ -140,7 +145,7 @@ async fn test_verify_channel_not_set() {
 async fn test_update_email_via_notification_prefs() {
     let client = client();
     let base = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
     let (token, did) = create_account_and_login(&client).await;
 
     let unique_email = format!("newemail_{}@example.com", uuid::Uuid::new_v4());
@@ -163,19 +168,22 @@ async fn test_update_email_via_notification_prefs() {
             .contains(&json!("email"))
     );
 
-    let user_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE did = $1")
-        .bind(&did)
-        .fetch_one(pool)
+    let user_id = repos
+        .user
+        .get_id_by_did(&Did::new(did).unwrap())
         .await
+        .expect("DB error")
         .expect("User not found");
 
-    let body_text: String = sqlx::query_scalar(
-        "SELECT body FROM comms_queue WHERE user_id = $1 AND comms_type = 'email_update' ORDER BY created_at DESC LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .expect("Verification code not found");
+    let comms = repos
+        .infra
+        .get_latest_comms_for_user(user_id, CommsType::EmailUpdate, 1)
+        .await
+        .expect("DB error");
+    let body_text = comms
+        .first()
+        .map(|c| c.body.clone())
+        .expect("Verification code not found");
 
     let code = body_text
         .lines()

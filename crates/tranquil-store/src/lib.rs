@@ -1,6 +1,7 @@
 pub mod blockstore;
 pub mod eventlog;
 pub mod fsync_order;
+#[cfg(any(test, feature = "test-harness"))]
 mod harness;
 mod io;
 pub mod metastore;
@@ -19,4 +20,5 @@ pub use record::{
     FILE_MAGIC, FORMAT_VERSION, HEADER_SIZE, MAX_RECORD_PAYLOAD, RECORD_OVERHEAD, ReadRecord,
     RecordReader, RecordWriter,
 };
+#[cfg(any(test, feature = "test-harness"))]
 pub use sim::{FaultConfig, OpRecord, SimulatedIO};

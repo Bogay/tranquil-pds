@@ -13,15 +13,17 @@ pub enum Partition {
     Users,
     Infra,
     Indexes,
+    Signal,
 }
 
 impl Partition {
-    pub const ALL: [Partition; 5] = [
+    pub const ALL: [Partition; 6] = [
         Partition::RepoData,
         Partition::Auth,
         Partition::Users,
         Partition::Infra,
         Partition::Indexes,
+        Partition::Signal,
     ];
 
     pub const fn index(self) -> usize {
@@ -31,6 +33,7 @@ impl Partition {
             Self::Users => 2,
             Self::Infra => 3,
             Self::Indexes => 4,
+            Self::Signal => 5,
         }
     }
 
@@ -41,6 +44,7 @@ impl Partition {
             Self::Users => "users",
             Self::Infra => "infra",
             Self::Indexes => "indexes",
+            Self::Signal => "signal",
         }
     }
 
@@ -52,7 +56,9 @@ impl Partition {
                     FilterPolicyEntry::Bloom(BloomConstructionPolicy::BitsPerKey(10.0)),
                 ]))
             }
-            Self::Auth | Self::Users | Self::Infra => KeyspaceCreateOptions::default(),
+            Self::Auth | Self::Users | Self::Infra | Self::Signal => {
+                KeyspaceCreateOptions::default()
+            }
         }
     }
 }
@@ -112,7 +118,7 @@ mod tests {
 
     #[test]
     fn all_partitions_covered() {
-        assert_eq!(Partition::ALL.len(), 5);
+        assert_eq!(Partition::ALL.len(), 6);
     }
 
     #[test]

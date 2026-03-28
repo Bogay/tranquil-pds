@@ -26,7 +26,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.7"
+version = "0.5.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 
@@ -51,7 +51,7 @@ tranquil-server = { path = "crates/tranquil-server" }
 tranquil-sync = { path = "crates/tranquil-sync" }
 tranquil-oauth-server = { path = "crates/tranquil-oauth-server" }
 tranquil-api = { path = "crates/tranquil-api" }
-tranquil-signal = { path = "crates/tranquil-signal" }
+tranquil-signal = { path = "crates/tranquil-signal", features = ["fjall-store"] }
 tranquil-store = { path = "crates/tranquil-store" }
 
 presage = { git = "https://github.com/whisperfish/presage", rev = "fe3ed54c4844ae51c3a9fa49cf80a7816a31a425", default-features = false }

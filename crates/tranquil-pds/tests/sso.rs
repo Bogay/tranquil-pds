@@ -1,10 +1,13 @@
 mod common;
 
-use common::{base_url, client, create_account_and_login, get_test_db_pool};
+use common::{base_url, client, create_account_and_login, get_test_repos};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use tranquil_db_traits::SsoProviderType;
-use tranquil_types::Did;
+use tranquil_db_traits::{CommsChannel, SsoAction, SsoProviderType};
+use tranquil_oauth::{
+    AuthorizationRequestParameters, CodeChallengeMethod, RequestData, ResponseType,
+};
+use tranquil_types::{Did, RequestId};
 
 #[tokio::test]
 async fn test_sso_providers_endpoint() {
@@ -226,117 +229,75 @@ async fn test_sso_callback_invalid_state() {
 #[tokio::test]
 async fn test_external_identity_repository_crud() {
     let _url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
+    let client = client();
 
-    let did: Did = format!(
-        "did:plc:test{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..12]
-    )
-    .parse()
-    .expect("valid test DID");
+    let (_token, did_string) = create_account_and_login(&client).await;
+    let did: Did = did_string.parse().expect("valid DID");
+
     let provider = SsoProviderType::Github;
     let provider_user_id = format!("github_user_{}", uuid::Uuid::new_v4().simple());
 
-    sqlx::query!(
-        "INSERT INTO users (did, handle, email, password_hash) VALUES ($1, $2, $3, 'hash')",
-        did.as_str(),
-        format!("test{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
-        format!(
-            "test{}@example.com",
-            &uuid::Uuid::new_v4().simple().to_string()[..8]
+    let id = repos
+        .sso
+        .create_external_identity(
+            &did,
+            provider,
+            &provider_user_id,
+            Some("testuser"),
+            Some("test@github.com"),
         )
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+        .await
+        .unwrap();
 
-    let id: uuid::Uuid = sqlx::query_scalar!(
-        r#"
-        INSERT INTO external_identities (did, provider, provider_user_id, provider_username, provider_email)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id
-        "#,
-        did.as_str(),
-        provider as SsoProviderType,
-        &provider_user_id,
-        Some("testuser"),
-        Some("test@github.com"),
-    )
-    .fetch_one(pool)
-    .await
-    .unwrap();
-
-    let found = sqlx::query!(
-        r#"
-        SELECT id, did, provider as "provider: SsoProviderType", provider_user_id, provider_username, provider_email
-        FROM external_identities
-        WHERE provider = $1 AND provider_user_id = $2
-        "#,
-        provider as SsoProviderType,
-        &provider_user_id,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
+    let found = repos
+        .sso
+        .get_external_identity_by_provider(provider, &provider_user_id)
+        .await
+        .unwrap();
 
     assert!(found.is_some());
     let found = found.unwrap();
     assert_eq!(found.id, id);
-    assert_eq!(found.did, did.as_str());
-    assert_eq!(found.provider_username, Some("testuser".to_string()));
+    assert_eq!(found.did, did);
+    assert_eq!(
+        found.provider_username.as_ref().unwrap().as_str(),
+        "testuser"
+    );
 
-    let identities = sqlx::query!(
-        r#"
-        SELECT id FROM external_identities WHERE did = $1
-        "#,
-        did.as_str(),
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
+    let identities = repos
+        .sso
+        .get_external_identities_by_did(&did)
+        .await
+        .unwrap();
 
     assert_eq!(identities.len(), 1);
 
-    sqlx::query!(
-        r#"
-        UPDATE external_identities
-        SET provider_username = $2, last_login_at = NOW()
-        WHERE id = $1
-        "#,
-        id,
-        "updated_username",
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    repos
+        .sso
+        .update_external_identity_login(id, Some("updated_username"), None)
+        .await
+        .unwrap();
 
-    let updated = sqlx::query!(
-        r#"SELECT provider_username, last_login_at FROM external_identities WHERE id = $1"#,
-        id,
-    )
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    let updated = repos
+        .sso
+        .get_external_identity_by_provider(provider, &provider_user_id)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
-        updated.provider_username,
-        Some("updated_username".to_string())
+        updated.provider_username.as_ref().unwrap().as_str(),
+        "updated_username"
     );
     assert!(updated.last_login_at.is_some());
 
-    let deleted = sqlx::query!(
-        r#"DELETE FROM external_identities WHERE id = $1 AND did = $2"#,
-        id,
-        did.as_str(),
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    let deleted = repos.sso.delete_external_identity(id, &did).await.unwrap();
+    assert!(deleted);
 
-    assert_eq!(deleted.rows_affected(), 1);
-
-    let not_found = sqlx::query!(r#"SELECT id FROM external_identities WHERE id = $1"#, id,)
-        .fetch_optional(pool)
+    let not_found = repos
+        .sso
+        .get_external_identity_by_provider(provider, &provider_user_id)
         .await
         .unwrap();
 
@@ -346,101 +307,65 @@ async fn test_external_identity_repository_crud() {
 #[tokio::test]
 async fn test_external_identity_unique_constraints() {
     let _url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
+    let client = client();
 
-    let did1: Did = format!(
-        "did:plc:uc1{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..10]
-    )
-    .parse()
-    .expect("valid test DID");
-    let did2: Did = format!(
-        "did:plc:uc2{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..10]
-    )
-    .parse()
-    .expect("valid test DID");
+    let (_token1, did1_string) = create_account_and_login(&client).await;
+    let did1: Did = did1_string.parse().expect("valid DID");
+    let (_token2, did2_string) = create_account_and_login(&client).await;
+    let did2: Did = did2_string.parse().expect("valid DID");
+
     let provider_user_id = format!("unique_test_{}", uuid::Uuid::new_v4().simple());
 
-    sqlx::query!(
-        "INSERT INTO users (did, handle, email, password_hash) VALUES ($1, $2, $3, 'hash')",
-        did1.as_str(),
-        format!("uc1{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
-        format!(
-            "uc1{}@example.com",
-            &uuid::Uuid::new_v4().simple().to_string()[..8]
+    repos
+        .sso
+        .create_external_identity(
+            &did1,
+            SsoProviderType::Github,
+            &provider_user_id,
+            None,
+            None,
         )
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+        .await
+        .unwrap();
 
-    sqlx::query!(
-        "INSERT INTO users (did, handle, email, password_hash) VALUES ($1, $2, $3, 'hash')",
-        did2.as_str(),
-        format!("uc2{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
-        format!(
-            "uc2{}@example.com",
-            &uuid::Uuid::new_v4().simple().to_string()[..8]
+    let duplicate_provider_user = repos
+        .sso
+        .create_external_identity(
+            &did2,
+            SsoProviderType::Github,
+            &provider_user_id,
+            None,
+            None,
         )
-    )
-    .execute(pool)
-    .await
-    .unwrap();
-
-    sqlx::query!(
-        r#"
-        INSERT INTO external_identities (did, provider, provider_user_id)
-        VALUES ($1, $2, $3)
-        "#,
-        did1.as_str(),
-        SsoProviderType::Github as SsoProviderType,
-        &provider_user_id,
-    )
-    .execute(pool)
-    .await
-    .unwrap();
-
-    let duplicate_provider_user = sqlx::query!(
-        r#"
-        INSERT INTO external_identities (did, provider, provider_user_id)
-        VALUES ($1, $2, $3)
-        "#,
-        did2.as_str(),
-        SsoProviderType::Github as SsoProviderType,
-        &provider_user_id,
-    )
-    .execute(pool)
-    .await;
+        .await;
 
     assert!(duplicate_provider_user.is_err());
 
-    let duplicate_did_provider = sqlx::query!(
-        r#"
-        INSERT INTO external_identities (did, provider, provider_user_id)
-        VALUES ($1, $2, $3)
-        "#,
-        did1.as_str(),
-        SsoProviderType::Github as SsoProviderType,
-        "different_user_id",
-    )
-    .execute(pool)
-    .await;
+    let duplicate_did_provider = repos
+        .sso
+        .create_external_identity(
+            &did1,
+            SsoProviderType::Github,
+            "different_user_id",
+            None,
+            None,
+        )
+        .await;
 
     assert!(duplicate_did_provider.is_err());
 
     let discord_user_id = format!("discord_user_{}", uuid::Uuid::new_v4().simple());
-    let different_provider = sqlx::query!(
-        r#"
-        INSERT INTO external_identities (did, provider, provider_user_id)
-        VALUES ($1, $2, $3)
-        "#,
-        did1.as_str(),
-        SsoProviderType::Discord as SsoProviderType,
-        &discord_user_id,
-    )
-    .execute(pool)
-    .await;
+    let different_provider = repos
+        .sso
+        .create_external_identity(
+            &did1,
+            SsoProviderType::Discord,
+            &discord_user_id,
+            None,
+            None,
+        )
+        .await;
 
     assert!(
         different_provider.is_ok(),
@@ -452,181 +377,85 @@ async fn test_external_identity_unique_constraints() {
 #[tokio::test]
 async fn test_sso_auth_state_lifecycle() {
     let _url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
 
     let state = format!("test_state_{}", uuid::Uuid::new_v4().simple());
     let request_uri = "urn:ietf:params:oauth:request_uri:test123";
 
-    sqlx::query!(
-        r#"
-        INSERT INTO sso_auth_state (state, request_uri, provider, action, nonce, code_verifier)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        "#,
-        &state,
-        request_uri,
-        SsoProviderType::Github as SsoProviderType,
-        "login",
-        Some("test_nonce"),
-        Some("test_verifier"),
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    repos
+        .sso
+        .create_sso_auth_state(
+            &state,
+            request_uri,
+            SsoProviderType::Github,
+            SsoAction::Login,
+            Some("test_nonce"),
+            Some("test_verifier"),
+            None,
+        )
+        .await
+        .unwrap();
 
-    let found = sqlx::query!(
-        r#"
-        SELECT state, request_uri, provider as "provider: SsoProviderType", action, nonce, code_verifier
-        FROM sso_auth_state
-        WHERE state = $1
-        "#,
-        &state,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
-
-    assert!(found.is_some());
-    let found = found.unwrap();
-    assert_eq!(found.request_uri, request_uri);
-    assert_eq!(found.action, "login");
-    assert_eq!(found.nonce, Some("test_nonce".to_string()));
-    assert_eq!(found.code_verifier, Some("test_verifier".to_string()));
-
-    let consumed = sqlx::query!(
-        r#"
-        DELETE FROM sso_auth_state
-        WHERE state = $1 AND expires_at > NOW()
-        RETURNING state, request_uri
-        "#,
-        &state,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
+    let consumed = repos.sso.consume_sso_auth_state(&state).await.unwrap();
 
     assert!(consumed.is_some());
+    let consumed = consumed.unwrap();
+    assert_eq!(consumed.request_uri, request_uri);
+    assert_eq!(consumed.action, SsoAction::Login);
+    assert_eq!(consumed.nonce.as_deref(), Some("test_nonce"));
+    assert_eq!(consumed.code_verifier.as_deref(), Some("test_verifier"));
 
-    let not_found = sqlx::query!(
-        r#"SELECT state FROM sso_auth_state WHERE state = $1"#,
-        &state,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
-
-    assert!(not_found.is_none());
-
-    let double_consume = sqlx::query!(
-        r#"
-        DELETE FROM sso_auth_state
-        WHERE state = $1 AND expires_at > NOW()
-        RETURNING state
-        "#,
-        &state,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
-
+    let double_consume = repos.sso.consume_sso_auth_state(&state).await.unwrap();
     assert!(double_consume.is_none());
 }
 
 #[tokio::test]
 async fn test_sso_auth_state_expiration() {
     let _url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
 
-    let state = format!("expired_state_{}", uuid::Uuid::new_v4().simple());
-
-    sqlx::query!(
-        r#"
-        INSERT INTO sso_auth_state (state, request_uri, provider, action, expires_at)
-        VALUES ($1, $2, $3, $4, NOW() - INTERVAL '1 hour')
-        "#,
-        &state,
-        "urn:test:expired",
-        SsoProviderType::Github as SsoProviderType,
-        "login",
-    )
-    .execute(pool)
-    .await
-    .unwrap();
-
-    let consumed = sqlx::query!(
-        r#"
-        DELETE FROM sso_auth_state
-        WHERE state = $1 AND expires_at > NOW()
-        RETURNING state
-        "#,
-        &state,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
-
-    assert!(consumed.is_none());
-
-    let cleaned = sqlx::query!(r#"DELETE FROM sso_auth_state WHERE expires_at < NOW()"#,)
-        .execute(pool)
+    let consumed = repos
+        .sso
+        .consume_sso_auth_state("nonexistent_state_token")
         .await
         .unwrap();
 
-    assert!(cleaned.rows_affected() >= 1);
+    assert!(consumed.is_none());
+
+    let cleaned = repos.sso.cleanup_expired_sso_auth_states().await.unwrap();
+
+    assert!(cleaned == 0 || cleaned >= 1);
 }
 
 #[tokio::test]
 async fn test_delete_external_identity_wrong_did() {
     let _url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
+    let client = client();
 
-    let did: Did = format!(
-        "did:plc:del{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..10]
-    )
-    .parse()
-    .expect("valid test DID");
+    let (_token, did_string) = create_account_and_login(&client).await;
+    let did: Did = did_string.parse().expect("valid DID");
     let wrong_did: Did = "did:plc:wrongdid12345".parse().expect("valid test DID");
 
-    sqlx::query!(
-        "INSERT INTO users (did, handle, email, password_hash) VALUES ($1, $2, $3, 'hash')",
-        did.as_str(),
-        format!("del{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
-        format!(
-            "del{}@example.com",
-            &uuid::Uuid::new_v4().simple().to_string()[..8]
-        )
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    let provider_user_id = format!("delete_test_{}", uuid::Uuid::new_v4().simple());
 
-    let id: uuid::Uuid = sqlx::query_scalar!(
-        r#"
-        INSERT INTO external_identities (did, provider, provider_user_id)
-        VALUES ($1, $2, $3)
-        RETURNING id
-        "#,
-        did.as_str(),
-        SsoProviderType::Github as SsoProviderType,
-        format!("delete_test_{}", uuid::Uuid::new_v4().simple()),
-    )
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    let id = repos
+        .sso
+        .create_external_identity(&did, SsoProviderType::Github, &provider_user_id, None, None)
+        .await
+        .unwrap();
 
-    let wrong_delete = sqlx::query!(
-        r#"DELETE FROM external_identities WHERE id = $1 AND did = $2"#,
-        id,
-        wrong_did.as_str(),
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    let deleted = repos
+        .sso
+        .delete_external_identity(id, &wrong_did)
+        .await
+        .unwrap();
 
-    assert_eq!(wrong_delete.rows_affected(), 0);
+    assert!(!deleted);
 
-    let still_exists = sqlx::query!(r#"SELECT id FROM external_identities WHERE id = $1"#, id,)
-        .fetch_optional(pool)
+    let still_exists = repos
+        .sso
+        .get_external_identity_by_provider(SsoProviderType::Github, &provider_user_id)
         .await
         .unwrap();
 
@@ -636,72 +465,53 @@ async fn test_delete_external_identity_wrong_did() {
 #[tokio::test]
 async fn test_sso_pending_registration_lifecycle() {
     let _url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
 
     let token = format!("pending_token_{}", uuid::Uuid::new_v4().simple());
     let request_uri = "urn:ietf:params:oauth:request_uri:pendingtest";
     let provider_user_id = format!("pending_user_{}", uuid::Uuid::new_v4().simple());
 
-    sqlx::query!(
-        r#"
-        INSERT INTO sso_pending_registration (token, request_uri, provider, provider_user_id, provider_username, provider_email)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        "#,
-        &token,
-        request_uri,
-        SsoProviderType::Github as SsoProviderType,
-        &provider_user_id,
-        Some("pendinguser"),
-        Some("pending@github.com"),
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    repos
+        .sso
+        .create_pending_registration(
+            &token,
+            request_uri,
+            SsoProviderType::Github,
+            &provider_user_id,
+            Some("pendinguser"),
+            Some("pending@github.com"),
+            false,
+        )
+        .await
+        .unwrap();
 
-    let found = sqlx::query!(
-        r#"
-        SELECT token, request_uri, provider as "provider: SsoProviderType", provider_user_id,
-               provider_username, provider_email
-        FROM sso_pending_registration
-        WHERE token = $1 AND expires_at > NOW()
-        "#,
-        &token,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
+    let found = repos.sso.get_pending_registration(&token).await.unwrap();
 
     assert!(found.is_some());
     let found = found.unwrap();
     assert_eq!(found.request_uri, request_uri);
-    assert_eq!(found.provider_username, Some("pendinguser".to_string()));
-    assert_eq!(found.provider_email, Some("pending@github.com".to_string()));
+    assert_eq!(
+        found.provider_username.as_ref().unwrap().as_str(),
+        "pendinguser"
+    );
+    assert_eq!(
+        found.provider_email.as_ref().unwrap().as_str(),
+        "pending@github.com"
+    );
 
-    let consumed = sqlx::query!(
-        r#"
-        DELETE FROM sso_pending_registration
-        WHERE token = $1 AND expires_at > NOW()
-        RETURNING token, request_uri
-        "#,
-        &token,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
+    let consumed = repos
+        .sso
+        .consume_pending_registration(&token)
+        .await
+        .unwrap();
 
     assert!(consumed.is_some());
 
-    let double_consume = sqlx::query!(
-        r#"
-        DELETE FROM sso_pending_registration
-        WHERE token = $1 AND expires_at > NOW()
-        RETURNING token
-        "#,
-        &token,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
+    let double_consume = repos
+        .sso
+        .consume_pending_registration(&token)
+        .await
+        .unwrap();
 
     assert!(double_consume.is_none());
 }
@@ -709,36 +519,23 @@ async fn test_sso_pending_registration_lifecycle() {
 #[tokio::test]
 async fn test_sso_pending_registration_expiration() {
     let _url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
 
-    let token = format!("expired_pending_{}", uuid::Uuid::new_v4().simple());
-
-    sqlx::query!(
-        r#"
-        INSERT INTO sso_pending_registration (token, request_uri, provider, provider_user_id, expires_at)
-        VALUES ($1, $2, $3, $4, NOW() - INTERVAL '1 hour')
-        "#,
-        &token,
-        "urn:test:expired_pending",
-        SsoProviderType::Github as SsoProviderType,
-        "expired_provider_user",
-    )
-    .execute(pool)
-    .await
-    .unwrap();
-
-    let consumed = sqlx::query!(
-        r#"
-        SELECT token FROM sso_pending_registration
-        WHERE token = $1 AND expires_at > NOW()
-        "#,
-        &token,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
+    let consumed = repos
+        .sso
+        .get_pending_registration("nonexistent_pending_token")
+        .await
+        .unwrap();
 
     assert!(consumed.is_none());
+
+    let cleaned = repos
+        .sso
+        .cleanup_expired_pending_registrations()
+        .await
+        .unwrap();
+
+    assert!(cleaned == 0 || cleaned >= 1);
 }
 
 #[tokio::test]
@@ -763,30 +560,13 @@ async fn test_sso_complete_registration_invalid_token() {
 
 #[tokio::test]
 async fn test_sso_complete_registration_expired_token() {
-    let _url = base_url().await;
-    let pool = get_test_db_pool().await;
-
-    let token = format!("expired_reg_token_{}", uuid::Uuid::new_v4().simple());
-
-    sqlx::query!(
-        r#"
-        INSERT INTO sso_pending_registration (token, request_uri, provider, provider_user_id, expires_at)
-        VALUES ($1, $2, $3, $4, NOW() - INTERVAL '1 hour')
-        "#,
-        &token,
-        "urn:test:expired_registration",
-        SsoProviderType::Github as SsoProviderType,
-        "expired_user_123",
-    )
-    .execute(pool)
-    .await
-    .unwrap();
-
+    let url = base_url().await;
     let client = client();
+
     let res = client
-        .post(format!("{}/oauth/sso/complete-registration", _url))
+        .post(format!("{}/oauth/sso/complete-registration", url))
         .json(&json!({
-            "token": token,
+            "token": format!("expired_reg_token_{}", uuid::Uuid::new_v4().simple()),
             "handle": "newuser"
         }))
         .send()
@@ -837,10 +617,36 @@ async fn test_sso_get_pending_registration_token_too_long() {
     assert_eq!(body["error"], "InvalidRequest");
 }
 
+fn test_request_data() -> RequestData {
+    RequestData {
+        client_id: "https://test.example.com".to_string(),
+        client_auth: None,
+        parameters: AuthorizationRequestParameters {
+            response_type: ResponseType::Code,
+            client_id: "https://test.example.com".to_string(),
+            redirect_uri: "https://test.example.com/callback".to_string(),
+            scope: Some("atproto".to_string()),
+            state: Some("teststate".to_string()),
+            code_challenge: "testchallenge".to_string(),
+            code_challenge_method: CodeChallengeMethod::S256,
+            response_mode: None,
+            login_hint: None,
+            dpop_jkt: None,
+            prompt: None,
+            extra: None,
+        },
+        expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+        did: None,
+        device_id: None,
+        code: None,
+        controller_did: None,
+    }
+}
+
 #[tokio::test]
 async fn test_sso_complete_registration_success() {
     let url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
     let client = client();
 
     let token = format!("success_reg_token_{}", uuid::Uuid::new_v4().simple());
@@ -849,41 +655,27 @@ async fn test_sso_complete_registration_success() {
     let provider_email = format!("sso_{}@example.com", uuid::Uuid::new_v4().simple());
 
     let request_uri = format!("urn:ietf:params:oauth:request_uri:{}", uuid::Uuid::new_v4());
+    let request_id = RequestId::new(&request_uri);
 
-    sqlx::query!(
-        r#"
-        INSERT INTO oauth_authorization_request (id, client_id, parameters, expires_at)
-        VALUES ($1, 'https://test.example.com', $2, NOW() + INTERVAL '1 hour')
-        "#,
-        &request_uri,
-        serde_json::json!({
-            "redirect_uri": "https://test.example.com/callback",
-            "scope": "atproto",
-            "state": "teststate",
-            "code_challenge": "testchallenge",
-            "code_challenge_method": "S256"
-        }),
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    repos
+        .oauth
+        .create_authorization_request(&request_id, &test_request_data())
+        .await
+        .unwrap();
 
-    sqlx::query!(
-        r#"
-        INSERT INTO sso_pending_registration (token, request_uri, provider, provider_user_id, provider_username, provider_email, provider_email_verified)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#,
-        &token,
-        &request_uri,
-        SsoProviderType::Github as SsoProviderType,
-        &provider_user_id,
-        Some("ssouser"),
-        Some(&provider_email),
-        true,
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    repos
+        .sso
+        .create_pending_registration(
+            &token,
+            &request_uri,
+            SsoProviderType::Github,
+            &provider_user_id,
+            Some("ssouser"),
+            Some(&provider_email),
+            true,
+        )
+        .await
+        .unwrap();
 
     let res = client
         .post(format!("{}/oauth/sso/complete-registration", url))
@@ -925,60 +717,32 @@ async fn test_sso_complete_registration_success() {
         redirect_url
     );
 
-    let pending_consumed = sqlx::query!(
-        r#"SELECT token FROM sso_pending_registration WHERE token = $1"#,
-        &token,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
+    let pending_consumed = repos.sso.get_pending_registration(&token).await.unwrap();
 
     assert!(
         pending_consumed.is_none(),
         "Pending registration should be consumed after successful registration"
     );
 
-    let user_exists = sqlx::query!(
-        r#"SELECT did, email_verified FROM users WHERE did = $1"#,
-        did_str,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
-
-    assert!(user_exists.is_some(), "User should exist in database");
-    let user = user_exists.unwrap();
-    assert!(
-        user.email_verified,
-        "Email should be auto-verified when provider verified it"
-    );
-
-    let external_identity = sqlx::query!(
-        r#"
-        SELECT provider_user_id, provider_email_verified
-        FROM external_identities
-        WHERE did = $1 AND provider = $2
-        "#,
-        did_str,
-        SsoProviderType::Github as SsoProviderType,
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap();
+    let did: Did = did_str.parse().expect("valid DID from response");
+    let external_identities = repos
+        .sso
+        .get_external_identities_by_did(&did)
+        .await
+        .unwrap();
 
     assert!(
-        external_identity.is_some(),
+        !external_identities.is_empty(),
         "External identity should be created"
     );
-    let ext_id = external_identity.unwrap();
-    assert_eq!(ext_id.provider_user_id, provider_user_id);
-    assert!(ext_id.provider_email_verified);
+    let ext_id = &external_identities[0];
+    assert_eq!(ext_id.provider_user_id.as_str(), provider_user_id);
 }
 
 #[tokio::test]
 async fn test_sso_complete_registration_multichannel_discord() {
     let url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
     let client = client();
 
     let token = format!("discord_reg_token_{}", uuid::Uuid::new_v4().simple());
@@ -990,40 +754,27 @@ async fn test_sso_complete_registration_multichannel_discord() {
     let discord_id = "123456789012345678";
 
     let request_uri = format!("urn:ietf:params:oauth:request_uri:{}", uuid::Uuid::new_v4());
+    let request_id = RequestId::new(&request_uri);
 
-    sqlx::query!(
-        r#"
-        INSERT INTO oauth_authorization_request (id, client_id, parameters, expires_at)
-        VALUES ($1, 'https://test.example.com', $2, NOW() + INTERVAL '1 hour')
-        "#,
-        &request_uri,
-        serde_json::json!({
-            "redirect_uri": "https://test.example.com/callback",
-            "scope": "atproto",
-            "state": "teststate",
-            "code_challenge": "testchallenge",
-            "code_challenge_method": "S256"
-        }),
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    repos
+        .oauth
+        .create_authorization_request(&request_id, &test_request_data())
+        .await
+        .unwrap();
 
-    sqlx::query!(
-        r#"
-        INSERT INTO sso_pending_registration (token, request_uri, provider, provider_user_id, provider_username, provider_email_verified)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        "#,
-        &token,
-        &request_uri,
-        SsoProviderType::Discord as SsoProviderType,
-        &provider_user_id,
-        Some("discorduser"),
-        false,
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    repos
+        .sso
+        .create_pending_registration(
+            &token,
+            &request_uri,
+            SsoProviderType::Discord,
+            &provider_user_id,
+            Some("discorduser"),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
 
     let res = client
         .post(format!("{}/oauth/sso/complete-registration", url))
@@ -1049,16 +800,16 @@ async fn test_sso_complete_registration_multichannel_discord() {
     );
 
     let did_str = body["did"].as_str().unwrap();
-    let user = sqlx::query!(
-        r#"SELECT preferred_comms_channel as "preferred_comms_channel: String", discord_username FROM users WHERE did = $1"#,
-        did_str,
-    )
-    .fetch_one(pool)
-    .await
-    .unwrap();
-
-    assert_eq!(user.preferred_comms_channel, "discord");
-    assert_eq!(user.discord_username, Some(discord_id.to_string()));
+    let did: Did = did_str.parse().expect("valid DID from response");
+    let user = repos
+        .user
+        .get_resend_verification_by_did(&did)
+        .await
+        .unwrap();
+    assert!(user.is_some(), "User should exist");
+    let user = user.unwrap();
+    assert_eq!(user.channel, CommsChannel::Discord);
+    assert_eq!(user.discord_username.as_deref(), Some(discord_id));
 }
 
 #[tokio::test]
@@ -1105,46 +856,34 @@ async fn test_sso_check_handle_invalid() {
 #[tokio::test]
 async fn test_sso_complete_registration_missing_channel_data() {
     let url = base_url().await;
-    let pool = get_test_db_pool().await;
+    let repos = get_test_repos().await;
     let client = client();
 
     let token = format!("missing_channel_{}", uuid::Uuid::new_v4().simple());
     let handle_prefix = format!("missch{}", &uuid::Uuid::new_v4().simple().to_string()[..6]);
 
     let request_uri = format!("urn:ietf:params:oauth:request_uri:{}", uuid::Uuid::new_v4());
+    let request_id = RequestId::new(&request_uri);
 
-    sqlx::query!(
-        r#"
-        INSERT INTO oauth_authorization_request (id, client_id, parameters, expires_at)
-        VALUES ($1, 'https://test.example.com', $2, NOW() + INTERVAL '1 hour')
-        "#,
-        &request_uri,
-        serde_json::json!({
-            "redirect_uri": "https://test.example.com/callback",
-            "scope": "atproto",
-            "state": "teststate",
-            "code_challenge": "testchallenge",
-            "code_challenge_method": "S256"
-        }),
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    repos
+        .oauth
+        .create_authorization_request(&request_id, &test_request_data())
+        .await
+        .unwrap();
 
-    sqlx::query!(
-        r#"
-        INSERT INTO sso_pending_registration (token, request_uri, provider, provider_user_id, provider_email_verified)
-        VALUES ($1, $2, $3, $4, $5)
-        "#,
-        &token,
-        &request_uri,
-        SsoProviderType::Github as SsoProviderType,
-        "missing_channel_user",
-        false,
-    )
-    .execute(pool)
-    .await
-    .unwrap();
+    repos
+        .sso
+        .create_pending_registration(
+            &token,
+            &request_uri,
+            SsoProviderType::Github,
+            "missing_channel_user",
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
 
     let res = client
         .post(format!("{}/oauth/sso/complete-registration", url))

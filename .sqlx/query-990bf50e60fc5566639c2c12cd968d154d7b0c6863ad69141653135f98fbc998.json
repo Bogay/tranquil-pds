@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT COUNT(*) as \"count!\" FROM plc_operation_tokens t JOIN users u ON t.user_id = u.id WHERE u.did = $1",
+  "query": "SELECT COUNT(*) as \"count!\"\n            FROM plc_operation_tokens t\n            JOIN users u ON t.user_id = u.id\n            WHERE u.did = $1",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       null
     ]
   },
-  "hash": "cda68f9b6c60295a196fc853b70ec5fd51a8ffaa2bac5942c115c99d1cbcafa3"
+  "hash": "990bf50e60fc5566639c2c12cd968d154d7b0c6863ad69141653135f98fbc998"
 }

@@ -324,4 +324,9 @@ pub trait OAuthRepository: Send + Sync {
         did: &Did,
         except_token_id: &TokenId,
     ) -> Result<u64, DbError>;
+
+    async fn get_2fa_challenge_code(
+        &self,
+        request_uri: &RequestId,
+    ) -> Result<Option<String>, DbError>;
 }

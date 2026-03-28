@@ -58,11 +58,8 @@ async fn test_create_record_cid_matches_firehose() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
 
-    let pool = get_test_db_pool().await;
-    let cursor: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq), 0) FROM repo_seq")
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let repos = get_test_repos().await;
+    let cursor = repos.repo.get_max_seq().await.unwrap().as_i64();
     let consumer = FirehoseConsumer::connect_with_cursor(app_port(), cursor).await;
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -136,11 +133,8 @@ async fn test_update_record_prev_matches_old_cid() {
     let v1_cid_str = v1_body["cid"].as_str().unwrap();
     let v1_cid = Cid::from_str(v1_cid_str).unwrap();
 
-    let pool = get_test_db_pool().await;
-    let cursor: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq), 0) FROM repo_seq")
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let repos = get_test_repos().await;
+    let cursor = repos.repo.get_max_seq().await.unwrap().as_i64();
     let consumer = FirehoseConsumer::connect_with_cursor(app_port(), cursor).await;
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -208,11 +202,8 @@ async fn test_delete_record_prev_set_cid_none() {
     let collection = parts[parts.len() - 2];
     let rkey = parts[parts.len() - 1];
 
-    let pool = get_test_db_pool().await;
-    let cursor: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq), 0) FROM repo_seq")
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let repos = get_test_repos().await;
+    let cursor = repos.repo.get_max_seq().await.unwrap().as_i64();
     let consumer = FirehoseConsumer::connect_with_cursor(app_port(), cursor).await;
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -254,11 +245,8 @@ async fn test_five_record_commit_chain_integrity() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
 
-    let pool = get_test_db_pool().await;
-    let cursor: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq), 0) FROM repo_seq")
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let repos = get_test_repos().await;
+    let cursor = repos.repo.get_max_seq().await.unwrap().as_i64();
     let consumer = FirehoseConsumer::connect_with_cursor(app_port(), cursor).await;
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -326,11 +314,8 @@ async fn test_apply_writes_single_commit_multiple_ops() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
 
-    let pool = get_test_db_pool().await;
-    let cursor: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq), 0) FROM repo_seq")
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let repos = get_test_repos().await;
+    let cursor = repos.repo.get_max_seq().await.unwrap().as_i64();
     let consumer = FirehoseConsumer::connect_with_cursor(app_port(), cursor).await;
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -410,11 +395,8 @@ async fn test_firehose_commit_signature_verification() {
         bytes: std::borrow::Cow::Owned(pubkey_bytes.as_bytes().to_vec()),
     };
 
-    let pool = get_test_db_pool().await;
-    let cursor: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq), 0) FROM repo_seq")
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let repos = get_test_repos().await;
+    let cursor = repos.repo.get_max_seq().await.unwrap().as_i64();
     let consumer = FirehoseConsumer::connect_with_cursor(app_port(), cursor).await;
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -461,12 +443,8 @@ async fn test_cursor_backfill_completeness() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
 
-    let pool = get_test_db_pool().await;
-    let baseline_seq: i64 =
-        sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq), 0) FROM repo_seq")
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let repos = get_test_repos().await;
+    let baseline_seq = repos.repo.get_max_seq().await.unwrap().as_i64();
 
     let mut expected_cids: Vec<String> = Vec::with_capacity(5);
     let texts = [
@@ -517,11 +495,8 @@ async fn test_multi_account_seq_interleaving() {
     let (alice_token, alice_did) = create_account_and_login(&client).await;
     let (bob_token, bob_did) = create_account_and_login(&client).await;
 
-    let pool = get_test_db_pool().await;
-    let cursor: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq), 0) FROM repo_seq")
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let repos = get_test_repos().await;
+    let cursor = repos.repo.get_max_seq().await.unwrap().as_i64();
     let consumer = FirehoseConsumer::connect_with_cursor(app_port(), cursor).await;
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

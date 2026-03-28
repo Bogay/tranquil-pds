@@ -482,19 +482,11 @@ pub fn get_multikey_from_signing_key(signing_key: &k256::ecdsa::SigningKey) -> S
 
 #[allow(dead_code)]
 pub async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
-    let db_url = get_db_connection_string().await;
-    let pool = sqlx::PgPool::connect(&db_url).await.ok()?;
-    let row = sqlx::query!(
-        r#"
-        SELECT k.key_bytes, k.encryption_version
-        FROM user_keys k
-        JOIN users u ON k.user_id = u.id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(&pool)
-    .await
-    .ok()??;
-    tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version).ok()
+    let repos = super::common::get_test_repos().await;
+    let key_info = repos
+        .user
+        .get_user_key_by_did(&tranquil_types::Did::new(did.to_string()).ok()?)
+        .await
+        .ok()??;
+    tranquil_pds::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version).ok()
 }

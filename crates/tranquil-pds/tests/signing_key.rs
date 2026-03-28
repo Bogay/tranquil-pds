@@ -31,7 +31,7 @@ async fn test_reserve_signing_key_without_did() {
 async fn test_reserve_signing_key_with_did() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let target_did = "did:plc:test123456";
     let res = client
         .post(format!(
@@ -46,14 +46,13 @@ async fn test_reserve_signing_key_with_did() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     let signing_key = body["signingKey"].as_str().unwrap();
     assert!(signing_key.starts_with("did:key:z"));
-    let row = sqlx::query!(
-        "SELECT did, public_key_did_key FROM reserved_signing_keys WHERE public_key_did_key = $1",
-        signing_key
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Reserved key not found in database");
-    assert_eq!(row.did.as_deref(), Some(target_did));
+    let row = repos
+        .infra
+        .get_reserved_signing_key_full(signing_key)
+        .await
+        .expect("db error")
+        .expect("Reserved key not found in database");
+    assert_eq!(row.did.as_ref().map(|d| d.as_str()), Some(target_did));
     assert_eq!(row.public_key_did_key, signing_key);
 }
 
@@ -61,7 +60,7 @@ async fn test_reserve_signing_key_with_did() {
 async fn test_reserve_signing_key_stores_private_key() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.reserveSigningKey",
@@ -74,13 +73,12 @@ async fn test_reserve_signing_key_stores_private_key() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     let signing_key = body["signingKey"].as_str().unwrap();
-    let row = sqlx::query!(
-        "SELECT private_key_bytes, expires_at, used_at FROM reserved_signing_keys WHERE public_key_did_key = $1",
-        signing_key
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Reserved key not found in database");
+    let row = repos
+        .infra
+        .get_reserved_signing_key_full(signing_key)
+        .await
+        .expect("db error")
+        .expect("Reserved key not found in database");
     assert_eq!(
         row.private_key_bytes.len(),
         32,
@@ -151,7 +149,7 @@ async fn test_reserve_signing_key_is_public() {
 async fn test_create_account_with_reserved_signing_key() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.reserveSigningKey",
@@ -185,13 +183,12 @@ async fn test_create_account_with_reserved_signing_key() {
     let did = body["did"].as_str().unwrap();
     let access_jwt = verify_new_account(&client, did).await;
     assert!(!access_jwt.is_empty());
-    let reserved = sqlx::query!(
-        "SELECT used_at FROM reserved_signing_keys WHERE public_key_did_key = $1",
-        signing_key
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Reserved key not found");
+    let reserved = repos
+        .infra
+        .get_reserved_signing_key_full(signing_key)
+        .await
+        .expect("db error")
+        .expect("Reserved key not found");
     assert!(
         reserved.used_at.is_some(),
         "Reserved key should be marked as used"

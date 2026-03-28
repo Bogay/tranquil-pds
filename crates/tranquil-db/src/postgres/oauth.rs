@@ -1323,4 +1323,19 @@ impl OAuthRepository for PostgresOAuthRepository {
         .map_err(map_sqlx_error)?;
         Ok(result.rows_affected())
     }
+
+    async fn get_2fa_challenge_code(
+        &self,
+        request_uri: &RequestId,
+    ) -> Result<Option<String>, DbError> {
+        let code = sqlx::query_scalar!(
+            "SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1",
+            request_uri.as_str()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(code)
+    }
 }

@@ -405,6 +405,10 @@ impl OAuthOps {
             family_id: token.family_id,
         };
 
+        let used_val = UsedRefreshValue {
+            family_id: token.family_id,
+        };
+
         let mut batch = self.db.batch();
         batch.remove(
             &self.auth,
@@ -428,6 +432,11 @@ impl OAuthOps {
             &self.auth,
             oauth_token_by_prev_refresh_key(&old_refresh).as_slice(),
             index.serialize_with_ttl(token.expires_at_ms),
+        );
+        batch.insert(
+            &self.auth,
+            oauth_used_refresh_key(&old_refresh).as_slice(),
+            used_val.serialize_with_ttl(token.expires_at_ms),
         );
         batch.insert(
             &self.auth,
@@ -1581,6 +1590,14 @@ impl OAuthOps {
                 Ok(count)
             }
         }
+    }
+
+    pub fn get_2fa_challenge_code(
+        &self,
+        request_uri: &RequestId,
+    ) -> Result<Option<String>, MetastoreError> {
+        self.get_2fa_challenge(request_uri)
+            .map(|opt| opt.map(|c| c.code))
     }
 }
 

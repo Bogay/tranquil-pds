@@ -2,12 +2,14 @@ mod common;
 
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use tranquil_db_traits::CommsType;
+use tranquil_types::Did;
 
 #[tokio::test]
 async fn test_send_email_success() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let (access_jwt, did) = common::create_admin_account_and_login(&client).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.admin.sendEmail", base_url))
@@ -24,17 +26,18 @@ async fn test_send_email_success() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["sent"], true);
-    let user = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_one(pool)
+    let user_id = repos
+        .user
+        .get_id_by_did(&Did::new(did).unwrap())
         .await
+        .expect("DB error")
         .expect("User not found");
-    let notification = sqlx::query!(
-        "SELECT subject, body, comms_type as \"comms_type: String\" FROM comms_queue WHERE user_id = $1 AND comms_type = 'admin_email' ORDER BY created_at DESC LIMIT 1",
-        user.id
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Notification not found");
+    let comms = repos
+        .infra
+        .get_latest_comms_for_user(user_id, CommsType::AdminEmail, 1)
+        .await
+        .expect("DB error");
+    let notification = comms.first().expect("Notification not found");
     assert_eq!(notification.subject.as_deref(), Some("Test Admin Email"));
     assert!(
         notification
@@ -47,7 +50,7 @@ async fn test_send_email_success() {
 async fn test_send_email_default_subject() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let (access_jwt, did) = common::create_admin_account_and_login(&client).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.admin.sendEmail", base_url))
@@ -63,19 +66,29 @@ async fn test_send_email_default_subject() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["sent"], true);
-    let user = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_one(pool)
+    let user_id = repos
+        .user
+        .get_id_by_did(&Did::new(did).unwrap())
         .await
+        .expect("DB error")
         .expect("User not found");
-    let notification = sqlx::query!(
-        "SELECT subject FROM comms_queue WHERE user_id = $1 AND comms_type = 'admin_email' AND body = 'Email without subject' LIMIT 1",
-        user.id
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Notification not found");
+    let comms = repos
+        .infra
+        .get_latest_comms_for_user(user_id, CommsType::AdminEmail, 10)
+        .await
+        .expect("DB error");
+    let notification = comms
+        .iter()
+        .find(|c| c.body == "Email without subject")
+        .expect("Notification not found");
     assert!(notification.subject.is_some());
-    assert!(notification.subject.unwrap().contains("Message from"));
+    assert!(
+        notification
+            .subject
+            .as_ref()
+            .unwrap()
+            .contains("Message from")
+    );
 }
 
 #[tokio::test]

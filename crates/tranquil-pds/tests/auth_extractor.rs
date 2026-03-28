@@ -215,9 +215,10 @@ async fn test_oauth_admin_extractor_allows_oauth_tokens() {
     let did = account["did"].as_str().unwrap().to_string();
     verify_new_account(&http_client, &did).await;
 
-    let pool = common::get_test_db_pool().await;
-    sqlx::query!("UPDATE users SET is_admin = TRUE WHERE did = $1", &did)
-        .execute(pool)
+    let repos = common::get_test_repos().await;
+    repos
+        .user
+        .set_admin_status(&tranquil_types::Did::new(did.clone()).unwrap(), true)
         .await
         .expect("Failed to mark user as admin");
 

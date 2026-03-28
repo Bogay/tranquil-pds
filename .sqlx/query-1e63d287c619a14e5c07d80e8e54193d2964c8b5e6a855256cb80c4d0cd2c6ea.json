@@ -1,14 +1,15 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE users SET is_admin = TRUE WHERE did = $1",
+  "query": "UPDATE users SET is_admin = $1 WHERE did = $2",
   "describe": {
     "columns": [],
     "parameters": {
       "Left": [
+        "Bool",
         "Text"
       ]
     },
     "nullable": []
   },
-  "hash": "f29da3bdfbbc547b339b4cdb059fac26435b0feec65cf1c56f851d1c4d6b1814"
+  "hash": "1e63d287c619a14e5c07d80e8e54193d2964c8b5e6a855256cb80c4d0cd2c6ea"
 }

@@ -22,9 +22,10 @@ use super::user_hash::UserHashMap;
 use super::users::UserValue;
 
 use tranquil_db_traits::{
-    AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DeletionRequest, InviteCodeError,
-    InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder, InviteCodeState, InviteCodeUse,
-    NotificationHistoryRow, QueuedComms, ReservedSigningKey, ValidatedInviteCode,
+    AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DeletionRequest,
+    DeletionRequestWithToken, InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder,
+    InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo, QueuedComms,
+    ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
 use tranquil_types::{CidLink, Did, Handle};
 
@@ -713,6 +714,7 @@ impl InfraOps {
             used: false,
             created_at_ms: now_ms,
             expires_at_ms: expires_at.timestamp_millis(),
+            used_at_ms: None,
         };
 
         let primary_key = signing_key_key(public_key_did_key);
@@ -771,6 +773,7 @@ impl InfraOps {
         ))?;
 
         val.used = true;
+        val.used_at_ms = Some(Utc::now().timestamp_millis());
         self.infra
             .insert(primary_key.as_slice(), val.serialize())
             .map_err(MetastoreError::Fjall)
@@ -906,9 +909,14 @@ impl InfraOps {
                 let mut reader = super::encoding::KeyReader::new(&key_bytes);
                 reader.tag();
                 reader.bytes();
-                let name = reader
+                let raw_name = reader
                     .string()
                     .ok_or(MetastoreError::CorruptData("corrupt account pref key"))?;
+                let name = raw_name
+                    .split('\x00')
+                    .next()
+                    .unwrap_or(&raw_name)
+                    .to_owned();
                 let value: serde_json::Value = serde_json::from_slice(&val_bytes)
                     .map_err(|_| MetastoreError::CorruptData("corrupt account pref json"))?;
                 acc.push((name, value));
@@ -939,8 +947,15 @@ impl InfraOps {
             Ok::<(), MetastoreError>(())
         })?;
 
+        let mut counts: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
         preferences.iter().try_for_each(|(name, value)| {
-            let key = account_pref_key(user_id, name);
+            let idx = counts.entry(name.as_str()).or_insert(0);
+            let indexed_name = match *idx {
+                0 => name.clone(),
+                n => format!("{}\x00{}", name, n),
+            };
+            *idx += 1;
+            let key = account_pref_key(user_id, &indexed_name);
             let bytes = serde_json::to_vec(value)
                 .map_err(|_| MetastoreError::InvalidInput("invalid json for account preference"))?;
             batch.insert(&self.infra, key.as_slice(), bytes);
@@ -1205,5 +1220,194 @@ impl InfraOps {
                 }
             })
             .collect()
+    }
+
+    pub fn get_deletion_request_by_did(
+        &self,
+        did: &Did,
+    ) -> Result<Option<DeletionRequestWithToken>, MetastoreError> {
+        let did_key = deletion_by_did_key(did.as_str());
+        let token = match self
+            .infra
+            .get(did_key.as_slice())
+            .map_err(MetastoreError::Fjall)?
+        {
+            Some(raw) => String::from_utf8(raw.to_vec())
+                .map_err(|_| MetastoreError::CorruptData("deletion by_did not valid utf8"))?,
+            None => return Ok(None),
+        };
+
+        let primary_key = deletion_request_key(&token);
+        let val: Option<DeletionRequestValue> = point_lookup(
+            &self.infra,
+            primary_key.as_slice(),
+            DeletionRequestValue::deserialize,
+            "corrupt deletion request",
+        )?;
+        Ok(val.map(|v| DeletionRequestWithToken {
+            token,
+            did: Did::new(v.did).expect("valid DID in database"),
+            expires_at: DateTime::from_timestamp_millis(v.expires_at_ms).unwrap_or_default(),
+        }))
+    }
+
+    pub fn get_latest_comms_for_user(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+        limit: i64,
+    ) -> Result<Vec<QueuedComms>, MetastoreError> {
+        let target_type = comms_type_to_u8(comms_type);
+        let limit = usize::try_from(limit).unwrap_or(0);
+        let prefix = comms_queue_prefix();
+
+        let mut results: Vec<QueuedComms> = self
+            .infra
+            .prefix(prefix.as_slice())
+            .map(|guard| -> Result<Option<QueuedComms>, MetastoreError> {
+                let (_, val_bytes) = guard.into_inner().map_err(MetastoreError::Fjall)?;
+                let val = QueuedCommsValue::deserialize(&val_bytes)
+                    .ok_or(MetastoreError::CorruptData("corrupt comms queue entry"))?;
+                let matches_user = val.user_id == Some(user_id);
+                let matches_type = val.comms_type == target_type;
+                match matches_user && matches_type {
+                    true => Ok(Some(self.value_to_queued_comms(&val)?)),
+                    false => Ok(None),
+                }
+            })
+            .filter_map(Result::transpose)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        results.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+        results.truncate(limit);
+        Ok(results)
+    }
+
+    pub fn count_comms_by_type(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+    ) -> Result<i64, MetastoreError> {
+        let target_type = comms_type_to_u8(comms_type);
+        let prefix = comms_queue_prefix();
+
+        let count = self
+            .infra
+            .prefix(prefix.as_slice())
+            .try_fold(0i64, |acc, guard| {
+                let (_, val_bytes) = guard.into_inner().map_err(MetastoreError::Fjall)?;
+                let val = QueuedCommsValue::deserialize(&val_bytes)
+                    .ok_or(MetastoreError::CorruptData("corrupt comms queue entry"))?;
+                let matches = val.user_id == Some(user_id) && val.comms_type == target_type;
+                Ok::<i64, MetastoreError>(acc + i64::from(matches))
+            })?;
+
+        Ok(count)
+    }
+
+    pub fn delete_comms_by_type_for_user(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+    ) -> Result<u64, MetastoreError> {
+        let target_type = comms_type_to_u8(comms_type);
+        let prefix = comms_queue_prefix();
+
+        let keys_to_delete: Vec<Vec<u8>> = self
+            .infra
+            .prefix(prefix.as_slice())
+            .map(|guard| -> Result<Option<Vec<u8>>, MetastoreError> {
+                let (key_bytes, val_bytes) = guard.into_inner().map_err(MetastoreError::Fjall)?;
+                let val = QueuedCommsValue::deserialize(&val_bytes)
+                    .ok_or(MetastoreError::CorruptData("corrupt comms queue entry"))?;
+                let matches = val.user_id == Some(user_id) && val.comms_type == target_type;
+                match matches {
+                    true => Ok(Some(key_bytes.to_vec())),
+                    false => Ok(None),
+                }
+            })
+            .filter_map(Result::transpose)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let count = u64::try_from(keys_to_delete.len()).unwrap_or(u64::MAX);
+        let mut batch = self.db.batch();
+        keys_to_delete
+            .iter()
+            .for_each(|k| batch.remove(&self.infra, k.as_slice()));
+        batch.commit().map_err(MetastoreError::Fjall)?;
+        Ok(count)
+    }
+
+    pub fn expire_deletion_request(&self, token: &str) -> Result<(), MetastoreError> {
+        let key = deletion_request_key(token);
+        let mut val: DeletionRequestValue = point_lookup(
+            &self.infra,
+            key.as_slice(),
+            DeletionRequestValue::deserialize,
+            "corrupt deletion request",
+        )?
+        .ok_or(MetastoreError::InvalidInput("deletion request not found"))?;
+
+        val.expires_at_ms = Utc::now().timestamp_millis() - 3_600_000;
+        self.infra
+            .insert(key.as_slice(), val.serialize())
+            .map_err(MetastoreError::Fjall)
+    }
+
+    pub fn get_reserved_signing_key_full(
+        &self,
+        public_key_did_key: &str,
+    ) -> Result<Option<ReservedSigningKeyFull>, MetastoreError> {
+        let key = signing_key_key(public_key_did_key);
+        let val: Option<SigningKeyValue> = point_lookup(
+            &self.infra,
+            key.as_slice(),
+            SigningKeyValue::deserialize,
+            "corrupt signing key",
+        )?;
+        Ok(val.map(|v| ReservedSigningKeyFull {
+            id: v.id,
+            did: v.did.and_then(|d| Did::new(d).ok()),
+            public_key_did_key: v.public_key_did_key,
+            private_key_bytes: v.private_key_bytes,
+            expires_at: DateTime::from_timestamp_millis(v.expires_at_ms).unwrap_or_default(),
+            used_at: v.used_at_ms.and_then(DateTime::from_timestamp_millis),
+        }))
+    }
+
+    pub fn get_plc_tokens_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<PlcTokenInfo>, MetastoreError> {
+        let prefix = plc_token_prefix(user_id);
+        self.infra
+            .prefix(prefix.as_slice())
+            .map(|guard| -> Result<PlcTokenInfo, MetastoreError> {
+                let (key_bytes, val_bytes) = guard.into_inner().map_err(MetastoreError::Fjall)?;
+                let arr: [u8; 8] = val_bytes
+                    .as_ref()
+                    .try_into()
+                    .map_err(|_| MetastoreError::CorruptData("plc token expiry not 8 bytes"))?;
+                let expires_at =
+                    DateTime::from_timestamp_millis(i64::from_be_bytes(arr)).unwrap_or_default();
+                let mut reader = super::encoding::KeyReader::new(&key_bytes);
+                let _tag = reader.tag();
+                let _user_id = reader.bytes();
+                let token = reader
+                    .string()
+                    .ok_or(MetastoreError::CorruptData("plc token key missing token"))?;
+                Ok(PlcTokenInfo { token, expires_at })
+            })
+            .collect()
+    }
+
+    pub fn count_plc_tokens_for_user(&self, user_id: Uuid) -> Result<i64, MetastoreError> {
+        let prefix = plc_token_prefix(user_id);
+        Ok(self
+            .infra
+            .prefix(prefix.as_slice())
+            .count()
+            .try_into()
+            .unwrap_or(0))
     }
 }

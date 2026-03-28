@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        DELETE FROM sso_pending_registration\n        WHERE token = $1 AND expires_at > NOW()\n        RETURNING token, request_uri\n        ",
+  "query": "SELECT token, did, expires_at FROM account_deletion_requests WHERE did = $1",
   "describe": {
     "columns": [
       {
@@ -10,8 +10,13 @@
       },
       {
         "ordinal": 1,
-        "name": "request_uri",
+        "name": "did",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -21,8 +26,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "24b823043ab60f36c29029137fef30dfe33922bb06067f2fdbfc1fbb4b0a2a81"
+  "hash": "61f489b4fc42f5b0aaea287cde4415da6f5e96b3a0f36216bdc6dea924b09abd"
 }

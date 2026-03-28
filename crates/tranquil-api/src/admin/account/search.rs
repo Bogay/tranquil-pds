@@ -51,16 +51,14 @@ pub async fn search_accounts(
     Query(params): Query<SearchAccountsParams>,
 ) -> Result<Json<SearchAccountsOutput>, ApiError> {
     let limit = params.limit.clamp(1, 100);
-    let email_filter = params.email.as_deref().map(|e| format!("%{}%", e));
-    let handle_filter = params.handle.as_deref().map(|h| format!("%{}%", h));
     let cursor_did: Option<Did> = params.cursor.as_ref().and_then(|c| c.parse().ok());
     let rows = state
         .repos
         .user
         .search_accounts(
             cursor_did.as_ref(),
-            email_filter.as_deref(),
-            handle_filter.as_deref(),
+            params.email.as_deref(),
+            params.handle.as_deref(),
             limit + 1,
         )
         .await

@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        DELETE FROM sso_auth_state\n        WHERE state = $1 AND expires_at > NOW()\n        RETURNING state\n        ",
+  "query": "SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "state",
+        "name": "code",
         "type_info": "Text"
       }
     ],
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "5af4a386c1632903ad7102551a5bd148bcf541baab6a84c8649666a695f9c4d1"
+  "hash": "5cee16f49a727d66b5231a8d07d7f4bcb6a1136fbf3e3d249fd33600772ac80f"
 }

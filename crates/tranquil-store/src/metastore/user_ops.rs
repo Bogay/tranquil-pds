@@ -410,10 +410,9 @@ impl UserOps {
                         return Ok(None);
                     }
 
-                    let email_match = email_filter.map_or(true, |f| {
-                        val.email.as_deref().map_or(false, |e| e.contains(f))
-                    });
-                    let handle_match = handle_filter.map_or(true, |f| val.handle.contains(f));
+                    let email_match = email_filter
+                        .is_none_or(|f| val.email.as_deref().is_some_and(|e| e.contains(f)));
+                    let handle_match = handle_filter.is_none_or(|f| val.handle.contains(f));
 
                     match email_match && handle_match {
                         true => Ok(Some(AccountSearchResult {
@@ -689,13 +688,13 @@ impl UserOps {
     pub fn is_account_migrated(&self, did: &Did) -> Result<bool, MetastoreError> {
         Ok(self
             .load_user_by_did(did.as_str())?
-            .map_or(false, |v| v.migrated_to_pds.is_some()))
+            .is_some_and(|v| v.migrated_to_pds.is_some()))
     }
 
     pub fn has_verified_comms_channel(&self, did: &Did) -> Result<bool, MetastoreError> {
         Ok(self
             .load_user_by_did(did.as_str())?
-            .map_or(false, |v| v.channel_verification() != 0))
+            .is_some_and(|v| v.channel_verification() != 0))
     }
 
     pub fn get_id_by_handle(&self, handle: &Handle) -> Result<Option<Uuid>, MetastoreError> {
@@ -859,6 +858,14 @@ impl UserOps {
             true => Ok(1),
             false => Ok(0),
         }
+    }
+
+    pub fn set_admin_status(&self, did: &Did, is_admin: bool) -> Result<(), MetastoreError> {
+        let user_hash = self.resolve_hash(did.as_str());
+        self.mutate_user(user_hash, |u| {
+            u.is_admin = is_admin;
+        })?;
+        Ok(())
     }
 
     pub fn get_notification_prefs(
@@ -1198,9 +1205,8 @@ impl UserOps {
         telegram_username: &str,
     ) -> Result<(), MetastoreError> {
         self.mutate_user_by_uuid(user_id, |u| {
-            match u.telegram_username.as_deref() == Some(telegram_username) {
-                true => u.telegram_verified = true,
-                false => {}
+            if u.telegram_username.as_deref() == Some(telegram_username) {
+                u.telegram_verified = true;
             }
         })?;
         Ok(())
@@ -1212,9 +1218,8 @@ impl UserOps {
         signal_username: &str,
     ) -> Result<(), MetastoreError> {
         self.mutate_user_by_uuid(user_id, |u| {
-            match u.signal_username.as_deref() == Some(signal_username) {
-                true => u.signal_verified = true,
-                false => {}
+            if u.signal_username.as_deref() == Some(signal_username) {
+                u.signal_verified = true;
             }
         })?;
         Ok(())
@@ -1251,7 +1256,7 @@ impl UserOps {
     pub fn has_totp_enabled(&self, did: &Did) -> Result<bool, MetastoreError> {
         Ok(self
             .load_user_by_did(did.as_str())?
-            .map_or(false, |v| v.totp_enabled))
+            .is_some_and(|v| v.totp_enabled))
     }
 
     pub fn has_passkeys(&self, did: &Did) -> Result<bool, MetastoreError> {
@@ -2077,7 +2082,7 @@ impl UserOps {
         let prefix = [super::keys::KeyTag::USER_RESET_CODE.raw()];
         let keys_to_remove: Vec<Vec<u8>> = self
             .auth
-            .prefix(&prefix)
+            .prefix(prefix)
             .filter_map(|guard| {
                 let (key_bytes, val_bytes) = guard.into_inner().ok()?;
                 let rc = ResetCodeValue::deserialize(&val_bytes)?;
@@ -2566,18 +2571,7 @@ impl UserOps {
             .collect()
     }
 
-    pub fn delete_account_with_firehose(
-        &self,
-        user_id: Uuid,
-        did: &Did,
-    ) -> Result<i64, MetastoreError> {
-        self.delete_account_complete(user_id, did)?;
-        tracing::warn!(
-            "delete_account_with_firehose: no firehose event emitted (not yet implemented for tranquil-store)"
-        );
-        Ok(0)
-    }
-
+    #[allow(clippy::too_many_arguments)]
     fn build_user_value(
         &self,
         did: &Did,
@@ -2894,9 +2888,8 @@ impl UserOps {
             .map_err(|e| MigrationReactivationError::Database(e.to_string()))?
             .ok_or(MigrationReactivationError::NotFound)?;
 
-        match user.deactivated_at_ms {
-            None => return Err(MigrationReactivationError::NotDeactivated),
-            Some(_) => {}
+        if user.deactivated_at_ms.is_none() {
+            return Err(MigrationReactivationError::NotDeactivated);
         }
 
         let existing_handle = self
@@ -3095,5 +3088,139 @@ impl UserOps {
         batch.commit().map_err(MetastoreError::Fjall)?;
 
         Ok(RecoverPasskeyAccountResult { passkeys_deleted })
+    }
+
+    pub fn get_password_reset_info(
+        &self,
+        email: &str,
+    ) -> Result<Option<tranquil_db_traits::PasswordResetInfo>, MetastoreError> {
+        let by_email_key = user_by_email_key(email);
+        let user_hash = match self
+            .users
+            .get(by_email_key.as_slice())
+            .map_err(MetastoreError::Fjall)?
+        {
+            Some(raw) => {
+                let arr: [u8; 8] = raw
+                    .as_ref()
+                    .try_into()
+                    .map_err(|_| MetastoreError::CorruptData("email index not 8 bytes"))?;
+                UserHash::from_raw(u64::from_be_bytes(arr))
+            }
+            None => return Ok(None),
+        };
+
+        let user = match self.load_user(user_hash)? {
+            Some(u) => u,
+            None => return Ok(None),
+        };
+
+        let prefix = [super::keys::KeyTag::USER_RESET_CODE.raw()];
+        let reset_code = self
+            .auth
+            .prefix(prefix)
+            .filter_map(|guard| {
+                let (_, val_bytes) = guard.into_inner().ok()?;
+                let rc = ResetCodeValue::deserialize(&val_bytes)?;
+                match rc.user_id == user.id {
+                    true => Some(rc),
+                    false => None,
+                }
+            })
+            .next();
+
+        Ok(Some(tranquil_db_traits::PasswordResetInfo {
+            code: reset_code.as_ref().map(|rc| rc.code.clone()),
+            expires_at: reset_code.and_then(|rc| DateTime::from_timestamp_millis(rc.expires_at_ms)),
+        }))
+    }
+
+    pub fn enable_totp_verified(
+        &self,
+        did: &Did,
+        encrypted_secret: &[u8],
+    ) -> Result<(), MetastoreError> {
+        let user_hash = self.resolve_hash(did.as_str());
+        let key = totp_key(user_hash);
+
+        let value = TotpValue {
+            secret_encrypted: encrypted_secret.to_vec(),
+            encryption_version: 1,
+            verified: true,
+            last_used_at_ms: None,
+        };
+
+        let mut batch = self.db.batch();
+        batch.insert(&self.users, key.as_slice(), value.serialize());
+
+        if let Some(mut user) = self.load_user(user_hash)? {
+            user.totp_enabled = true;
+            batch.insert(
+                &self.users,
+                user_primary_key(user_hash).as_slice(),
+                user.serialize(),
+            );
+        }
+
+        batch.commit().map_err(MetastoreError::Fjall)
+    }
+
+    pub fn set_two_factor_enabled(&self, did: &Did, enabled: bool) -> Result<(), MetastoreError> {
+        let user_hash = self.resolve_hash(did.as_str());
+        let mut user = self
+            .load_user(user_hash)?
+            .ok_or(MetastoreError::InvalidInput("user not found"))?;
+
+        user.two_factor_enabled = enabled;
+        self.users
+            .insert(user_primary_key(user_hash).as_slice(), user.serialize())
+            .map_err(MetastoreError::Fjall)
+    }
+
+    pub fn expire_password_reset_code(&self, email: &str) -> Result<(), MetastoreError> {
+        let by_email_key = user_by_email_key(email);
+        let user_hash_bytes = match self
+            .users
+            .get(by_email_key.as_slice())
+            .map_err(MetastoreError::Fjall)?
+        {
+            Some(raw) => raw,
+            None => return Ok(()),
+        };
+
+        let arr: [u8; 8] = user_hash_bytes
+            .as_ref()
+            .try_into()
+            .map_err(|_| MetastoreError::CorruptData("email index not 8 bytes"))?;
+        let user_hash = UserHash::from_raw(u64::from_be_bytes(arr));
+        let user = match self.load_user(user_hash)? {
+            Some(u) => u,
+            None => return Ok(()),
+        };
+
+        let prefix = [super::keys::KeyTag::USER_RESET_CODE.raw()];
+        let keys_to_remove: Vec<Vec<u8>> = self
+            .auth
+            .prefix(prefix)
+            .filter_map(|guard| {
+                let (key_bytes, val_bytes) = guard.into_inner().ok()?;
+                let rc = ResetCodeValue::deserialize(&val_bytes)?;
+                match rc.user_id == user.id {
+                    true => Some(key_bytes.to_vec()),
+                    false => None,
+                }
+            })
+            .collect();
+
+        match keys_to_remove.is_empty() {
+            true => Ok(()),
+            false => {
+                let mut batch = self.db.batch();
+                keys_to_remove.iter().for_each(|key| {
+                    batch.remove(&self.auth, key);
+                });
+                batch.commit().map_err(MetastoreError::Fjall)
+            }
+        }
     }
 }

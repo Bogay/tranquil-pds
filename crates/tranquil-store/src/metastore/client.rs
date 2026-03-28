@@ -9,12 +9,13 @@ use tranquil_db_traits::{
     ApplyCommitResult, Backlink, BrokenGenesisCommit, CommitEventData, CommsChannel, CommsType,
     CompletePasskeySetupInput, CreateAccountError, CreateDelegatedAccountInput,
     CreatePasskeyAccountInput, CreatePasswordAccountInput, CreatePasswordAccountResult,
-    CreateSsoAccountInput, DbError, DeletionRequest, DidWebOverrides, EventBlocksCids, ImportBlock,
-    ImportRecord, ImportRepoError, InviteCodeError, InviteCodeInfo, InviteCodeRow,
-    InviteCodeSortOrder, InviteCodeUse, MigrationReactivationError, MigrationReactivationInput,
-    NotificationHistoryRow, NotificationPrefs, OAuthTokenWithUser, PasswordResetResult,
-    QueuedComms, ReactivatedAccountInfo, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
-    RepoAccountInfo, RepoInfo, RepoListItem, RepoWithoutRev, ReservedSigningKey,
+    CreateSsoAccountInput, DbError, DeletionRequest, DeletionRequestWithToken, DidWebOverrides,
+    EventBlocksCids, ImportBlock, ImportRecord, ImportRepoError, InviteCodeError, InviteCodeInfo,
+    InviteCodeRow, InviteCodeSortOrder, InviteCodeUse, MigrationReactivationError,
+    MigrationReactivationInput, NotificationHistoryRow, NotificationPrefs, OAuthTokenWithUser,
+    PasswordResetResult, PlcTokenInfo, QueuedComms, ReactivatedAccountInfo,
+    RecoverPasskeyAccountInput, RecoverPasskeyAccountResult, RepoAccountInfo, RepoInfo,
+    RepoListItem, RepoWithoutRev, ReservedSigningKey, ReservedSigningKeyFull,
     ScheduledDeletionAccount, ScopePreference, SequenceNumber, SequencedEvent, StoredBackupCode,
     StoredPasskey, TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus, UserAuthInfo,
     UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo, UserForDeletion,
@@ -2459,6 +2460,114 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         ))?;
         recv(rx).await
     }
+
+    async fn get_deletion_request_by_did(
+        &self,
+        did: &Did,
+    ) -> Result<Option<DeletionRequestWithToken>, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::Infra(
+            InfraRequest::GetDeletionRequestByDid {
+                did: did.clone(),
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
+    async fn get_latest_comms_for_user(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+        limit: i64,
+    ) -> Result<Vec<QueuedComms>, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::Infra(
+            InfraRequest::GetLatestCommsForUser {
+                user_id,
+                comms_type,
+                limit,
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
+    async fn count_comms_by_type(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+    ) -> Result<i64, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::Infra(InfraRequest::CountCommsByType {
+                user_id,
+                comms_type,
+                tx,
+            }))?;
+        recv(rx).await
+    }
+
+    async fn delete_comms_by_type_for_user(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+    ) -> Result<u64, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::Infra(
+            InfraRequest::DeleteCommsByTypeForUser {
+                user_id,
+                comms_type,
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
+    async fn expire_deletion_request(&self, token: &str) -> Result<(), DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::Infra(
+            InfraRequest::ExpireDeletionRequest {
+                token: token.to_owned(),
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
+    async fn get_reserved_signing_key_full(
+        &self,
+        public_key_did_key: &str,
+    ) -> Result<Option<ReservedSigningKeyFull>, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::Infra(
+            InfraRequest::GetReservedSigningKeyFull {
+                public_key_did_key: public_key_did_key.to_owned(),
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
+    async fn get_plc_tokens_by_did(&self, did: &Did) -> Result<Vec<PlcTokenInfo>, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::Infra(InfraRequest::GetPlcTokensByDid {
+                did: did.clone(),
+                tx,
+            }))?;
+        recv(rx).await
+    }
+
+    async fn count_plc_tokens_by_did(&self, did: &Did) -> Result<i64, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::Infra(InfraRequest::CountPlcTokensByDid {
+                did: did.clone(),
+                tx,
+            }))?;
+        recv(rx).await
+    }
 }
 
 #[async_trait]
@@ -3227,6 +3336,19 @@ impl<S: StorageIO + 'static> tranquil_db_traits::OAuthRepository for MetastoreCl
         ))?;
         recv(rx).await
     }
+
+    async fn get_2fa_challenge_code(
+        &self,
+        request_uri: &RequestId,
+    ) -> Result<Option<String>, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::OAuth(OAuthRequest::Get2faChallengeCode {
+                request_uri: request_uri.clone(),
+                tx,
+            }))?;
+        recv(rx).await
+    }
 }
 
 #[async_trait]
@@ -3685,6 +3807,17 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
             .send(MetastoreRequest::User(UserRequest::AdminUpdatePassword {
                 did: did.clone(),
                 password_hash: password_hash.to_owned(),
+                tx,
+            }))?;
+        recv(rx).await
+    }
+
+    async fn set_admin_status(&self, did: &Did, is_admin: bool) -> Result<(), DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::User(UserRequest::SetAdminStatus {
+                did: did.clone(),
+                is_admin,
                 tx,
             }))?;
         recv(rx).await
@@ -4887,6 +5020,56 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
                 input: input.clone(),
                 tx,
             }))?;
+        recv(rx).await
+    }
+
+    async fn get_password_reset_info(
+        &self,
+        email: &str,
+    ) -> Result<Option<tranquil_db_traits::PasswordResetInfo>, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::User(UserRequest::GetPasswordResetInfo {
+                email: email.to_owned(),
+                tx,
+            }))?;
+        recv(rx).await
+    }
+
+    async fn enable_totp_verified(
+        &self,
+        did: &Did,
+        encrypted_secret: &[u8],
+    ) -> Result<(), DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::User(UserRequest::EnableTotpVerified {
+                did: did.clone(),
+                encrypted_secret: encrypted_secret.to_vec(),
+                tx,
+            }))?;
+        recv(rx).await
+    }
+
+    async fn set_two_factor_enabled(&self, did: &Did, enabled: bool) -> Result<(), DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::User(UserRequest::SetTwoFactorEnabled {
+                did: did.clone(),
+                enabled,
+                tx,
+            }))?;
+        recv(rx).await
+    }
+
+    async fn expire_password_reset_code(&self, email: &str) -> Result<(), DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::User(
+            UserRequest::ExpirePasswordResetCode {
+                email: email.to_owned(),
+                tx,
+            },
+        ))?;
         recv(rx).await
     }
 }

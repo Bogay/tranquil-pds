@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM comms_queue WHERE user_id = $1 AND comms_type = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "comms_type",
+            "kind": {
+              "Enum": [
+                "welcome",
+                "email_verification",
+                "password_reset",
+                "email_update",
+                "account_deletion",
+                "admin_email",
+                "plc_operation",
+                "two_factor_code",
+                "channel_verification",
+                "passkey_recovery",
+                "legacy_login_alert",
+                "migration_verification",
+                "channel_verified"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "89b0292d8d022fad8f9cda07b9a7870ca6a7ebe904b2d580956b0816b50bcdb7"
+}

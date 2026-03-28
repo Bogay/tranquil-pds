@@ -28,10 +28,18 @@ static MOCK_PLC: OnceLock<MockServer> = OnceLock::new();
 static TEST_DB_POOL: OnceLock<sqlx::PgPool> = OnceLock::new();
 static TEST_TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 static CLUSTER: OnceLock<Vec<ServerInstance>> = OnceLock::new();
+static TEST_REPOS: OnceLock<Arc<tranquil_db::PostgresRepositories>> = OnceLock::new();
+
+#[allow(dead_code)]
+pub fn is_store_backend() -> bool {
+    std::env::var("TRANQUIL_TEST_BACKEND")
+        .map(|v| v == "store")
+        .unwrap_or(false)
+}
 
 #[allow(dead_code)]
 pub struct ServerConfig {
-    pub pool: sqlx::PgPool,
+    pub pool: Option<sqlx::PgPool>,
     pub cache: Option<(Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>)>,
 }
 
@@ -123,6 +131,12 @@ pub async fn base_url() -> &'static str {
     SERVER_URL.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+                )
+                .try_init();
             unsafe {
                 std::env::set_var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS", "1");
             }
@@ -141,7 +155,10 @@ pub async fn base_url() -> &'static str {
             }
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                if has_external_infra() {
+                if is_store_backend() {
+                    let url = setup_store_backend().await;
+                    tx.send(url).unwrap();
+                } else if has_external_infra() {
                     let url = setup_with_external_infra().await;
                     tx.send(url).unwrap();
                 } else {
@@ -557,9 +574,12 @@ async fn spawn_server(config: ServerConfig) -> ServerInstance {
         .with_oauth_authorize_limit(10000)
         .with_oauth_token_limit(10000);
     let cache_refs = config.cache.as_ref().map(|(c, r)| (c.clone(), r.clone()));
-    let mut state = AppState::from_db(config.pool, CancellationToken::new())
-        .await
-        .with_rate_limiters(rate_limiters);
+    let mut state = match config.pool {
+        Some(pool) => AppState::from_db(pool, CancellationToken::new()).await,
+        None => AppState::from_store(CancellationToken::new()).await,
+    };
+    state = state.with_rate_limiters(rate_limiters);
+    TEST_REPOS.set(state.repos.clone()).ok();
     if let Some((cache, distributed_rate_limiter)) = config.cache {
         state = state.with_cache(cache, distributed_rate_limiter);
     }
@@ -590,6 +610,39 @@ async fn spawn_server(config: ServerConfig) -> ServerInstance {
     }
 }
 
+async fn setup_store_backend() -> String {
+    let temp_dir =
+        std::env::temp_dir().join(format!("tranquil-pds-store-{}", uuid::Uuid::new_v4()));
+    let blob_path = temp_dir.join("blobs");
+    let backup_path = temp_dir.join("backups");
+    let store_path = temp_dir.join("store");
+    std::fs::create_dir_all(&blob_path).expect("failed to create blob temp directory");
+    std::fs::create_dir_all(&backup_path).expect("failed to create backup temp directory");
+    std::fs::create_dir_all(&store_path).expect("failed to create store temp directory");
+    TEST_TEMP_DIR.set(temp_dir).ok();
+    let plc_url = setup_mock_plc_directory().await;
+    unsafe {
+        std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
+        std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
+        std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
+        std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
+        std::env::set_var("MAX_IMPORT_SIZE", "100000000");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
+        std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
+        std::env::set_var("REPO_BACKEND", "tranquil-store");
+        std::env::set_var("TRANQUIL_STORE_DATA_DIR", store_path.to_str().unwrap());
+        std::env::set_var("DATABASE_URL", "postgres://unused/unused");
+    }
+    register_mock_appview().await;
+    let instance = spawn_server(ServerConfig {
+        pool: None,
+        cache: None,
+    })
+    .await;
+    APP_PORT.set(instance.port).ok();
+    instance.url
+}
+
 async fn spawn_app(database_url: String) -> String {
     let pool = PgPoolOptions::new()
         .max_connections(10)
@@ -608,7 +661,11 @@ async fn spawn_app(database_url: String) -> String {
         .await
         .expect("Failed to create test pool");
     TEST_DB_POOL.set(test_pool).ok();
-    let instance = spawn_server(ServerConfig { pool, cache: None }).await;
+    let instance = spawn_server(ServerConfig {
+        pool: Some(pool),
+        cache: None,
+    })
+    .await;
     APP_PORT.set(instance.port).ok();
     instance.url
 }
@@ -659,7 +716,7 @@ pub async fn spawn_cluster(database_url: String, node_count: usize) -> Vec<Serve
     let mut instances: Vec<ServerInstance> = Vec::with_capacity(node_count);
     for (cache, rate_limiter) in ripple_nodes {
         let server_config = ServerConfig {
-            pool: pool.clone(),
+            pool: Some(pool.clone()),
             cache: Some((cache, rate_limiter)),
         };
         let instance = spawn_server(server_config).await;
@@ -799,18 +856,14 @@ pub async fn get_test_db_pool() -> &'static sqlx::PgPool {
 }
 
 #[allow(dead_code)]
-pub async fn verify_new_account(client: &Client, did: &str) -> String {
-    let pool = get_test_db_pool().await;
-    let body_text: String = sqlx::query_scalar!(
-        "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to get verification code");
+pub async fn get_test_repos() -> &'static Arc<tranquil_db::PostgresRepositories> {
+    base_url().await;
+    TEST_REPOS.get().expect("TEST_REPOS not initialized")
+}
 
+fn extract_verification_code(body_text: &str) -> String {
     let lines: Vec<&str> = body_text.lines().collect();
-    let verification_code = lines
+    lines
         .iter()
         .enumerate()
         .find(|(_, line)| line.contains("verification code is:") || line.contains("code is:"))
@@ -821,7 +874,35 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
                 .find(|line| line.trim().starts_with("MX"))
                 .map(|s| s.trim().to_string())
         })
-        .unwrap_or_else(|| body_text.clone());
+        .unwrap_or_else(|| body_text.to_string())
+}
+
+async fn get_verification_body_for_did(did: &str) -> String {
+    use tranquil_db_traits::CommsType;
+    use tranquil_types::Did;
+
+    let repos = get_test_repos().await;
+    let user = repos
+        .user
+        .get_by_did(&Did::new(did.to_string()).unwrap())
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    let comms = repos
+        .infra
+        .get_latest_comms_for_user(user.id, CommsType::EmailVerification, 1)
+        .await
+        .expect("failed to get comms");
+    comms
+        .first()
+        .map(|c| c.body.clone())
+        .expect("no email_verification comms found")
+}
+
+#[allow(dead_code)]
+pub async fn verify_new_account(client: &Client, did: &str) -> String {
+    let body_text = get_verification_body_for_did(did).await;
+    let verification_code = extract_verification_code(&body_text);
 
     let confirm_payload = json!({
         "did": did,
@@ -956,10 +1037,11 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
         if res.status() == StatusCode::OK {
             let body: Value = res.json().await.expect("Invalid JSON");
             let did = body["did"].as_str().expect("No did").to_string();
-            let pool = get_test_db_pool().await;
             if make_admin {
-                sqlx::query!("UPDATE users SET is_admin = TRUE WHERE did = $1", &did)
-                    .execute(pool)
+                let repos = get_test_repos().await;
+                repos
+                    .user
+                    .set_admin_status(&tranquil_types::Did::new(did.clone()).unwrap(), true)
                     .await
                     .expect("Failed to mark user as admin");
             }
@@ -969,28 +1051,8 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
             {
                 return (access_jwt.to_string(), did);
             }
-            let body_text: String = sqlx::query_scalar!(
-                "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
-                &did
-            )
-            .fetch_one(pool)
-            .await
-            .expect("Failed to get verification from comms_queue");
-            let lines: Vec<&str> = body_text.lines().collect();
-            let verification_code = lines
-                .iter()
-                .enumerate()
-                .find(|(_, line): &(usize, &&str)| {
-                    line.contains("verification code is:") || line.contains("code is:")
-                })
-                .and_then(|(i, _)| lines.get(i + 1).map(|s: &&str| s.trim().to_string()))
-                .or_else(|| {
-                    body_text
-                        .lines()
-                        .find(|line| line.trim().starts_with("MX"))
-                        .map(|s| s.trim().to_string())
-                })
-                .unwrap_or_else(|| body_text.clone());
+            let body_text = get_verification_body_for_did(&did).await;
+            let verification_code = extract_verification_code(&body_text);
 
             let confirm_payload = json!({
                 "did": did,

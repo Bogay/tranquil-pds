@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_totp (did, secret_encrypted, encryption_version, verified, created_at)\n               VALUES ($1, $2, 1, TRUE, NOW())\n               ON CONFLICT (did) DO UPDATE SET secret_encrypted = $2, verified = TRUE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7d3a9f0545943bc6a3a14fcd596aac5cc731c8177d74e504606d7e92c7d0c73f"
+}

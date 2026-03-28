@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use presage::libsignal_service::configuration::SignalServers;
 use presage::manager::Registered;
 use presage::proto::DataMessage;
+use presage::store::Store;
 use sqlx::PgPool;
 use tokio::sync::{RwLock, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -190,7 +191,7 @@ impl Drop for LinkingGuard {
 #[derive(Debug, thiserror::Error)]
 pub enum SignalError {
     #[error("store: {0}")]
-    Store(#[from] crate::store::PgStoreError),
+    Store(String),
     #[error("presage: {0}")]
     Presage(String),
     #[error("username lookup failed: {0}")]
@@ -209,7 +210,11 @@ pub enum SignalError {
     Runtime(String),
 }
 
-type Manager = presage::Manager<PgSignalStore, Registered>;
+impl From<crate::store::PgStoreError> for SignalError {
+    fn from(e: crate::store::PgStoreError) -> Self {
+        Self::Store(e.to_string())
+    }
+}
 
 struct SendRequest {
     recipient: SignalUsername,
@@ -311,7 +316,10 @@ pub struct SignalClient {
 }
 
 impl SignalClient {
-    fn from_manager(manager: Manager, shutdown: CancellationToken) -> Result<Self, SignalError> {
+    fn from_manager<S: Store>(
+        manager: presage::Manager<S, Registered>,
+        shutdown: CancellationToken,
+    ) -> Result<Self, SignalError> {
         let (tx, rx) = mpsc::channel::<SendRequest>(64);
 
         spawn_signal_thread("signal-worker", move || {
@@ -322,8 +330,7 @@ impl SignalClient {
         Ok(Self { tx })
     }
 
-    pub async fn from_pool(db: &PgPool, shutdown: CancellationToken) -> Option<Self> {
-        let store = PgSignalStore::new(db.clone());
+    pub async fn from_store<S: Store>(store: S, shutdown: CancellationToken) -> Option<Self> {
         let (init_tx, init_rx) = oneshot::channel();
 
         spawn_signal_thread("signal-init", move || {
@@ -348,8 +355,12 @@ impl SignalClient {
             .ok()
     }
 
-    async fn worker_loop(
-        mut manager: Manager,
+    pub async fn from_pool(db: &PgPool, shutdown: CancellationToken) -> Option<Self> {
+        Self::from_store(PgSignalStore::new(db.clone()), shutdown).await
+    }
+
+    async fn worker_loop<S: Store>(
+        mut manager: presage::Manager<S, Registered>,
         mut rx: mpsc::Receiver<SendRequest>,
         shutdown: CancellationToken,
     ) {
@@ -391,8 +402,8 @@ impl SignalClient {
         }
     }
 
-    async fn handle_send(
-        manager: &mut Manager,
+    async fn handle_send<S: Store>(
+        manager: &mut presage::Manager<S, Registered>,
         recipient: &SignalUsername,
         message: &MessageBody,
     ) -> Result<(), SignalError> {
@@ -444,8 +455,8 @@ impl SignalClient {
             .map_err(|_| SignalError::Runtime("signal worker dropped request".into()))?
     }
 
-    pub async fn link_device(
-        db: &PgPool,
+    pub async fn link_device_with_store<S: Store>(
+        store: S,
         device_name: DeviceName,
         shutdown: CancellationToken,
         link_cancel: CancellationToken,
@@ -457,7 +468,6 @@ impl SignalClient {
             ));
         }
 
-        let store = PgSignalStore::new(db.clone());
         let (url_tx, url_rx) = oneshot::channel::<Result<Url, SignalError>>();
         let (done_tx, done_rx) = oneshot::channel::<Result<SignalClient, SignalError>>();
 
@@ -537,5 +547,22 @@ impl SignalClient {
             url,
             completion: done_rx,
         })
+    }
+
+    pub async fn link_device(
+        db: &PgPool,
+        device_name: DeviceName,
+        shutdown: CancellationToken,
+        link_cancel: CancellationToken,
+        linking_flag: Arc<AtomicBool>,
+    ) -> Result<LinkResult, SignalError> {
+        Self::link_device_with_store(
+            PgSignalStore::new(db.clone()),
+            device_name,
+            shutdown,
+            link_cancel,
+            linking_flag,
+        )
+        .await
     }
 }

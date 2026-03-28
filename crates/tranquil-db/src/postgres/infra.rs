@@ -3,9 +3,9 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use tranquil_db_traits::{
     AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DbError, DeletionRequest,
-    InfraRepository, InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder,
-    InviteCodeState, InviteCodeUse, NotificationHistoryRow, QueuedComms, ReservedSigningKey,
-    ValidatedInviteCode,
+    DeletionRequestWithToken, InfraRepository, InviteCodeError, InviteCodeInfo, InviteCodeRow,
+    InviteCodeSortOrder, InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo,
+    QueuedComms, ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
 use tranquil_types::{CidLink, Did, Handle};
 use uuid::Uuid;
@@ -1033,5 +1033,160 @@ impl InfraRepository for PostgresInfraRepository {
             .into_iter()
             .map(|r| (r.used_by_user, r.code))
             .collect())
+    }
+
+    async fn get_deletion_request_by_did(
+        &self,
+        did: &Did,
+    ) -> Result<Option<DeletionRequestWithToken>, DbError> {
+        let row = sqlx::query!(
+            r#"SELECT token, did, expires_at FROM account_deletion_requests WHERE did = $1"#,
+            did.as_str()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(row.map(|r| DeletionRequestWithToken {
+            token: r.token,
+            did: Did::new(r.did).expect("valid DID in database"),
+            expires_at: r.expires_at,
+        }))
+    }
+
+    async fn get_latest_comms_for_user(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+        limit: i64,
+    ) -> Result<Vec<QueuedComms>, DbError> {
+        let results = sqlx::query_as!(
+            QueuedComms,
+            r#"SELECT
+                id, user_id,
+                channel as "channel: CommsChannel",
+                comms_type as "comms_type: CommsType",
+                status as "status: CommsStatus",
+                recipient, subject, body, metadata,
+                attempts, max_attempts, last_error,
+                created_at, updated_at, scheduled_for, processed_at
+            FROM comms_queue
+            WHERE user_id = $1 AND comms_type = $2
+            ORDER BY created_at DESC
+            LIMIT $3"#,
+            user_id,
+            comms_type as CommsType,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(results)
+    }
+
+    async fn count_comms_by_type(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+    ) -> Result<i64, DbError> {
+        let count = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!" FROM comms_queue WHERE user_id = $1 AND comms_type = $2"#,
+            user_id,
+            comms_type as CommsType
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(count)
+    }
+
+    async fn delete_comms_by_type_for_user(
+        &self,
+        user_id: Uuid,
+        comms_type: CommsType,
+    ) -> Result<u64, DbError> {
+        let result = sqlx::query!(
+            "DELETE FROM comms_queue WHERE user_id = $1 AND comms_type = $2",
+            user_id,
+            comms_type as CommsType
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn expire_deletion_request(&self, token: &str) -> Result<(), DbError> {
+        sqlx::query!(
+            "UPDATE account_deletion_requests SET expires_at = NOW() - INTERVAL '1 hour' WHERE token = $1",
+            token
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(())
+    }
+
+    async fn get_reserved_signing_key_full(
+        &self,
+        public_key_did_key: &str,
+    ) -> Result<Option<ReservedSigningKeyFull>, DbError> {
+        let row = sqlx::query!(
+            r#"SELECT id, did, public_key_did_key, private_key_bytes, expires_at, used_at
+            FROM reserved_signing_keys WHERE public_key_did_key = $1"#,
+            public_key_did_key
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(row.map(|r| ReservedSigningKeyFull {
+            id: r.id,
+            did: r.did.map(|d| Did::new(d).expect("valid DID in database")),
+            public_key_did_key: r.public_key_did_key,
+            private_key_bytes: r.private_key_bytes,
+            expires_at: r.expires_at,
+            used_at: r.used_at,
+        }))
+    }
+
+    async fn get_plc_tokens_by_did(&self, did: &Did) -> Result<Vec<PlcTokenInfo>, DbError> {
+        let results = sqlx::query!(
+            r#"SELECT t.token, t.expires_at
+            FROM plc_operation_tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE u.did = $1"#,
+            did.as_str()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(results
+            .into_iter()
+            .map(|r| PlcTokenInfo {
+                token: r.token,
+                expires_at: r.expires_at,
+            })
+            .collect())
+    }
+
+    async fn count_plc_tokens_by_did(&self, did: &Did) -> Result<i64, DbError> {
+        let count = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!"
+            FROM plc_operation_tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE u.did = $1"#,
+            did.as_str()
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(count)
     }
 }

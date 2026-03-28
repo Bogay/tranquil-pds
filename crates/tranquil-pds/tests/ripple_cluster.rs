@@ -97,14 +97,22 @@ async fn cluster_any_node_access() {
         .expect("no accessJwt")
         .to_string();
 
-    let pool = common::get_test_db_pool().await;
-    let body_text: String = sqlx::query_scalar!(
-        "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
-        &did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("verification code not found");
+    let repos = common::get_test_repos().await;
+    let user = repos
+        .user
+        .get_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    let comms = repos
+        .infra
+        .get_latest_comms_for_user(user.id, tranquil_db_traits::CommsType::EmailVerification, 1)
+        .await
+        .expect("failed to get comms");
+    let body_text = comms
+        .first()
+        .map(|c| c.body.clone())
+        .expect("no email_verification comms found");
 
     let lines: Vec<&str> = body_text.lines().collect();
     let verification_code = lines
@@ -624,14 +632,22 @@ fn create_account_on_node<'a>(
             .expect("no accessJwt")
             .to_string();
 
-        let pool = common::get_test_db_pool().await;
-        let body_text: String = sqlx::query_scalar!(
-            "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
-            &did
-        )
-        .fetch_one(pool)
-        .await
-        .expect("verification code not found");
+        let repos = common::get_test_repos().await;
+        let user = repos
+            .user
+            .get_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
+            .await
+            .expect("failed to look up user")
+            .expect("user not found");
+        let comms = repos
+            .infra
+            .get_latest_comms_for_user(user.id, tranquil_db_traits::CommsType::EmailVerification, 1)
+            .await
+            .expect("failed to get comms");
+        let body_text = comms
+            .first()
+            .map(|c| c.body.clone())
+            .expect("no email_verification comms found");
 
         let lines: Vec<&str> = body_text.lines().collect();
         let verification_code = lines

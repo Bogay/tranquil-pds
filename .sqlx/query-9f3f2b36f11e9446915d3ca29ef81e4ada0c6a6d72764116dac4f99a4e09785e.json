@@ -1,0 +1,180 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                id, user_id,\n                channel as \"channel: CommsChannel\",\n                comms_type as \"comms_type: CommsType\",\n                status as \"status: CommsStatus\",\n                recipient, subject, body, metadata,\n                attempts, max_attempts, last_error,\n                created_at, updated_at, scheduled_for, processed_at\n            FROM comms_queue\n            WHERE user_id = $1 AND comms_type = $2\n            ORDER BY created_at DESC\n            LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel: CommsChannel",
+        "type_info": {
+          "Custom": {
+            "name": "comms_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "comms_type: CommsType",
+        "type_info": {
+          "Custom": {
+            "name": "comms_type",
+            "kind": {
+              "Enum": [
+                "welcome",
+                "email_verification",
+                "password_reset",
+                "email_update",
+                "account_deletion",
+                "admin_email",
+                "plc_operation",
+                "two_factor_code",
+                "channel_verification",
+                "passkey_recovery",
+                "legacy_login_alert",
+                "migration_verification",
+                "channel_verified"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "status: CommsStatus",
+        "type_info": {
+          "Custom": {
+            "name": "comms_status",
+            "kind": {
+              "Enum": [
+                "pending",
+                "processing",
+                "sent",
+                "failed"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "recipient",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "max_attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "scheduled_for",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "processed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "comms_type",
+            "kind": {
+              "Enum": [
+                "welcome",
+                "email_verification",
+                "password_reset",
+                "email_update",
+                "account_deletion",
+                "admin_email",
+                "plc_operation",
+                "two_factor_code",
+                "channel_verification",
+                "passkey_recovery",
+                "legacy_login_alert",
+                "migration_verification",
+                "channel_verified"
+              ]
+            }
+          }
+        },
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "9f3f2b36f11e9446915d3ca29ef81e4ada0c6a6d72764116dac4f99a4e09785e"
+}

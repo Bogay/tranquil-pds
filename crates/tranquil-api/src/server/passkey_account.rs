@@ -15,7 +15,6 @@ use tranquil_pds::rate_limit::{AccountCreationLimit, PasswordResetLimit, RateLim
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{Did, Handle, PlainPassword};
 use tranquil_pds::validation::validate_password;
-use tranquil_types::CidLink;
 
 fn generate_setup_token() -> String {
     let mut rng = rand::thread_rng();
@@ -366,22 +365,6 @@ pub async fn create_passkey_account(
         }
     };
     let user_id = create_result.user_id;
-
-    state
-        .repos
-        .repo
-        .create_repo(
-            user_id,
-            &did_typed,
-            &handle_typed,
-            &CidLink::from(&repo.commit_cid),
-            &repo.repo_rev,
-        )
-        .await
-        .map_err(|e| {
-            error!("failed to register repo in backend: {e:?}");
-            ApiError::InternalError(None)
-        })?;
 
     if !is_byod_did_web {
         crate::identity::provision::sequence_new_account(

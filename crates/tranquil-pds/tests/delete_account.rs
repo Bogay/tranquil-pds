@@ -51,15 +51,14 @@ async fn test_delete_account_full_flow() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_test_db_pool().await;
-    let row = sqlx::query!(
-        "SELECT token FROM account_deletion_requests WHERE did = $1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to query deletion token");
-    let token = row.token;
+    let repos = get_test_repos().await;
+    let deletion_request = repos
+        .infra
+        .get_deletion_request_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let token = deletion_request.token;
     let delete_payload = json!({
         "did": did,
         "password": password,
@@ -75,11 +74,12 @@ async fn test_delete_account_full_flow() {
         .await
         .expect("Failed to delete account");
     assert_eq!(delete_res.status(), StatusCode::OK);
-    let user_row = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(pool)
+    let user = repos
+        .user
+        .get_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
         .await
-        .expect("Failed to query user");
-    assert!(user_row.is_none(), "User should be deleted from database");
+        .unwrap();
+    assert!(user.is_none(), "User should be deleted from database");
     let session_res = client
         .get(format!("{}/xrpc/com.atproto.server.getSession", base_url))
         .bearer_auth(&jwt)
@@ -108,15 +108,14 @@ async fn test_delete_account_wrong_password() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_test_db_pool().await;
-    let row = sqlx::query!(
-        "SELECT token FROM account_deletion_requests WHERE did = $1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to query deletion token");
-    let token = row.token;
+    let repos = get_test_repos().await;
+    let deletion_request = repos
+        .infra
+        .get_deletion_request_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let token = deletion_request.token;
     let delete_payload = json!({
         "did": did,
         "password": "wrong-password",
@@ -198,22 +197,15 @@ async fn test_delete_account_expired_token() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_test_db_pool().await;
-    let row = sqlx::query!(
-        "SELECT token FROM account_deletion_requests WHERE did = $1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to query deletion token");
-    let token = row.token;
-    sqlx::query!(
-        "UPDATE account_deletion_requests SET expires_at = NOW() - INTERVAL '1 hour' WHERE token = $1",
-        token
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to expire token");
+    let repos = get_test_repos().await;
+    let deletion_request = repos
+        .infra
+        .get_deletion_request_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let token = deletion_request.token;
+    repos.infra.expire_deletion_request(&token).await.unwrap();
     let delete_payload = json!({
         "did": did,
         "password": password,
@@ -257,15 +249,14 @@ async fn test_delete_account_token_mismatch() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_test_db_pool().await;
-    let row = sqlx::query!(
-        "SELECT token FROM account_deletion_requests WHERE did = $1",
-        did1
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to query deletion token");
-    let token = row.token;
+    let repos = get_test_repos().await;
+    let deletion_request = repos
+        .infra
+        .get_deletion_request_by_did(&tranquil_types::Did::new(did1.clone()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let token = deletion_request.token;
     let delete_payload = json!({
         "did": did2,
         "password": password2,
@@ -318,15 +309,14 @@ async fn test_delete_account_with_app_password() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_test_db_pool().await;
-    let row = sqlx::query!(
-        "SELECT token FROM account_deletion_requests WHERE did = $1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to query deletion token");
-    let token = row.token;
+    let repos = get_test_repos().await;
+    let deletion_request = repos
+        .infra
+        .get_deletion_request_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let token = deletion_request.token;
     let delete_payload = json!({
         "did": did,
         "password": app_password,
@@ -342,11 +332,12 @@ async fn test_delete_account_with_app_password() {
         .await
         .expect("Failed to delete account");
     assert_eq!(delete_res.status(), StatusCode::OK);
-    let user_row = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(pool)
+    let user = repos
+        .user
+        .get_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
         .await
-        .expect("Failed to query user");
-    assert!(user_row.is_none(), "User should be deleted from database");
+        .unwrap();
+    assert!(user.is_none(), "User should be deleted from database");
 }
 
 #[tokio::test]

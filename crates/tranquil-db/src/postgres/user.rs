@@ -234,6 +234,8 @@ impl UserRepository for PostgresUserRepository {
         limit: i64,
     ) -> Result<Vec<AccountSearchResult>, DbError> {
         let cursor_str = cursor_did.map(|d| d.as_str());
+        let email_like = email_filter.map(|e| format!("%{e}%"));
+        let handle_like = handle_filter.map(|h| format!("%{h}%"));
         let rows = sqlx::query!(
             r#"SELECT did, handle, email, created_at, email_verified, deactivated_at, invites_disabled
                FROM users
@@ -243,8 +245,8 @@ impl UserRepository for PostgresUserRepository {
                ORDER BY did ASC
                LIMIT $4"#,
             cursor_str,
-            email_filter,
-            handle_filter,
+            email_like.as_deref(),
+            handle_like.as_deref(),
             limit
         )
         .fetch_all(&self.pool)
@@ -625,6 +627,18 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
         Ok(result.rows_affected())
+    }
+
+    async fn set_admin_status(&self, did: &Did, is_admin: bool) -> Result<(), DbError> {
+        sqlx::query!(
+            "UPDATE users SET is_admin = $1 WHERE did = $2",
+            is_admin,
+            did.as_str()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
     }
 
     async fn get_notification_prefs(
@@ -3305,5 +3319,67 @@ impl UserRepository for PostgresUserRepository {
             .await
             .map_err(map_sqlx_error)?;
         Ok(row.flatten())
+    }
+
+    async fn get_password_reset_info(
+        &self,
+        email: &str,
+    ) -> Result<Option<tranquil_db_traits::PasswordResetInfo>, DbError> {
+        let row = sqlx::query!(
+            "SELECT password_reset_code, password_reset_code_expires_at FROM users WHERE email = $1",
+            email
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(row.map(|r| tranquil_db_traits::PasswordResetInfo {
+            code: r.password_reset_code,
+            expires_at: r.password_reset_code_expires_at,
+        }))
+    }
+
+    async fn enable_totp_verified(
+        &self,
+        did: &Did,
+        encrypted_secret: &[u8],
+    ) -> Result<(), DbError> {
+        sqlx::query!(
+            r#"INSERT INTO user_totp (did, secret_encrypted, encryption_version, verified, created_at)
+               VALUES ($1, $2, 1, TRUE, NOW())
+               ON CONFLICT (did) DO UPDATE SET secret_encrypted = $2, verified = TRUE"#,
+            did.as_str(),
+            encrypted_secret
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(())
+    }
+
+    async fn set_two_factor_enabled(&self, did: &Did, enabled: bool) -> Result<(), DbError> {
+        sqlx::query!(
+            "UPDATE users SET two_factor_enabled = $1 WHERE did = $2",
+            enabled,
+            did.as_str()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(())
+    }
+
+    async fn expire_password_reset_code(&self, email: &str) -> Result<(), DbError> {
+        sqlx::query!(
+            "UPDATE users SET password_reset_code_expires_at = NOW() - INTERVAL '1 hour' WHERE email = $1",
+            email
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(())
     }
 }

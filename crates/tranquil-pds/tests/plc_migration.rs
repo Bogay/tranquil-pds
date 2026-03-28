@@ -3,7 +3,7 @@ use common::*;
 use k256::ecdsa::SigningKey;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use tranquil_types::Did;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -36,47 +36,28 @@ fn get_multikey_from_signing_key(signing_key: &SigningKey) -> String {
 }
 
 async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
-    let db_url = get_db_connection_string().await;
-    let pool = PgPool::connect(&db_url).await.ok()?;
-    let row = sqlx::query!(
-        r#"
-        SELECT k.key_bytes, k.encryption_version
-        FROM user_keys k
-        JOIN users u ON k.user_id = u.id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(&pool)
-    .await
-    .ok()??;
-    tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version).ok()
+    let repos = get_test_repos().await;
+    let parsed_did = Did::new(did.to_string()).ok()?;
+    let key_info = repos.user.get_user_key_by_did(&parsed_did).await.ok()??;
+    tranquil_pds::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version).ok()
 }
 
 async fn get_plc_token_from_db(did: &str) -> Option<String> {
-    let db_url = get_db_connection_string().await;
-    let pool = PgPool::connect(&db_url).await.ok()?;
-    sqlx::query_scalar!(
-        r#"
-        SELECT t.token
-        FROM plc_operation_tokens t
-        JOIN users u ON t.user_id = u.id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(&pool)
-    .await
-    .ok()?
+    let repos = get_test_repos().await;
+    let parsed_did = Did::new(did.to_string()).ok()?;
+    let tokens = repos.infra.get_plc_tokens_by_did(&parsed_did).await.ok()?;
+    tokens.into_iter().next().map(|t| t.token)
 }
 
 async fn get_user_handle(did: &str) -> Option<String> {
-    let db_url = get_db_connection_string().await;
-    let pool = PgPool::connect(&db_url).await.ok()?;
-    sqlx::query_scalar!(r#"SELECT handle FROM users WHERE did = $1"#, did)
-        .fetch_optional(&pool)
+    let repos = get_test_repos().await;
+    let parsed_did = Did::new(did.to_string()).ok()?;
+    repos
+        .user
+        .get_handle_by_did(&parsed_did)
         .await
         .ok()?
+        .map(|h| h.to_string())
 }
 
 fn create_mock_last_op(

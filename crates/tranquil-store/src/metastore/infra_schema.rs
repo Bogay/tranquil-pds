@@ -7,7 +7,8 @@ use super::keys::KeyTag;
 const COMMS_SCHEMA_VERSION: u8 = 1;
 const INVITE_CODE_SCHEMA_VERSION: u8 = 1;
 const INVITE_USE_SCHEMA_VERSION: u8 = 1;
-const SIGNING_KEY_SCHEMA_VERSION: u8 = 1;
+const SIGNING_KEY_SCHEMA_V1: u8 = 1;
+const SIGNING_KEY_SCHEMA_V2: u8 = 2;
 const DELETION_REQUEST_SCHEMA_VERSION: u8 = 1;
 const REPORT_SCHEMA_VERSION: u8 = 1;
 const NOTIFICATION_HISTORY_SCHEMA_VERSION: u8 = 1;
@@ -105,6 +106,17 @@ impl InviteCodeUseValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SigningKeyValueV1 {
+    id: uuid::Uuid,
+    did: Option<String>,
+    public_key_did_key: String,
+    private_key_bytes: Vec<u8>,
+    used: bool,
+    created_at_ms: i64,
+    expires_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SigningKeyValue {
     pub id: uuid::Uuid,
     pub did: Option<String>,
@@ -113,6 +125,7 @@ pub struct SigningKeyValue {
     pub used: bool,
     pub created_at_ms: i64,
     pub expires_at_ms: i64,
+    pub used_at_ms: Option<i64>,
 }
 
 impl SigningKeyValue {
@@ -120,7 +133,7 @@ impl SigningKeyValue {
         let payload =
             postcard::to_allocvec(self).expect("SigningKeyValue serialization cannot fail");
         let mut buf = Vec::with_capacity(1 + payload.len());
-        buf.push(SIGNING_KEY_SCHEMA_VERSION);
+        buf.push(SIGNING_KEY_SCHEMA_V2);
         buf.extend_from_slice(&payload);
         buf
     }
@@ -128,7 +141,20 @@ impl SigningKeyValue {
     pub fn deserialize(bytes: &[u8]) -> Option<Self> {
         let (&version, payload) = bytes.split_first()?;
         match version {
-            SIGNING_KEY_SCHEMA_VERSION => postcard::from_bytes(payload).ok(),
+            SIGNING_KEY_SCHEMA_V1 => {
+                let v1: SigningKeyValueV1 = postcard::from_bytes(payload).ok()?;
+                Some(Self {
+                    id: v1.id,
+                    did: v1.did,
+                    public_key_did_key: v1.public_key_did_key,
+                    private_key_bytes: v1.private_key_bytes,
+                    used: v1.used,
+                    created_at_ms: v1.created_at_ms,
+                    expires_at_ms: v1.expires_at_ms,
+                    used_at_ms: None,
+                })
+            }
+            SIGNING_KEY_SCHEMA_V2 => postcard::from_bytes(payload).ok(),
             _ => None,
         }
     }
@@ -518,10 +544,33 @@ mod tests {
             used: false,
             created_at_ms: 1700000000000,
             expires_at_ms: 1700000600000,
+            used_at_ms: None,
         };
         let bytes = val.serialize();
         let decoded = SigningKeyValue::deserialize(&bytes).unwrap();
         assert_eq!(val, decoded);
+    }
+
+    #[test]
+    fn signing_key_value_v1_migration() {
+        let v1 = SigningKeyValueV1 {
+            id: uuid::Uuid::new_v4(),
+            did: Some("did:plc:test".to_owned()),
+            public_key_did_key: "did:key:z123".to_owned(),
+            private_key_bytes: vec![1, 2, 3, 4],
+            used: true,
+            created_at_ms: 1700000000000,
+            expires_at_ms: 1700000600000,
+        };
+        let payload = postcard::to_allocvec(&v1).unwrap();
+        let mut bytes = Vec::with_capacity(1 + payload.len());
+        bytes.push(SIGNING_KEY_SCHEMA_V1);
+        bytes.extend_from_slice(&payload);
+
+        let decoded = SigningKeyValue::deserialize(&bytes).unwrap();
+        assert_eq!(decoded.id, v1.id);
+        assert!(decoded.used);
+        assert_eq!(decoded.used_at_ms, None);
     }
 
     #[test]

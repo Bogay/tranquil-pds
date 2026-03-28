@@ -5,7 +5,6 @@ use serde::Serialize;
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::auth::{Admin, Auth};
 use tranquil_pds::state::AppState;
-use tranquil_signal::PgSignalStore;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,15 +52,20 @@ pub async fn link_signal_device(
     let device_name = tranquil_signal::DeviceName::new("tranquil-pds".to_string())
         .map_err(|e| ApiError::InternalError(Some(format!("invalid device name: {e}"))))?;
 
-    let link_result = tranquil_signal::SignalClient::link_device(
-        &state.repos.pool,
-        device_name,
-        state.shutdown.clone(),
-        link_cancel,
-        slot.linking_flag(),
-    )
-    .await
-    .map_err(|e| ApiError::InternalError(Some(format!("Signal linking failed: {e}"))))?;
+    let signal_store = state
+        .signal_store_provider
+        .as_ref()
+        .ok_or_else(|| ApiError::InternalError(Some("Signal store not configured".into())))?;
+
+    let link_result = signal_store
+        .link_signal_device(
+            device_name,
+            state.shutdown.clone(),
+            link_cancel,
+            slot.linking_flag(),
+        )
+        .await
+        .map_err(|e| ApiError::InternalError(Some(format!("Signal linking failed: {e}"))))?;
 
     let qr_base64 = url_to_qr_png_base64(link_result.url.as_str())
         .map_err(|e| ApiError::InternalError(Some(format!("QR generation failed: {e}"))))?;
@@ -108,9 +112,13 @@ pub async fn unlink_signal_device(
         .as_ref()
         .ok_or_else(|| ApiError::InvalidRequest("Signal is not enabled".into()))?;
 
-    let store = PgSignalStore::new(state.repos.pool.clone());
-    store
-        .clear_all()
+    let signal_store = state
+        .signal_store_provider
+        .as_ref()
+        .ok_or_else(|| ApiError::InternalError(Some("Signal store not configured".into())))?;
+
+    signal_store
+        .clear_signal_data()
         .await
         .map_err(|e| ApiError::InternalError(Some(format!("Failed to clear signal data: {e}"))))?;
 

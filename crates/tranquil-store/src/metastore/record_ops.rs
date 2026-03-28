@@ -179,6 +179,12 @@ impl RecordOps {
 
         let effective_cursor = match query.reverse {
             false => {
+                if let Some(ck) = cursor_key.as_ref().filter(|ck| ck.as_slice() < range_hi) {
+                    range_hi = ck.as_slice();
+                }
+                None
+            }
+            true => {
                 let narrowed = cursor_key.as_ref().filter(|ck| ck.as_slice() > range_lo);
                 match narrowed {
                     Some(ck) => {
@@ -188,21 +194,15 @@ impl RecordOps {
                     None => None,
                 }
             }
-            true => {
-                if let Some(ck) = cursor_key.as_ref().filter(|ck| ck.as_slice() < range_hi) {
-                    range_hi = ck.as_slice();
-                }
-                None
-            }
         };
 
         match range_lo >= range_hi {
             true => Ok(Vec::new()),
             false => match query.reverse {
-                false => {
+                false => self.list_records_reverse(range_lo, range_hi, query.limit),
+                true => {
                     self.list_records_forward(range_lo, range_hi, effective_cursor, query.limit)
                 }
-                true => self.list_records_reverse(range_lo, range_hi, query.limit),
             },
         }
     }
@@ -674,7 +674,7 @@ mod tests {
     }
 
     #[test]
-    fn list_records_forward_with_limit() {
+    fn list_records_default_desc_with_limit() {
         let (_dir, ms) = open_fresh();
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
@@ -699,84 +699,13 @@ mod tests {
             .list_records(&lrq(user_id, &collection, None, 3, false, None, None))
             .unwrap();
         assert_eq!(results.len(), 3);
-        assert_eq!(results[0].rkey.as_str(), "rkey000");
-        assert_eq!(results[1].rkey.as_str(), "rkey001");
-        assert_eq!(results[2].rkey.as_str(), "rkey002");
-    }
-
-    #[test]
-    fn list_records_with_cursor() {
-        let (_dir, ms) = open_fresh();
-        let (user_id, user_hash) = setup_user(&ms);
-        let rec_ops = ms.record_ops();
-
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..5).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
-        let cids: Vec<CidLink> = (0..5).map(|i| test_cid_link(i + 1)).collect();
-
-        let writes: Vec<RecordWrite<'_>> = rkeys
-            .iter()
-            .zip(cids.iter())
-            .map(|(rk, c)| rw(&collection, rk, c))
-            .collect();
-
-        let mut batch = ms.database().batch();
-        rec_ops
-            .upsert_records(&mut batch, user_hash, &writes)
-            .unwrap();
-        batch.commit().unwrap();
-
-        let cursor = Rkey::from("rkey001".to_string());
-        let results = rec_ops
-            .list_records(&lrq(
-                user_id,
-                &collection,
-                Some(&cursor),
-                10,
-                false,
-                None,
-                None,
-            ))
-            .unwrap();
-        assert_eq!(results.len(), 3);
-        assert_eq!(results[0].rkey.as_str(), "rkey002");
-        assert_eq!(results[1].rkey.as_str(), "rkey003");
-        assert_eq!(results[2].rkey.as_str(), "rkey004");
-    }
-
-    #[test]
-    fn list_records_reverse() {
-        let (_dir, ms) = open_fresh();
-        let (user_id, user_hash) = setup_user(&ms);
-        let rec_ops = ms.record_ops();
-
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..5).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
-        let cids: Vec<CidLink> = (0..5).map(|i| test_cid_link(i + 1)).collect();
-
-        let writes: Vec<RecordWrite<'_>> = rkeys
-            .iter()
-            .zip(cids.iter())
-            .map(|(rk, c)| rw(&collection, rk, c))
-            .collect();
-
-        let mut batch = ms.database().batch();
-        rec_ops
-            .upsert_records(&mut batch, user_hash, &writes)
-            .unwrap();
-        batch.commit().unwrap();
-
-        let results = rec_ops
-            .list_records(&lrq(user_id, &collection, None, 3, true, None, None))
-            .unwrap();
-        assert_eq!(results.len(), 3);
         assert_eq!(results[0].rkey.as_str(), "rkey004");
         assert_eq!(results[1].rkey.as_str(), "rkey003");
         assert_eq!(results[2].rkey.as_str(), "rkey002");
     }
 
     #[test]
-    fn list_records_reverse_with_cursor() {
+    fn list_records_default_desc_with_cursor() {
         let (_dir, ms) = open_fresh();
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
@@ -804,7 +733,7 @@ mod tests {
                 &collection,
                 Some(&cursor),
                 10,
-                true,
+                false,
                 None,
                 None,
             ))
@@ -816,7 +745,78 @@ mod tests {
     }
 
     #[test]
-    fn list_records_rkey_range_bounds() {
+    fn list_records_reverse_asc() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+
+        let collection = Nsid::from("app.bsky.feed.post".to_string());
+        let rkeys: Vec<Rkey> = (0..5).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let cids: Vec<CidLink> = (0..5).map(|i| test_cid_link(i + 1)).collect();
+
+        let writes: Vec<RecordWrite<'_>> = rkeys
+            .iter()
+            .zip(cids.iter())
+            .map(|(rk, c)| rw(&collection, rk, c))
+            .collect();
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &writes)
+            .unwrap();
+        batch.commit().unwrap();
+
+        let results = rec_ops
+            .list_records(&lrq(user_id, &collection, None, 3, true, None, None))
+            .unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].rkey.as_str(), "rkey000");
+        assert_eq!(results[1].rkey.as_str(), "rkey001");
+        assert_eq!(results[2].rkey.as_str(), "rkey002");
+    }
+
+    #[test]
+    fn list_records_reverse_asc_with_cursor() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+
+        let collection = Nsid::from("app.bsky.feed.post".to_string());
+        let rkeys: Vec<Rkey> = (0..5).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let cids: Vec<CidLink> = (0..5).map(|i| test_cid_link(i + 1)).collect();
+
+        let writes: Vec<RecordWrite<'_>> = rkeys
+            .iter()
+            .zip(cids.iter())
+            .map(|(rk, c)| rw(&collection, rk, c))
+            .collect();
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &writes)
+            .unwrap();
+        batch.commit().unwrap();
+
+        let cursor = Rkey::from("rkey001".to_string());
+        let results = rec_ops
+            .list_records(&lrq(
+                user_id,
+                &collection,
+                Some(&cursor),
+                10,
+                true,
+                None,
+                None,
+            ))
+            .unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].rkey.as_str(), "rkey002");
+        assert_eq!(results[1].rkey.as_str(), "rkey003");
+        assert_eq!(results[2].rkey.as_str(), "rkey004");
+    }
+
+    #[test]
+    fn list_records_default_desc_rkey_range_bounds() {
         let (_dir, ms) = open_fresh();
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
@@ -851,8 +851,8 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(results.len(), 4);
-        assert_eq!(results[0].rkey.as_str(), "rkey003");
-        assert_eq!(results[3].rkey.as_str(), "rkey006");
+        assert_eq!(results[0].rkey.as_str(), "rkey006");
+        assert_eq!(results[3].rkey.as_str(), "rkey003");
     }
 
     #[test]
@@ -1220,7 +1220,7 @@ mod tests {
             .list_records(&lrq(user_id, &collection, None, 100, false, None, None))
             .unwrap();
         let result_rkeys: Vec<&str> = results.iter().map(|r| r.rkey.as_str()).collect();
-        assert_eq!(result_rkeys, ["apple", "banana", "mango", "zebra"]);
+        assert_eq!(result_rkeys, ["zebra", "mango", "banana", "apple"]);
     }
 
     #[test]
@@ -1287,8 +1287,8 @@ mod tests {
             .list_records(&lrq(user_id, &collection, None, 100, false, None, None))
             .unwrap();
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].rkey.as_str(), "abc");
-        assert_eq!(results[1].rkey.as_str(), "abc\x00def");
+        assert_eq!(results[0].rkey.as_str(), "abc\x00def");
+        assert_eq!(results[1].rkey.as_str(), "abc");
     }
 
     #[test]
@@ -1341,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn list_records_cursor_past_rkey_end_returns_empty() {
+    fn list_records_cursor_before_all_returns_empty() {
         let (_dir, ms) = open_fresh();
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
@@ -1362,8 +1362,7 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        let cursor = Rkey::from("rkey010".to_string());
-        let rkey_end = Rkey::from("rkey003".to_string());
+        let cursor = Rkey::from("a".to_string());
         let results = rec_ops
             .list_records(&lrq(
                 user_id,
@@ -1372,14 +1371,14 @@ mod tests {
                 100,
                 false,
                 None,
-                Some(&rkey_end),
+                None,
             ))
             .unwrap();
         assert!(results.is_empty());
     }
 
     #[test]
-    fn list_records_reverse_with_rkey_bounds() {
+    fn list_records_reverse_asc_with_rkey_bounds() {
         let (_dir, ms) = open_fresh();
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
@@ -1414,12 +1413,12 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(results.len(), 6);
-        assert_eq!(results[0].rkey.as_str(), "rkey007");
-        assert_eq!(results[5].rkey.as_str(), "rkey002");
+        assert_eq!(results[0].rkey.as_str(), "rkey002");
+        assert_eq!(results[5].rkey.as_str(), "rkey007");
     }
 
     #[test]
-    fn list_records_reverse_cursor_narrows_range() {
+    fn list_records_default_desc_cursor_narrows_range() {
         let (_dir, ms) = open_fresh();
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
@@ -1447,7 +1446,7 @@ mod tests {
                 &collection,
                 Some(&cursor),
                 3,
-                true,
+                false,
                 None,
                 None,
             ))

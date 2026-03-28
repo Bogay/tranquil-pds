@@ -1,16 +1,24 @@
 mod common;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use tranquil_db_traits::CommsType;
+use tranquil_types::Did;
 
-async fn get_email_update_token(pool: &PgPool, did: &str) -> String {
-    let body_text: String = sqlx::query_scalar!(
-        "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_update' ORDER BY created_at DESC LIMIT 1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Verification not found");
+async fn get_email_update_token(did: &str) -> String {
+    let repos = common::get_test_repos().await;
+    let parsed_did = Did::new(did.to_string()).unwrap();
+    let user = repos
+        .user
+        .get_by_did(&parsed_did)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    let comms = repos
+        .infra
+        .get_latest_comms_for_user(user.id, CommsType::EmailUpdate, 1)
+        .await
+        .expect("failed to get comms");
+    let body_text = comms.first().expect("Verification not found").body.clone();
 
     body_text
         .lines()
@@ -82,7 +90,7 @@ async fn test_request_email_update_returns_token_required() {
 async fn test_update_email_flow_success() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let handle = format!("eu{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
     let (access_jwt, did) = create_verified_account(&client, base_url, &handle, &email).await;
@@ -101,7 +109,7 @@ async fn test_update_email_flow_success() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["tokenRequired"], true);
 
-    let code = get_email_update_token(pool, &did).await;
+    let code = get_email_update_token(&did).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
@@ -115,11 +123,14 @@ async fn test_update_email_flow_success() {
         .expect("Failed to update email");
     assert_eq!(res.status(), StatusCode::OK);
 
-    let user_email: Option<String> =
-        sqlx::query_scalar!("SELECT email FROM users WHERE did = $1", did)
-            .fetch_one(pool)
-            .await
-            .expect("User not found");
+    let parsed_did = Did::new(did).unwrap();
+    let user_email = repos
+        .user
+        .get_email_info_by_did(&parsed_did)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found")
+        .email;
     assert_eq!(user_email, Some(new_email));
 }
 
@@ -239,7 +250,7 @@ async fn test_update_email_invalid_format() {
 async fn test_confirm_email_confirms_existing_email() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let handle = format!("ec{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
 
@@ -264,13 +275,23 @@ async fn test_confirm_email_confirms_existing_email() {
         .expect("No accessJwt")
         .to_string();
 
-    let body_text: String = sqlx::query_scalar!(
-        "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Verification email not found");
+    let parsed_did = Did::new(did.clone()).unwrap();
+    let user = repos
+        .user
+        .get_by_did(&parsed_did)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    let comms = repos
+        .infra
+        .get_latest_comms_for_user(user.id, CommsType::EmailVerification, 1)
+        .await
+        .expect("failed to get comms");
+    let body_text = comms
+        .first()
+        .expect("Verification email not found")
+        .body
+        .clone();
 
     let code = body_text
         .lines()
@@ -290,11 +311,13 @@ async fn test_confirm_email_confirms_existing_email() {
         .expect("Failed to confirm email");
     assert_eq!(res.status(), StatusCode::OK);
 
-    let verified: bool =
-        sqlx::query_scalar!("SELECT email_verified FROM users WHERE did = $1", did)
-            .fetch_one(pool)
-            .await
-            .expect("User not found");
+    let verified = repos
+        .user
+        .get_email_info_by_did(&parsed_did)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found")
+        .email_verified;
     assert!(verified);
 }
 
@@ -302,7 +325,7 @@ async fn test_confirm_email_confirms_existing_email() {
 async fn test_confirm_email_rejects_wrong_email() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let handle = format!("ew{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
 
@@ -327,13 +350,23 @@ async fn test_confirm_email_rejects_wrong_email() {
         .expect("No accessJwt")
         .to_string();
 
-    let body_text: String = sqlx::query_scalar!(
-        "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Verification email not found");
+    let parsed_did = Did::new(did).unwrap();
+    let user = repos
+        .user
+        .get_by_did(&parsed_did)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    let comms = repos
+        .infra
+        .get_latest_comms_for_user(user.id, CommsType::EmailVerification, 1)
+        .await
+        .expect("failed to get comms");
+    let body_text = comms
+        .first()
+        .expect("Verification email not found")
+        .body
+        .clone();
 
     let code = body_text
         .lines()
@@ -402,7 +435,7 @@ async fn test_confirm_email_invalid_token() {
 async fn test_unverified_account_can_update_email_without_token() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let handle = format!("ev{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
 
@@ -457,11 +490,14 @@ async fn test_unverified_account_can_update_email_without_token() {
         "Unverified account should be able to update email without token"
     );
 
-    let user_email: Option<String> =
-        sqlx::query_scalar!("SELECT email FROM users WHERE did = $1", did)
-            .fetch_one(pool)
-            .await
-            .expect("User not found");
+    let parsed_did = Did::new(did).unwrap();
+    let user_email = repos
+        .user
+        .get_email_info_by_did(&parsed_did)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found")
+        .email;
     assert_eq!(user_email, Some(new_email));
 }
 
@@ -469,7 +505,7 @@ async fn test_unverified_account_can_update_email_without_token() {
 async fn test_update_email_to_same_as_another_user_allowed() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
 
     let handle1 = format!("d1{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email1 = format!("{}@example.com", handle1);
@@ -490,7 +526,7 @@ async fn test_update_email_to_same_as_another_user_allowed() {
         .expect("Failed to request email update");
     assert_eq!(res.status(), StatusCode::OK);
 
-    let code = get_email_update_token(pool, &did2).await;
+    let code = get_email_update_token(&did2).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
@@ -508,10 +544,13 @@ async fn test_update_email_to_same_as_another_user_allowed() {
         "Multiple accounts can share the same email address"
     );
 
-    let user_email: Option<String> =
-        sqlx::query_scalar!("SELECT email FROM users WHERE did = $1", did2)
-            .fetch_one(pool)
-            .await
-            .expect("User not found");
+    let parsed_did = Did::new(did2).unwrap();
+    let user_email = repos
+        .user
+        .get_email_info_by_did(&parsed_did)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found")
+        .email;
     assert_eq!(user_email, Some(email1.clone()));
 }

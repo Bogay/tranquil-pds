@@ -577,19 +577,23 @@ async fn test_request_account_delete() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(res.status(), StatusCode::OK);
-    let db_url = get_db_connection_string().await;
-    let pool = sqlx::PgPool::connect(&db_url)
+    let repos = get_test_repos().await;
+    let deletion_request = repos
+        .infra
+        .get_deletion_request_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
         .await
-        .expect("Failed to connect to test DB");
-    let row = sqlx::query!(
-        "SELECT token, expires_at FROM account_deletion_requests WHERE did = $1",
-        did
-    )
-    .fetch_optional(&pool)
-    .await
-    .expect("Failed to query DB");
-    assert!(row.is_some(), "Deletion token should exist in DB");
-    let row = row.unwrap();
-    assert!(!row.token.is_empty(), "Token should not be empty");
-    assert!(row.expires_at > Utc::now(), "Token should not be expired");
+        .expect("Failed to query DB");
+    assert!(
+        deletion_request.is_some(),
+        "Deletion token should exist in DB"
+    );
+    let deletion_request = deletion_request.unwrap();
+    assert!(
+        !deletion_request.token.is_empty(),
+        "Token should not be empty"
+    );
+    assert!(
+        deletion_request.expires_at > Utc::now(),
+        "Token should not be expired"
+    );
 }

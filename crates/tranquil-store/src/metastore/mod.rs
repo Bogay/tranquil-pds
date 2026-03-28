@@ -233,6 +233,10 @@ impl Metastore {
         &self.partitions[p.index()]
     }
 
+    pub fn signal_keyspace(&self) -> Keyspace {
+        self.partitions[Partition::Signal.index()].clone()
+    }
+
     pub fn user_hashes(&self) -> &Arc<UserHashMap> {
         &self.user_hashes
     }

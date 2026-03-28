@@ -114,8 +114,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let signal_sender = if tranquil_config::get().signal.enabled {
         let slot = Arc::new(tranquil_signal::SignalSlot::default());
         state = state.with_signal_sender(slot.clone());
-        if let Some(client) =
-            tranquil_signal::SignalClient::from_pool(&state.repos.pool, shutdown.clone()).await
+        if let Some(provider) = &state.signal_store_provider
+            && let Some(client) = provider.load_signal_client(shutdown.clone()).await
         {
             slot.set_client(client).await;
             info!("Signal device already linked");

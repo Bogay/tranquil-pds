@@ -177,31 +177,31 @@ async fn test_complete_user_journey_signup_to_deletion() {
         .expect("Request delete failed");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
 
-    let pool = get_test_db_pool().await;
-    let row = sqlx::query!(
-        "SELECT token FROM account_deletion_requests WHERE did = $1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to get deletion token");
+    let repos = get_test_repos().await;
+    let deletion_request = repos
+        .infra
+        .get_deletion_request_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
 
     let final_delete_res = client
         .post(format!("{}/xrpc/com.atproto.server.deleteAccount", base))
         .json(&json!({
             "did": did,
             "password": password,
-            "token": row.token
+            "token": deletion_request.token
         }))
         .send()
         .await
         .expect("Final delete failed");
     assert_eq!(final_delete_res.status(), StatusCode::OK);
 
-    let user_gone = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(pool)
+    let user_gone = repos
+        .user
+        .get_by_did(&tranquil_types::Did::new(did.clone()).unwrap())
         .await
-        .expect("Failed to check user");
+        .unwrap();
     assert!(user_gone.is_none(), "User should be deleted");
 }
 

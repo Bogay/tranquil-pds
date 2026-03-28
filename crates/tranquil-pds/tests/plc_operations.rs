@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use reqwest::StatusCode;
 use serde_json::json;
-use sqlx::PgPool;
+use tranquil_types::Did;
 
 #[tokio::test]
 async fn test_plc_operation_auth() {
@@ -176,26 +176,34 @@ async fn test_plc_token_lifecycle() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let db_url = get_db_connection_string().await;
-    let pool = PgPool::connect(&db_url).await.unwrap();
-    let row = sqlx::query!(
-        "SELECT t.token, t.expires_at FROM plc_operation_tokens t JOIN users u ON t.user_id = u.id WHERE u.did = $1",
-        did
-    ).fetch_optional(&pool).await.unwrap();
-    assert!(row.is_some(), "PLC token should be created in database");
-    let row = row.unwrap();
-    assert_eq!(row.token.len(), 11, "Token should be in format xxxxx-xxxxx");
-    assert!(row.token.contains('-'), "Token should contain hyphen");
+    let repos = get_test_repos().await;
+    let parsed_did = Did::new(did.clone()).unwrap();
+    let tokens = repos
+        .infra
+        .get_plc_tokens_by_did(&parsed_did)
+        .await
+        .unwrap();
     assert!(
-        row.expires_at > chrono::Utc::now(),
+        !tokens.is_empty(),
+        "PLC token should be created in database"
+    );
+    let first = &tokens[0];
+    assert_eq!(
+        first.token.len(),
+        11,
+        "Token should be in format xxxxx-xxxxx"
+    );
+    assert!(first.token.contains('-'), "Token should contain hyphen");
+    assert!(
+        first.expires_at > chrono::Utc::now(),
         "Token should not be expired"
     );
-    let diff = row.expires_at - chrono::Utc::now();
+    let diff = first.expires_at - chrono::Utc::now();
     assert!(
         diff.num_minutes() >= 9 && diff.num_minutes() <= 11,
         "Token should expire in ~10 minutes"
     );
-    let token1 = row.token.clone();
+    let token1 = first.token.clone();
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.identity.requestPlcOperationSignature",
@@ -206,12 +214,20 @@ async fn test_plc_token_lifecycle() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let token2 = sqlx::query_scalar!(
-        "SELECT t.token FROM plc_operation_tokens t JOIN users u ON t.user_id = u.id WHERE u.did = $1", did
-    ).fetch_one(&pool).await.unwrap();
-    assert_ne!(token1, token2, "Second request should generate a new token");
-    let count: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) as \"count!\" FROM plc_operation_tokens t JOIN users u ON t.user_id = u.id WHERE u.did = $1", did
-    ).fetch_one(&pool).await.unwrap();
+    let tokens2 = repos
+        .infra
+        .get_plc_tokens_by_did(&parsed_did)
+        .await
+        .unwrap();
+    let token2 = &tokens2[0].token;
+    assert_ne!(
+        token1, *token2,
+        "Second request should generate a new token"
+    );
+    let count = repos
+        .infra
+        .count_plc_tokens_by_did(&parsed_did)
+        .await
+        .unwrap();
     assert_eq!(count, 1, "Should only have one token per user");
 }

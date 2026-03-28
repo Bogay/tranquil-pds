@@ -223,6 +223,8 @@ pub trait UserRepository: Send + Sync {
 
     async fn admin_update_password(&self, did: &Did, password_hash: &str) -> Result<u64, DbError>;
 
+    async fn set_admin_status(&self, did: &Did, is_admin: bool) -> Result<(), DbError>;
+
     async fn get_notification_prefs(&self, did: &Did)
     -> Result<Option<NotificationPrefs>, DbError>;
 
@@ -584,6 +586,18 @@ pub trait UserRepository: Send + Sync {
         &self,
         input: &RecoverPasskeyAccountInput,
     ) -> Result<RecoverPasskeyAccountResult, DbError>;
+
+    async fn get_password_reset_info(
+        &self,
+        email: &str,
+    ) -> Result<Option<crate::PasswordResetInfo>, DbError>;
+
+    async fn enable_totp_verified(&self, did: &Did, encrypted_secret: &[u8])
+    -> Result<(), DbError>;
+
+    async fn set_two_factor_enabled(&self, did: &Did, enabled: bool) -> Result<(), DbError>;
+
+    async fn expire_password_reset_code(&self, email: &str) -> Result<(), DbError>;
 }
 
 #[derive(Debug, Clone)]

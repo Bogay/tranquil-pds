@@ -28,7 +28,7 @@ use tranquil_db_traits::{
 pub use user::PostgresUserRepository;
 
 pub struct PostgresRepositories {
-    pub pool: PgPool,
+    pub pool: Option<PgPool>,
     pub user: Arc<dyn UserRepository>,
     pub oauth: Arc<dyn OAuthRepository>,
     pub session: Arc<dyn SessionRepository>,
@@ -44,7 +44,7 @@ pub struct PostgresRepositories {
 impl PostgresRepositories {
     pub fn new(pool: PgPool) -> Self {
         Self {
-            pool: pool.clone(),
+            pool: Some(pool.clone()),
             user: Arc::new(PostgresUserRepository::new(pool.clone())),
             oauth: Arc::new(PostgresOAuthRepository::new(pool.clone())),
             session: Arc::new(PostgresSessionRepository::new(pool.clone())),

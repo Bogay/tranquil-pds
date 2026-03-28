@@ -3,12 +3,13 @@ mod helpers;
 use helpers::verify_new_account;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use tranquil_db_traits::CommsType;
 
 #[tokio::test]
 async fn test_request_password_reset_creates_code() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let handle = format!("pr{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
     let payload = json!({
@@ -36,16 +37,15 @@ async fn test_request_password_reset_creates_code() {
         .await
         .expect("Failed to request password reset");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!(
-        "SELECT password_reset_code, password_reset_code_expires_at FROM users WHERE email = $1",
-        email
-    )
-    .fetch_one(pool)
-    .await
-    .expect("User not found");
-    assert!(user.password_reset_code.is_some());
-    assert!(user.password_reset_code_expires_at.is_some());
-    let code = user.password_reset_code.unwrap();
+    let info = repos
+        .user
+        .get_password_reset_info(&email)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    assert!(info.code.is_some());
+    assert!(info.expires_at.is_some());
+    let code = info.code.unwrap();
     assert!(code.contains('-'));
     assert_eq!(code.len(), 11);
 }
@@ -70,7 +70,7 @@ async fn test_request_password_reset_unknown_email_returns_ok() {
 async fn test_reset_password_with_valid_token() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let handle = format!("pr2{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
     let old_password = "Oldpass123!";
@@ -103,14 +103,13 @@ async fn test_reset_password_with_valid_token() {
         .await
         .expect("Failed to request password reset");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!(
-        "SELECT password_reset_code FROM users WHERE email = $1",
-        email
-    )
-    .fetch_one(pool)
-    .await
-    .expect("User not found");
-    let token = user.password_reset_code.expect("No reset code");
+    let info = repos
+        .user
+        .get_password_reset_info(&email)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    let token = info.code.expect("No reset code");
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.resetPassword",
@@ -124,15 +123,14 @@ async fn test_reset_password_with_valid_token() {
         .await
         .expect("Failed to reset password");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!(
-        "SELECT password_reset_code, password_reset_code_expires_at FROM users WHERE email = $1",
-        email
-    )
-    .fetch_one(pool)
-    .await
-    .expect("User not found");
-    assert!(user.password_reset_code.is_none());
-    assert!(user.password_reset_code_expires_at.is_none());
+    let info = repos
+        .user
+        .get_password_reset_info(&email)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    assert!(info.code.is_none());
+    assert!(info.expires_at.is_none());
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createSession",
@@ -186,7 +184,7 @@ async fn test_reset_password_with_invalid_token() {
 async fn test_reset_password_with_expired_token() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let handle = format!("pr3{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
     let payload = json!({
@@ -214,21 +212,18 @@ async fn test_reset_password_with_expired_token() {
         .await
         .expect("Failed to request password reset");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!(
-        "SELECT password_reset_code FROM users WHERE email = $1",
-        email
-    )
-    .fetch_one(pool)
-    .await
-    .expect("User not found");
-    let token = user.password_reset_code.expect("No reset code");
-    sqlx::query!(
-        "UPDATE users SET password_reset_code_expires_at = NOW() - INTERVAL '1 hour' WHERE email = $1",
-        email
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to expire token");
+    let info = repos
+        .user
+        .get_password_reset_info(&email)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    let token = info.code.expect("No reset code");
+    repos
+        .user
+        .expire_password_reset_code(&email)
+        .await
+        .expect("Failed to expire token");
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.resetPassword",
@@ -250,7 +245,7 @@ async fn test_reset_password_with_expired_token() {
 async fn test_reset_password_invalidates_sessions() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let handle = format!("pr4{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
     let payload = json!({
@@ -288,14 +283,13 @@ async fn test_reset_password_invalidates_sessions() {
         .await
         .expect("Failed to request password reset");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!(
-        "SELECT password_reset_code FROM users WHERE email = $1",
-        email
-    )
-    .fetch_one(pool)
-    .await
-    .expect("User not found");
-    let token = user.password_reset_code.expect("No reset code");
+    let info = repos
+        .user
+        .get_password_reset_info(&email)
+        .await
+        .expect("failed to look up user")
+        .expect("user not found");
+    let token = info.code.expect("No reset code");
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.resetPassword",
@@ -338,7 +332,7 @@ async fn test_request_password_reset_empty_email() {
 
 #[tokio::test]
 async fn test_reset_password_creates_notification() {
-    let pool = common::get_test_db_pool().await;
+    let repos = common::get_test_repos().await;
     let client = common::client();
     let base_url = common::base_url().await;
     let handle = format!("pr5{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
@@ -358,18 +352,17 @@ async fn test_reset_password_creates_notification() {
         .await
         .expect("Failed to create account");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!("SELECT id FROM users WHERE email = $1", email)
-        .fetch_one(pool)
+    let user = repos
+        .user
+        .get_by_email(&email)
         .await
-        .expect("User not found");
-    let initial_count: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM comms_queue WHERE user_id = $1 AND comms_type = 'password_reset'",
-        user.id
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to count")
-    .unwrap_or(0);
+        .expect("failed to look up user")
+        .expect("user not found");
+    let initial_count = repos
+        .infra
+        .count_comms_by_type(user.id, CommsType::PasswordReset)
+        .await
+        .expect("Failed to count");
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.requestPasswordReset",
@@ -380,13 +373,10 @@ async fn test_reset_password_creates_notification() {
         .await
         .expect("Failed to request password reset");
     assert_eq!(res.status(), StatusCode::OK);
-    let final_count: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM comms_queue WHERE user_id = $1 AND comms_type = 'password_reset'",
-        user.id
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to count")
-    .unwrap_or(0);
+    let final_count = repos
+        .infra
+        .count_comms_by_type(user.id, CommsType::PasswordReset)
+        .await
+        .expect("Failed to count");
     assert_eq!(final_count - initial_count, 1);
 }

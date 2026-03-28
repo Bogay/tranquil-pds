@@ -48,6 +48,7 @@ pub struct AppState {
     pub shutdown: CancellationToken,
     pub bootstrap_invite_code: Option<String>,
     pub signal_sender: Option<Arc<tranquil_signal::SignalSlot>>,
+    pub signal_store_provider: Option<Arc<dyn tranquil_signal::SignalStoreProvider>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -210,76 +211,122 @@ impl AppState {
 
     pub async fn new(shutdown: CancellationToken) -> Result<Self, Box<dyn Error>> {
         let cfg = tranquil_config::get();
-        let database_url = &cfg.database.url;
-        let max_connections = cfg.database.max_connections;
-        let min_connections = cfg.database.min_connections;
-        let acquire_timeout_secs = cfg.database.acquire_timeout_secs;
 
-        tracing::info!(
-            "Configuring database pool: max={}, min={}, acquire_timeout={}s",
-            max_connections,
-            min_connections,
-            acquire_timeout_secs
-        );
-
-        let db = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(max_connections)
-            .min_connections(min_connections)
-            .acquire_timeout(std::time::Duration::from_secs(acquire_timeout_secs))
-            .idle_timeout(std::time::Duration::from_secs(300))
-            .max_lifetime(std::time::Duration::from_secs(1800))
-            .connect(database_url)
-            .await
-            .map_err(|e| format!("Failed to connect to Postgres: {}", e))?;
-
-        sqlx::migrate!("./migrations")
-            .run(&db)
-            .await
-            .map_err(|e| format!("Failed to run migrations: {}", e))?;
-
-        let bootstrap_invite_code = match (
-            cfg.server.invite_code_required,
-            sqlx::query_scalar!("SELECT COUNT(*) FROM users")
-                .fetch_one(&db)
-                .await,
-        ) {
-            (true, Ok(Some(0))) => {
-                let code = crate::util::gen_invite_code();
+        match cfg.storage.repo_backend() {
+            tranquil_config::RepoBackend::TranquilStore => {
                 tracing::info!(
-                    "No users exist and invite codes are required. Bootstrap invite code: {}",
-                    code
+                    "tranquil-store repo backend active. EXPERIMENTAL! No garbage collection, no backup/restore"
                 );
-                Some(code)
+                Ok(Self::from_store(shutdown).await)
             }
-            _ => None,
-        };
+            tranquil_config::RepoBackend::Postgres => {
+                let database_url = &cfg.database.url;
+                let max_connections = cfg.database.max_connections;
+                let min_connections = cfg.database.min_connections;
+                let acquire_timeout_secs = cfg.database.acquire_timeout_secs;
 
-        let mut state = Self::from_db(db, shutdown).await;
-        state.bootstrap_invite_code = bootstrap_invite_code;
-        Ok(state)
+                tracing::info!(
+                    "Configuring database pool: max={}, min={}, acquire_timeout={}s",
+                    max_connections,
+                    min_connections,
+                    acquire_timeout_secs
+                );
+
+                let db = sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(max_connections)
+                    .min_connections(min_connections)
+                    .acquire_timeout(std::time::Duration::from_secs(acquire_timeout_secs))
+                    .idle_timeout(std::time::Duration::from_secs(300))
+                    .max_lifetime(std::time::Duration::from_secs(1800))
+                    .connect(database_url)
+                    .await
+                    .map_err(|e| format!("Failed to connect to Postgres: {}", e))?;
+
+                sqlx::migrate!("./migrations")
+                    .run(&db)
+                    .await
+                    .map_err(|e| format!("Failed to run migrations: {}", e))?;
+
+                let bootstrap_invite_code = match (
+                    cfg.server.invite_code_required,
+                    sqlx::query_scalar!("SELECT COUNT(*) FROM users")
+                        .fetch_one(&db)
+                        .await,
+                ) {
+                    (true, Ok(Some(0))) => {
+                        let code = crate::util::gen_invite_code();
+                        tracing::info!(
+                            "No users exist and invite codes are required. Bootstrap invite code: {}",
+                            code
+                        );
+                        Some(code)
+                    }
+                    _ => None,
+                };
+
+                let mut state = Self::from_db(db, shutdown).await;
+                state.bootstrap_invite_code = bootstrap_invite_code;
+                Ok(state)
+            }
+        }
     }
 
     pub async fn from_db(db: PgPool, shutdown: CancellationToken) -> Self {
+        let cfg = tranquil_config::get();
+        let (repos, block_store, signal_store_provider): (
+            PostgresRepositories,
+            crate::repo::AnyBlockStore,
+            Option<Arc<dyn tranquil_signal::SignalStoreProvider>>,
+        ) = match cfg.storage.repo_backend() == tranquil_config::RepoBackend::TranquilStore {
+            true => {
+                let wiring = wire_tranquil_store(&cfg.tranquil_store, shutdown.clone());
+                (
+                    wiring.repos,
+                    crate::repo::AnyBlockStore::TranquilStore(wiring.blockstore),
+                    Some(wiring.signal_provider),
+                )
+            }
+            false => {
+                let repos = PostgresRepositories::new(db.clone());
+                let provider: Arc<dyn tranquil_signal::SignalStoreProvider> =
+                    Arc::new(tranquil_signal::PgSignalStoreProvider { pool: db.clone() });
+                (
+                    repos,
+                    crate::repo::AnyBlockStore::Postgres(PostgresBlockStore::new(db)),
+                    Some(provider),
+                )
+            }
+        };
+
+        Self::build(repos, block_store, signal_store_provider, shutdown).await
+    }
+
+    pub async fn from_store(shutdown: CancellationToken) -> Self {
+        let cfg = tranquil_config::get();
+        let wiring = wire_tranquil_store(&cfg.tranquil_store, shutdown.clone());
+
+        Self::build(
+            wiring.repos,
+            crate::repo::AnyBlockStore::TranquilStore(wiring.blockstore),
+            Some(wiring.signal_provider),
+            shutdown,
+        )
+        .await
+    }
+
+    async fn build(
+        repos: PostgresRepositories,
+        block_store: crate::repo::AnyBlockStore,
+        signal_store_provider: Option<Arc<dyn tranquil_signal::SignalStoreProvider>>,
+        shutdown: CancellationToken,
+    ) -> Self {
         AuthConfig::init();
         init_rate_limit_override();
 
-        let mut repos = PostgresRepositories::new(db.clone());
-
         let cfg = tranquil_config::get();
-        let block_store =
-            match cfg.storage.repo_backend() == tranquil_config::RepoBackend::TranquilStore {
-                true => {
-                    let bs = wire_tranquil_store(&mut repos, &cfg.tranquil_store, shutdown.clone());
-                    crate::repo::AnyBlockStore::TranquilStore(bs)
-                }
-                false => crate::repo::AnyBlockStore::Postgres(PostgresBlockStore::new(db)),
-            };
-
         let repos = Arc::new(repos);
         let blob_store = create_blob_storage().await;
-
-        let firehose_buffer_size = tranquil_config::get().firehose.buffer_size;
-
+        let firehose_buffer_size = cfg.firehose.buffer_size;
         let (firehose_tx, _) = broadcast::channel(firehose_buffer_size);
         let rate_limiters = Arc::new(RateLimiters::new());
         let repo_write_locks = Arc::new(RepoWriteLocks::new());
@@ -290,7 +337,7 @@ impl AppState {
         let sso_config = SsoConfig::init();
         let sso_manager = SsoManager::from_config(sso_config);
         let webauthn_config = Arc::new(
-            WebAuthnConfig::new(&tranquil_config::get().server.hostname)
+            WebAuthnConfig::new(&cfg.server.hostname)
                 .expect("Failed to create WebAuthn config at startup"),
         );
 
@@ -311,6 +358,7 @@ impl AppState {
             shutdown,
             bootstrap_invite_code: None,
             signal_sender: None,
+            signal_store_provider,
         }
     }
 
@@ -390,11 +438,16 @@ impl AppState {
     }
 }
 
+struct TranquilStoreWiring {
+    blockstore: tranquil_store::blockstore::TranquilBlockStore,
+    signal_provider: Arc<dyn tranquil_signal::SignalStoreProvider>,
+    repos: PostgresRepositories,
+}
+
 fn wire_tranquil_store(
-    repos: &mut PostgresRepositories,
     store_cfg: &tranquil_config::TranquilStoreConfig,
     shutdown: CancellationToken,
-) -> tranquil_store::blockstore::TranquilBlockStore {
+) -> TranquilStoreWiring {
     use tranquil_store::RealIO;
     use tranquil_store::blockstore::{BlockStoreConfig, TranquilBlockStore};
     use tranquil_store::eventlog::{EventLog, EventLogBridge, EventLogConfig};
@@ -460,6 +513,8 @@ fn wire_tranquil_store(
     }
 
     let notifier = bridge.notifier();
+    let signal_db = metastore.database().clone();
+    let signal_ks = metastore.signal_keyspace();
 
     let pool = Arc::new(HandlerPool::spawn::<RealIO>(
         metastore,
@@ -480,16 +535,27 @@ fn wire_tranquil_store(
 
     tracing::info!(data_dir = %store_cfg.data_dir, "tranquil-store data directory");
 
-    repos.repo = Arc::new(client.clone());
-    repos.backlink = Arc::new(client.clone());
-    repos.blob = Arc::new(client.clone());
-    repos.user = Arc::new(client.clone());
-    repos.session = Arc::new(client.clone());
-    repos.oauth = Arc::new(client.clone());
-    repos.infra = Arc::new(client.clone());
-    repos.delegation = Arc::new(client.clone());
-    repos.sso = Arc::new(client);
-    repos.event_notifier = Arc::new(notifier);
+    let repos = PostgresRepositories {
+        pool: None,
+        repo: Arc::new(client.clone()),
+        backlink: Arc::new(client.clone()),
+        blob: Arc::new(client.clone()),
+        user: Arc::new(client.clone()),
+        session: Arc::new(client.clone()),
+        oauth: Arc::new(client.clone()),
+        infra: Arc::new(client.clone()),
+        delegation: Arc::new(client.clone()),
+        sso: Arc::new(client),
+        event_notifier: Arc::new(notifier),
+    };
 
-    blockstore
+    let signal_provider: Arc<dyn tranquil_signal::SignalStoreProvider> = Arc::new(
+        tranquil_signal::fjall_store::FjallSignalStoreProvider::new(signal_db, signal_ks),
+    );
+
+    TranquilStoreWiring {
+        blockstore,
+        signal_provider,
+        repos,
+    }
 }

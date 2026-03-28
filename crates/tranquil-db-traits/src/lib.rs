@@ -22,9 +22,10 @@ pub use delegation::{
 };
 pub use error::DbError;
 pub use infra::{
-    AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DeletionRequest, InfraRepository,
-    InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder, InviteCodeState, InviteCodeUse,
-    NotificationHistoryRow, QueuedComms, ReservedSigningKey,
+    AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DeletionRequest,
+    DeletionRequestWithToken, InfraRepository, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder,
+    InviteCodeState, InviteCodeUse, NotificationHistoryRow, PasswordResetInfo, PlcTokenInfo,
+    QueuedComms, ReservedSigningKey, ReservedSigningKeyFull,
 };
 pub use invite_code::{InviteCodeError, ValidatedInviteCode};
 pub use oauth::{

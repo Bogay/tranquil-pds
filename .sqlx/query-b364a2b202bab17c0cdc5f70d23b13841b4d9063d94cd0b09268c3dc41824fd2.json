@@ -1,22 +1,18 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT subject, body, comms_type as \"comms_type: String\" FROM comms_queue WHERE user_id = $1 AND comms_type = 'admin_email' ORDER BY created_at DESC LIMIT 1",
+  "query": "SELECT COUNT(*) as \"count!\" FROM comms_queue WHERE user_id = $1 AND comms_type = $2",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "subject",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 1,
-        "name": "body",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 2,
-        "name": "comms_type: String",
-        "type_info": {
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
           "Custom": {
             "name": "comms_type",
             "kind": {
@@ -38,18 +34,11 @@
             }
           }
         }
-      }
-    ],
-    "parameters": {
-      "Left": [
-        "Uuid"
       ]
     },
     "nullable": [
-      true,
-      false,
-      false
+      null
     ]
   },
-  "hash": "4445cc86cdf04894b340e67661b79a3c411917144a011f50849b737130b24dbe"
+  "hash": "b364a2b202bab17c0cdc5f70d23b13841b4d9063d94cd0b09268c3dc41824fd2"
 }

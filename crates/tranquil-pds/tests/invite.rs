@@ -203,6 +203,7 @@ async fn test_create_invite_codes_no_auth() {
 #[tokio::test]
 async fn test_create_invite_codes_non_admin() {
     let client = client();
+    let _ = create_account_and_login(&client).await;
     let (access_jwt, _did) = create_account_and_login(&client).await;
     let payload = json!({
         "useCount": 2
