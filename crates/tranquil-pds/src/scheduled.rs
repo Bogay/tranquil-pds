@@ -15,7 +15,7 @@ use tranquil_db_traits::{
 };
 use tranquil_types::{AtUri, CidLink, Did};
 
-use crate::repo::PostgresBlockStore;
+use crate::repo::AnyBlockStore;
 use crate::storage::BlobStorage;
 use crate::sync::car::encode_car_header;
 
@@ -44,7 +44,7 @@ impl std::fmt::Display for GenesisBackfillError {
 
 async fn process_genesis_commit(
     repo_repo: &dyn RepoRepository,
-    block_store: &PostgresBlockStore,
+    block_store: &AnyBlockStore,
     row: BrokenGenesisCommit,
 ) -> Result<(Did, SequenceNumber), (SequenceNumber, GenesisBackfillError)> {
     let commit_cid_str = row
@@ -69,7 +69,7 @@ async fn process_genesis_commit(
 
 pub async fn backfill_genesis_commit_blocks(
     repo_repo: Arc<dyn RepoRepository>,
-    block_store: PostgresBlockStore,
+    block_store: AnyBlockStore,
 ) {
     let broken_genesis_commits = match repo_repo.get_broken_genesis_commits().await {
         Ok(rows) => rows,
@@ -122,7 +122,7 @@ pub async fn backfill_genesis_commit_blocks(
 
 async fn process_repo_rev(
     repo_repo: &dyn RepoRepository,
-    block_store: &PostgresBlockStore,
+    block_store: &AnyBlockStore,
     user_id: uuid::Uuid,
     repo_root_cid: String,
 ) -> Result<uuid::Uuid, uuid::Uuid> {
@@ -147,10 +147,7 @@ async fn process_repo_rev(
     Ok(user_id)
 }
 
-pub async fn backfill_repo_rev(
-    repo_repo: Arc<dyn RepoRepository>,
-    block_store: PostgresBlockStore,
-) {
+pub async fn backfill_repo_rev(repo_repo: Arc<dyn RepoRepository>, block_store: AnyBlockStore) {
     let repos_missing_rev = match repo_repo.get_repos_without_rev().await {
         Ok(rows) => rows,
         Err(e) => {
@@ -197,7 +194,7 @@ pub async fn backfill_repo_rev(
 
 async fn process_user_blocks(
     repo_repo: &dyn RepoRepository,
-    block_store: &PostgresBlockStore,
+    block_store: &AnyBlockStore,
     user_id: uuid::Uuid,
     repo_root_cid: String,
     repo_rev: Option<String>,
@@ -218,10 +215,7 @@ async fn process_user_blocks(
     Ok((user_id, count))
 }
 
-pub async fn backfill_user_blocks(
-    repo_repo: Arc<dyn RepoRepository>,
-    block_store: PostgresBlockStore,
-) {
+pub async fn backfill_user_blocks(repo_repo: Arc<dyn RepoRepository>, block_store: AnyBlockStore) {
     let users_without_blocks = match repo_repo.get_users_without_blocks().await {
         Ok(rows) => rows,
         Err(e) => {
@@ -271,7 +265,7 @@ pub async fn backfill_user_blocks(
 }
 
 pub async fn collect_current_repo_blocks(
-    block_store: &PostgresBlockStore,
+    block_store: &AnyBlockStore,
     head_cid: &Cid,
 ) -> anyhow::Result<Vec<Vec<u8>>> {
     let mut block_cids: Vec<Vec<u8>> = Vec::new();
@@ -324,7 +318,7 @@ pub async fn collect_current_repo_blocks(
 
 async fn process_record_blobs(
     repo_repo: &dyn RepoRepository,
-    block_store: &PostgresBlockStore,
+    block_store: &AnyBlockStore,
     user_id: uuid::Uuid,
     did: Did,
 ) -> Result<(uuid::Uuid, Did, usize), (uuid::Uuid, &'static str)> {
@@ -383,10 +377,7 @@ async fn process_record_blobs(
     Ok((user_id, did, blob_refs_found))
 }
 
-pub async fn backfill_record_blobs(
-    repo_repo: Arc<dyn RepoRepository>,
-    block_store: PostgresBlockStore,
-) {
+pub async fn backfill_record_blobs(repo_repo: Arc<dyn RepoRepository>, block_store: AnyBlockStore) {
     let users_needing_backfill = match repo_repo.get_users_needing_record_blobs_backfill(100).await
     {
         Ok(rows) => rows,
@@ -437,7 +428,7 @@ pub async fn start_scheduled_tasks(
     blob_store: Arc<dyn BlobStorage>,
     sso_repo: Arc<dyn SsoRepository>,
     repo_repo: Arc<dyn RepoRepository>,
-    block_store: PostgresBlockStore,
+    block_store: AnyBlockStore,
     shutdown: CancellationToken,
 ) {
     let cfg = tranquil_config::get();
@@ -502,7 +493,9 @@ pub async fn start_scheduled_tasks(
                 }
             }
             _ = gc_ticker.tick() => {
-                if let Err(e) = run_block_gc(repo_repo.as_ref(), &block_store).await {
+                if let Some(pg) = block_store.as_postgres()
+                    && let Err(e) = run_block_gc(repo_repo.as_ref(), pg).await
+                {
                     error!("Block GC error: {e}");
                 }
             }
@@ -514,7 +507,7 @@ const BLOCK_GC_BATCH_SIZE: i64 = 1000;
 
 async fn run_block_gc(
     repo_repo: &dyn RepoRepository,
-    block_store: &PostgresBlockStore,
+    block_store: &crate::repo::PostgresBlockStore,
 ) -> anyhow::Result<()> {
     let mut total_deleted: u64 = 0;
 
@@ -632,11 +625,9 @@ async fn delete_account_data(
 }
 
 pub async fn generate_repo_car(
-    block_store: &PostgresBlockStore,
+    block_store: &AnyBlockStore,
     head_cid: &Cid,
 ) -> anyhow::Result<Vec<u8>> {
-    use jacquard_repo::storage::BlockStore;
-
     let block_cids_bytes = collect_current_repo_blocks(block_store, head_cid).await?;
     let block_cids: Vec<Cid> = block_cids_bytes
         .iter()
@@ -686,7 +677,7 @@ fn encode_car_block(cid: &Cid, block: &[u8]) -> Vec<u8> {
 
 pub async fn generate_repo_car_from_user_blocks(
     repo_repo: &dyn tranquil_db_traits::RepoRepository,
-    block_store: &PostgresBlockStore,
+    block_store: &AnyBlockStore,
     user_id: uuid::Uuid,
     _head_cid: &Cid,
 ) -> anyhow::Result<Vec<u8>> {

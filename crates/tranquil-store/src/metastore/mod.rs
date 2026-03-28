@@ -3,10 +3,16 @@ pub mod backlinks;
 pub mod blob_ops;
 pub mod blobs;
 pub mod commit_ops;
+pub mod delegation_ops;
+pub mod delegations;
 pub mod encoding;
 pub mod event_keys;
 pub mod event_ops;
+pub mod infra_ops;
+pub mod infra_schema;
 pub mod keys;
+pub mod oauth_ops;
+pub mod oauth_schema;
 pub mod partitions;
 pub mod record_ops;
 pub mod records;
@@ -14,9 +20,15 @@ pub mod recovery;
 pub mod repo_meta;
 pub mod repo_ops;
 pub mod scan;
+pub mod session_ops;
+pub mod sessions;
+pub mod sso_ops;
+pub mod sso_schema;
 pub mod user_block_ops;
 pub mod user_blocks;
 pub mod user_hash;
+pub mod user_ops;
+pub mod users;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -145,6 +157,7 @@ pub struct Metastore {
     db: Database,
     partitions: [Keyspace; Partition::ALL.len()],
     user_hashes: Arc<UserHashMap>,
+    counter_lock: Arc<parking_lot::Mutex<()>>,
 }
 
 impl Metastore {
@@ -185,6 +198,7 @@ impl Metastore {
             db,
             partitions,
             user_hashes,
+            counter_lock: Arc::new(parking_lot::Mutex::new(())),
         })
     }
 
@@ -270,6 +284,61 @@ impl Metastore {
     pub fn backlink_ops(&self) -> backlink_ops::BacklinkOps {
         backlink_ops::BacklinkOps::new(
             self.partitions[Partition::Indexes.index()].clone(),
+            Arc::clone(&self.user_hashes),
+        )
+    }
+
+    pub fn delegation_ops(&self) -> delegation_ops::DelegationOps {
+        delegation_ops::DelegationOps::new(
+            self.db.clone(),
+            self.partitions[Partition::Indexes.index()].clone(),
+            self.partitions[Partition::Users.index()].clone(),
+            Arc::clone(&self.user_hashes),
+        )
+    }
+
+    pub fn sso_ops(&self) -> sso_ops::SsoOps {
+        sso_ops::SsoOps::new(
+            self.db.clone(),
+            self.partitions[Partition::Indexes.index()].clone(),
+        )
+    }
+
+    pub fn session_ops(&self) -> session_ops::SessionOps {
+        session_ops::SessionOps::new(
+            self.db.clone(),
+            self.partitions[Partition::Auth.index()].clone(),
+            self.partitions[Partition::Users.index()].clone(),
+            Arc::clone(&self.user_hashes),
+            Arc::clone(&self.counter_lock),
+        )
+    }
+
+    pub fn infra_ops(&self) -> infra_ops::InfraOps {
+        infra_ops::InfraOps::new(
+            self.db.clone(),
+            self.partitions[Partition::Infra.index()].clone(),
+            self.partitions[Partition::RepoData.index()].clone(),
+            self.partitions[Partition::Users.index()].clone(),
+            Arc::clone(&self.user_hashes),
+        )
+    }
+
+    pub fn oauth_ops(&self) -> oauth_ops::OAuthOps {
+        oauth_ops::OAuthOps::new(
+            self.db.clone(),
+            self.partitions[Partition::Auth.index()].clone(),
+            self.partitions[Partition::Users.index()].clone(),
+            Arc::clone(&self.counter_lock),
+        )
+    }
+
+    pub fn user_ops(&self) -> user_ops::UserOps {
+        user_ops::UserOps::new(
+            self.db.clone(),
+            self.partitions[Partition::Users.index()].clone(),
+            self.partitions[Partition::RepoData.index()].clone(),
+            self.partitions[Partition::Auth.index()].clone(),
             Arc::clone(&self.user_hashes),
         )
     }

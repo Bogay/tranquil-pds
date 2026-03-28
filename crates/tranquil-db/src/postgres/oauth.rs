@@ -1194,7 +1194,7 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(exists.is_some())
     }
 
-    async fn revoke_device_trust(&self, device_id: &DeviceId) -> Result<(), DbError> {
+    async fn revoke_device_trust(&self, device_id: &DeviceId, _did: &Did) -> Result<(), DbError> {
         sqlx::query!(
             "UPDATE oauth_device SET trusted_at = NULL, trusted_until = NULL WHERE id = $1",
             device_id.as_str()
@@ -1208,6 +1208,7 @@ impl OAuthRepository for PostgresOAuthRepository {
     async fn update_device_friendly_name(
         &self,
         device_id: &DeviceId,
+        _did: &Did,
         friendly_name: Option<&str>,
     ) -> Result<(), DbError> {
         sqlx::query!(
@@ -1224,6 +1225,7 @@ impl OAuthRepository for PostgresOAuthRepository {
     async fn trust_device(
         &self,
         device_id: &DeviceId,
+        _did: &Did,
         trusted_at: DateTime<Utc>,
         trusted_until: DateTime<Utc>,
     ) -> Result<(), DbError> {
@@ -1242,6 +1244,7 @@ impl OAuthRepository for PostgresOAuthRepository {
     async fn extend_device_trust(
         &self,
         device_id: &DeviceId,
+        _did: &Did,
         trusted_until: DateTime<Utc>,
     ) -> Result<(), DbError> {
         sqlx::query!(

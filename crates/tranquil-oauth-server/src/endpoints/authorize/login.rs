@@ -529,9 +529,12 @@ pub async fn authorize_post(
 
         if device_is_trusted {
             if let Some(ref dev_id) = device_cookie {
-                let _ =
-                    tranquil_api::server::extend_device_trust(state.repos.oauth.as_ref(), dev_id)
-                        .await;
+                let _ = tranquil_api::server::extend_device_trust(
+                    state.repos.oauth.as_ref(),
+                    dev_id,
+                    &user.did,
+                )
+                .await;
             }
         } else {
             if state
@@ -892,7 +895,8 @@ pub async fn authorize_select(
             .into_response();
         }
         let _ =
-            tranquil_api::server::extend_device_trust(state.repos.oauth.as_ref(), &device_id).await;
+            tranquil_api::server::extend_device_trust(state.repos.oauth.as_ref(), &device_id, &did)
+                .await;
     }
     if user.two_factor_enabled {
         let _ = state

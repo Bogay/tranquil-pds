@@ -1074,9 +1074,12 @@ pub async fn authorize_passkey_finish(
 
         if device_is_trusted {
             if let Some(ref dev_id) = device_cookie {
-                let _ =
-                    tranquil_api::server::extend_device_trust(state.repos.oauth.as_ref(), dev_id)
-                        .await;
+                let _ = tranquil_api::server::extend_device_trust(
+                    state.repos.oauth.as_ref(),
+                    dev_id,
+                    &did,
+                )
+                .await;
             }
         } else {
             let user = match state.repos.user.get_2fa_status_by_did(&did).await {

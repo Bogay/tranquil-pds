@@ -367,7 +367,7 @@ impl<S: StorageIO> CommitOps<S> {
         &self,
         limit: i64,
     ) -> Result<Vec<UserNeedingRecordBlobsBackfill>, MetastoreError> {
-        let limit_usize = usize::try_from(limit).unwrap_or(usize::MAX);
+        let limit_usize = usize::try_from(limit).unwrap_or(0);
 
         self.scan_users_missing_prefix(
             record_blobs_user_prefix,

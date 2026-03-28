@@ -273,7 +273,8 @@ pub async fn authorize_2fa_post(
             .upsert_account_device(&did, &trust_device_id)
             .await;
         let _ =
-            tranquil_api::server::trust_device(state.repos.oauth.as_ref(), &trust_device_id).await;
+            tranquil_api::server::trust_device(state.repos.oauth.as_ref(), &trust_device_id, &did)
+                .await;
     }
     let requested_scope_str = request_data
         .parameters

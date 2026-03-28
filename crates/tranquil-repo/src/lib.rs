@@ -150,14 +150,14 @@ impl BlockStore for PostgresBlockStore {
 }
 
 #[derive(Clone)]
-pub struct TrackingBlockStore {
-    inner: PostgresBlockStore,
+pub struct TrackingBlockStore<S: BlockStore> {
+    inner: S,
     written_cids: Arc<Mutex<Vec<Cid>>>,
     read_cids: Arc<Mutex<HashSet<Cid>>>,
 }
 
-impl TrackingBlockStore {
-    pub fn new(store: PostgresBlockStore) -> Self {
+impl<S: BlockStore + Sync> TrackingBlockStore<S> {
+    pub fn new(store: S) -> Self {
         Self {
             inner: store,
             written_cids: Arc::new(Mutex::new(Vec::new())),
@@ -188,7 +188,7 @@ impl TrackingBlockStore {
     }
 }
 
-impl BlockStore for TrackingBlockStore {
+impl<S: BlockStore + Sync> BlockStore for TrackingBlockStore<S> {
     async fn get(&self, cid: &Cid) -> Result<Option<Bytes>, RepoError> {
         let result = self.inner.get(cid).await?;
         if result.is_some() {

@@ -127,7 +127,7 @@ pub async fn revoke_trusted_device(
     state
         .repos
         .oauth
-        .revoke_device_trust(&input.device_id)
+        .revoke_device_trust(&input.device_id, &auth.did)
         .await
         .log_db_err("revoking device trust")?;
 
@@ -166,7 +166,7 @@ pub async fn update_trusted_device(
     state
         .repos
         .oauth
-        .update_device_friendly_name(&input.device_id, input.friendly_name.as_deref())
+        .update_device_friendly_name(&input.device_id, &auth.did, input.friendly_name.as_deref())
         .await
         .log_db_err("updating device friendly name")?;
 
@@ -198,18 +198,22 @@ pub async fn is_device_trusted(
 pub async fn trust_device(
     oauth_repo: &dyn OAuthRepository,
     device_id: &DeviceId,
+    did: &tranquil_types::Did,
 ) -> Result<(), tranquil_db_traits::DbError> {
     let now = Utc::now();
     let trusted_until = now + Duration::days(TRUST_DURATION_DAYS);
-    oauth_repo.trust_device(device_id, now, trusted_until).await
+    oauth_repo
+        .trust_device(device_id, did, now, trusted_until)
+        .await
 }
 
 pub async fn extend_device_trust(
     oauth_repo: &dyn OAuthRepository,
     device_id: &DeviceId,
+    did: &tranquil_types::Did,
 ) -> Result<(), tranquil_db_traits::DbError> {
     let trusted_until = Utc::now() + Duration::days(TRUST_DURATION_DAYS);
     oauth_repo
-        .extend_device_trust(device_id, trusted_until)
+        .extend_device_trust(device_id, did, trusted_until)
         .await
 }

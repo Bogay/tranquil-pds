@@ -33,7 +33,7 @@ pub fn init_rate_limit_override() {
 #[derive(Clone)]
 pub struct AppState {
     pub repos: Arc<PostgresRepositories>,
-    pub block_store: PostgresBlockStore,
+    pub block_store: crate::repo::AnyBlockStore,
     pub blob_store: Arc<dyn BlobStorage>,
     pub firehose_tx: broadcast::Sender<SequencedEvent>,
     pub rate_limiters: Arc<RateLimiters>,
@@ -266,12 +266,16 @@ impl AppState {
         let mut repos = PostgresRepositories::new(db.clone());
 
         let cfg = tranquil_config::get();
-        if cfg.storage.repo_backend() == tranquil_config::RepoBackend::TranquilStore {
-            wire_tranquil_store(&mut repos, &cfg.tranquil_store);
-        }
+        let block_store =
+            match cfg.storage.repo_backend() == tranquil_config::RepoBackend::TranquilStore {
+                true => {
+                    let bs = wire_tranquil_store(&mut repos, &cfg.tranquil_store, shutdown.clone());
+                    crate::repo::AnyBlockStore::TranquilStore(bs)
+                }
+                false => crate::repo::AnyBlockStore::Postgres(PostgresBlockStore::new(db)),
+            };
 
         let repos = Arc::new(repos);
-        let block_store = PostgresBlockStore::new(db);
         let blob_store = create_blob_storage().await;
 
         let firehose_buffer_size = tranquil_config::get().firehose.buffer_size;
@@ -389,8 +393,10 @@ impl AppState {
 fn wire_tranquil_store(
     repos: &mut PostgresRepositories,
     store_cfg: &tranquil_config::TranquilStoreConfig,
-) {
+    shutdown: CancellationToken,
+) -> tranquil_store::blockstore::TranquilBlockStore {
     use tranquil_store::RealIO;
+    use tranquil_store::blockstore::{BlockStoreConfig, TranquilBlockStore};
     use tranquil_store::eventlog::{EventLog, EventLogBridge, EventLogConfig};
     use tranquil_store::metastore::client::MetastoreClient;
     use tranquil_store::metastore::handler::HandlerPool;
@@ -404,9 +410,15 @@ fn wire_tranquil_store(
     };
     let metastore_dir = data_dir.join("metastore");
     let segments_dir = data_dir.join("eventlog").join("segments");
+    let blockstore_data_dir = data_dir.join("blockstore").join("data");
+    let blockstore_index_dir = data_dir.join("blockstore").join("index");
 
     std::fs::create_dir_all(&metastore_dir).expect("failed to create metastore directory");
     std::fs::create_dir_all(&segments_dir).expect("failed to create eventlog segments directory");
+    std::fs::create_dir_all(&blockstore_data_dir)
+        .expect("failed to create blockstore data directory");
+    std::fs::create_dir_all(&blockstore_index_dir)
+        .expect("failed to create blockstore index directory");
 
     let metastore_config = store_cfg
         .memory_budget_mb
@@ -417,6 +429,14 @@ fn wire_tranquil_store(
 
     let metastore =
         Metastore::open(&metastore_dir, metastore_config).expect("failed to open metastore");
+
+    let blockstore = TranquilBlockStore::open(BlockStoreConfig {
+        data_dir: blockstore_data_dir,
+        index_dir: blockstore_index_dir,
+        max_file_size: tranquil_store::blockstore::DEFAULT_MAX_FILE_SIZE,
+        group_commit: Default::default(),
+    })
+    .expect("failed to open blockstore");
 
     let event_log = EventLog::open(
         EventLogConfig {
@@ -441,13 +461,35 @@ fn wire_tranquil_store(
 
     let notifier = bridge.notifier();
 
-    let pool = HandlerPool::spawn::<RealIO>(metastore, bridge, None, store_cfg.handler_threads);
+    let pool = Arc::new(HandlerPool::spawn::<RealIO>(
+        metastore,
+        bridge,
+        Some(blockstore.clone()),
+        store_cfg.handler_threads,
+    ));
 
-    let client = MetastoreClient::<RealIO>::new(Arc::new(pool));
+    tokio::spawn({
+        let pool = Arc::clone(&pool);
+        async move {
+            shutdown.cancelled().await;
+            pool.close().await;
+        }
+    });
+
+    let client = MetastoreClient::<RealIO>::new(pool);
 
     tracing::info!(data_dir = %store_cfg.data_dir, "tranquil-store data directory");
 
     repos.repo = Arc::new(client.clone());
-    repos.backlink = Arc::new(client);
+    repos.backlink = Arc::new(client.clone());
+    repos.blob = Arc::new(client.clone());
+    repos.user = Arc::new(client.clone());
+    repos.session = Arc::new(client.clone());
+    repos.oauth = Arc::new(client.clone());
+    repos.infra = Arc::new(client.clone());
+    repos.delegation = Arc::new(client.clone());
+    repos.sso = Arc::new(client);
     repos.event_notifier = Arc::new(notifier);
+
+    blockstore
 }

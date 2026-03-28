@@ -291,21 +291,24 @@ pub trait OAuthRepository: Send + Sync {
         device_id: &DeviceId,
         did: &Did,
     ) -> Result<bool, DbError>;
-    async fn revoke_device_trust(&self, device_id: &DeviceId) -> Result<(), DbError>;
+    async fn revoke_device_trust(&self, device_id: &DeviceId, did: &Did) -> Result<(), DbError>;
     async fn update_device_friendly_name(
         &self,
         device_id: &DeviceId,
+        did: &Did,
         friendly_name: Option<&str>,
     ) -> Result<(), DbError>;
     async fn trust_device(
         &self,
         device_id: &DeviceId,
+        did: &Did,
         trusted_at: DateTime<Utc>,
         trusted_until: DateTime<Utc>,
     ) -> Result<(), DbError>;
     async fn extend_device_trust(
         &self,
         device_id: &DeviceId,
+        did: &Did,
         trusted_until: DateTime<Utc>,
     ) -> Result<(), DbError>;
 
