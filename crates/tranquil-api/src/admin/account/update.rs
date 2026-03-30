@@ -1,6 +1,6 @@
 use axum::{Json, extract::State};
 use serde::Deserialize;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use tranquil_pds::api::EmptyResponse;
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::auth::{Admin, Auth};
@@ -165,4 +165,35 @@ pub async fn update_account_password(
             Err(ApiError::InternalError(None))
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct SetAdminStatusInput {
+    pub did: Did,
+    pub admin: bool,
+}
+
+pub async fn set_admin_status(
+    State(state): State<AppState>,
+    auth: Auth<Admin>,
+    Json(input): Json<SetAdminStatusInput>,
+) -> Result<Json<EmptyResponse>, ApiError> {
+    info!(
+        actor = %auth.did,
+        target = %input.did,
+        admin = input.admin,
+        "admin status change"
+    );
+
+    state
+        .repos
+        .user
+        .set_admin_status(&input.did, input.admin)
+        .await
+        .map_err(|e| {
+            error!("DB error setting admin status: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
+
+    Ok(Json(EmptyResponse {}))
 }

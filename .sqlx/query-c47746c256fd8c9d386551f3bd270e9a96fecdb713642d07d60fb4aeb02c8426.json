@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT seq, did, created_at, event_type as \"event_type: RepoEventType\", commit_cid, prev_cid, prev_data_cid,\n                      ops, blobs, blocks_cids, handle, active, status, rev\n               FROM repo_seq\n               WHERE seq > $1\n               ORDER BY seq ASC\n               LIMIT $2",
+  "query": "SELECT seq, did, created_at, event_type as \"event_type: RepoEventType\", commit_cid, prev_cid, prev_data_cid,\n                              ops, blobs, block_cids, block_data, blocks_cids, handle, active, status, rev\n                       FROM repo_seq\n                       WHERE seq > $1\n                       ORDER BY seq ASC",
   "describe": {
     "columns": [
       {
@@ -50,33 +50,42 @@
       },
       {
         "ordinal": 9,
+        "name": "block_cids",
+        "type_info": "ByteaArray"
+      },
+      {
+        "ordinal": 10,
+        "name": "block_data",
+        "type_info": "ByteaArray"
+      },
+      {
+        "ordinal": 11,
         "name": "blocks_cids",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "handle",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "status",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "rev",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
         "Int8"
       ]
     },
@@ -94,8 +103,10 @@
       true,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "e7aa1080be9eb3a8ddf1f050c93dc8afd10478f41e22307014784b4ee3740b4a"
+  "hash": "c47746c256fd8c9d386551f3bd270e9a96fecdb713642d07d60fb4aeb02c8426"
 }

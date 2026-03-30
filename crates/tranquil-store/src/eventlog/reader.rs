@@ -12,11 +12,33 @@ use crate::io::{MappedFile, StorageIO};
 use super::manager::SegmentManager;
 use super::segment_file::{ReadEventRecord, SEGMENT_HEADER_SIZE, decode_event_record};
 use super::segment_index::{DEFAULT_INDEX_INTERVAL, SegmentIndex, rebuild_from_segment};
+use super::sidecar::{SidecarIndex, build_sidecar_from_segment};
 use super::types::{
     DidHash, EventSequence, EventTypeTag, SegmentId, SegmentOffset, TimestampMicros,
 };
 
 const FIRST_EVENT_OFFSET: SegmentOffset = SegmentOffset::new(SEGMENT_HEADER_SIZE as u64);
+
+#[derive(Debug, Clone)]
+pub struct SequenceGap {
+    pub after_segment: SegmentId,
+    pub expected_seq: EventSequence,
+    pub actual_seq: EventSequence,
+}
+
+#[derive(Debug, Clone)]
+pub struct SequenceContiguityResult {
+    pub total_segments: u64,
+    pub min_seq: Option<EventSequence>,
+    pub max_seq: Option<EventSequence>,
+    pub gaps: Vec<SequenceGap>,
+}
+
+impl SequenceContiguityResult {
+    pub fn is_contiguous(&self) -> bool {
+        self.gaps.is_empty()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RawEvent {
@@ -37,22 +59,37 @@ struct SegmentRange {
 pub struct EventLogReader<S: StorageIO> {
     manager: Arc<SegmentManager<S>>,
     indexes: RwLock<HashMap<SegmentId, Arc<SegmentIndex>>>,
+    sidecars: RwLock<HashMap<SegmentId, Arc<SidecarIndex>>>,
     ranges: RwLock<Vec<SegmentRange>>,
     mmaps: RwLock<HashMap<SegmentId, Arc<MappedFile>>>,
     active_segment: RwLock<Option<SegmentId>>,
     use_mmap: bool,
+    skip_sealed_checksum: bool,
+    max_payload: u32,
 }
 
 impl<S: StorageIO> EventLogReader<S> {
-    pub fn new(manager: Arc<SegmentManager<S>>, use_mmap: bool) -> Self {
+    pub fn new(
+        manager: Arc<SegmentManager<S>>,
+        use_mmap: bool,
+        skip_sealed_checksum: bool,
+        max_payload: u32,
+    ) -> Self {
         Self {
             manager,
             indexes: RwLock::new(HashMap::new()),
+            sidecars: RwLock::new(HashMap::new()),
             ranges: RwLock::new(Vec::new()),
             mmaps: RwLock::new(HashMap::new()),
             active_segment: RwLock::new(None),
             use_mmap,
+            skip_sealed_checksum,
+            max_payload,
         }
+    }
+
+    pub fn max_payload(&self) -> u32 {
+        self.max_payload
     }
 
     pub fn set_active_segment(&self, id: SegmentId) {
@@ -60,6 +97,7 @@ impl<S: StorageIO> EventLogReader<S> {
     }
 
     pub fn extend_active_range(&self, first_seq: EventSequence, last_seq: EventSequence) {
+        debug_assert!(first_seq <= last_seq);
         let active_id = match *self.active_segment.read() {
             Some(id) => id,
             None => return,
@@ -108,7 +146,12 @@ impl<S: StorageIO> EventLogReader<S> {
 
     fn rebuild_index(&self, segment_id: SegmentId) -> io::Result<SegmentIndex> {
         let fd = self.manager.open_for_read(segment_id)?;
-        let (idx, _) = rebuild_from_segment(self.manager.io(), fd, DEFAULT_INDEX_INTERVAL)?;
+        let (idx, _) = rebuild_from_segment(
+            self.manager.io(),
+            fd,
+            DEFAULT_INDEX_INTERVAL,
+            self.max_payload,
+        )?;
         let _ = idx.save(self.manager.io(), &self.manager.index_path(segment_id));
         Ok(idx)
     }
@@ -157,6 +200,34 @@ impl<S: StorageIO> EventLogReader<S> {
             .collect();
         *self.ranges.write() = new_ranges;
         Ok(())
+    }
+
+    pub fn check_sequence_contiguity(&self) -> SequenceContiguityResult {
+        let ranges = self.ranges.read();
+        let mut gaps: Vec<SequenceGap> = Vec::new();
+        let total_segments = ranges.len() as u64;
+
+        ranges.windows(2).for_each(|pair| {
+            let expected_next = pair[0].last.next();
+            let actual_next = pair[1].first;
+            if actual_next != expected_next {
+                gaps.push(SequenceGap {
+                    after_segment: pair[0].id,
+                    expected_seq: expected_next,
+                    actual_seq: actual_next,
+                });
+            }
+        });
+
+        let max_seq = ranges.last().map(|r| r.last);
+        let min_seq = ranges.first().map(|r| r.first);
+
+        SequenceContiguityResult {
+            total_segments,
+            min_seq,
+            max_seq,
+            gaps,
+        }
     }
 
     fn is_mmap_eligible(&self, segment_id: SegmentId) -> bool {
@@ -222,15 +293,27 @@ impl<S: StorageIO> EventLogReader<S> {
         mut predicate: impl FnMut(&EventSequence) -> bool,
     ) -> io::Result<bool> {
         let mmap = self.get_mmap(segment_id)?;
+        let mmap_bytes = Bytes::from_owner(OwnedMmap(Arc::clone(&mmap)));
         let data: &[u8] = (*mmap).as_ref();
         let file_size = data.len() as u64;
+        let skip_checksum = self.skip_sealed_checksum && self.is_mmap_eligible(segment_id);
         let offset = Cell::new(start_offset);
         let collected = Cell::new(0usize);
 
+        let max_payload = self.max_payload;
         std::iter::from_fn(|| {
             let cur = offset.get();
-            (cur.raw() < file_size && collected.get() < limit)
-                .then(|| decode_mmap_event(data, cur, file_size, segment_id))
+            (cur.raw() < file_size && collected.get() < limit).then(|| {
+                decode_mmap_event(
+                    data,
+                    &mmap_bytes,
+                    cur,
+                    file_size,
+                    segment_id,
+                    skip_checksum,
+                    max_payload,
+                )
+            })
         })
         .try_for_each(|result| -> io::Result<()> {
             match result? {
@@ -268,8 +351,9 @@ impl<S: StorageIO> EventLogReader<S> {
 
         std::iter::from_fn(|| {
             let cur = offset.get();
-            (cur.raw() < file_size && collected.get() < limit)
-                .then(|| decode_event_record(self.manager.io(), fd, cur, file_size))
+            (cur.raw() < file_size && collected.get() < limit).then(|| {
+                decode_event_record(self.manager.io(), fd, cur, file_size, self.max_payload)
+            })
         })
         .try_for_each(|result| -> io::Result<()> {
             match result? {
@@ -320,14 +404,13 @@ impl<S: StorageIO> EventLogReader<S> {
         };
 
         let mut events = Vec::with_capacity(limit.min(1024));
+        let done = Cell::new(false);
 
-        ranges[start_idx..].iter().enumerate().try_fold(
-            false,
-            |limit_reached, (i, range)| -> io::Result<bool> {
-                if limit_reached {
-                    return Ok(true);
-                }
-
+        ranges[start_idx..]
+            .iter()
+            .enumerate()
+            .take_while(|_| !done.get())
+            .try_for_each(|(i, range)| -> io::Result<()> {
                 let remaining = limit - events.len();
                 let is_first = i == 0;
 
@@ -341,16 +424,16 @@ impl<S: StorageIO> EventLogReader<S> {
                     }
                 };
 
-                self.scan_events_from_offset(
+                done.set(self.scan_events_from_offset(
                     range.id,
                     scan_offset,
                     effective_seq,
                     remaining,
                     &mut events,
                     |_| true,
-                )
-            },
-        )?;
+                )?);
+                Ok(())
+            })?;
 
         Ok(events)
     }
@@ -384,6 +467,7 @@ impl<S: StorageIO> EventLogReader<S> {
     ) -> io::Result<()> {
         self.invalidate_index(sealed_id);
         self.invalidate_mmap(sealed_id);
+        self.invalidate_sidecar(sealed_id);
         self.set_active_segment(new_active_id);
         self.refresh_segment_ranges()
     }
@@ -394,6 +478,53 @@ impl<S: StorageIO> EventLogReader<S> {
 
     pub fn invalidate_index(&self, segment_id: SegmentId) {
         self.indexes.write().remove(&segment_id);
+    }
+
+    pub fn invalidate_sidecar(&self, segment_id: SegmentId) {
+        self.sidecars.write().remove(&segment_id);
+    }
+
+    pub fn load_sidecar(&self, segment_id: SegmentId) -> io::Result<Option<Arc<SidecarIndex>>> {
+        if let Some(sc) = self.sidecars.read().get(&segment_id) {
+            return Ok(Some(Arc::clone(sc)));
+        }
+
+        let sidecar = match SidecarIndex::load(
+            self.manager.io(),
+            &self.manager.sidecar_path(segment_id),
+        ) {
+            Ok(Some(sc)) => sc,
+            Ok(None) => return Ok(None),
+            Err(e) => {
+                warn!(segment = %segment_id, error = %e, "sidecar load failed, attempting rebuild");
+                match self.rebuild_sidecar(segment_id) {
+                    Ok(sc) => sc,
+                    Err(rebuild_err) => {
+                        warn!(segment = %segment_id, error = %rebuild_err, "sidecar rebuild also failed");
+                        return Ok(None);
+                    }
+                }
+            }
+        };
+
+        let arc = Arc::new(sidecar);
+        self.sidecars.write().insert(segment_id, Arc::clone(&arc));
+        Ok(Some(arc))
+    }
+
+    fn rebuild_sidecar(&self, segment_id: SegmentId) -> io::Result<SidecarIndex> {
+        let fd = self.manager.open_for_read(segment_id)?;
+        let sidecar = build_sidecar_from_segment(self.manager.io(), fd, self.max_payload)?;
+        let _ = sidecar.save(self.manager.io(), &self.manager.sidecar_path(segment_id));
+        Ok(sidecar)
+    }
+}
+
+struct OwnedMmap(Arc<MappedFile>);
+
+impl AsRef<[u8]> for OwnedMmap {
+    fn as_ref(&self) -> &[u8] {
+        (*self.0).as_ref()
     }
 }
 
@@ -406,12 +537,14 @@ enum MmapDecodeResult {
 
 fn decode_mmap_event(
     data: &[u8],
+    mmap_bytes: &Bytes,
     offset: SegmentOffset,
     file_size: u64,
     segment_id: SegmentId,
+    skip_checksum: bool,
+    max_payload: u32,
 ) -> io::Result<MmapDecodeResult> {
     use super::segment_file::EVENT_HEADER_SIZE;
-    use super::types::MAX_EVENT_PAYLOAD;
 
     let raw = offset.raw();
     if raw > file_size {
@@ -469,7 +602,7 @@ fn decode_mmap_event(
     };
 
     let payload_len = u32::from_le_bytes(header_slice[21..25].try_into().unwrap());
-    if payload_len > MAX_EVENT_PAYLOAD {
+    if payload_len > max_payload {
         warn!(
             segment = %segment_id,
             offset = raw,
@@ -494,25 +627,27 @@ fn decode_mmap_event(
     let payload_start = base + EVENT_HEADER_SIZE;
     let payload_end = payload_start + usize::try_from(payload_len).expect("payload_len fits usize");
 
-    let checksum_start = payload_end;
-    let stored_checksum =
-        u32::from_le_bytes(data[checksum_start..checksum_start + 4].try_into().unwrap());
+    if !skip_checksum {
+        let checksum_start = payload_end;
+        let stored_checksum =
+            u32::from_le_bytes(data[checksum_start..checksum_start + 4].try_into().unwrap());
 
-    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
-    hasher.update(header_slice);
-    hasher.update(&data[payload_start..payload_end]);
-    let computed = hasher.digest() as u32;
+        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+        hasher.update(header_slice);
+        hasher.update(&data[payload_start..payload_end]);
+        let computed = hasher.digest() as u32;
 
-    if stored_checksum != computed {
-        warn!(
-            segment = %segment_id,
-            offset = raw,
-            seq = %seq,
-            stored = stored_checksum,
-            computed,
-            "corrupted record in sealed segment: checksum mismatch"
-        );
-        return Ok(MmapDecodeResult::Corrupted);
+        if stored_checksum != computed {
+            warn!(
+                segment = %segment_id,
+                offset = raw,
+                seq = %seq,
+                stored = stored_checksum,
+                computed,
+                "corrupted record in sealed segment: checksum mismatch"
+            );
+            return Ok(MmapDecodeResult::Corrupted);
+        }
     }
 
     let next_offset = offset.advance(record_size);
@@ -522,7 +657,7 @@ fn decode_mmap_event(
             timestamp,
             did_hash,
             event_type,
-            payload: Bytes::copy_from_slice(&data[payload_start..payload_end]),
+            payload: mmap_bytes.slice(payload_start..payload_end),
         },
         next_offset,
     ))
@@ -532,6 +667,7 @@ fn decode_mmap_event(
 mod tests {
     use super::*;
     use crate::eventlog::segment_file::EVENT_RECORD_OVERHEAD;
+    use crate::eventlog::types::MAX_EVENT_PAYLOAD;
     use crate::eventlog::writer::EventLogWriter;
     use crate::sim::SimulatedIO;
     use std::path::PathBuf;
@@ -552,7 +688,8 @@ mod tests {
         let mgr = setup_manager(max_segment_size);
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=event_count).for_each(|i| {
                 writer
                     .append(
@@ -566,7 +703,7 @@ mod tests {
         }
         mgr.shutdown();
 
-        let reader = EventLogReader::new(Arc::clone(&mgr), false);
+        let reader = EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
         reader.refresh_segment_ranges().unwrap();
         (mgr, reader)
     }
@@ -586,7 +723,8 @@ mod tests {
         let mgr = setup_manager(max_segment_size);
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             let total = events_per_segment * num_segments;
             (1..=total).for_each(|i| {
                 writer
@@ -605,7 +743,7 @@ mod tests {
         }
         mgr.shutdown();
 
-        let reader = EventLogReader::new(Arc::clone(&mgr), false);
+        let reader = EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
         reader.refresh_segment_ranges().unwrap();
         (mgr, reader)
     }
@@ -777,7 +915,7 @@ mod tests {
     fn mmap_read_matches_direct_read() {
         let (mgr, direct_reader) = setup_with_events(10, 50, 64 * 1024);
 
-        let mmap_reader = EventLogReader::new(Arc::clone(&mgr), true);
+        let mmap_reader = EventLogReader::new(Arc::clone(&mgr), true, false, MAX_EVENT_PAYLOAD);
         mmap_reader.refresh_segment_ranges().unwrap();
 
         let direct_events = direct_reader
@@ -820,7 +958,7 @@ mod tests {
     #[test]
     fn empty_reader_returns_empty() {
         let mgr = setup_manager(64 * 1024);
-        let reader = EventLogReader::new(Arc::clone(&mgr), false);
+        let reader = EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
         reader.refresh_segment_ranges().unwrap();
 
         let events = reader
@@ -858,7 +996,8 @@ mod tests {
         let mgr = setup_manager(64 * 1024);
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             let types = [
                 EventTypeTag::COMMIT,
                 EventTypeTag::IDENTITY,
@@ -878,7 +1017,7 @@ mod tests {
         }
         mgr.shutdown();
 
-        let reader = EventLogReader::new(Arc::clone(&mgr), false);
+        let reader = EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
         reader.refresh_segment_ranges().unwrap();
 
         let events = reader
@@ -894,7 +1033,7 @@ mod tests {
     fn active_segment_excludes_mmap() {
         let (mgr, _) = setup_with_events(10, 50, 64 * 1024);
 
-        let reader = EventLogReader::new(Arc::clone(&mgr), true);
+        let reader = EventLogReader::new(Arc::clone(&mgr), true, false, MAX_EVENT_PAYLOAD);
         reader.set_active_segment(SegmentId::new(1));
         reader.refresh_segment_ranges().unwrap();
 
@@ -905,7 +1044,7 @@ mod tests {
     #[test]
     fn no_active_segment_mmaps_all() {
         let reader: EventLogReader<SimulatedIO> =
-            EventLogReader::new(setup_manager(64 * 1024), true);
+            EventLogReader::new(setup_manager(64 * 1024), true, false, MAX_EVENT_PAYLOAD);
 
         assert!(reader.is_mmap_eligible(SegmentId::new(1)));
         assert!(reader.is_mmap_eligible(SegmentId::new(99)));
@@ -916,7 +1055,8 @@ mod tests {
         let mgr = setup_manager(64 * 1024);
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=5).for_each(|i| {
                 writer
                     .append(
@@ -937,7 +1077,7 @@ mod tests {
             .save(mgr.io(), &mgr.index_path(SegmentId::new(1)))
             .unwrap();
 
-        let reader = EventLogReader::new(Arc::clone(&mgr), false);
+        let reader = EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
         reader.refresh_segment_ranges().unwrap();
 
         let events = reader
@@ -954,7 +1094,8 @@ mod tests {
         let mgr = setup_manager(64 * 1024);
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=5).for_each(|i| {
                 writer
                     .append(
@@ -975,7 +1116,7 @@ mod tests {
             .save(mgr.io(), &mgr.index_path(SegmentId::new(1)))
             .unwrap();
 
-        let reader = EventLogReader::new(Arc::clone(&mgr), true);
+        let reader = EventLogReader::new(Arc::clone(&mgr), true, false, MAX_EVENT_PAYLOAD);
         reader.refresh_segment_ranges().unwrap();
 
         let events = reader
@@ -988,7 +1129,7 @@ mod tests {
     fn on_segment_rotated_updates_state() {
         let (mgr, _direct_reader) = setup_multi_segment(3, 2, 50);
 
-        let reader = EventLogReader::new(Arc::clone(&mgr), true);
+        let reader = EventLogReader::new(Arc::clone(&mgr), true, false, MAX_EVENT_PAYLOAD);
         reader.refresh_segment_ranges().unwrap();
 
         assert_eq!(

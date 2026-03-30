@@ -36,6 +36,7 @@ async fn create_store_repos() -> Arc<PostgresRepositories> {
         index_dir: bs_index,
         max_file_size: tranquil_store::blockstore::DEFAULT_MAX_FILE_SIZE,
         group_commit: Default::default(),
+        shard_count: 1,
     })
     .expect("blockstore open");
 
@@ -66,7 +67,7 @@ async fn create_store_repos() -> Arc<PostgresRepositories> {
         Some(2),
     ));
 
-    let client = MetastoreClient::<RealIO>::new(pool);
+    let client = MetastoreClient::<RealIO>::new(pool, Arc::clone(&event_log));
 
     Arc::new(PostgresRepositories {
         pool: None,
@@ -137,18 +138,39 @@ fn test_at_uri(did: &Did, collection: &Nsid, rkey: &Rkey) -> AtUri {
     .unwrap()
 }
 
-async fn seed_repo(
-    repos: &PostgresRepositories,
-    did: &Did,
-    handle: &Handle,
-    root_cid: &CidLink,
-    user_id: Uuid,
-) {
+async fn seed_user(repos: &PostgresRepositories, did: &Did, handle: &Handle) -> Uuid {
+    let commit_cid = helpers::make_cid(did.as_str().as_bytes()).to_string();
+    let input = tranquil_db_traits::CreatePasswordAccountInput {
+        handle: handle.clone(),
+        email: None,
+        did: did.clone(),
+        password_hash: "parity-test-hash".to_string(),
+        preferred_comms_channel: CommsChannel::Email,
+        discord_username: None,
+        telegram_username: None,
+        signal_username: None,
+        deactivated_at: None,
+        encrypted_key_bytes: vec![0u8; 32],
+        encryption_version: 0,
+        reserved_key_id: None,
+        commit_cid,
+        repo_rev: "rev0".to_string(),
+        genesis_block_cids: vec![],
+        invite_code: None,
+        birthdate_pref: None,
+    };
     repos
-        .repo
-        .create_repo(user_id, did, handle, root_cid, "rev0")
+        .user
+        .create_password_account(&input)
         .await
-        .unwrap();
+        .unwrap()
+        .user_id
+}
+
+async fn seed_repos(f: &ParityFixture, did: &Did, handle: &Handle) -> (Uuid, Uuid) {
+    let pg_uid = seed_user(&f.pg, did, handle).await;
+    let store_uid = seed_user(&f.store, did, handle).await;
+    (pg_uid, store_uid)
 }
 
 async fn seed_records(
@@ -211,14 +233,11 @@ async fn parity_health_check() {
 #[tokio::test]
 async fn parity_rkey_sort_order() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("rkey");
     let handle = test_handle("rkey");
-    let root_cid = test_cid(0);
     let collection = test_nsid("post");
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let records: Vec<(Rkey, CidLink)> = (0u8..10)
         .map(|i| {
@@ -228,18 +247,18 @@ async fn parity_rkey_sort_order() {
         })
         .collect();
 
-    seed_records(&f.pg, uid, &collection, &records).await;
-    seed_records(&f.store, uid, &collection, &records).await;
+    seed_records(&f.pg, pg_uid, &collection, &records).await;
+    seed_records(&f.store, store_uid, &collection, &records).await;
 
     let pg_fwd =
         f.pg.repo
-            .list_records(uid, &collection, None, 100, false, None, None)
+            .list_records(pg_uid, &collection, None, 100, false, None, None)
             .await
             .unwrap();
     let store_fwd = f
         .store
         .repo
-        .list_records(uid, &collection, None, 100, false, None, None)
+        .list_records(store_uid, &collection, None, 100, false, None, None)
         .await
         .unwrap();
 
@@ -249,13 +268,13 @@ async fn parity_rkey_sort_order() {
 
     let pg_rev =
         f.pg.repo
-            .list_records(uid, &collection, None, 100, true, None, None)
+            .list_records(pg_uid, &collection, None, 100, true, None, None)
             .await
             .unwrap();
     let store_rev = f
         .store
         .repo
-        .list_records(uid, &collection, None, 100, true, None, None)
+        .list_records(store_uid, &collection, None, 100, true, None, None)
         .await
         .unwrap();
 
@@ -271,14 +290,11 @@ async fn parity_rkey_sort_order() {
 #[tokio::test]
 async fn parity_cursor_pagination() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("cursor");
     let handle = test_handle("cursor");
-    let root_cid = test_cid(0);
     let collection = test_nsid("post");
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let records: Vec<(Rkey, CidLink)> = (0u8..20)
         .map(|i| {
@@ -288,8 +304,8 @@ async fn parity_cursor_pagination() {
         })
         .collect();
 
-    seed_records(&f.pg, uid, &collection, &records).await;
-    seed_records(&f.store, uid, &collection, &records).await;
+    seed_records(&f.pg, pg_uid, &collection, &records).await;
+    seed_records(&f.store, store_uid, &collection, &records).await;
 
     let mut pg_all = Vec::new();
     let mut store_all = Vec::new();
@@ -302,7 +318,7 @@ async fn parity_cursor_pagination() {
         let pg_page =
             f.pg.repo
                 .list_records(
-                    uid,
+                    pg_uid,
                     &collection,
                     pg_cursor.as_ref(),
                     limit,
@@ -316,7 +332,7 @@ async fn parity_cursor_pagination() {
             .store
             .repo
             .list_records(
-                uid,
+                store_uid,
                 &collection,
                 store_cursor.as_ref(),
                 limit,
@@ -359,14 +375,11 @@ async fn parity_cursor_pagination() {
 #[tokio::test]
 async fn parity_cursor_pagination_reverse() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("currev");
     let handle = test_handle("currev");
-    let root_cid = test_cid(0);
     let collection = test_nsid("post");
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let records: Vec<(Rkey, CidLink)> = (0u8..15)
         .map(|i| {
@@ -376,8 +389,8 @@ async fn parity_cursor_pagination_reverse() {
         })
         .collect();
 
-    seed_records(&f.pg, uid, &collection, &records).await;
-    seed_records(&f.store, uid, &collection, &records).await;
+    seed_records(&f.pg, pg_uid, &collection, &records).await;
+    seed_records(&f.store, store_uid, &collection, &records).await;
 
     let mut pg_all = Vec::new();
     let mut store_all = Vec::new();
@@ -389,7 +402,7 @@ async fn parity_cursor_pagination_reverse() {
         let pg_page =
             f.pg.repo
                 .list_records(
-                    uid,
+                    pg_uid,
                     &collection,
                     pg_cursor.as_ref(),
                     limit,
@@ -403,7 +416,7 @@ async fn parity_cursor_pagination_reverse() {
             .store
             .repo
             .list_records(
-                uid,
+                store_uid,
                 &collection,
                 store_cursor.as_ref(),
                 limit,
@@ -436,14 +449,11 @@ async fn parity_cursor_pagination_reverse() {
 #[tokio::test]
 async fn parity_rkey_range_query() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("range");
     let handle = test_handle("range");
-    let root_cid = test_cid(0);
     let collection = test_nsid("post");
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let records: Vec<(Rkey, CidLink)> = (0u8..10)
         .map(|i| {
@@ -453,21 +463,37 @@ async fn parity_rkey_range_query() {
         })
         .collect();
 
-    seed_records(&f.pg, uid, &collection, &records).await;
-    seed_records(&f.store, uid, &collection, &records).await;
+    seed_records(&f.pg, pg_uid, &collection, &records).await;
+    seed_records(&f.store, store_uid, &collection, &records).await;
 
     let start = test_rkey("3l03aaaaaaaaa");
     let end = test_rkey("3l07aaaaaaaaa");
 
     let pg_range =
         f.pg.repo
-            .list_records(uid, &collection, None, 100, false, Some(&start), Some(&end))
+            .list_records(
+                pg_uid,
+                &collection,
+                None,
+                100,
+                false,
+                Some(&start),
+                Some(&end),
+            )
             .await
             .unwrap();
     let store_range = f
         .store
         .repo
-        .list_records(uid, &collection, None, 100, false, Some(&start), Some(&end))
+        .list_records(
+            store_uid,
+            &collection,
+            None,
+            100,
+            false,
+            Some(&start),
+            Some(&end),
+        )
         .await
         .unwrap();
 
@@ -479,13 +505,10 @@ async fn parity_rkey_range_query() {
 #[tokio::test]
 async fn parity_collection_listing() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("colls");
     let handle = test_handle("colls");
-    let root_cid = test_cid(0);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let post_ns = test_nsid("post");
     let like_ns = Nsid::new("app.bsky.feed.like").unwrap();
@@ -497,19 +520,19 @@ async fn parity_collection_listing() {
     let repost_records = vec![(test_rkey("3laaaaaaaaa03"), test_cid(3))];
     let follow_records = vec![(test_rkey("3laaaaaaaaa04"), test_cid(4))];
 
-    seed_records(&f.pg, uid, &post_ns, &post_records).await;
-    seed_records(&f.pg, uid, &like_ns, &like_records).await;
-    seed_records(&f.pg, uid, &repost_ns, &repost_records).await;
-    seed_records(&f.pg, uid, &follow_ns, &follow_records).await;
+    seed_records(&f.pg, pg_uid, &post_ns, &post_records).await;
+    seed_records(&f.pg, pg_uid, &like_ns, &like_records).await;
+    seed_records(&f.pg, pg_uid, &repost_ns, &repost_records).await;
+    seed_records(&f.pg, pg_uid, &follow_ns, &follow_records).await;
 
-    seed_records(&f.store, uid, &post_ns, &post_records).await;
-    seed_records(&f.store, uid, &like_ns, &like_records).await;
-    seed_records(&f.store, uid, &repost_ns, &repost_records).await;
-    seed_records(&f.store, uid, &follow_ns, &follow_records).await;
+    seed_records(&f.store, store_uid, &post_ns, &post_records).await;
+    seed_records(&f.store, store_uid, &like_ns, &like_records).await;
+    seed_records(&f.store, store_uid, &repost_ns, &repost_records).await;
+    seed_records(&f.store, store_uid, &follow_ns, &follow_records).await;
 
     let mut pg_colls: Vec<String> =
         f.pg.repo
-            .list_collections(uid)
+            .list_collections(pg_uid)
             .await
             .unwrap()
             .into_iter()
@@ -520,7 +543,7 @@ async fn parity_collection_listing() {
     let mut store_colls: Vec<String> = f
         .store
         .repo
-        .list_collections(uid)
+        .list_collections(store_uid)
         .await
         .unwrap()
         .into_iter()
@@ -531,8 +554,8 @@ async fn parity_collection_listing() {
     assert_eq!(pg_colls, store_colls, "collection listing mismatch");
     assert_eq!(pg_colls.len(), 4);
 
-    let pg_count = f.pg.repo.count_records(uid).await.unwrap();
-    let store_count = f.store.repo.count_records(uid).await.unwrap();
+    let pg_count = f.pg.repo.count_records(pg_uid).await.unwrap();
+    let store_count = f.store.repo.count_records(store_uid).await.unwrap();
     assert_eq!(pg_count, store_count, "record count mismatch");
     assert_eq!(pg_count, 4);
 }
@@ -540,53 +563,64 @@ async fn parity_collection_listing() {
 #[tokio::test]
 async fn parity_record_get_and_delete() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("getdel");
     let handle = test_handle("getdel");
-    let root_cid = test_cid(0);
     let collection = test_nsid("post");
     let rkey = test_rkey("3laaaaaaaaa01");
     let cid = test_cid(1);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
-    seed_records(&f.pg, uid, &collection, &[(rkey.clone(), cid.clone())]).await;
-    seed_records(&f.store, uid, &collection, &[(rkey.clone(), cid.clone())]).await;
+    seed_records(&f.pg, pg_uid, &collection, &[(rkey.clone(), cid.clone())]).await;
+    seed_records(
+        &f.store,
+        store_uid,
+        &collection,
+        &[(rkey.clone(), cid.clone())],
+    )
+    .await;
 
     let pg_cid =
         f.pg.repo
-            .get_record_cid(uid, &collection, &rkey)
+            .get_record_cid(pg_uid, &collection, &rkey)
             .await
             .unwrap();
     let store_cid = f
         .store
         .repo
-        .get_record_cid(uid, &collection, &rkey)
+        .get_record_cid(store_uid, &collection, &rkey)
         .await
         .unwrap();
     assert_eq!(pg_cid, store_cid, "get_record_cid mismatch");
     assert!(pg_cid.is_some());
 
     f.pg.repo
-        .delete_records(uid, &[collection.clone()], &[rkey.clone()])
+        .delete_records(
+            pg_uid,
+            std::slice::from_ref(&collection),
+            std::slice::from_ref(&rkey),
+        )
         .await
         .unwrap();
     f.store
         .repo
-        .delete_records(uid, &[collection.clone()], &[rkey.clone()])
+        .delete_records(
+            store_uid,
+            std::slice::from_ref(&collection),
+            std::slice::from_ref(&rkey),
+        )
         .await
         .unwrap();
 
     let pg_gone =
         f.pg.repo
-            .get_record_cid(uid, &collection, &rkey)
+            .get_record_cid(pg_uid, &collection, &rkey)
             .await
             .unwrap();
     let store_gone = f
         .store
         .repo
-        .get_record_cid(uid, &collection, &rkey)
+        .get_record_cid(store_uid, &collection, &rkey)
         .await
         .unwrap();
     assert_eq!(pg_gone, None);
@@ -596,15 +630,12 @@ async fn parity_record_get_and_delete() {
 #[tokio::test]
 async fn parity_backlink_queries() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("blink");
     let handle = test_handle("blink");
-    let root_cid = test_cid(0);
     let like_ns = Nsid::new("app.bsky.feed.like").unwrap();
     let target_did = test_did("target");
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let rkey1 = test_rkey("3laaaaaaaaa01");
     let rkey2 = test_rkey("3laaaaaaaaa02");
@@ -628,10 +659,13 @@ async fn parity_backlink_queries() {
         },
     ];
 
-    f.pg.backlink.add_backlinks(uid, &backlinks).await.unwrap();
+    f.pg.backlink
+        .add_backlinks(pg_uid, &backlinks)
+        .await
+        .unwrap();
     f.store
         .backlink
-        .add_backlinks(uid, &backlinks)
+        .add_backlinks(store_uid, &backlinks)
         .await
         .unwrap();
 
@@ -643,13 +677,13 @@ async fn parity_backlink_queries() {
 
     let pg_conflicts =
         f.pg.backlink
-            .get_backlink_conflicts(uid, &like_ns, &[conflict_backlink.clone()])
+            .get_backlink_conflicts(pg_uid, &like_ns, std::slice::from_ref(&conflict_backlink))
             .await
             .unwrap();
     let store_conflicts = f
         .store
         .backlink
-        .get_backlink_conflicts(uid, &like_ns, &[conflict_backlink])
+        .get_backlink_conflicts(store_uid, &like_ns, &[conflict_backlink])
         .await
         .unwrap();
 
@@ -674,13 +708,13 @@ async fn parity_backlink_queries() {
 
     let pg_after =
         f.pg.backlink
-            .get_backlink_conflicts(uid, &like_ns, &[post_removal.clone()])
+            .get_backlink_conflicts(pg_uid, &like_ns, std::slice::from_ref(&post_removal))
             .await
             .unwrap();
     let store_after = f
         .store
         .backlink
-        .get_backlink_conflicts(uid, &like_ns, &[post_removal])
+        .get_backlink_conflicts(store_uid, &like_ns, &[post_removal])
         .await
         .unwrap();
 
@@ -694,14 +728,11 @@ async fn parity_backlink_queries() {
 #[tokio::test]
 async fn parity_backlink_remove_by_repo() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("blrep");
     let handle = test_handle("blrep");
-    let root_cid = test_cid(0);
     let like_ns = Nsid::new("app.bsky.feed.like").unwrap();
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let rkey = test_rkey("3laaaaaaaaa01");
     let uri = test_at_uri(&did, &like_ns, &rkey);
@@ -711,17 +742,23 @@ async fn parity_backlink_remove_by_repo() {
         link_to: "at://did:plc:sometarget/app.bsky.feed.post/abc".to_owned(),
     }];
 
-    f.pg.backlink.add_backlinks(uid, &backlinks).await.unwrap();
+    f.pg.backlink
+        .add_backlinks(pg_uid, &backlinks)
+        .await
+        .unwrap();
     f.store
         .backlink
-        .add_backlinks(uid, &backlinks)
+        .add_backlinks(store_uid, &backlinks)
         .await
         .unwrap();
 
-    f.pg.backlink.remove_backlinks_by_repo(uid).await.unwrap();
+    f.pg.backlink
+        .remove_backlinks_by_repo(pg_uid)
+        .await
+        .unwrap();
     f.store
         .backlink
-        .remove_backlinks_by_repo(uid)
+        .remove_backlinks_by_repo(store_uid)
         .await
         .unwrap();
 
@@ -732,29 +769,26 @@ async fn parity_backlink_remove_by_repo() {
     };
     let pg_after =
         f.pg.backlink
-            .get_backlink_conflicts(uid, &like_ns, &[probe.clone()])
+            .get_backlink_conflicts(pg_uid, &like_ns, std::slice::from_ref(&probe))
             .await
             .unwrap();
     let store_after = f
         .store
         .backlink
-        .get_backlink_conflicts(uid, &like_ns, &[probe])
+        .get_backlink_conflicts(store_uid, &like_ns, &[probe])
         .await
         .unwrap();
     assert_eq!(pg_after.len(), 0);
     assert_eq!(store_after.len(), 0);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn parity_blob_metadata() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("blob");
     let handle = test_handle("blob");
-    let root_cid = test_cid(0);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let blob_cid1 = test_cid(101);
     let blob_cid2 = test_cid(102);
@@ -776,12 +810,12 @@ async fn parity_blob_metadata() {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 pg.blob
-                    .insert_blob(&cid, &mime, size, uid, &key)
+                    .insert_blob(&cid, &mime, size, pg_uid, &key)
                     .await
                     .unwrap();
                 store
                     .blob
-                    .insert_blob(&cid, &mime, size, uid, &key)
+                    .insert_blob(&cid, &mime, size, store_uid, &key)
                     .await
                     .unwrap();
             });
@@ -809,31 +843,32 @@ async fn parity_blob_metadata() {
     let store_key = f.store.blob.get_blob_storage_key(&blob_cid2).await.unwrap();
     assert_eq!(pg_key, store_key);
 
-    let pg_count = f.pg.blob.count_blobs_by_user(uid).await.unwrap();
-    let store_count = f.store.blob.count_blobs_by_user(uid).await.unwrap();
+    let pg_count = f.pg.blob.count_blobs_by_user(pg_uid).await.unwrap();
+    let store_count = f.store.blob.count_blobs_by_user(store_uid).await.unwrap();
     assert_eq!(pg_count, store_count);
     assert_eq!(pg_count, 3);
 
-    let pg_list = f.pg.blob.list_blobs_by_user(uid, None, 100).await.unwrap();
+    let pg_list =
+        f.pg.blob
+            .list_blobs_by_user(pg_uid, None, 100)
+            .await
+            .unwrap();
     let store_list = f
         .store
         .blob
-        .list_blobs_by_user(uid, None, 100)
+        .list_blobs_by_user(store_uid, None, 100)
         .await
         .unwrap();
     assert_eq!(pg_list.len(), store_list.len());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn parity_blob_pagination() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("blobpg");
     let handle = test_handle("blobpg");
-    let root_cid = test_cid(0);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     (0u8..8).for_each(|i| {
         let cid = test_cid(200 + i);
@@ -847,7 +882,7 @@ async fn parity_blob_pagination() {
                         &cid,
                         "application/octet-stream",
                         512 * (i as i64 + 1),
-                        uid,
+                        pg_uid,
                         &key,
                     )
                     .await
@@ -858,7 +893,7 @@ async fn parity_blob_pagination() {
                         &cid,
                         "application/octet-stream",
                         512 * (i as i64 + 1),
-                        uid,
+                        store_uid,
                         &key,
                     )
                     .await
@@ -876,13 +911,13 @@ async fn parity_blob_pagination() {
     loop {
         let pg_page =
             f.pg.blob
-                .list_blobs_by_user(uid, pg_cursor.as_deref(), limit)
+                .list_blobs_by_user(pg_uid, pg_cursor.as_deref(), limit)
                 .await
                 .unwrap();
         let store_page = f
             .store
             .blob
-            .list_blobs_by_user(uid, store_cursor.as_deref(), limit)
+            .list_blobs_by_user(store_uid, store_cursor.as_deref(), limit)
             .await
             .unwrap();
 
@@ -910,38 +945,35 @@ async fn parity_blob_pagination() {
 #[tokio::test]
 async fn parity_blob_duplicate_insert() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("blobdup");
     let handle = test_handle("blobdup");
-    let root_cid = test_cid(0);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let cid = test_cid(150);
 
     let pg_first =
         f.pg.blob
-            .insert_blob(&cid, "image/png", 1024, uid, "blobs/dup.png")
+            .insert_blob(&cid, "image/png", 1024, pg_uid, "blobs/dup.png")
             .await
             .unwrap();
     let store_first = f
         .store
         .blob
-        .insert_blob(&cid, "image/png", 1024, uid, "blobs/dup.png")
+        .insert_blob(&cid, "image/png", 1024, store_uid, "blobs/dup.png")
         .await
         .unwrap();
     assert_eq!(pg_first, store_first);
 
     let pg_dup =
         f.pg.blob
-            .insert_blob(&cid, "image/png", 1024, uid, "blobs/dup.png")
+            .insert_blob(&cid, "image/png", 1024, pg_uid, "blobs/dup.png")
             .await
             .unwrap();
     let store_dup = f
         .store
         .blob
-        .insert_blob(&cid, "image/png", 1024, uid, "blobs/dup.png")
+        .insert_blob(&cid, "image/png", 1024, store_uid, "blobs/dup.png")
         .await
         .unwrap();
     assert_eq!(pg_dup, store_dup);
@@ -950,13 +982,10 @@ async fn parity_blob_duplicate_insert() {
 #[tokio::test]
 async fn parity_get_all_records() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("allrec");
     let handle = test_handle("allrec");
-    let root_cid = test_cid(0);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let post_ns = test_nsid("post");
     let like_ns = Nsid::new("app.bsky.feed.like").unwrap();
@@ -967,13 +996,13 @@ async fn parity_get_all_records() {
     ];
     let likes = vec![(test_rkey("3laaaaaaaaa03"), test_cid(3))];
 
-    seed_records(&f.pg, uid, &post_ns, &posts).await;
-    seed_records(&f.pg, uid, &like_ns, &likes).await;
-    seed_records(&f.store, uid, &post_ns, &posts).await;
-    seed_records(&f.store, uid, &like_ns, &likes).await;
+    seed_records(&f.pg, pg_uid, &post_ns, &posts).await;
+    seed_records(&f.pg, pg_uid, &like_ns, &likes).await;
+    seed_records(&f.store, store_uid, &post_ns, &posts).await;
+    seed_records(&f.store, store_uid, &like_ns, &likes).await;
 
-    let mut pg_all = f.pg.repo.get_all_records(uid).await.unwrap();
-    let mut store_all = f.store.repo.get_all_records(uid).await.unwrap();
+    let mut pg_all = f.pg.repo.get_all_records(pg_uid).await.unwrap();
+    let mut store_all = f.store.repo.get_all_records(store_uid).await.unwrap();
 
     pg_all.sort_by(|a, b| {
         a.collection
@@ -999,12 +1028,14 @@ async fn parity_get_all_records() {
 #[tokio::test]
 async fn parity_comms_queue() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
+    let did = test_did("comms");
+    let handle = test_handle("comms");
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let pg_id =
         f.pg.infra
             .enqueue_comms(
-                Some(uid),
+                Some(pg_uid),
                 CommsChannel::Email,
                 CommsType::Welcome,
                 "test@example.com",
@@ -1019,7 +1050,7 @@ async fn parity_comms_queue() {
         .store
         .infra
         .enqueue_comms(
-            Some(uid),
+            Some(store_uid),
             CommsChannel::Email,
             CommsType::Welcome,
             "test@example.com",
@@ -1035,13 +1066,13 @@ async fn parity_comms_queue() {
 
     let pg_latest =
         f.pg.infra
-            .get_latest_comms_for_user(uid, CommsType::Welcome, 10)
+            .get_latest_comms_for_user(pg_uid, CommsType::Welcome, 10)
             .await
             .unwrap();
     let store_latest = f
         .store
         .infra
-        .get_latest_comms_for_user(uid, CommsType::Welcome, 10)
+        .get_latest_comms_for_user(store_uid, CommsType::Welcome, 10)
         .await
         .unwrap();
 
@@ -1050,13 +1081,13 @@ async fn parity_comms_queue() {
 
     let pg_count =
         f.pg.infra
-            .count_comms_by_type(uid, CommsType::Welcome)
+            .count_comms_by_type(pg_uid, CommsType::Welcome)
             .await
             .unwrap();
     let store_count = f
         .store
         .infra
-        .count_comms_by_type(uid, CommsType::Welcome)
+        .count_comms_by_type(store_uid, CommsType::Welcome)
         .await
         .unwrap();
     assert_eq!(pg_count, store_count);
@@ -1066,13 +1097,20 @@ async fn parity_comms_queue() {
 #[tokio::test]
 async fn parity_invite_codes() {
     let f = ParityFixture::new().await;
+    let did = test_did("invite");
+    let handle = test_handle("invite");
+    let _ = seed_repos(&f, &did, &handle).await;
     let code = format!("parity-invite-{}", Uuid::new_v4());
 
-    let pg_created = f.pg.infra.create_invite_code(&code, 5, None).await.unwrap();
+    let pg_created =
+        f.pg.infra
+            .create_invite_code(&code, 5, Some(&did))
+            .await
+            .unwrap();
     let store_created = f
         .store
         .infra
-        .create_invite_code(&code, 5, None)
+        .create_invite_code(&code, 5, Some(&did))
         .await
         .unwrap();
     assert_eq!(pg_created, store_created);
@@ -1095,13 +1133,10 @@ async fn parity_invite_codes() {
 #[tokio::test]
 async fn parity_account_preferences() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("prefs");
     let handle = test_handle("prefs");
-    let root_cid = test_cid(0);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let pref_value = serde_json::json!({
         "$type": "app.bsky.actor.defs#adultContentPref",
@@ -1110,7 +1145,7 @@ async fn parity_account_preferences() {
 
     f.pg.infra
         .upsert_account_preference(
-            uid,
+            pg_uid,
             "app.bsky.actor.defs#adultContentPref/0",
             pref_value.clone(),
         )
@@ -1118,12 +1153,21 @@ async fn parity_account_preferences() {
         .unwrap();
     f.store
         .infra
-        .upsert_account_preference(uid, "app.bsky.actor.defs#adultContentPref/0", pref_value)
+        .upsert_account_preference(
+            store_uid,
+            "app.bsky.actor.defs#adultContentPref/0",
+            pref_value,
+        )
         .await
         .unwrap();
 
-    let mut pg_prefs = f.pg.infra.get_account_preferences(uid).await.unwrap();
-    let mut store_prefs = f.store.infra.get_account_preferences(uid).await.unwrap();
+    let mut pg_prefs = f.pg.infra.get_account_preferences(pg_uid).await.unwrap();
+    let mut store_prefs = f
+        .store
+        .infra
+        .get_account_preferences(store_uid)
+        .await
+        .unwrap();
 
     pg_prefs.sort_by(|a, b| a.0.cmp(&b.0));
     store_prefs.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1138,31 +1182,40 @@ async fn parity_account_preferences() {
 #[tokio::test]
 async fn parity_record_upsert_overwrites() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("upsert");
     let handle = test_handle("upsert");
-    let root_cid = test_cid(0);
     let collection = test_nsid("post");
     let rkey = test_rkey("3laaaaaaaaa01");
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let cid_v1 = test_cid(1);
-    seed_records(&f.pg, uid, &collection, &[(rkey.clone(), cid_v1.clone())]).await;
+    seed_records(
+        &f.pg,
+        pg_uid,
+        &collection,
+        &[(rkey.clone(), cid_v1.clone())],
+    )
+    .await;
     seed_records(
         &f.store,
-        uid,
+        store_uid,
         &collection,
         &[(rkey.clone(), cid_v1.clone())],
     )
     .await;
 
     let cid_v2 = test_cid(2);
-    seed_records(&f.pg, uid, &collection, &[(rkey.clone(), cid_v2.clone())]).await;
+    seed_records(
+        &f.pg,
+        pg_uid,
+        &collection,
+        &[(rkey.clone(), cid_v2.clone())],
+    )
+    .await;
     seed_records(
         &f.store,
-        uid,
+        store_uid,
         &collection,
         &[(rkey.clone(), cid_v2.clone())],
     )
@@ -1170,20 +1223,20 @@ async fn parity_record_upsert_overwrites() {
 
     let pg_cid =
         f.pg.repo
-            .get_record_cid(uid, &collection, &rkey)
+            .get_record_cid(pg_uid, &collection, &rkey)
             .await
             .unwrap();
     let store_cid = f
         .store
         .repo
-        .get_record_cid(uid, &collection, &rkey)
+        .get_record_cid(store_uid, &collection, &rkey)
         .await
         .unwrap();
     assert_eq!(pg_cid, store_cid);
     assert_eq!(pg_cid.unwrap().as_str(), cid_v2.as_str());
 
-    let pg_count = f.pg.repo.count_records(uid).await.unwrap();
-    let store_count = f.store.repo.count_records(uid).await.unwrap();
+    let pg_count = f.pg.repo.count_records(pg_uid).await.unwrap();
+    let store_count = f.store.repo.count_records(store_uid).await.unwrap();
     assert_eq!(pg_count, 1);
     assert_eq!(store_count, 1);
 }
@@ -1191,44 +1244,45 @@ async fn parity_record_upsert_overwrites() {
 #[tokio::test]
 async fn parity_empty_queries() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("empty");
     let handle = test_handle("empty");
-    let root_cid = test_cid(0);
     let collection = test_nsid("post");
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let pg_records =
         f.pg.repo
-            .list_records(uid, &collection, None, 100, false, None, None)
+            .list_records(pg_uid, &collection, None, 100, false, None, None)
             .await
             .unwrap();
     let store_records = f
         .store
         .repo
-        .list_records(uid, &collection, None, 100, false, None, None)
+        .list_records(store_uid, &collection, None, 100, false, None, None)
         .await
         .unwrap();
     assert_eq!(pg_records.len(), 0);
     assert_eq!(store_records.len(), 0);
 
-    let pg_colls = f.pg.repo.list_collections(uid).await.unwrap();
-    let store_colls = f.store.repo.list_collections(uid).await.unwrap();
+    let pg_colls = f.pg.repo.list_collections(pg_uid).await.unwrap();
+    let store_colls = f.store.repo.list_collections(store_uid).await.unwrap();
     assert_eq!(pg_colls.len(), 0);
     assert_eq!(store_colls.len(), 0);
 
-    let pg_count = f.pg.repo.count_records(uid).await.unwrap();
-    let store_count = f.store.repo.count_records(uid).await.unwrap();
+    let pg_count = f.pg.repo.count_records(pg_uid).await.unwrap();
+    let store_count = f.store.repo.count_records(store_uid).await.unwrap();
     assert_eq!(pg_count, 0);
     assert_eq!(store_count, 0);
 
-    let pg_blobs = f.pg.blob.list_blobs_by_user(uid, None, 100).await.unwrap();
+    let pg_blobs =
+        f.pg.blob
+            .list_blobs_by_user(pg_uid, None, 100)
+            .await
+            .unwrap();
     let store_blobs = f
         .store
         .blob
-        .list_blobs_by_user(uid, None, 100)
+        .list_blobs_by_user(store_uid, None, 100)
         .await
         .unwrap();
     assert_eq!(pg_blobs.len(), 0);
@@ -1249,6 +1303,8 @@ async fn parity_empty_queries() {
 async fn parity_deletion_requests() {
     let f = ParityFixture::new().await;
     let did = test_did("delreq");
+    let handle = test_handle("delreq");
+    let _ = seed_repos(&f, &did, &handle).await;
     let token = format!("del-token-{}", Uuid::new_v4());
     let expires = chrono::Utc::now() + chrono::Duration::hours(24);
 
@@ -1345,13 +1401,10 @@ async fn parity_signing_key_reservation() {
 #[tokio::test]
 async fn parity_repo_root_operations() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("root");
     let handle = test_handle("root");
-    let root_cid = test_cid(0);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let pg_root = f.pg.repo.get_repo_root_by_did(&did).await.unwrap();
     let store_root = f.store.repo.get_repo_root_by_did(&did).await.unwrap();
@@ -1359,12 +1412,12 @@ async fn parity_repo_root_operations() {
 
     let new_root = test_cid(99);
     f.pg.repo
-        .update_repo_root(uid, &new_root, "rev1")
+        .update_repo_root(pg_uid, &new_root, "rev1")
         .await
         .unwrap();
     f.store
         .repo
-        .update_repo_root(uid, &new_root, "rev1")
+        .update_repo_root(store_uid, &new_root, "rev1")
         .await
         .unwrap();
 
@@ -1373,8 +1426,8 @@ async fn parity_repo_root_operations() {
     assert_eq!(pg_updated, store_updated);
     assert_eq!(pg_updated.unwrap().as_str(), new_root.as_str());
 
-    let pg_info = f.pg.repo.get_repo(uid).await.unwrap().unwrap();
-    let store_info = f.store.repo.get_repo(uid).await.unwrap().unwrap();
+    let pg_info = f.pg.repo.get_repo(pg_uid).await.unwrap().unwrap();
+    let store_info = f.store.repo.get_repo(store_uid).await.unwrap().unwrap();
     assert_eq!(pg_info.repo_rev, store_info.repo_rev);
     assert_eq!(
         pg_info.repo_root_cid.as_str(),
@@ -1385,32 +1438,29 @@ async fn parity_repo_root_operations() {
 #[tokio::test]
 async fn parity_delete_all_records() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("delall");
     let handle = test_handle("delall");
-    let root_cid = test_cid(0);
     let collection = test_nsid("post");
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let records: Vec<(Rkey, CidLink)> = (0u8..5)
         .map(|i| (test_rkey(&format!("3l{:02}aaaaaaaaa", i)), test_cid(i + 1)))
         .collect();
 
-    seed_records(&f.pg, uid, &collection, &records).await;
-    seed_records(&f.store, uid, &collection, &records).await;
+    seed_records(&f.pg, pg_uid, &collection, &records).await;
+    seed_records(&f.store, store_uid, &collection, &records).await;
 
-    f.pg.repo.delete_all_records(uid).await.unwrap();
-    f.store.repo.delete_all_records(uid).await.unwrap();
+    f.pg.repo.delete_all_records(pg_uid).await.unwrap();
+    f.store.repo.delete_all_records(store_uid).await.unwrap();
 
-    let pg_count = f.pg.repo.count_records(uid).await.unwrap();
-    let store_count = f.store.repo.count_records(uid).await.unwrap();
+    let pg_count = f.pg.repo.count_records(pg_uid).await.unwrap();
+    let store_count = f.store.repo.count_records(store_uid).await.unwrap();
     assert_eq!(pg_count, 0);
     assert_eq!(store_count, 0);
 
-    let pg_colls = f.pg.repo.list_collections(uid).await.unwrap();
-    let store_colls = f.store.repo.list_collections(uid).await.unwrap();
+    let pg_colls = f.pg.repo.list_collections(pg_uid).await.unwrap();
+    let store_colls = f.store.repo.list_collections(store_uid).await.unwrap();
     assert_eq!(pg_colls.len(), 0);
     assert_eq!(store_colls.len(), 0);
 }
@@ -1418,32 +1468,33 @@ async fn parity_delete_all_records() {
 #[tokio::test]
 async fn parity_plc_tokens() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("plctok");
     let handle = test_handle("plctok");
-    let root_cid = test_cid(0);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let token = format!("plc-{}", Uuid::new_v4());
     let expires = chrono::Utc::now() + chrono::Duration::hours(1);
 
     f.pg.infra
-        .insert_plc_token(uid, &token, expires)
+        .insert_plc_token(pg_uid, &token, expires)
         .await
         .unwrap();
     f.store
         .infra
-        .insert_plc_token(uid, &token, expires)
+        .insert_plc_token(store_uid, &token, expires)
         .await
         .unwrap();
 
-    let pg_expiry = f.pg.infra.get_plc_token_expiry(uid, &token).await.unwrap();
+    let pg_expiry =
+        f.pg.infra
+            .get_plc_token_expiry(pg_uid, &token)
+            .await
+            .unwrap();
     let store_expiry = f
         .store
         .infra
-        .get_plc_token_expiry(uid, &token)
+        .get_plc_token_expiry(store_uid, &token)
         .await
         .unwrap();
     assert!(pg_expiry.is_some());
@@ -1458,14 +1509,22 @@ async fn parity_plc_tokens() {
     assert_eq!(pg_count, store_count);
     assert_eq!(pg_count, 1);
 
-    f.pg.infra.delete_plc_token(uid, &token).await.unwrap();
-    f.store.infra.delete_plc_token(uid, &token).await.unwrap();
+    f.pg.infra.delete_plc_token(pg_uid, &token).await.unwrap();
+    f.store
+        .infra
+        .delete_plc_token(store_uid, &token)
+        .await
+        .unwrap();
 
-    let pg_gone = f.pg.infra.get_plc_token_expiry(uid, &token).await.unwrap();
+    let pg_gone =
+        f.pg.infra
+            .get_plc_token_expiry(pg_uid, &token)
+            .await
+            .unwrap();
     let store_gone = f
         .store
         .infra
-        .get_plc_token_expiry(uid, &token)
+        .get_plc_token_expiry(store_uid, &token)
         .await
         .unwrap();
     assert!(pg_gone.is_none());
@@ -1475,22 +1534,19 @@ async fn parity_plc_tokens() {
 #[tokio::test]
 async fn parity_blob_delete_and_takedown() {
     let f = ParityFixture::new().await;
-    let uid = Uuid::new_v4();
     let did = test_did("blobdel");
     let handle = test_handle("blobdel");
-    let root_cid = test_cid(0);
 
-    seed_repo(&f.pg, &did, &handle, &root_cid, uid).await;
-    seed_repo(&f.store, &did, &handle, &root_cid, uid).await;
+    let (pg_uid, store_uid) = seed_repos(&f, &did, &handle).await;
 
     let cid = test_cid(180);
     f.pg.blob
-        .insert_blob(&cid, "image/png", 1024, uid, "blobs/td.png")
+        .insert_blob(&cid, "image/png", 1024, pg_uid, "blobs/td.png")
         .await
         .unwrap();
     f.store
         .blob
-        .insert_blob(&cid, "image/png", 1024, uid, "blobs/td.png")
+        .insert_blob(&cid, "image/png", 1024, store_uid, "blobs/td.png")
         .await
         .unwrap();
 
@@ -1521,4 +1577,89 @@ async fn parity_blob_delete_and_takedown() {
     let store_meta = f.store.blob.get_blob_metadata(&cid).await.unwrap();
     assert!(pg_meta.is_none());
     assert!(store_meta.is_none());
+}
+
+#[tokio::test]
+async fn parity_prune_events_older_than() {
+    let f = ParityFixture::new().await;
+    let did = test_did("prune");
+
+    let event = tranquil_db_traits::CommitEventData {
+        did: did.clone(),
+        event_type: tranquil_db_traits::RepoEventType::Commit,
+        commit_cid: Some(test_cid(1)),
+        prev_cid: None,
+        ops: None,
+        blobs: None,
+        blocks: None,
+        prev_data_cid: None,
+        rev: Some("rev0".to_string()),
+    };
+
+    let pg_seq = f.pg.repo.insert_commit_event(&event).await.unwrap();
+    let store_seq = f.store.repo.insert_commit_event(&event).await.unwrap();
+    assert!(pg_seq.as_i64() > 0);
+    assert!(store_seq.as_i64() > 0);
+
+    let past_cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
+    let pg_pruned_past =
+        f.pg.repo
+            .prune_events_older_than(past_cutoff)
+            .await
+            .unwrap();
+    let store_pruned_past = f
+        .store
+        .repo
+        .prune_events_older_than(past_cutoff)
+        .await
+        .unwrap();
+    assert!(
+        pg_pruned_past.is_zero(),
+        "past cutoff should not prune fresh events on pg, got {pg_pruned_past:?}"
+    );
+    assert!(
+        store_pruned_past.is_zero(),
+        "past cutoff should not prune fresh events on store, got {store_pruned_past:?}"
+    );
+    assert!(
+        matches!(pg_pruned_past, tranquil_db_traits::PruneCount::Rows(_)),
+        "pg backend must report row counts"
+    );
+    assert!(
+        matches!(
+            store_pruned_past,
+            tranquil_db_traits::PruneCount::Segments(_)
+        ),
+        "store backend must report segment counts"
+    );
+
+    let future_cutoff = chrono::Utc::now() + chrono::Duration::hours(24);
+    let pg_pruned_future =
+        f.pg.repo
+            .prune_events_older_than(future_cutoff)
+            .await
+            .unwrap();
+    assert!(
+        pg_pruned_future.count() > 0,
+        "future cutoff should prune at least one row on pg, got {pg_pruned_future:?}"
+    );
+
+    let pg_after = f.pg.repo.get_event_by_seq(pg_seq).await.unwrap();
+    assert!(
+        pg_after.is_none(),
+        "pruned pg event must no longer be readable"
+    );
+
+    let store_max_before = f.store.repo.get_max_seq().await.unwrap();
+    let _ = f
+        .store
+        .repo
+        .prune_events_older_than(future_cutoff)
+        .await
+        .unwrap();
+    let store_max_after = f.store.repo.get_max_seq().await.unwrap();
+    assert_eq!(
+        store_max_after, store_max_before,
+        "store retention must not regress max_seq"
+    );
 }

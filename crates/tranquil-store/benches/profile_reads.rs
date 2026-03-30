@@ -128,7 +128,7 @@ async fn seed_records(pool: &Arc<HandlerPool>, users: &[UserInfo], records_per_u
                                     prev_cid: None,
                                     ops: None,
                                     blobs: None,
-                                    blocks_cids: None,
+                                    blocks: None,
                                     prev_data_cid: None,
                                     rev: Some("rev0000000001".to_string()),
                                 },

@@ -22,6 +22,20 @@ impl AnyBlockStore {
             Self::TranquilStore(_) => None,
         }
     }
+
+    pub fn as_tranquil_store(&self) -> Option<&TranquilBlockStore> {
+        match self {
+            Self::TranquilStore(s) => Some(s),
+            Self::Postgres(_) => None,
+        }
+    }
+
+    pub async fn decrement_refs(&self, cids: &[Cid]) -> Result<(), RepoError> {
+        match self {
+            Self::Postgres(_) => Ok(()),
+            Self::TranquilStore(s) => s.decrement_refs(cids).await,
+        }
+    }
 }
 
 impl BlockStore for AnyBlockStore {

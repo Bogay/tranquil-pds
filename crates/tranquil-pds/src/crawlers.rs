@@ -75,8 +75,8 @@ impl Crawlers {
         self.last_notified.store(now, Ordering::Relaxed);
     }
 
-    pub async fn notify_of_update(&self) {
-        if !self.should_notify() {
+    pub async fn notify_of_update(&self, force: bool) {
+        if !force && !self.should_notify() {
             debug!("Skipping crawler notification due to debounce");
             return;
         }
@@ -157,13 +157,17 @@ pub async fn start_crawlers_service(
             result = firehose_rx.recv() => {
                 match result {
                     Ok(event) => {
-                        if event.event_type == RepoEventType::Commit {
-                            crawlers.notify_of_update().await;
+                        match event.event_type {
+                            RepoEventType::Commit => crawlers.notify_of_update(false).await,
+                            RepoEventType::Account | RepoEventType::Identity => {
+                                crawlers.notify_of_update(true).await
+                            }
+                            RepoEventType::Sync => {}
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!(skipped = n, "Crawlers service lagged behind firehose");
-                        crawlers.notify_of_update().await;
+                        crawlers.notify_of_update(false).await;
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         error!("Firehose channel closed, stopping crawlers service");

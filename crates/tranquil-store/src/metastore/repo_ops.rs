@@ -606,8 +606,8 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("alice");
-        let handle = test_handle("alice");
+        let did = test_did("olaren");
+        let handle = test_handle("olaren");
         let cid = test_cid_link(1);
 
         ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
@@ -631,8 +631,8 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("bob");
-        let handle = test_handle("bob");
+        let did = test_did("teq");
+        let handle = test_handle("teq");
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
 
@@ -651,8 +651,8 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("carol");
-        let handle = test_handle("carol");
+        let did = test_did("nel");
+        let handle = test_handle("nel");
         let cid = test_cid_link(3);
 
         ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
@@ -670,8 +670,8 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("dave");
-        let handle = test_handle("dave");
+        let did = test_did("lyna");
+        let handle = test_handle("lyna");
         let cid = test_cid_link(4);
 
         ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
@@ -738,14 +738,14 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("eve");
-        let handle = test_handle("eve");
+        let did = test_did("bailey");
+        let handle = test_handle("bailey");
         let cid = test_cid_link(5);
 
         ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
             .unwrap();
 
-        let upper_handle = Handle::from("EVE.TEST.INVALID".to_string());
+        let upper_handle = Handle::from("BAILEY.TEST.INVALID".to_string());
         let found = ops.lookup_handle(&upper_handle).unwrap();
         assert_eq!(found, Some(user_id));
     }
@@ -755,8 +755,8 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("frank");
-        let handle = test_handle("frank");
+        let did = test_did("olaren");
+        let handle = test_handle("olaren");
         let cid = test_cid_link(6);
 
         ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
@@ -765,7 +765,7 @@ mod tests {
         let root = ops.get_repo_root_by_did(&did).unwrap().unwrap();
         assert_eq!(root, cid);
 
-        let unknown = test_did("nobody");
+        let unknown = test_did("nonexistent");
         assert!(ops.get_repo_root_by_did(&unknown).unwrap().is_none());
     }
 
@@ -774,8 +774,8 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("grace");
-        let handle = test_handle("grace");
+        let did = test_did("teq");
+        let handle = test_handle("teq");
         let cid = test_cid_link(7);
 
         ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
@@ -809,8 +809,8 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("henry");
-        let handle = test_handle("henry");
+        let did = test_did("nel");
+        let handle = test_handle("nel");
         let cid = test_cid_link(8);
 
         ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")

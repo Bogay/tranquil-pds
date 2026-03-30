@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use fjall::{Database, Keyspace};
+use smallvec::SmallVec;
 use uuid::Uuid;
 
 use super::MetastoreError;
@@ -35,6 +36,7 @@ pub struct InfraOps {
     repo_data: Keyspace,
     users: Keyspace,
     user_hashes: Arc<UserHashMap>,
+    comms_seq: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl InfraOps {
@@ -44,6 +46,7 @@ impl InfraOps {
         repo_data: Keyspace,
         users: Keyspace,
         user_hashes: Arc<UserHashMap>,
+        comms_seq: Arc<std::sync::atomic::AtomicU32>,
     ) -> Self {
         Self {
             db,
@@ -51,6 +54,7 @@ impl InfraOps {
             repo_data,
             users,
             user_hashes,
+            comms_seq,
         }
     }
 
@@ -189,7 +193,10 @@ impl InfraOps {
                 status: status_to_u8(CommsStatus::Pending),
                 created_at_ms: now_ms,
             };
-            let history_key = comms_history_key(uid, now_ms, id);
+            let seq = self
+                .comms_seq
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let history_key = comms_history_key(uid, now_ms, seq, id);
             batch.insert(
                 &self.infra,
                 history_key.as_slice(),
@@ -245,19 +252,11 @@ impl InfraOps {
         let mut batch = self.db.batch();
         batch.insert(&self.infra, key.as_slice(), val.serialize());
 
-        let history_key = comms_history_key(
-            val.user_id.unwrap_or(Uuid::nil()),
-            val.created_at_ms,
-            val.id,
-        );
-        if let Some(mut history_val) = point_lookup(
-            &self.infra,
-            history_key.as_slice(),
-            NotificationHistoryValue::deserialize,
-            "corrupt notification history",
-        )? {
-            history_val.status = status_to_u8(CommsStatus::Sent);
-            batch.insert(&self.infra, history_key.as_slice(), history_val.serialize());
+        if let Some((hk, mut hv)) =
+            self.find_history_entry(val.user_id.unwrap_or(Uuid::nil()), val.id)?
+        {
+            hv.status = status_to_u8(CommsStatus::Sent);
+            batch.insert(&self.infra, hk.as_slice(), hv.serialize());
         }
 
         batch.commit().map_err(MetastoreError::Fjall)
@@ -280,22 +279,44 @@ impl InfraOps {
         let mut batch = self.db.batch();
         batch.insert(&self.infra, key.as_slice(), val.serialize());
 
-        let history_key = comms_history_key(
-            val.user_id.unwrap_or(Uuid::nil()),
-            val.created_at_ms,
-            val.id,
-        );
-        if let Some(mut history_val) = point_lookup(
-            &self.infra,
-            history_key.as_slice(),
-            NotificationHistoryValue::deserialize,
-            "corrupt notification history",
-        )? {
-            history_val.status = status_to_u8(CommsStatus::Failed);
-            batch.insert(&self.infra, history_key.as_slice(), history_val.serialize());
+        if let Some((hk, mut hv)) =
+            self.find_history_entry(val.user_id.unwrap_or(Uuid::nil()), val.id)?
+        {
+            hv.status = status_to_u8(CommsStatus::Failed);
+            batch.insert(&self.infra, hk.as_slice(), hv.serialize());
         }
 
         batch.commit().map_err(MetastoreError::Fjall)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn find_history_entry(
+        &self,
+        user_id: Uuid,
+        comms_id: Uuid,
+    ) -> Result<Option<(SmallVec<[u8; 128]>, NotificationHistoryValue)>, MetastoreError> {
+        let prefix = comms_history_prefix(user_id);
+        self.infra
+            .prefix(prefix.as_slice())
+            .find_map(|guard| {
+                let (key_bytes, val_bytes) = match guard.into_inner() {
+                    Ok(kv) => kv,
+                    Err(e) => return Some(Err(MetastoreError::Fjall(e))),
+                };
+                let val = match NotificationHistoryValue::deserialize(&val_bytes) {
+                    Some(v) => v,
+                    None => {
+                        return Some(Err(MetastoreError::CorruptData(
+                            "corrupt notification history",
+                        )));
+                    }
+                };
+                match val.id == comms_id {
+                    true => Some(Ok((SmallVec::from_slice(&key_bytes), val))),
+                    false => None,
+                }
+            })
+            .transpose()
     }
 
     pub fn create_invite_code(
@@ -743,10 +764,13 @@ impl InfraOps {
             SigningKeyValue::deserialize,
             "corrupt signing key",
         )?;
-        Ok(val.map(|v| ReservedSigningKey {
-            id: v.id,
-            private_key_bytes: v.private_key_bytes,
-        }))
+        let now_ms = Utc::now().timestamp_millis();
+        Ok(val
+            .filter(|v| !v.used && v.expires_at_ms > now_ms)
+            .map(|v| ReservedSigningKey {
+                id: v.id,
+                private_key_bytes: v.private_key_bytes,
+            }))
     }
 
     pub fn mark_signing_key_used(&self, key_id: Uuid) -> Result<(), MetastoreError> {

@@ -29,7 +29,7 @@ fn append_test_event(writer: &mut EventLogWriter<SimulatedIO>, seq_hint: u64) ->
 fn sequence_assignment_is_contiguous() {
     let n = 100u64;
     let mgr = setup_manager(64 * 1024);
-    let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+    let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
 
     let seqs: Vec<EventSequence> = (1..=n).map(|i| append_test_event(&mut writer, i)).collect();
 
@@ -48,7 +48,7 @@ fn cursor_resumption_returns_correct_suffix() {
     let mgr = setup_manager(64 * 1024);
 
     {
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         (1..=1000).for_each(|i| {
             append_test_event(&mut writer, i);
         });
@@ -56,7 +56,7 @@ fn cursor_resumption_returns_correct_suffix() {
     }
     mgr.shutdown();
 
-    let reader = EventLogReader::new(Arc::clone(&mgr), false);
+    let reader = EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
     reader.refresh_segment_ranges().unwrap();
 
     let events = reader
@@ -88,7 +88,7 @@ fn cross_segment_read_is_seamless() {
     let mgr = setup_manager(max_segment_size);
 
     {
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         (1..=total_events).for_each(|i| {
             writer
                 .append(
@@ -107,7 +107,7 @@ fn cross_segment_read_is_seamless() {
     }
     mgr.shutdown();
 
-    let reader = EventLogReader::new(Arc::clone(&mgr), false);
+    let reader = EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
     reader.refresh_segment_ranges().unwrap();
 
     let events = reader
@@ -141,7 +141,7 @@ fn retention_deletes_only_old_segments() {
     let mgr =
         Arc::new(SegmentManager::new(sim, PathBuf::from("/segments"), max_segment_size).unwrap());
 
-    let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+    let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
 
     (1..=15).for_each(|i| {
         writer
@@ -223,7 +223,7 @@ fn payload_round_trip() {
                     serde_json::json!([{"action": "create", "path": "app.bsky.feed.post/abc"}]),
                 ),
                 blobs: Some(vec!["bafkreibtest".to_owned()]),
-                blocks_cids: None,
+                blocks: None,
                 handle: None,
                 active: None,
                 status: None,
@@ -243,7 +243,7 @@ fn payload_round_trip() {
                 prev_data_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 handle: Some(Handle::new("test.bsky.social").unwrap()),
                 active: None,
                 status: None,
@@ -263,7 +263,7 @@ fn payload_round_trip() {
                 prev_data_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 handle: None,
                 active: Some(true),
                 status: Some(AccountStatus::Active),
@@ -283,7 +283,7 @@ fn payload_round_trip() {
                 prev_data_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 handle: None,
                 active: None,
                 status: None,
@@ -315,8 +315,9 @@ fn payload_round_trip() {
 
 #[test]
 fn max_payload_accepted() {
-    let payload = vec![0xBB; MAX_EVENT_PAYLOAD as usize];
-    assert!(validate_payload_size(&payload).is_ok());
+    const SMALL_MAX: u32 = 1024 * 1024;
+    let payload = vec![0xBB; SMALL_MAX as usize];
+    assert!(validate_payload_size(&payload, SMALL_MAX).is_ok());
 
     let sim = SimulatedIO::pristine(42);
     let dir = Path::new("/test");
@@ -331,6 +332,7 @@ fn max_payload_accepted() {
         fd,
         SegmentId::new(1),
         EventSequence::new(1),
+        SMALL_MAX,
     )
     .unwrap();
 
@@ -344,19 +346,20 @@ fn max_payload_accepted() {
     writer.append_event(&sim, &event).unwrap();
     writer.sync(&sim).unwrap();
 
-    let reader = SegmentReader::open(&sim, fd).unwrap();
+    let reader = SegmentReader::open(&sim, fd, SMALL_MAX).unwrap();
     let events = reader.valid_prefix().unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].payload.len(), MAX_EVENT_PAYLOAD as usize);
+    assert_eq!(events[0].payload.len(), SMALL_MAX as usize);
 }
 
 #[test]
 fn oversized_payload_rejected() {
-    let payload = vec![0xCC; MAX_EVENT_PAYLOAD as usize + 1];
-    match validate_payload_size(&payload) {
+    const SMALL_MAX: u32 = 1024;
+    let payload = vec![0xCC; SMALL_MAX as usize + 1];
+    match validate_payload_size(&payload, SMALL_MAX) {
         Err(PayloadError::TooLarge { size, max }) => {
-            assert_eq!(size, MAX_EVENT_PAYLOAD as usize + 1);
-            assert_eq!(max, MAX_EVENT_PAYLOAD as usize);
+            assert_eq!(size, SMALL_MAX as usize + 1);
+            assert_eq!(max, SMALL_MAX as usize);
         }
         other => panic!("expected TooLarge, got {other:?}"),
     }
@@ -374,7 +377,7 @@ fn retention_does_not_break_active_readers() {
         Arc::new(SegmentManager::new(sim, PathBuf::from("/segments"), max_segment_size).unwrap());
 
     {
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         (1..=25).for_each(|i| {
             writer
                 .append(
@@ -392,7 +395,7 @@ fn retention_does_not_break_active_readers() {
     }
     mgr.shutdown();
 
-    let reader = EventLogReader::new(Arc::clone(&mgr), false);
+    let reader = EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
     reader.refresh_segment_ranges().unwrap();
 
     let first_batch = reader
@@ -421,6 +424,7 @@ async fn subscriber_lag_recovery() {
         index_interval: 256,
         broadcast_buffer: 4,
         use_mmap: false,
+        ..EventLogConfig::default()
     };
 
     let event_log = EventLog::open(config, sim).unwrap();
@@ -442,7 +446,7 @@ async fn subscriber_lag_recovery() {
                     prev_data_cid: None,
                     ops: None,
                     blobs: None,
-                    blocks_cids: None,
+                    blocks: None,
                     handle: None,
                     active: None,
                     status: None,
@@ -498,7 +502,7 @@ fn index_checkpoint_accelerates_recovery() {
         Arc::new(SegmentManager::new(sim, PathBuf::from("/segments"), 256 * 1024 * 1024).unwrap());
 
     {
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         (1..=event_count).for_each(|i| {
             writer
                 .append(
@@ -524,7 +528,7 @@ fn index_checkpoint_accelerates_recovery() {
     let offset = index.lookup(mid);
     assert!(offset.is_some(), "index should cover midpoint seq {}", mid,);
 
-    let reader_with_index = EventLogReader::new(Arc::clone(&mgr), false);
+    let reader_with_index = EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
 
     let reads_before = mgr
         .io()
@@ -549,7 +553,8 @@ fn index_checkpoint_accelerates_recovery() {
 
     let _ = mgr.io().delete(&mgr.index_path(SegmentId::new(1)));
 
-    let reader_without_index = EventLogReader::new(Arc::clone(&mgr), false);
+    let reader_without_index =
+        EventLogReader::new(Arc::clone(&mgr), false, false, MAX_EVENT_PAYLOAD);
 
     let reads_before = mgr
         .io()
@@ -615,7 +620,8 @@ fn fsync_ordering_blocks_before_events() {
     sim.sync_dir(data_dir).unwrap();
 
     {
-        let mut event_writer = EventLogWriter::open(Arc::clone(&event_mgr), 256).unwrap();
+        let mut event_writer =
+            EventLogWriter::open(Arc::clone(&event_mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         event_writer
             .append(
                 DidHash::from_did("did:plc:fsyncorder"),
@@ -643,7 +649,8 @@ fn fsync_ordering_blocks_before_events() {
     );
     assert_eq!(recovered_blocks[0].1, cid, "recovered block CID must match");
 
-    let event_writer = EventLogWriter::open(Arc::clone(&event_mgr), 256).unwrap();
+    let event_writer =
+        EventLogWriter::open(Arc::clone(&event_mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
     assert_eq!(
         event_writer.synced_seq(),
         EventSequence::BEFORE_ALL,
@@ -653,7 +660,8 @@ fn fsync_ordering_blocks_before_events() {
     drop(event_writer);
 
     {
-        let mut event_writer = EventLogWriter::open(Arc::clone(&event_mgr), 256).unwrap();
+        let mut event_writer =
+            EventLogWriter::open(Arc::clone(&event_mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         event_writer
             .append(
                 DidHash::from_did("did:plc:fsyncorder"),
@@ -668,7 +676,8 @@ fn fsync_ordering_blocks_before_events() {
     event_mgr.shutdown();
     sim.crash();
 
-    let event_writer = EventLogWriter::open(Arc::clone(&event_mgr), 256).unwrap();
+    let event_writer =
+        EventLogWriter::open(Arc::clone(&event_mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
     assert_eq!(
         event_writer.synced_seq(),
         EventSequence::new(1),

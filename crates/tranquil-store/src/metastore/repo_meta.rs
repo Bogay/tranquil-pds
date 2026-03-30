@@ -80,7 +80,7 @@ mod tests {
         let value = RepoMetaValue {
             repo_root_cid: vec![0x01, 0x71, 0x12, 0x20, 0xAB],
             repo_rev: "3k2a7bcd".to_string(),
-            handle: "alice.bsky.social".to_string(),
+            handle: "olaren.example.com".to_string(),
             status: RepoStatus::Active,
             deactivated_at_ms: None,
             takedown_ref: None,
@@ -96,11 +96,11 @@ mod tests {
         let value = RepoMetaValue {
             repo_root_cid: vec![0x01],
             repo_rev: "rev1".to_string(),
-            handle: "bob.example.com".to_string(),
+            handle: "teq.example.com".to_string(),
             status: RepoStatus::Deactivated,
             deactivated_at_ms: Some(1700000000000),
             takedown_ref: Some("DMCA-123".to_string()),
-            did: Some("did:plc:bob".to_string()),
+            did: Some("did:plc:teq".to_string()),
         };
         let bytes = value.serialize();
         let decoded = RepoMetaValue::deserialize(&bytes).unwrap();
@@ -128,17 +128,17 @@ mod tests {
 
     #[test]
     fn handle_key_roundtrip() {
-        let key = handle_key("alice.bsky.social");
+        let key = handle_key("olaren.example.com");
         let mut reader = KeyReader::new(&key);
         assert_eq!(reader.tag(), Some(KeyTag::HANDLES.raw()));
-        assert_eq!(reader.string(), Some("alice.bsky.social".to_string()));
+        assert_eq!(reader.string(), Some("olaren.example.com".to_string()));
         assert!(reader.is_empty());
     }
 
     #[test]
     fn handle_keys_sort_lexicographically() {
-        let k1 = handle_key("alice.example.com");
-        let k2 = handle_key("bob.example.com");
+        let k1 = handle_key("lyna.example.com");
+        let k2 = handle_key("teq.example.com");
         assert!(k1.as_slice() < k2.as_slice());
     }
 

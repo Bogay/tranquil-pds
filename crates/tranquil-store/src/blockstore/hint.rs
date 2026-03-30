@@ -1,25 +1,58 @@
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::io::{FileId, OpenOptions, StorageIO};
 
-use super::data_file::{BLOCK_RECORD_OVERHEAD, CID_SIZE, DataFileReader};
-use super::key_index::{KeyIndex, KeyIndexError};
+use super::data_file::{BLOCK_RECORD_OVERHEAD, CID_SIZE};
 use super::list_files_by_extension;
-use super::manager::DATA_FILE_EXTENSION;
 use super::types::{
-    BlockLength, BlockLocation, BlockOffset, DataFileId, HintOffset, MAX_BLOCK_SIZE, WriteCursor,
+    BlockLength, BlockLocation, BlockOffset, CidBytes, CommitEpoch, DataFileId, HintOffset,
+    MAX_BLOCK_SIZE, WallClockMs, WriteCursor,
 };
 
-pub const HINT_RECORD_SIZE: usize = CID_SIZE + 4 + 8 + 4 + 4;
+pub const HINT_RECORD_SIZE: usize = 1 + 3 + CID_SIZE + 8 + 8 + 8;
 pub const HINT_FILE_EXTENSION: &str = "tqh";
 
-fn hint_checksum(buf: &[u8; CID_SIZE + 4 + 8 + 4]) -> u32 {
-    xxhash_rust::xxh3::xxh3_64(buf) as u32
+const _: () = assert!(HINT_RECORD_SIZE == 64);
+
+const HINT_PAYLOAD_SIZE: usize = HINT_RECORD_SIZE - 8;
+
+const RECORD_TYPE_PUT: u8 = 0x01;
+const RECORD_TYPE_DECREMENT: u8 = 0x02;
+const RECORD_TYPE_RELOCATE: u8 = 0x03;
+const RECORD_TYPE_REMOVE: u8 = 0x04;
+
+const HINT_FORMAT_VERSION: u8 = 1;
+
+fn hint_checksum(payload: &[u8]) -> u64 {
+    xxhash_rust::xxh3::xxh3_64(payload)
 }
 
 pub fn hint_file_path(data_dir: &Path, file_id: DataFileId) -> PathBuf {
     data_dir.join(format!("{file_id}.{HINT_FILE_EXTENSION}"))
+}
+
+const TYPE_OFFSET: usize = 0;
+const VERSION_OFFSET: usize = 1;
+const CID_OFFSET: usize = 4;
+const FIELD_A_OFFSET: usize = CID_OFFSET + CID_SIZE;
+const FIELD_B_OFFSET: usize = FIELD_A_OFFSET + 8;
+const CHECKSUM_OFFSET: usize = FIELD_B_OFFSET + 8;
+
+fn write_hint_record<S: StorageIO>(
+    io: &S,
+    fd: FileId,
+    write_offset: HintOffset,
+    record: &[u8; HINT_RECORD_SIZE],
+) -> io::Result<()> {
+    assert!(
+        write_offset.raw().is_multiple_of(HINT_RECORD_SIZE as u64),
+        "hint write_offset {} not aligned to HINT_RECORD_SIZE {}",
+        write_offset.raw(),
+        HINT_RECORD_SIZE,
+    );
+    io.write_all_at(fd, write_offset.raw(), record)
 }
 
 pub(crate) fn encode_hint_record<S: StorageIO>(
@@ -31,34 +64,109 @@ pub(crate) fn encode_hint_record<S: StorageIO>(
     block_offset: BlockOffset,
     length: BlockLength,
 ) -> io::Result<()> {
-    debug_assert!(
-        write_offset.raw().is_multiple_of(HINT_RECORD_SIZE as u64),
-        "hint write_offset {} not aligned to HINT_RECORD_SIZE {}",
-        write_offset.raw(),
-        HINT_RECORD_SIZE,
-    );
-
     let mut record = [0u8; HINT_RECORD_SIZE];
-    record[..CID_SIZE].copy_from_slice(cid_bytes);
-    record[CID_SIZE..CID_SIZE + 4].copy_from_slice(&file_id.raw().to_le_bytes());
-    record[CID_SIZE + 4..CID_SIZE + 12].copy_from_slice(&block_offset.raw().to_le_bytes());
-    record[CID_SIZE + 12..CID_SIZE + 16].copy_from_slice(&length.raw().to_le_bytes());
+    record[TYPE_OFFSET] = RECORD_TYPE_PUT;
+    record[VERSION_OFFSET] = HINT_FORMAT_VERSION;
+    record[CID_OFFSET..CID_OFFSET + CID_SIZE].copy_from_slice(cid_bytes);
+    record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4].copy_from_slice(&file_id.raw().to_le_bytes());
+    record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8].copy_from_slice(&length.raw().to_le_bytes());
+    record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8].copy_from_slice(&block_offset.raw().to_le_bytes());
 
-    let checksum =
-        hint_checksum(<&[u8; CID_SIZE + 4 + 8 + 4]>::try_from(&record[..CID_SIZE + 16]).unwrap());
-    record[CID_SIZE + 16..].copy_from_slice(&checksum.to_le_bytes());
+    let checksum = hint_checksum(&record[..HINT_PAYLOAD_SIZE]);
+    record[CHECKSUM_OFFSET..].copy_from_slice(&checksum.to_le_bytes());
 
-    io.write_all_at(fd, write_offset.raw(), &record)
+    write_hint_record(io, fd, write_offset, &record)
+}
+
+pub(crate) fn encode_relocate_record<S: StorageIO>(
+    io: &S,
+    fd: FileId,
+    write_offset: HintOffset,
+    cid_bytes: &[u8; CID_SIZE],
+    file_id: DataFileId,
+    block_offset: BlockOffset,
+    length: BlockLength,
+) -> io::Result<()> {
+    let mut record = [0u8; HINT_RECORD_SIZE];
+    record[TYPE_OFFSET] = RECORD_TYPE_RELOCATE;
+    record[VERSION_OFFSET] = HINT_FORMAT_VERSION;
+    record[CID_OFFSET..CID_OFFSET + CID_SIZE].copy_from_slice(cid_bytes);
+    record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4].copy_from_slice(&file_id.raw().to_le_bytes());
+    record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8].copy_from_slice(&length.raw().to_le_bytes());
+    record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8].copy_from_slice(&block_offset.raw().to_le_bytes());
+
+    let checksum = hint_checksum(&record[..HINT_PAYLOAD_SIZE]);
+    record[CHECKSUM_OFFSET..].copy_from_slice(&checksum.to_le_bytes());
+
+    write_hint_record(io, fd, write_offset, &record)
+}
+
+pub(crate) fn encode_remove_record<S: StorageIO>(
+    io: &S,
+    fd: FileId,
+    write_offset: HintOffset,
+    cid_bytes: &[u8; CID_SIZE],
+) -> io::Result<()> {
+    let mut record = [0u8; HINT_RECORD_SIZE];
+    record[TYPE_OFFSET] = RECORD_TYPE_REMOVE;
+    record[VERSION_OFFSET] = HINT_FORMAT_VERSION;
+    record[CID_OFFSET..CID_OFFSET + CID_SIZE].copy_from_slice(cid_bytes);
+
+    let checksum = hint_checksum(&record[..HINT_PAYLOAD_SIZE]);
+    record[CHECKSUM_OFFSET..].copy_from_slice(&checksum.to_le_bytes());
+
+    write_hint_record(io, fd, write_offset, &record)
+}
+
+pub(crate) fn encode_decrement_record<S: StorageIO>(
+    io: &S,
+    fd: FileId,
+    write_offset: HintOffset,
+    cid_bytes: &[u8; CID_SIZE],
+    epoch: CommitEpoch,
+    timestamp: WallClockMs,
+) -> io::Result<()> {
+    let mut record = [0u8; HINT_RECORD_SIZE];
+    record[TYPE_OFFSET] = RECORD_TYPE_DECREMENT;
+    record[VERSION_OFFSET] = HINT_FORMAT_VERSION;
+    record[CID_OFFSET..CID_OFFSET + CID_SIZE].copy_from_slice(cid_bytes);
+    record[FIELD_A_OFFSET..FIELD_A_OFFSET + 8].copy_from_slice(&epoch.raw().to_le_bytes());
+    record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8].copy_from_slice(&timestamp.raw().to_le_bytes());
+
+    let checksum = hint_checksum(&record[..HINT_PAYLOAD_SIZE]);
+    record[CHECKSUM_OFFSET..].copy_from_slice(&checksum.to_le_bytes());
+
+    write_hint_record(io, fd, write_offset, &record)
 }
 
 #[must_use]
 #[derive(Debug)]
 pub enum ReadHintRecord {
-    Valid {
+    Put {
         cid_bytes: [u8; CID_SIZE],
         file_id: DataFileId,
         offset: BlockOffset,
         length: BlockLength,
+    },
+    Decrement {
+        cid_bytes: [u8; CID_SIZE],
+        epoch: CommitEpoch,
+        timestamp: WallClockMs,
+    },
+    Relocate {
+        cid_bytes: [u8; CID_SIZE],
+        file_id: DataFileId,
+        offset: BlockOffset,
+        length: BlockLength,
+    },
+    Remove {
+        cid_bytes: [u8; CID_SIZE],
+    },
+    UnknownVersion {
+        version: u8,
+    },
+    UnknownType {
+        record_type: u8,
     },
     Corrupted,
     Truncated,
@@ -86,34 +194,95 @@ pub fn decode_hint_record<S: StorageIO>(
     let mut record = [0u8; HINT_RECORD_SIZE];
     io.read_exact_at(fd, raw, &mut record)?;
 
-    let payload: &[u8; CID_SIZE + 4 + 8 + 4] = record[..CID_SIZE + 16].try_into().unwrap();
-    let stored = u32::from_le_bytes(record[CID_SIZE + 16..].try_into().unwrap());
-    let computed = hint_checksum(payload);
+    let stored = u64::from_le_bytes(record[CHECKSUM_OFFSET..].try_into().unwrap());
+    let computed = hint_checksum(&record[..HINT_PAYLOAD_SIZE]);
     if stored != computed {
         return Ok(Some(ReadHintRecord::Corrupted));
     }
 
-    let mut cid_bytes = [0u8; CID_SIZE];
-    cid_bytes.copy_from_slice(&record[..CID_SIZE]);
-
-    let file_id = DataFileId::new(u32::from_le_bytes(
-        record[CID_SIZE..CID_SIZE + 4].try_into().unwrap(),
-    ));
-    let block_offset = BlockOffset::new(u64::from_le_bytes(
-        record[CID_SIZE + 4..CID_SIZE + 12].try_into().unwrap(),
-    ));
-    let raw_length = u32::from_le_bytes(record[CID_SIZE + 12..CID_SIZE + 16].try_into().unwrap());
-    if raw_length > MAX_BLOCK_SIZE {
-        return Ok(Some(ReadHintRecord::Corrupted));
+    let version = record[VERSION_OFFSET];
+    if version != HINT_FORMAT_VERSION {
+        return Ok(Some(ReadHintRecord::UnknownVersion { version }));
     }
-    let length = BlockLength::new(raw_length);
 
-    Ok(Some(ReadHintRecord::Valid {
-        cid_bytes,
-        file_id,
-        offset: block_offset,
-        length,
-    }))
+    let record_type = record[TYPE_OFFSET];
+
+    let mut cid_bytes = [0u8; CID_SIZE];
+    cid_bytes.copy_from_slice(&record[CID_OFFSET..CID_OFFSET + CID_SIZE]);
+
+    match record_type {
+        RECORD_TYPE_PUT => {
+            let file_id = DataFileId::new(u32::from_le_bytes(
+                record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4]
+                    .try_into()
+                    .unwrap(),
+            ));
+            let raw_length = u32::from_le_bytes(
+                record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let block_offset = BlockOffset::new(u64::from_le_bytes(
+                record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8]
+                    .try_into()
+                    .unwrap(),
+            ));
+            if raw_length > MAX_BLOCK_SIZE {
+                return Ok(Some(ReadHintRecord::Corrupted));
+            }
+            Ok(Some(ReadHintRecord::Put {
+                cid_bytes,
+                file_id,
+                offset: block_offset,
+                length: BlockLength::new(raw_length),
+            }))
+        }
+        RECORD_TYPE_DECREMENT => {
+            let epoch = CommitEpoch::new(u64::from_le_bytes(
+                record[FIELD_A_OFFSET..FIELD_A_OFFSET + 8]
+                    .try_into()
+                    .unwrap(),
+            ));
+            let timestamp = WallClockMs::new(u64::from_le_bytes(
+                record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8]
+                    .try_into()
+                    .unwrap(),
+            ));
+            Ok(Some(ReadHintRecord::Decrement {
+                cid_bytes,
+                epoch,
+                timestamp,
+            }))
+        }
+        RECORD_TYPE_RELOCATE => {
+            let file_id = DataFileId::new(u32::from_le_bytes(
+                record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4]
+                    .try_into()
+                    .unwrap(),
+            ));
+            let raw_length = u32::from_le_bytes(
+                record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let block_offset = BlockOffset::new(u64::from_le_bytes(
+                record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8]
+                    .try_into()
+                    .unwrap(),
+            ));
+            if raw_length > MAX_BLOCK_SIZE {
+                return Ok(Some(ReadHintRecord::Corrupted));
+            }
+            Ok(Some(ReadHintRecord::Relocate {
+                cid_bytes,
+                file_id,
+                offset: block_offset,
+                length: BlockLength::new(raw_length),
+            }))
+        }
+        RECORD_TYPE_REMOVE => Ok(Some(ReadHintRecord::Remove { cid_bytes })),
+        other => Ok(Some(ReadHintRecord::UnknownType { record_type: other })),
+    }
 }
 
 pub struct HintFileWriter<'a, S: StorageIO> {
@@ -155,6 +324,43 @@ impl<'a, S: StorageIO> HintFileWriter<'a, S> {
         Ok(())
     }
 
+    pub fn append_decrement(
+        &mut self,
+        cid_bytes: &[u8; CID_SIZE],
+        epoch: CommitEpoch,
+        timestamp: WallClockMs,
+    ) -> io::Result<()> {
+        encode_decrement_record(self.io, self.fd, self.position, cid_bytes, epoch, timestamp)?;
+        self.position = self.position.advance(HINT_RECORD_SIZE as u64);
+        Ok(())
+    }
+
+    pub fn append_relocate(
+        &mut self,
+        cid_bytes: &[u8; CID_SIZE],
+        file_id: DataFileId,
+        offset: BlockOffset,
+        length: BlockLength,
+    ) -> io::Result<()> {
+        encode_relocate_record(
+            self.io,
+            self.fd,
+            self.position,
+            cid_bytes,
+            file_id,
+            offset,
+            length,
+        )?;
+        self.position = self.position.advance(HINT_RECORD_SIZE as u64);
+        Ok(())
+    }
+
+    pub fn append_remove(&mut self, cid_bytes: &[u8; CID_SIZE]) -> io::Result<()> {
+        encode_remove_record(self.io, self.fd, self.position, cid_bytes)?;
+        self.position = self.position.advance(HINT_RECORD_SIZE as u64);
+        Ok(())
+    }
+
     pub fn sync(&self) -> io::Result<()> {
         self.io.sync(self.fd)
     }
@@ -181,6 +387,22 @@ impl<'a, S: StorageIO> HintFileReader<'a, S> {
             file_size,
         })
     }
+
+    pub fn resume(io: &'a S, fd: FileId, position: HintOffset) -> io::Result<Self> {
+        assert!(
+            position.raw().is_multiple_of(HINT_RECORD_SIZE as u64),
+            "hint resume position {} not aligned to HINT_RECORD_SIZE {}",
+            position.raw(),
+            HINT_RECORD_SIZE,
+        );
+        let file_size = io.file_size(fd)?;
+        Ok(Self {
+            io,
+            fd,
+            position,
+            file_size,
+        })
+    }
 }
 
 impl<S: StorageIO> Iterator for HintFileReader<'_, S> {
@@ -195,10 +417,16 @@ impl<S: StorageIO> Iterator for HintFileReader<'_, S> {
             Ok(None) => None,
             Ok(Some(record)) => {
                 match &record {
-                    ReadHintRecord::Valid { .. } => {
+                    ReadHintRecord::Put { .. }
+                    | ReadHintRecord::Decrement { .. }
+                    | ReadHintRecord::Relocate { .. }
+                    | ReadHintRecord::Remove { .. }
+                    | ReadHintRecord::UnknownType { .. } => {
                         self.position = self.position.advance(HINT_RECORD_SIZE as u64);
                     }
-                    ReadHintRecord::Corrupted | ReadHintRecord::Truncated => {
+                    ReadHintRecord::UnknownVersion { .. }
+                    | ReadHintRecord::Corrupted
+                    | ReadHintRecord::Truncated => {
                         self.position = HintOffset::new(self.file_size);
                     }
                 }
@@ -211,14 +439,14 @@ impl<S: StorageIO> Iterator for HintFileReader<'_, S> {
 #[derive(Debug)]
 pub enum RebuildError {
     Io(io::Error),
-    Index(KeyIndexError),
+    BlockIndex(super::hash_index::BlockIndexError),
 }
 
 impl std::fmt::Display for RebuildError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(e) => write!(f, "io: {e}"),
-            Self::Index(e) => write!(f, "index: {e}"),
+            Self::BlockIndex(e) => write!(f, "block index: {e}"),
         }
     }
 }
@@ -227,7 +455,7 @@ impl std::error::Error for RebuildError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(e) => Some(e),
-            Self::Index(e) => Some(e),
+            Self::BlockIndex(e) => Some(e),
         }
     }
 }
@@ -238,13 +466,11 @@ impl From<io::Error> for RebuildError {
     }
 }
 
-impl From<KeyIndexError> for RebuildError {
-    fn from(e: KeyIndexError) -> Self {
-        Self::Index(e)
+impl From<super::hash_index::BlockIndexError> for RebuildError {
+    fn from(e: super::hash_index::BlockIndexError) -> Self {
+        Self::BlockIndex(e)
     }
 }
-
-const REBUILD_BATCH_SIZE: usize = 10_000;
 
 struct RebuildState {
     entries: Vec<([u8; CID_SIZE], BlockLocation)>,
@@ -272,129 +498,329 @@ impl RebuildState {
         self.entries.push((cid_bytes, location));
     }
 
-    fn flush_if_full(&mut self, index: &KeyIndex) -> Result<(), RebuildError> {
-        if self.entries.len() >= REBUILD_BATCH_SIZE {
-            self.flush(index)?;
+    fn cursor(&self) -> WriteCursor {
+        WriteCursor {
+            file_id: self.cursor_file,
+            offset: self.cursor_offset,
         }
-        Ok(())
-    }
-
-    fn flush(&mut self, index: &KeyIndex) -> Result<(), RebuildError> {
-        if self.entries.is_empty() {
-            return Ok(());
-        }
-        index.batch_put(
-            &self.entries,
-            &[],
-            WriteCursor {
-                file_id: self.cursor_file,
-                offset: self.cursor_offset,
-            },
-        )?;
-        self.entries.clear();
-        Ok(())
     }
 }
 
-pub fn rebuild_index_from_hints<S: StorageIO>(
+fn scan_single_hint_file<S: StorageIO>(
     io: &S,
     data_dir: &Path,
-    index: &KeyIndex,
-) -> Result<(), RebuildError> {
-    let hint_files = list_files_by_extension(io, data_dir, HINT_FILE_EXTENSION)?;
-    let mut state = RebuildState::new();
+    hf_id: DataFileId,
+) -> Result<Vec<([u8; CID_SIZE], BlockLocation)>, RebuildError> {
+    let path = hint_file_path(data_dir, hf_id);
+    let fd = io.open(&path, OpenOptions::read_only_existing())?;
+    let reader = HintFileReader::open(io, fd)?;
 
-    hint_files.iter().try_for_each(|&hf_id| {
-        let path = hint_file_path(data_dir, hf_id);
-        let fd = io.open(&path, OpenOptions::read_only_existing())?;
-        let reader = HintFileReader::open(io, fd)?;
-
-        let result: Result<(), RebuildError> = reader
-            .filter_map(|r| match r {
-                Ok(ReadHintRecord::Valid {
-                    cid_bytes,
+    let entries: Result<Vec<_>, RebuildError> = reader
+        .filter_map(|r| match r {
+            Ok(ReadHintRecord::Put {
+                cid_bytes,
+                file_id,
+                offset,
+                length,
+            }) => Some(Ok((
+                cid_bytes,
+                BlockLocation {
                     file_id,
                     offset,
                     length,
-                }) => Some(Ok((cid_bytes, file_id, offset, length))),
-                Ok(_) => None,
-                Err(e) => Some(Err(RebuildError::Io(e))),
-            })
-            .try_for_each(|r| {
-                let (cid_bytes, file_id, offset, length) = r?;
-                state.push(
-                    cid_bytes,
-                    BlockLocation {
-                        file_id,
-                        offset,
-                        length,
-                    },
-                );
-                state.flush_if_full(index)
-            });
+                },
+            ))),
+            Ok(
+                ReadHintRecord::Decrement { .. }
+                | ReadHintRecord::Relocate { .. }
+                | ReadHintRecord::Remove { .. }
+                | ReadHintRecord::UnknownVersion { .. }
+                | ReadHintRecord::UnknownType { .. }
+                | ReadHintRecord::Corrupted
+                | ReadHintRecord::Truncated,
+            ) => None,
+            Err(e) => Some(Err(RebuildError::Io(e))),
+        })
+        .collect();
 
-        let _ = io.close(fd);
-        result
-    })?;
-
-    state.flush(index)
+    let _ = io.close(fd);
+    entries
 }
 
-pub fn rebuild_index_from_data_files<S: StorageIO>(
+const REPLAY_BATCH_SIZE: usize = 10_000;
+
+pub fn replay_hints_into_block_index<S: StorageIO>(
     io: &S,
     data_dir: &Path,
-    index: &KeyIndex,
-) -> Result<(), RebuildError> {
-    let data_files = list_files_by_extension(io, data_dir, DATA_FILE_EXTENSION)?;
-    let mut state = RebuildState::new();
+    index: &super::hash_index::BlockIndex,
+    from: Option<&super::hash_index::CheckpointPositions>,
+) -> Result<(u64, HashMap<DataFileId, BlockOffset>), RebuildError> {
+    let hint_files = list_files_by_extension(io, data_dir, HINT_FILE_EXTENSION)?;
+    if hint_files.is_empty() {
+        return Ok((0, HashMap::new()));
+    }
 
-    data_files.iter().try_for_each(|&file_id| {
-        let path = data_dir.join(format!("{file_id}.{DATA_FILE_EXTENSION}"));
-        let fd = io.open(&path, OpenOptions::read_only_existing())?;
-        let reader = DataFileReader::open(io, fd)?;
+    let checkpointed_files: HashMap<DataFileId, HintOffset> = from
+        .map(|cp| cp.0.iter().copied().collect())
+        .unwrap_or_default();
 
-        let result: Result<(), RebuildError> = reader
-            .filter_map(|r| match r {
-                Ok(super::data_file::ReadBlockRecord::Valid {
-                    offset,
-                    cid_bytes,
-                    data,
-                }) => {
-                    let length = BlockLength::new(
-                        u32::try_from(data.len()).expect("block size validated by reader"),
-                    );
-                    Some(Ok((cid_bytes, offset, length)))
-                }
-                Ok(_) => None,
-                Err(e) => Some(Err(RebuildError::Io(e))),
-            })
-            .try_for_each(|r| {
-                let (cid_bytes, offset, length) = r?;
-                state.push(
-                    cid_bytes,
-                    BlockLocation {
+    let max_checkpointed_fid = checkpointed_files
+        .keys()
+        .max()
+        .copied()
+        .unwrap_or(DataFileId::new(0));
+
+    let mut max_cursor: Option<WriteCursor> = None;
+    let mut file_cursors: HashMap<DataFileId, BlockOffset> = HashMap::new();
+    let mut replayed: u64 = 0;
+    let mut put_buffer: Vec<([u8; CID_SIZE], BlockLocation)> =
+        Vec::with_capacity(REPLAY_BATCH_SIZE);
+    let mut relocate_buffer: Vec<([u8; CID_SIZE], BlockLocation)> =
+        Vec::with_capacity(REPLAY_BATCH_SIZE);
+    let mut remove_buffer: Vec<[u8; CID_SIZE]> = Vec::with_capacity(REPLAY_BATCH_SIZE);
+
+    hint_files
+        .iter()
+        .filter_map(|&fid| match checkpointed_files.get(&fid) {
+            Some(&offset) => Some((fid, offset)),
+            None if fid > max_checkpointed_fid => Some((fid, HintOffset::new(0))),
+            None => None,
+        })
+        .try_for_each(|(fid, start_pos)| {
+            let path = hint_file_path(data_dir, fid);
+            let fd = match io.open(&path, OpenOptions::read_only_existing()) {
+                Ok(fd) => fd,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+                Err(e) => return Err(RebuildError::Io(e)),
+            };
+
+            let mut reader = HintFileReader::resume(io, fd, start_pos)?;
+
+            reader.try_for_each(|record_result| {
+                match record_result? {
+                    ReadHintRecord::Put {
+                        cid_bytes,
                         file_id,
                         offset,
                         length,
-                    },
-                );
-                state.flush_if_full(index)
-            });
+                    } => {
+                        let loc = BlockLocation {
+                            file_id,
+                            offset,
+                            length,
+                        };
+                        put_buffer.push((cid_bytes, loc));
 
-        let _ = io.close(fd);
-        result
+                        let record_end =
+                            offset.advance(BLOCK_RECORD_OVERHEAD as u64 + length.as_u64());
+                        let candidate = WriteCursor {
+                            file_id,
+                            offset: record_end,
+                        };
+                        max_cursor = Some(match max_cursor {
+                            Some(c) => {
+                                std::cmp::max_by_key(c, candidate, |w| (w.file_id, w.offset))
+                            }
+                            None => candidate,
+                        });
+                        file_cursors
+                            .entry(file_id)
+                            .and_modify(|existing| {
+                                if record_end > *existing {
+                                    *existing = record_end;
+                                }
+                            })
+                            .or_insert(record_end);
+
+                        replayed = replayed.saturating_add(1);
+                        if put_buffer.len() >= REPLAY_BATCH_SIZE {
+                            index.batch_insert_buffered(&put_buffer)?;
+                            put_buffer.clear();
+                        }
+                    }
+                    ReadHintRecord::Decrement {
+                        cid_bytes,
+                        epoch,
+                        timestamp,
+                    } => {
+                        if !put_buffer.is_empty() {
+                            index.batch_insert_buffered(&put_buffer)?;
+                            put_buffer.clear();
+                        }
+                        if !relocate_buffer.is_empty() {
+                            index.batch_relocate(&relocate_buffer)?;
+                            relocate_buffer.clear();
+                        }
+                        if !remove_buffer.is_empty() {
+                            index.batch_remove(&remove_buffer);
+                            remove_buffer.clear();
+                        }
+                        index.batch_decrement(&[cid_bytes], epoch, timestamp)?;
+                        replayed = replayed.saturating_add(1);
+                    }
+                    ReadHintRecord::Relocate {
+                        cid_bytes,
+                        file_id,
+                        offset,
+                        length,
+                    } => {
+                        let loc = BlockLocation {
+                            file_id,
+                            offset,
+                            length,
+                        };
+                        relocate_buffer.push((cid_bytes, loc));
+
+                        let record_end =
+                            offset.advance(BLOCK_RECORD_OVERHEAD as u64 + length.as_u64());
+                        file_cursors
+                            .entry(file_id)
+                            .and_modify(|existing| {
+                                if record_end > *existing {
+                                    *existing = record_end;
+                                }
+                            })
+                            .or_insert(record_end);
+
+                        replayed = replayed.saturating_add(1);
+                        if relocate_buffer.len() >= REPLAY_BATCH_SIZE {
+                            if !put_buffer.is_empty() {
+                                index.batch_insert_buffered(&put_buffer)?;
+                                put_buffer.clear();
+                            }
+                            index.batch_relocate(&relocate_buffer)?;
+                            relocate_buffer.clear();
+                        }
+                    }
+                    ReadHintRecord::Remove { cid_bytes } => {
+                        remove_buffer.push(cid_bytes);
+                        replayed = replayed.saturating_add(1);
+                        if remove_buffer.len() >= REPLAY_BATCH_SIZE {
+                            if !put_buffer.is_empty() {
+                                index.batch_insert_buffered(&put_buffer)?;
+                                put_buffer.clear();
+                            }
+                            if !relocate_buffer.is_empty() {
+                                index.batch_relocate(&relocate_buffer)?;
+                                relocate_buffer.clear();
+                            }
+                            index.batch_remove(&remove_buffer);
+                            remove_buffer.clear();
+                        }
+                    }
+                    ReadHintRecord::Corrupted => {
+                        tracing::warn!(
+                            file_id = %fid,
+                            "corrupted hint record during replay, skipping"
+                        );
+                    }
+                    ReadHintRecord::UnknownVersion { .. }
+                    | ReadHintRecord::UnknownType { .. }
+                    | ReadHintRecord::Truncated => {}
+                }
+                Ok::<_, RebuildError>(())
+            })?;
+
+            if !put_buffer.is_empty() {
+                index.batch_insert_buffered(&put_buffer)?;
+                put_buffer.clear();
+            }
+            if !relocate_buffer.is_empty() {
+                index.batch_relocate(&relocate_buffer)?;
+                relocate_buffer.clear();
+            }
+            if !remove_buffer.is_empty() {
+                index.batch_remove(&remove_buffer);
+                remove_buffer.clear();
+            }
+
+            let _ = io.close(fd);
+            Ok(())
+        })?;
+
+    if let Some(cursor) = max_cursor {
+        index.set_write_cursor(cursor)?;
+    }
+
+    Ok((replayed, file_cursors))
+}
+
+#[derive(Debug)]
+pub struct HintIndex {
+    entries: HashMap<CidBytes, BlockLocation>,
+}
+
+impl HintIndex {
+    pub fn from_scanned(scanned: Vec<(CidBytes, BlockLocation)>) -> Self {
+        let mut entries = HashMap::with_capacity(scanned.len());
+        scanned.into_iter().for_each(|(cid, loc)| {
+            entries.entry(cid).or_insert(loc);
+        });
+        Self { entries }
+    }
+
+    pub fn get(&self, cid: &[u8; CID_SIZE]) -> Option<BlockLocation> {
+        self.entries.get(cid).copied()
+    }
+
+    pub fn contains(&self, cid: &[u8; CID_SIZE]) -> bool {
+        self.entries.contains_key(cid)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+pub fn scan_hints_to_memory<S: StorageIO>(
+    io: &S,
+    data_dir: &Path,
+) -> Result<(HintIndex, WriteCursor), RebuildError> {
+    use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+    let hint_files = list_files_by_extension(io, data_dir, HINT_FILE_EXTENSION)?;
+    if hint_files.is_empty() {
+        return Err(RebuildError::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            "no hint files found for instant recovery",
+        )));
+    }
+
+    let file_results: Vec<Result<Vec<_>, RebuildError>> = hint_files
+        .par_iter()
+        .map(|&hf_id| scan_single_hint_file(io, data_dir, hf_id))
+        .collect();
+
+    let mut state = RebuildState::new();
+    file_results.into_iter().try_for_each(|result| {
+        result?.into_iter().for_each(|(cid_bytes, location)| {
+            state.push(cid_bytes, location);
+        });
+        Ok::<_, RebuildError>(())
     })?;
 
-    state.flush(index)
+    if state.entries.is_empty() {
+        return Err(RebuildError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "hint files contained no valid entries",
+        )));
+    }
+
+    let cursor = state.cursor();
+    let hint_index = HintIndex::from_scanned(state.entries);
+
+    Ok((hint_index, cursor))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::OpenOptions;
-    use crate::blockstore::data_file::{DataFileWriter, ReadBlockRecord, decode_block_record};
     use crate::blockstore::test_cid;
-    use crate::blockstore::types::RefCount;
     use crate::sim::SimulatedIO;
     use std::path::Path;
 
@@ -425,7 +851,7 @@ mod tests {
             .unwrap();
 
         match record {
-            ReadHintRecord::Valid {
+            ReadHintRecord::Put {
                 cid_bytes,
                 file_id: fid,
                 offset: off,
@@ -437,6 +863,34 @@ mod tests {
                 assert_eq!(len, length);
             }
             other => panic!("expected Valid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decrement_record_round_trip() {
+        let (sim, fd) = setup();
+        let cid = test_cid(42);
+        let epoch = CommitEpoch::new(7);
+        let timestamp = WallClockMs::new(1_700_000_000_000);
+
+        encode_decrement_record(&sim, fd, HintOffset::new(0), &cid, epoch, timestamp).unwrap();
+
+        let file_size = sim.file_size(fd).unwrap();
+        let record = decode_hint_record(&sim, fd, HintOffset::new(0), file_size)
+            .unwrap()
+            .unwrap();
+
+        match record {
+            ReadHintRecord::Decrement {
+                cid_bytes,
+                epoch: decoded_epoch,
+                timestamp: decoded_ts,
+            } => {
+                assert_eq!(cid_bytes, cid);
+                assert_eq!(decoded_epoch, epoch);
+                assert_eq!(decoded_ts, timestamp);
+            }
+            other => panic!("expected Decrement, got {other:?}"),
         }
     }
 
@@ -472,7 +926,7 @@ mod tests {
             .collect();
 
         records.iter().enumerate().for_each(|(i, r)| match r {
-            ReadHintRecord::Valid {
+            ReadHintRecord::Put {
                 file_id, length, ..
             } => {
                 assert_eq!(file_id.raw(), i as u32);
@@ -544,15 +998,14 @@ mod tests {
         )
         .unwrap();
 
-        let length_offset = CID_SIZE as u64 + 4 + 8;
+        let length_offset = FIELD_A_OFFSET as u64 + 4;
         let oversized = (MAX_BLOCK_SIZE + 1).to_le_bytes();
         sim.write_all_at(fd, length_offset, &oversized).unwrap();
 
-        let checksum_offset = (CID_SIZE + 4 + 8 + 4) as u64;
-        let mut buf = [0u8; CID_SIZE + 4 + 8 + 4];
+        let mut buf = [0u8; HINT_PAYLOAD_SIZE];
         sim.read_exact_at(fd, 0, &mut buf).unwrap();
         let fixed_checksum = hint_checksum(&buf);
-        sim.write_all_at(fd, checksum_offset, &fixed_checksum.to_le_bytes())
+        sim.write_all_at(fd, CHECKSUM_OFFSET as u64, &fixed_checksum.to_le_bytes())
             .unwrap();
 
         let file_size = sim.file_size(fd).unwrap();
@@ -588,7 +1041,7 @@ mod tests {
         assert_eq!(records.len(), 5);
 
         records.iter().enumerate().for_each(|(i, r)| match r {
-            ReadHintRecord::Valid {
+            ReadHintRecord::Put {
                 file_id, length, ..
             } => {
                 assert_eq!(file_id.raw(), 0);
@@ -625,7 +1078,7 @@ mod tests {
         let reader = HintFileReader::open(&sim, fd).unwrap();
         let valid_count = reader
             .filter_map(|r| match r.ok()? {
-                ReadHintRecord::Valid { .. } => Some(()),
+                ReadHintRecord::Put { .. } => Some(()),
                 _ => None,
             })
             .count();
@@ -658,7 +1111,7 @@ mod tests {
         let reader = HintFileReader::open(&sim, fd).unwrap();
         let records: Vec<_> = reader.map(|r| r.unwrap()).collect();
         assert_eq!(records.len(), 2);
-        assert!(matches!(records[0], ReadHintRecord::Valid { .. }));
+        assert!(matches!(records[0], ReadHintRecord::Put { .. }));
         assert!(matches!(records[1], ReadHintRecord::Truncated));
     }
 
@@ -684,336 +1137,8 @@ mod tests {
         let reader = HintFileReader::open(&sim, fd).unwrap();
         let records: Vec<_> = reader.map(|r| r.unwrap()).collect();
         assert_eq!(records.len(), 2);
-        assert!(matches!(records[0], ReadHintRecord::Valid { .. }));
+        assert!(matches!(records[0], ReadHintRecord::Put { .. }));
         assert!(matches!(records[1], ReadHintRecord::Corrupted));
-    }
-
-    fn setup_data_dir(sim: &SimulatedIO) -> &'static Path {
-        let dir = Path::new("/data");
-        sim.mkdir(dir).unwrap();
-        sim.sync_dir(dir).unwrap();
-        dir
-    }
-
-    fn write_test_blocks(
-        sim: &SimulatedIO,
-        dir: &Path,
-        file_id: DataFileId,
-        count: u8,
-    ) -> (Vec<BlockLocation>, BlockOffset) {
-        let data_path = dir.join(format!("{file_id}.tqb"));
-        let data_fd = sim.open(&data_path, OpenOptions::read_write()).unwrap();
-        let mut data_writer = DataFileWriter::new(sim, data_fd, file_id).unwrap();
-
-        let hint_fd = sim
-            .open(&hint_file_path(dir, file_id), OpenOptions::read_write())
-            .unwrap();
-        let mut hint_writer = HintFileWriter::new(sim, hint_fd);
-
-        let locations: Vec<BlockLocation> = (0..count)
-            .map(|i| {
-                let cid = test_cid(i);
-                let data = vec![i; (i as usize + 1) * 10];
-                let loc = data_writer.append_block(&cid, &data).unwrap();
-                hint_writer
-                    .append_hint(&cid, loc.file_id, loc.offset, loc.length)
-                    .unwrap();
-                loc
-            })
-            .collect();
-
-        data_writer.sync().unwrap();
-        hint_writer.sync().unwrap();
-        sim.sync_dir(dir).unwrap();
-
-        let final_pos = data_writer.position();
-        (locations, final_pos)
-    }
-
-    fn write_test_blocks_no_hints(
-        sim: &SimulatedIO,
-        dir: &Path,
-        file_id: DataFileId,
-        count: u8,
-    ) -> (Vec<BlockLocation>, BlockOffset) {
-        let data_path = dir.join(format!("{file_id}.tqb"));
-        let data_fd = sim.open(&data_path, OpenOptions::read_write()).unwrap();
-        let mut data_writer = DataFileWriter::new(sim, data_fd, file_id).unwrap();
-
-        let locations: Vec<BlockLocation> = (0..count)
-            .map(|i| {
-                let cid = test_cid(i);
-                let data = vec![i; (i as usize + 1) * 10];
-                data_writer.append_block(&cid, &data).unwrap()
-            })
-            .collect();
-
-        data_writer.sync().unwrap();
-        sim.sync_dir(dir).unwrap();
-
-        let final_pos = data_writer.position();
-        (locations, final_pos)
-    }
-
-    #[test]
-    fn rebuild_from_hints_restores_index() {
-        let sim = SimulatedIO::pristine(42);
-        let dir = setup_data_dir(&sim);
-        let block_count = 10u8;
-        let (locations, final_pos) = write_test_blocks(&sim, dir, DataFileId::new(0), block_count);
-
-        let index_dir = tempfile::TempDir::new().unwrap();
-        let index = KeyIndex::open(index_dir.path()).unwrap().into_inner();
-
-        rebuild_index_from_hints(&sim, dir, &index).unwrap();
-
-        (0..block_count).for_each(|i| {
-            let entry = index.get(&test_cid(i)).unwrap().unwrap();
-            assert_eq!(entry.location, locations[i as usize]);
-            assert_eq!(entry.refcount, RefCount::one());
-        });
-
-        let cursor = index.read_write_cursor().unwrap().unwrap();
-        assert_eq!(cursor.file_id, DataFileId::new(0));
-        assert_eq!(cursor.offset, final_pos);
-    }
-
-    #[test]
-    fn rebuild_from_data_files_restores_index() {
-        let sim = SimulatedIO::pristine(42);
-        let dir = setup_data_dir(&sim);
-        let block_count = 10u8;
-        let (locations, final_pos) =
-            write_test_blocks_no_hints(&sim, dir, DataFileId::new(0), block_count);
-
-        let index_dir = tempfile::TempDir::new().unwrap();
-        let index = KeyIndex::open(index_dir.path()).unwrap().into_inner();
-
-        rebuild_index_from_data_files(&sim, dir, &index).unwrap();
-
-        (0..block_count).for_each(|i| {
-            let entry = index.get(&test_cid(i)).unwrap().unwrap();
-            assert_eq!(entry.location, locations[i as usize]);
-            assert_eq!(entry.refcount, RefCount::one());
-        });
-
-        let cursor = index.read_write_cursor().unwrap().unwrap();
-        assert_eq!(cursor.file_id, DataFileId::new(0));
-        assert_eq!(cursor.offset, final_pos);
-    }
-
-    #[test]
-    fn rebuild_from_hints_handles_empty_dir() {
-        let sim = SimulatedIO::pristine(42);
-        let dir = setup_data_dir(&sim);
-
-        let index_dir = tempfile::TempDir::new().unwrap();
-        let index = KeyIndex::open(index_dir.path()).unwrap().into_inner();
-
-        rebuild_index_from_hints(&sim, dir, &index).unwrap();
-        assert!(index.read_write_cursor().unwrap().is_none());
-    }
-
-    #[test]
-    fn rebuild_from_data_files_handles_empty_dir() {
-        let sim = SimulatedIO::pristine(42);
-        let dir = setup_data_dir(&sim);
-
-        let index_dir = tempfile::TempDir::new().unwrap();
-        let index = KeyIndex::open(index_dir.path()).unwrap().into_inner();
-
-        rebuild_index_from_data_files(&sim, dir, &index).unwrap();
-        assert!(index.read_write_cursor().unwrap().is_none());
-    }
-
-    #[test]
-    fn rebuild_from_hints_handles_duplicate_cids() {
-        let sim = SimulatedIO::pristine(42);
-        let dir = setup_data_dir(&sim);
-
-        let data_fd = sim
-            .open(Path::new("/data/000000.tqb"), OpenOptions::read_write())
-            .unwrap();
-        let mut data_writer = DataFileWriter::new(&sim, data_fd, DataFileId::new(0)).unwrap();
-
-        let hint_fd = sim
-            .open(
-                &hint_file_path(dir, DataFileId::new(0)),
-                OpenOptions::read_write(),
-            )
-            .unwrap();
-        let mut hint_writer = HintFileWriter::new(&sim, hint_fd);
-
-        let cid = test_cid(1);
-        let data = vec![0xAA; 64];
-
-        let loc1 = data_writer.append_block(&cid, &data).unwrap();
-        hint_writer
-            .append_hint(&cid, loc1.file_id, loc1.offset, loc1.length)
-            .unwrap();
-
-        let loc2 = data_writer.append_block(&cid, &data).unwrap();
-        hint_writer
-            .append_hint(&cid, loc2.file_id, loc2.offset, loc2.length)
-            .unwrap();
-
-        data_writer.sync().unwrap();
-        hint_writer.sync().unwrap();
-        sim.sync_dir(dir).unwrap();
-
-        let index_dir = tempfile::TempDir::new().unwrap();
-        let index = KeyIndex::open(index_dir.path()).unwrap().into_inner();
-
-        rebuild_index_from_hints(&sim, dir, &index).unwrap();
-
-        let entry = index.get(&cid).unwrap().unwrap();
-        assert_eq!(entry.refcount, RefCount::new(2));
-        assert_eq!(entry.location, loc1);
-    }
-
-    #[test]
-    fn sim_hints_survive_crash_and_enable_rebuild() {
-        let sim = SimulatedIO::pristine(42);
-        let dir = setup_data_dir(&sim);
-        let block_count = 15u8;
-        let (locations, _) = write_test_blocks(&sim, dir, DataFileId::new(0), block_count);
-
-        sim.crash();
-
-        let hint_fd = sim
-            .open(
-                &hint_file_path(dir, DataFileId::new(0)),
-                OpenOptions::read_only_existing(),
-            )
-            .unwrap();
-        let hint_size = sim.file_size(hint_fd).unwrap();
-        assert_eq!(hint_size, block_count as u64 * HINT_RECORD_SIZE as u64);
-        let _ = sim.close(hint_fd);
-
-        let index_dir = tempfile::TempDir::new().unwrap();
-        let index = KeyIndex::open(index_dir.path()).unwrap().into_inner();
-
-        rebuild_index_from_hints(&sim, dir, &index).unwrap();
-
-        let data_fd = sim
-            .open(
-                Path::new("/data/000000.tqb"),
-                OpenOptions::read_only_existing(),
-            )
-            .unwrap();
-        let data_size = sim.file_size(data_fd).unwrap();
-
-        (0..block_count).for_each(|i| {
-            let entry = index.get(&test_cid(i)).unwrap().unwrap();
-            assert_eq!(entry.location, locations[i as usize]);
-
-            let record = decode_block_record(&sim, data_fd, entry.location.offset, data_size)
-                .unwrap()
-                .unwrap();
-            match record {
-                ReadBlockRecord::Valid {
-                    cid_bytes, data, ..
-                } => {
-                    assert_eq!(cid_bytes, test_cid(i));
-                    assert_eq!(data, vec![i; (i as usize + 1) * 10]);
-                }
-                other => panic!("expected Valid for block {i}, got {other:?}"),
-            }
-        });
-    }
-
-    #[test]
-    fn sim_rebuild_from_data_files_without_hints() {
-        let sim = SimulatedIO::pristine(42);
-        let dir = setup_data_dir(&sim);
-        let block_count = 15u8;
-        let (locations, _) = write_test_blocks_no_hints(&sim, dir, DataFileId::new(0), block_count);
-
-        sim.crash();
-
-        let index_dir = tempfile::TempDir::new().unwrap();
-        let index = KeyIndex::open(index_dir.path()).unwrap().into_inner();
-
-        rebuild_index_from_data_files(&sim, dir, &index).unwrap();
-
-        let data_fd = sim
-            .open(
-                Path::new("/data/000000.tqb"),
-                OpenOptions::read_only_existing(),
-            )
-            .unwrap();
-        let data_size = sim.file_size(data_fd).unwrap();
-
-        (0..block_count).for_each(|i| {
-            let entry = index.get(&test_cid(i)).unwrap().unwrap();
-            assert_eq!(entry.location, locations[i as usize]);
-
-            let record = decode_block_record(&sim, data_fd, entry.location.offset, data_size)
-                .unwrap()
-                .unwrap();
-            match record {
-                ReadBlockRecord::Valid {
-                    cid_bytes, data, ..
-                } => {
-                    assert_eq!(cid_bytes, test_cid(i));
-                    assert_eq!(data, vec![i; (i as usize + 1) * 10]);
-                }
-                other => panic!("expected Valid for block {i}, got {other:?}"),
-            }
-        });
-    }
-
-    #[test]
-    fn rebuild_across_multiple_data_files() {
-        let sim = SimulatedIO::pristine(42);
-        let dir = setup_data_dir(&sim);
-
-        let (locs0, _) = write_test_blocks(&sim, dir, DataFileId::new(0), 5);
-
-        let data_fd1 = sim
-            .open(Path::new("/data/000001.tqb"), OpenOptions::read_write())
-            .unwrap();
-        let mut data_writer1 = DataFileWriter::new(&sim, data_fd1, DataFileId::new(1)).unwrap();
-        let hint_fd1 = sim
-            .open(
-                &hint_file_path(dir, DataFileId::new(1)),
-                OpenOptions::read_write(),
-            )
-            .unwrap();
-        let mut hint_writer1 = HintFileWriter::new(&sim, hint_fd1);
-
-        let locs1: Vec<BlockLocation> = (5u8..10)
-            .map(|i| {
-                let cid = test_cid(i);
-                let data = vec![i; (i as usize + 1) * 10];
-                let loc = data_writer1.append_block(&cid, &data).unwrap();
-                hint_writer1
-                    .append_hint(&cid, loc.file_id, loc.offset, loc.length)
-                    .unwrap();
-                loc
-            })
-            .collect();
-
-        data_writer1.sync().unwrap();
-        hint_writer1.sync().unwrap();
-        sim.sync_dir(dir).unwrap();
-
-        let index_dir = tempfile::TempDir::new().unwrap();
-        let index = KeyIndex::open(index_dir.path()).unwrap().into_inner();
-
-        rebuild_index_from_hints(&sim, dir, &index).unwrap();
-
-        (0u8..5).for_each(|i| {
-            let entry = index.get(&test_cid(i)).unwrap().unwrap();
-            assert_eq!(entry.location, locs0[i as usize]);
-        });
-        (5u8..10).for_each(|i| {
-            let entry = index.get(&test_cid(i)).unwrap().unwrap();
-            assert_eq!(entry.location, locs1[(i - 5) as usize]);
-        });
-
-        let cursor = index.read_write_cursor().unwrap().unwrap();
-        assert_eq!(cursor.file_id, DataFileId::new(1));
     }
 
     #[test]

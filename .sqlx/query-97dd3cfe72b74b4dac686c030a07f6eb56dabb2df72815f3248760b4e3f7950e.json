@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, prev_data_cid, rev)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n            RETURNING seq\n            ",
+  "query": "\n            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, block_cids, block_data, prev_data_cid, rev)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n            RETURNING seq\n            ",
   "describe": {
     "columns": [
       {
@@ -17,7 +17,8 @@
         "Text",
         "Jsonb",
         "TextArray",
-        "TextArray",
+        "ByteaArray",
+        "ByteaArray",
         "Text",
         "Text"
       ]
@@ -26,5 +27,5 @@
       false
     ]
   },
-  "hash": "40e848f48afb50f5e4820445aee874a482333e9090ef14ce44db3fd9721cfff0"
+  "hash": "97dd3cfe72b74b4dac686c030a07f6eb56dabb2df72815f3248760b4e3f7950e"
 }

@@ -14,15 +14,16 @@ use uuid::Uuid;
 
 use crate::store::{IdentityType, PgProtocolStore, PgSignalStore};
 
-async fn test_store() -> PgSignalStore {
+async fn test_store() -> Option<PgSignalStore> {
     let url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5432/postgres".into());
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
+        .acquire_timeout(std::time::Duration::from_secs(2))
         .connect(&url)
         .await
-        .unwrap();
+        .ok()?;
 
     sqlx::query("DELETE FROM signal_kv")
         .execute(&pool)
@@ -61,7 +62,7 @@ async fn test_store() -> PgSignalStore {
         .await
         .ok();
 
-    PgSignalStore::new(pool)
+    Some(PgSignalStore::new(pool))
 }
 
 fn protocol_store(store: &PgSignalStore, identity: IdentityType) -> PgProtocolStore {
@@ -70,7 +71,9 @@ fn protocol_store(store: &PgSignalStore, identity: IdentityType) -> PgProtocolSt
 
 #[tokio::test]
 async fn state_store_registration_empty() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
 
     assert!(store.load_registration_data().await.unwrap().is_none());
     assert!(!store.is_registered().await);
@@ -78,7 +81,9 @@ async fn state_store_registration_empty() {
 
 #[tokio::test]
 async fn state_store_kv_roundtrip() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
 
     let value = b"test-data".to_vec();
     sqlx::query("INSERT INTO signal_kv (key, value) VALUES ('test_key', $1)")
@@ -96,7 +101,9 @@ async fn state_store_kv_roundtrip() {
 
 #[tokio::test]
 async fn state_store_identity_keypairs() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
 
     let aci_pair = IdentityKeyPair::generate(&mut rand::rng());
     let pni_pair = IdentityKeyPair::generate(&mut rand::rng());
@@ -116,13 +123,17 @@ async fn state_store_identity_keypairs() {
 
 #[tokio::test]
 async fn state_store_sender_certificate_roundtrip() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     assert!(store.sender_certificate().await.unwrap().is_none());
 }
 
 #[tokio::test]
 async fn state_store_clear_registration() {
-    let mut store = test_store().await;
+    let Some(mut store) = test_store().await else {
+        return;
+    };
 
     sqlx::query("INSERT INTO signal_kv (key, value) VALUES ('registration', $1)")
         .bind(b"dummy-data".as_slice())
@@ -151,7 +162,9 @@ async fn state_store_clear_registration() {
 
 #[tokio::test]
 async fn session_store_crud() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let addr = ProtocolAddress::new("test-uuid".into(), DeviceId::new(1).unwrap());
@@ -170,7 +183,9 @@ async fn session_store_crud() {
 
 #[tokio::test]
 async fn session_store_sub_devices() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let uuid = Uuid::new_v4();
@@ -196,7 +211,9 @@ async fn session_store_sub_devices() {
 
 #[tokio::test]
 async fn pre_key_store_crud() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let keypair = KeyPair::generate(&mut rand::rng());
@@ -213,7 +230,9 @@ async fn pre_key_store_crud() {
 
 #[tokio::test]
 async fn pre_key_store_next_ids() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     assert_eq!(ps.next_pre_key_id().await.unwrap(), 1);
@@ -229,7 +248,9 @@ async fn pre_key_store_next_ids() {
 
 #[tokio::test]
 async fn signed_pre_key_store_crud() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let keypair = KeyPair::generate(&mut rand::rng());
@@ -251,7 +272,9 @@ async fn signed_pre_key_store_crud() {
 
 #[tokio::test]
 async fn kyber_pre_key_one_time_mark_used_deletes() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let keypair = KeyPair::generate(&mut rand::rng());
@@ -276,7 +299,9 @@ async fn kyber_pre_key_one_time_mark_used_deletes() {
 
 #[tokio::test]
 async fn kyber_pre_key_last_resort_survives_mark_used() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let keypair = KeyPair::generate(&mut rand::rng());
@@ -303,7 +328,9 @@ async fn kyber_pre_key_last_resort_survives_mark_used() {
 
 #[tokio::test]
 async fn kyber_pre_key_last_resort_rejects_replayed_base_key() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let keypair = KeyPair::generate(&mut rand::rng());
@@ -332,7 +359,9 @@ async fn kyber_pre_key_last_resort_rejects_replayed_base_key() {
 
 #[tokio::test]
 async fn kyber_pre_key_last_resort_list() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let keypair = KeyPair::generate(&mut rand::rng());
@@ -361,7 +390,9 @@ async fn kyber_pre_key_last_resort_list() {
 
 #[tokio::test]
 async fn identity_store_crud() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let addr = ProtocolAddress::new("test-addr".into(), DeviceId::new(1).unwrap());
@@ -383,7 +414,9 @@ async fn identity_store_crud() {
 
 #[tokio::test]
 async fn identity_store_aci_pni_isolation() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut aci_store = protocol_store(&store, IdentityType::Aci);
     let pni_store = protocol_store(&store, IdentityType::Pni);
 
@@ -401,7 +434,9 @@ async fn identity_store_aci_pni_isolation() {
 
 #[tokio::test]
 async fn sender_key_store_load_missing() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let mut ps = protocol_store(&store, IdentityType::Aci);
 
     let sender = ProtocolAddress::new("sender-uuid".into(), DeviceId::new(1).unwrap());
@@ -417,7 +452,9 @@ async fn sender_key_store_load_missing() {
 
 #[tokio::test]
 async fn profile_key_store_roundtrip() {
-    let mut store = test_store().await;
+    let Some(mut store) = test_store().await else {
+        return;
+    };
 
     let uuid = Uuid::new_v4();
     let service_id: ServiceId = presage::libsignal_service::protocol::Aci::from(uuid).into();
@@ -433,7 +470,9 @@ async fn profile_key_store_roundtrip() {
 
 #[tokio::test]
 async fn client_from_pool_returns_none_without_registration() {
-    let store = test_store().await;
+    let Some(store) = test_store().await else {
+        return;
+    };
     let pool = store.db.clone();
 
     let client =
@@ -443,7 +482,9 @@ async fn client_from_pool_returns_none_without_registration() {
 
 #[tokio::test]
 async fn store_clear_removes_kv() {
-    let mut store = test_store().await;
+    let Some(mut store) = test_store().await else {
+        return;
+    };
 
     store
         .set_aci_identity_key_pair(IdentityKeyPair::generate(&mut rand::rng()))

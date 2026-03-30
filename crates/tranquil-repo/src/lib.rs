@@ -6,7 +6,7 @@ use jacquard_repo::storage::BlockStore;
 use multihash::Multihash;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -21,32 +21,6 @@ impl PostgresBlockStore {
 
     pub fn pool(&self) -> &PgPool {
         &self.pool
-    }
-}
-
-impl PostgresBlockStore {
-    pub async fn get_oldest_block_cids(&self, limit: i64) -> Result<Vec<Vec<u8>>, RepoError> {
-        let rows = sqlx::query!(
-            "SELECT cid FROM blocks ORDER BY created_at ASC LIMIT $1",
-            limit,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(RepoError::storage)?;
-        Ok(rows.into_iter().map(|r| r.cid).collect())
-    }
-
-    pub async fn delete_blocks(&self, cids: &[Vec<u8>]) -> Result<u64, RepoError> {
-        match cids.is_empty() {
-            true => Ok(0),
-            false => {
-                let result = sqlx::query!("DELETE FROM blocks WHERE cid = ANY($1)", cids,)
-                    .execute(&self.pool)
-                    .await
-                    .map_err(RepoError::storage)?;
-                Ok(result.rows_affected())
-            }
-        }
     }
 }
 
@@ -152,7 +126,7 @@ impl BlockStore for PostgresBlockStore {
 #[derive(Clone)]
 pub struct TrackingBlockStore<S: BlockStore> {
     inner: S,
-    written_cids: Arc<Mutex<Vec<Cid>>>,
+    written_blocks: Arc<Mutex<HashMap<Cid, Bytes>>>,
     read_cids: Arc<Mutex<HashSet<Cid>>>,
 }
 
@@ -160,16 +134,24 @@ impl<S: BlockStore + Sync> TrackingBlockStore<S> {
     pub fn new(store: S) -> Self {
         Self {
             inner: store,
-            written_cids: Arc::new(Mutex::new(Vec::new())),
+            written_blocks: Arc::new(Mutex::new(HashMap::new())),
             read_cids: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
     pub fn get_written_cids(&self) -> Vec<Cid> {
-        match self.written_cids.lock() {
-            Ok(guard) => guard.clone(),
-            Err(poisoned) => poisoned.into_inner().clone(),
+        match self.written_blocks.lock() {
+            Ok(guard) => guard.keys().copied().collect(),
+            Err(poisoned) => poisoned.into_inner().keys().copied().collect(),
         }
+    }
+
+    pub fn take_written_blocks(&self) -> HashMap<Cid, Bytes> {
+        let mut guard = match self.written_blocks.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        std::mem::take(&mut *guard)
     }
 
     pub fn get_read_cids(&self) -> Vec<Cid> {
@@ -206,9 +188,14 @@ impl<S: BlockStore + Sync> BlockStore for TrackingBlockStore<S> {
 
     async fn put(&self, data: &[u8]) -> Result<Cid, RepoError> {
         let cid = self.inner.put(data).await?;
-        match self.written_cids.lock() {
-            Ok(mut guard) => guard.push(cid),
-            Err(poisoned) => poisoned.into_inner().push(cid),
+        let bytes = Bytes::copy_from_slice(data);
+        match self.written_blocks.lock() {
+            Ok(mut guard) => {
+                guard.insert(cid, bytes);
+            }
+            Err(poisoned) => {
+                poisoned.into_inner().insert(cid, bytes);
+            }
         }
         Ok(cid)
     }
@@ -222,11 +209,10 @@ impl<S: BlockStore + Sync> BlockStore for TrackingBlockStore<S> {
         blocks: impl IntoIterator<Item = (Cid, Bytes)> + Send,
     ) -> Result<(), RepoError> {
         let blocks: Vec<_> = blocks.into_iter().collect();
-        let cids: Vec<Cid> = blocks.iter().map(|(cid, _)| *cid).collect();
-        self.inner.put_many(blocks).await?;
-        match self.written_cids.lock() {
-            Ok(mut guard) => guard.extend(cids),
-            Err(poisoned) => poisoned.into_inner().extend(cids),
+        self.inner.put_many(blocks.clone()).await?;
+        match self.written_blocks.lock() {
+            Ok(mut guard) => guard.extend(blocks),
+            Err(poisoned) => poisoned.into_inner().extend(blocks),
         }
         Ok(())
     }

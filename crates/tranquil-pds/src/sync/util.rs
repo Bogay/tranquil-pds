@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
-use tranquil_db_traits::{AccountStatus, RepoEventType, RepoRepository};
+use tranquil_db_traits::{AccountStatus, EventBlocks, RepoEventType, RepoRepository};
 use tranquil_types::Did;
 
 #[derive(Debug)]
@@ -25,7 +25,8 @@ pub enum SyncFrameError {
     IoFlush(std::io::Error),
     CborSerialize(String),
     MissingCommitCid,
-    CommitBlockNotFound,
+    MissingInlineCommitBlock,
+    MissingLegacyBlocks(Vec<Cid>),
     RevExtraction,
     InvalidEvent(String),
     BlockStore(tranquil_db_traits::DbError),
@@ -40,7 +41,17 @@ impl std::fmt::Display for SyncFrameError {
             Self::IoFlush(e) => write!(f, "CAR buffer flush failed: {}", e),
             Self::CborSerialize(e) => write!(f, "CBOR serialization failed: {}", e),
             Self::MissingCommitCid => write!(f, "missing commit_cid"),
-            Self::CommitBlockNotFound => write!(f, "commit block not found"),
+            Self::MissingInlineCommitBlock => {
+                write!(f, "event missing inline commit block bytes")
+            }
+            Self::MissingLegacyBlocks(cids) => {
+                write!(
+                    f,
+                    "legacy event references blocks not present in live blockstore (gc race): {} missing cid(s), first: {}",
+                    cids.len(),
+                    cids.first().map(|c| c.to_string()).unwrap_or_default()
+                )
+            }
             Self::RevExtraction => write!(f, "could not extract rev from commit"),
             Self::InvalidEvent(msg) => write!(f, "invalid event: {}", msg),
             Self::BlockStore(e) => write!(f, "block store error: {}", e),
@@ -178,7 +189,7 @@ fn extract_rev_from_commit_bytes(commit_bytes: &[u8]) -> Option<String> {
 
 async fn write_car_blocks(
     commit_cid: Cid,
-    commit_bytes: Option<Bytes>,
+    commit_bytes: Bytes,
     other_blocks: BTreeMap<Cid, Bytes>,
 ) -> Result<Vec<u8>, SyncFrameError> {
     let mut buffer = Cursor::new(Vec::new());
@@ -190,12 +201,10 @@ async fn write_car_blocks(
             .await
             .map_err(SyncFrameError::CarWrite)?;
     }
-    if let Some(data) = commit_bytes {
-        writer
-            .write(commit_cid, data.as_ref())
-            .await
-            .map_err(SyncFrameError::CarWrite)?;
-    }
+    writer
+        .write(commit_cid, commit_bytes.as_ref())
+        .await
+        .map_err(SyncFrameError::CarWrite)?;
     writer.finish().await.map_err(SyncFrameError::CarFinalize)?;
     buffer.flush().await.map_err(SyncFrameError::IoFlush)?;
     Ok(buffer.into_inner())
@@ -265,26 +274,81 @@ fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameErro
     Ok(bytes)
 }
 
-async fn format_sync_event(
+async fn event_blocks_to_map(
+    blocks: Option<&EventBlocks>,
+    prefetched: &HashMap<Cid, Bytes>,
     state: &AppState,
+) -> Result<HashMap<Cid, Bytes>, SyncFrameError> {
+    match blocks {
+        None => Ok(HashMap::new()),
+        Some(EventBlocks::Inline(inline)) => inline
+            .iter()
+            .map(|b| {
+                Cid::read_bytes(b.cid_bytes.as_slice())
+                    .map_err(SyncFrameError::CidParse)
+                    .map(|cid| (cid, Bytes::copy_from_slice(&b.data)))
+            })
+            .collect(),
+        Some(EventBlocks::LegacyCids(cid_strs)) => {
+            let cids: Vec<Cid> = cid_strs
+                .iter()
+                .map(|s| Cid::from_str(s).map_err(SyncFrameError::CidParse))
+                .collect::<Result<_, _>>()?;
+            let mut map: HashMap<Cid, Bytes> = HashMap::with_capacity(cids.len());
+            let to_fetch: Vec<Cid> = cids
+                .iter()
+                .filter(|cid| match prefetched.get(cid) {
+                    Some(b) => {
+                        map.insert(**cid, b.clone());
+                        false
+                    }
+                    None => true,
+                })
+                .copied()
+                .collect();
+            if !to_fetch.is_empty() {
+                let fetched = state.block_store.get_many(&to_fetch).await?;
+                let (found, missing): (Vec<_>, Vec<_>) = to_fetch
+                    .into_iter()
+                    .zip(fetched)
+                    .partition(|(_, opt)| opt.is_some());
+                found
+                    .into_iter()
+                    .filter_map(|(cid, opt)| opt.map(|b| (cid, b)))
+                    .for_each(|(cid, b)| {
+                        map.insert(cid, b);
+                    });
+                if !missing.is_empty() {
+                    let missing_cids: Vec<Cid> = missing.into_iter().map(|(cid, _)| cid).collect();
+                    return Err(SyncFrameError::MissingLegacyBlocks(missing_cids));
+                }
+            }
+            Ok(map)
+        }
+    }
+}
+
+async fn format_sync_event(
     event: &SequencedEvent,
+    prefetched: &HashMap<Cid, Bytes>,
+    state: &AppState,
 ) -> Result<Vec<u8>, SyncFrameError> {
     let commit_cid_str = event
         .commit_cid
         .as_ref()
         .ok_or(SyncFrameError::MissingCommitCid)?;
     let commit_cid = Cid::from_str(commit_cid_str)?;
-    let commit_bytes = state
-        .block_store
+    let blocks_map = event_blocks_to_map(event.blocks.as_ref(), prefetched, state).await?;
+    let commit_bytes = blocks_map
         .get(&commit_cid)
-        .await?
-        .ok_or(SyncFrameError::CommitBlockNotFound)?;
+        .cloned()
+        .ok_or(SyncFrameError::MissingInlineCommitBlock)?;
     let rev = if let Some(ref stored_rev) = event.rev {
         stored_rev.clone()
     } else {
         extract_rev_from_commit_bytes(&commit_bytes).ok_or(SyncFrameError::RevExtraction)?
     };
-    let car_bytes = write_car_blocks(commit_cid, Some(commit_bytes), BTreeMap::new()).await?;
+    let car_bytes = write_car_blocks(commit_cid, commit_bytes, BTreeMap::new()).await?;
     serialize_event_frame(
         FrameType::Sync,
         &SyncFrame {
@@ -302,13 +366,17 @@ struct CommitEventContext {
     frame: CommitFrame,
     commit_cid: Cid,
     prev_cid: Option<Cid>,
-    block_cids: Vec<Cid>,
+    inline_blocks: HashMap<Cid, Bytes>,
 }
 
-fn prepare_commit_event(event: SequencedEvent) -> Result<CommitEventContext, SyncFrameError> {
-    let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
+async fn prepare_commit_event(
+    event: SequencedEvent,
+    prefetched: &HashMap<Cid, Bytes>,
+    state: &AppState,
+) -> Result<CommitEventContext, SyncFrameError> {
     let prev_cid_link = event.prev_cid.clone();
     let prev_data_cid_link = event.prev_data_cid.clone();
+    let inline_blocks = event_blocks_to_map(event.blocks.as_ref(), prefetched, state).await?;
     let mut frame: CommitFrame =
         event
             .try_into()
@@ -321,46 +389,43 @@ fn prepare_commit_event(event: SequencedEvent) -> Result<CommitEventContext, Syn
         frame.prev_data = Some(cid);
     }
     let commit_cid = frame.commit;
+    if !inline_blocks.contains_key(&commit_cid) {
+        return Err(SyncFrameError::MissingInlineCommitBlock);
+    }
     let prev_cid = prev_cid_link
         .as_ref()
         .and_then(|c| Cid::from_str(c.as_str()).ok());
-    let mut block_cids: Vec<Cid> = block_cids_str
-        .iter()
-        .filter_map(|s| Cid::from_str(s).ok())
-        .filter(|c| Some(*c) != prev_cid)
-        .collect();
-    if !block_cids.contains(&commit_cid) {
-        block_cids.push(commit_cid);
-    }
     Ok(CommitEventContext {
         frame,
         commit_cid,
         prev_cid,
-        block_cids,
+        inline_blocks,
     })
 }
 
 fn partition_blocks(
     block_cids: impl IntoIterator<Item = (Cid, Bytes)>,
     commit_cid: Cid,
-) -> (Option<Bytes>, BTreeMap<Cid, Bytes>) {
+) -> Result<(Bytes, BTreeMap<Cid, Bytes>), SyncFrameError> {
     let (commit_data, other_blocks): (Vec<_>, Vec<_>) = block_cids
         .into_iter()
         .partition(|(cid, _)| *cid == commit_cid);
-    let commit_bytes = commit_data.into_iter().next().map(|(_, data)| data);
+    let commit_bytes = commit_data
+        .into_iter()
+        .next()
+        .map(|(_, data)| data)
+        .ok_or(SyncFrameError::MissingInlineCommitBlock)?;
     let other = other_blocks.into_iter().collect();
-    (commit_bytes, other)
+    Ok((commit_bytes, other))
 }
 
 async fn finalize_commit_frame(
     mut frame: CommitFrame,
     commit_cid: Cid,
-    commit_bytes: Option<Bytes>,
+    commit_bytes: Bytes,
     other_blocks: BTreeMap<Cid, Bytes>,
 ) -> Result<Vec<u8>, SyncFrameError> {
-    if let Some(ref cb) = commit_bytes
-        && let Some(rev) = extract_rev_from_commit_bytes(cb)
-    {
+    if let Some(rev) = extract_rev_from_commit_bytes(&commit_bytes) {
         frame.rev = rev;
     }
     frame.blocks = write_car_blocks(commit_cid, commit_bytes, other_blocks).await?;
@@ -372,133 +437,62 @@ pub async fn format_event_for_sending(
     state: &AppState,
     event: SequencedEvent,
 ) -> Result<Vec<u8>, SyncFrameError> {
+    format_event_inner(event, &HashMap::new(), state).await
+}
+
+async fn format_event_inner(
+    event: SequencedEvent,
+    prefetched: &HashMap<Cid, Bytes>,
+    state: &AppState,
+) -> Result<Vec<u8>, SyncFrameError> {
     match event.event_type {
         RepoEventType::Identity => return format_identity_event(&event),
         RepoEventType::Account => return format_account_event(&event),
-        RepoEventType::Sync => return format_sync_event(state, &event).await,
+        RepoEventType::Sync => return format_sync_event(&event, prefetched, state).await,
         RepoEventType::Commit => {}
     }
-    let ctx = prepare_commit_event(event)?;
+    let ctx = prepare_commit_event(event, prefetched, state).await?;
     let mut frame = ctx.frame;
     if let Some(ref pc) = ctx.prev_cid
-        && let Ok(Some(prev_bytes)) = state.block_store.get(pc).await
-        && let Some(rev) = extract_rev_from_commit_bytes(&prev_bytes)
+        && let Some(prev_bytes) = ctx.inline_blocks.get(pc)
+        && let Some(rev) = extract_rev_from_commit_bytes(prev_bytes)
     {
         frame.since = Some(rev);
     }
-    if ctx.block_cids.is_empty() {
-        frame.blocks = Vec::new();
-        let capacity = frame.blocks.len() + 512;
-        return serialize_event_frame(FrameType::Commit, &frame, capacity);
-    }
-    let fetched = state.block_store.get_many(&ctx.block_cids).await?;
-    let resolved = ctx
-        .block_cids
-        .iter()
-        .zip(fetched.iter())
-        .filter_map(|(cid, data_opt)| data_opt.as_ref().map(|data| (*cid, data.clone())));
-    let (commit_bytes, other_blocks) = partition_blocks(resolved, ctx.commit_cid);
+    let (commit_bytes, other_blocks) = partition_blocks(ctx.inline_blocks, ctx.commit_cid)?;
     finalize_commit_frame(frame, ctx.commit_cid, commit_bytes, other_blocks).await
+}
+
+pub async fn format_event_with_prefetched_blocks(
+    state: &AppState,
+    event: SequencedEvent,
+    prefetched: &HashMap<Cid, Bytes>,
+) -> Result<Vec<u8>, SyncFrameError> {
+    format_event_inner(event, prefetched, state).await
 }
 
 pub async fn prefetch_blocks_for_events(
     state: &AppState,
     events: &[SequencedEvent],
 ) -> Result<HashMap<Cid, Bytes>, SyncFrameError> {
-    let mut all_cids: Vec<Cid> = events
+    let legacy_cids: Vec<Cid> = events
         .iter()
-        .flat_map(|event| {
-            let commit_cid = event
-                .commit_cid
-                .as_ref()
-                .and_then(|s| Cid::from_str(s).ok());
-            let prev_cid = event.prev_cid.as_ref().and_then(|s| Cid::from_str(s).ok());
-            let block_cids = event
-                .blocks_cids
-                .as_ref()
-                .map(|cids| cids.iter().filter_map(|s| Cid::from_str(s).ok()).collect())
-                .unwrap_or_else(Vec::new);
-            commit_cid.into_iter().chain(prev_cid).chain(block_cids)
+        .filter_map(|e| match e.blocks.as_ref() {
+            Some(EventBlocks::LegacyCids(strs)) => Some(strs.iter()),
+            _ => None,
         })
-        .collect();
-    all_cids.sort();
-    all_cids.dedup();
-    if all_cids.is_empty() {
+        .flatten()
+        .map(|s| Cid::from_str(s).map_err(SyncFrameError::CidParse))
+        .collect::<Result<_, _>>()?;
+    if legacy_cids.is_empty() {
         return Ok(HashMap::new());
     }
-    let fetched = state.block_store.get_many(&all_cids).await?;
-    let blocks_map: HashMap<Cid, Bytes> = all_cids
+    let fetched = state.block_store.get_many(&legacy_cids).await?;
+    Ok(legacy_cids
         .into_iter()
         .zip(fetched)
-        .filter_map(|(cid, data_opt)| data_opt.map(|data| (cid, data)))
-        .collect();
-    Ok(blocks_map)
-}
-
-fn format_sync_event_with_prefetched(
-    event: &SequencedEvent,
-    prefetched: &HashMap<Cid, Bytes>,
-) -> Result<Vec<u8>, SyncFrameError> {
-    let commit_cid_str = event
-        .commit_cid
-        .as_ref()
-        .ok_or(SyncFrameError::MissingCommitCid)?;
-    let commit_cid = Cid::from_str(commit_cid_str)?;
-    let commit_bytes = prefetched
-        .get(&commit_cid)
-        .ok_or(SyncFrameError::CommitBlockNotFound)?;
-    let rev = if let Some(ref stored_rev) = event.rev {
-        stored_rev.clone()
-    } else {
-        extract_rev_from_commit_bytes(commit_bytes).ok_or(SyncFrameError::RevExtraction)?
-    };
-    let car_bytes = futures::executor::block_on(write_car_blocks(
-        commit_cid,
-        Some(commit_bytes.clone()),
-        BTreeMap::new(),
-    ))?;
-    serialize_event_frame(
-        FrameType::Sync,
-        &SyncFrame {
-            did: event.did.clone(),
-            rev,
-            blocks: car_bytes,
-            seq: event.seq.as_i64(),
-            time: format_atproto_time(event.created_at),
-        },
-        512,
-    )
-}
-
-pub async fn format_event_with_prefetched_blocks(
-    event: SequencedEvent,
-    prefetched: &HashMap<Cid, Bytes>,
-) -> Result<Vec<u8>, SyncFrameError> {
-    match event.event_type {
-        RepoEventType::Identity => return format_identity_event(&event),
-        RepoEventType::Account => return format_account_event(&event),
-        RepoEventType::Sync => return format_sync_event_with_prefetched(&event, prefetched),
-        RepoEventType::Commit => {}
-    }
-    let ctx = prepare_commit_event(event)?;
-    let mut frame = ctx.frame;
-    if let Some(ref pc) = ctx.prev_cid
-        && let Some(prev_bytes) = prefetched.get(pc)
-        && let Some(rev) = extract_rev_from_commit_bytes(prev_bytes)
-    {
-        frame.since = Some(rev);
-    }
-    if ctx.block_cids.is_empty() {
-        frame.blocks = Vec::new();
-        let capacity = frame.blocks.len() + 512;
-        return serialize_event_frame(FrameType::Commit, &frame, capacity);
-    }
-    let resolved = ctx
-        .block_cids
-        .into_iter()
-        .filter_map(|cid| prefetched.get(&cid).map(|data| (cid, data.clone())));
-    let (commit_bytes, other_blocks) = partition_blocks(resolved, ctx.commit_cid);
-    finalize_commit_frame(frame, ctx.commit_cid, commit_bytes, other_blocks).await
+        .filter_map(|(cid, opt)| opt.map(|b| (cid, b)))
+        .collect())
 }
 
 pub fn format_info_frame(

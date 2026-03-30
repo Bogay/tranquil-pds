@@ -10,7 +10,7 @@ pub use pagination::PaginationDirection;
 pub use validation_mode::ValidationMode;
 
 pub use batch::apply_writes;
-pub use delete::{DeleteRecordInput, delete_record, delete_record_internal};
+pub use delete::{DeleteRecordInput, delete_record};
 pub use read::{GetRecordInput, ListRecordsInput, ListRecordsOutput, get_record, list_records};
 pub use tranquil_pds::repo_ops::*;
 pub use write::{

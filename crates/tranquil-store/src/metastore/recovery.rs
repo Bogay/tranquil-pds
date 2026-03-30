@@ -258,11 +258,11 @@ mod tests {
             block_inserts: vec![vec![0x01, 0x02]],
             block_deletes: vec![vec![0x03, 0x04]],
             backlink_adds: vec![BacklinkMutation {
-                uri: "at://did:plc:alice/app.bsky.feed.like/3k2abc".to_owned(),
+                uri: "at://did:plc:olaren/app.bsky.feed.like/3k2abc".to_owned(),
                 path: 1,
-                link_to: "at://did:plc:bob/app.bsky.feed.post/3k2xyz".to_owned(),
+                link_to: "at://did:plc:teq/app.bsky.feed.post/3k2xyz".to_owned(),
             }],
-            backlink_remove_uris: vec!["at://did:plc:alice/app.bsky.feed.like/3k2old".to_owned()],
+            backlink_remove_uris: vec!["at://did:plc:olaren/app.bsky.feed.like/3k2old".to_owned()],
         };
 
         let bytes = ms.serialize().unwrap();

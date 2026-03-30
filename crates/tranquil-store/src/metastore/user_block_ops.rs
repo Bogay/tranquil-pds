@@ -144,33 +144,6 @@ impl UserBlockOps {
             .collect()
     }
 
-    pub fn find_unreferenced(&self, candidate_cids: &[Vec<u8>]) -> Vec<Vec<u8>> {
-        match candidate_cids.is_empty() {
-            true => Vec::new(),
-            false => {
-                let mut remaining: HashSet<Vec<u8>> = candidate_cids.iter().cloned().collect();
-                let tag_prefix = super::keys::KeyTag::USER_BLOCKS.raw();
-                let mut iter = self.repo_data.prefix([tag_prefix]);
-                loop {
-                    match remaining.is_empty() {
-                        true => break,
-                        false => match iter.next() {
-                            None => break,
-                            Some(guard) => {
-                                if let Ok((key_bytes, _)) = guard.into_inner()
-                                    && let Some(cid) = extract_cid_from_key(&key_bytes)
-                                {
-                                    remaining.remove(&cid);
-                                }
-                            }
-                        },
-                    }
-                }
-                remaining.into_iter().collect()
-            }
-        }
-    }
-
     pub fn count_user_blocks(&self, user_id: Uuid) -> Result<i64, MetastoreError> {
         let user_hash = match self.user_hashes.get(&user_id) {
             Some(h) => h,

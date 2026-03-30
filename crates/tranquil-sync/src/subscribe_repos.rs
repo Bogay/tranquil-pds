@@ -150,7 +150,9 @@ async fn handle_socket_inner(
                         current_cursor = event.seq;
                         last_seen = event.seq;
                         let bytes =
-                            match format_event_with_prefetched_blocks(event, &prefetched).await {
+                            match format_event_with_prefetched_blocks(state, event, &prefetched)
+                                .await
+                            {
                                 Ok(b) => b,
                                 Err(e) => {
                                     warn!("Failed to format backfill event: {}", e);
@@ -190,13 +192,14 @@ async fn handle_socket_inner(
             };
             for event in events {
                 last_seen = event.seq;
-                let bytes = match format_event_with_prefetched_blocks(event, &prefetched).await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        warn!("Failed to format cutover event: {}", e);
-                        return Err(());
-                    }
-                };
+                let bytes =
+                    match format_event_with_prefetched_blocks(state, event, &prefetched).await {
+                        Ok(b) => b,
+                        Err(e) => {
+                            warn!("Failed to format cutover event: {}", e);
+                            return Err(());
+                        }
+                    };
                 if let Err(e) = socket.send(Message::Binary(bytes.into())).await {
                     warn!("Failed to send cutover event: {}", e);
                     return Err(());

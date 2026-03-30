@@ -7,7 +7,7 @@ pub mod status;
 
 pub use account::{
     delete_account, get_account_info, get_account_infos, search_accounts, send_email,
-    update_account_email, update_account_handle, update_account_password,
+    set_admin_status, update_account_email, update_account_handle, update_account_password,
 };
 pub use config::{get_server_config, update_server_config};
 pub use invite::{

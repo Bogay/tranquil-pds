@@ -3,7 +3,7 @@ pub mod db;
 pub mod scopes;
 pub mod verify;
 
-pub fn db_err_to_oauth(err: tranquil_db::DbError) -> OAuthError {
+pub fn db_err_to_oauth(err: tranquil_db_traits::DbError) -> OAuthError {
     tracing::error!("Database error in OAuth flow: {}", err);
     OAuthError::ServerError("An internal error occurred".to_string())
 }

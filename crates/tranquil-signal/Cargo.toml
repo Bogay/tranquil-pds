@@ -24,4 +24,6 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+tranquil-signal = { path = ".", features = ["fjall-store"] }
 rand = "0.9"
+tempfile = "3"

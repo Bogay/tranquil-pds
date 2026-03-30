@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO repo_seq (did, event_type, commit_cid, rev, block_cids, block_data)\n            VALUES ($1, 'sync', $2, $3, $4, $5)\n            RETURNING seq\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "seq",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "ByteaArray",
+        "ByteaArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5996774d097a484f81353d49e4a99b07c30a003377c924add576bfb48ddde29b"
+}

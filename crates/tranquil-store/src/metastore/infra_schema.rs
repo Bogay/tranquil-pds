@@ -452,13 +452,16 @@ pub fn plc_token_prefix(user_id: uuid::Uuid) -> SmallVec<[u8; 128]> {
 pub fn comms_history_key(
     user_id: uuid::Uuid,
     created_at_ms: i64,
+    seq: u32,
     id: uuid::Uuid,
 ) -> SmallVec<[u8; 128]> {
     let reversed_ts = i64::MAX.saturating_sub(created_at_ms);
+    let reversed_seq = u32::MAX.saturating_sub(seq);
     KeyBuilder::new()
         .tag(KeyTag::INFRA_COMMS_HISTORY)
         .bytes(user_id.as_bytes())
         .i64(reversed_ts)
+        .bytes(&reversed_seq.to_be_bytes())
         .bytes(id.as_bytes())
         .build()
 }
@@ -655,8 +658,8 @@ mod tests {
         let user_id = uuid::Uuid::new_v4();
         let id_a = uuid::Uuid::new_v4();
         let id_b = uuid::Uuid::new_v4();
-        let key_old = comms_history_key(user_id, 1000, id_a);
-        let key_new = comms_history_key(user_id, 2000, id_b);
+        let key_old = comms_history_key(user_id, 1000, 0, id_a);
+        let key_new = comms_history_key(user_id, 2000, 0, id_b);
         assert!(key_new.as_slice() < key_old.as_slice());
     }
 

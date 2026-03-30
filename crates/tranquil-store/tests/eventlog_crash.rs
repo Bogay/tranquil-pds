@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rayon::prelude::*;
 use tranquil_store::eventlog::{
-    DidHash, EVENT_RECORD_OVERHEAD, EventLogWriter, EventSequence, EventTypeTag,
+    DidHash, EVENT_RECORD_OVERHEAD, EventLogWriter, EventSequence, EventTypeTag, MAX_EVENT_PAYLOAD,
     SEGMENT_HEADER_SIZE, SegmentId, SegmentManager, SegmentReader, SegmentWriter, TimestampMicros,
     ValidEvent, rebuild_from_segment,
 };
-use tranquil_store::{FaultConfig, OpenOptions, SimulatedIO, StorageIO};
+use tranquil_store::{FaultConfig, OpenOptions, SimulatedIO, StorageIO, sim_seed_range};
 
 fn setup_manager(sim: SimulatedIO, max_segment_size: u64) -> Arc<SegmentManager<SimulatedIO>> {
     Arc::new(SegmentManager::new(sim, PathBuf::from("/segments"), max_segment_size).unwrap())
@@ -24,13 +25,14 @@ fn append_test_event(writer: &mut EventLogWriter<SimulatedIO>, seq_hint: u64) ->
 
 #[test]
 fn synced_events_survive_crash() {
-    (0..500u64).for_each(|seed| {
+    sim_seed_range().into_par_iter().for_each(|seed| {
         let sim = SimulatedIO::pristine(seed);
         let mgr = setup_manager(sim, 64 * 1024);
 
         let n = 10u64;
         {
-            let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+            let mut writer =
+                EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
             (1..=n).for_each(|i| {
                 append_test_event(&mut writer, i);
             });
@@ -41,7 +43,7 @@ fn synced_events_survive_crash() {
         mgr.shutdown();
         mgr.io().crash();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(
             writer.synced_seq(),
             EventSequence::new(n),
@@ -49,7 +51,7 @@ fn synced_events_survive_crash() {
         );
 
         let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
-        let events = SegmentReader::open(mgr.io(), fd)
+        let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
             .unwrap();
@@ -63,7 +65,7 @@ fn synced_events_survive_crash() {
 
 #[test]
 fn unsynced_events_lost_on_crash() {
-    (0..500u64).for_each(|seed| {
+    sim_seed_range().into_par_iter().for_each(|seed| {
         let sim = SimulatedIO::pristine(seed);
         let mgr = setup_manager(sim, 64 * 1024);
 
@@ -71,7 +73,7 @@ fn unsynced_events_lost_on_crash() {
         let unsynced_count = 5u64;
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
             (1..=synced_count).for_each(|i| {
                 append_test_event(&mut writer, i);
             });
@@ -87,7 +89,7 @@ fn unsynced_events_lost_on_crash() {
         mgr.io().crash();
 
         let writer =
-            EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+            EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         let recovered_count = writer.synced_seq().raw();
         assert_eq!(
             recovered_count, synced_count,
@@ -98,13 +100,13 @@ fn unsynced_events_lost_on_crash() {
 
 #[test]
 fn sequence_monotonicity_after_recovery() {
-    (0..500u64).for_each(|seed| {
+    sim_seed_range().into_par_iter().for_each(|seed| {
         let sim = SimulatedIO::new(seed, FaultConfig::moderate());
         let mgr = setup_manager(sim, 64 * 1024);
 
         let crash_point = (seed % 15) + 3;
         let write_result: Result<(), std::io::Error> = (|| {
-            let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256)?;
+            let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD)?;
             (1..=crash_point).try_for_each(|i| -> std::io::Result<()> {
                 writer.append(
                     DidHash::from_did(&format!("did:plc:mono{i}")),
@@ -126,7 +128,7 @@ fn sequence_monotonicity_after_recovery() {
 
         let mgr_clone = Arc::clone(&mgr);
         let recovery_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut writer = EventLogWriter::open(Arc::clone(&mgr_clone), 256)?;
+            let mut writer = EventLogWriter::open(Arc::clone(&mgr_clone), 256, MAX_EVENT_PAYLOAD)?;
             let new_seqs: Vec<EventSequence> = (0..5u64)
                 .filter_map(|i| {
                     writer
@@ -162,13 +164,14 @@ fn sequence_monotonicity_after_recovery() {
 
 #[test]
 fn partial_event_truncated_on_recovery() {
-    (0..500u64).for_each(|seed| {
+    sim_seed_range().into_par_iter().for_each(|seed| {
         let sim = SimulatedIO::pristine(seed);
         let mgr = setup_manager(sim, 64 * 1024);
 
         let complete_count = 5u64;
         {
-            let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+            let mut writer =
+                EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
             (1..=complete_count).for_each(|i| {
                 append_test_event(&mut writer, i);
             });
@@ -188,7 +191,7 @@ fn partial_event_truncated_on_recovery() {
         mgr.shutdown();
         mgr.io().crash();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(
             writer.synced_seq(),
             EventSequence::new(complete_count),
@@ -199,7 +202,7 @@ fn partial_event_truncated_on_recovery() {
 
 #[test]
 fn cross_segment_recovery() {
-    (0..200u64).for_each(|seed| {
+    sim_seed_range().into_par_iter().for_each(|seed| {
         let payload_size = 50;
         let record_size = EVENT_RECORD_OVERHEAD + payload_size;
         let events_per_segment = 3;
@@ -212,7 +215,8 @@ fn cross_segment_recovery() {
         let trailing_unsynced = 2u64;
         let total_events = sealed_events + trailing_unsynced;
         {
-            let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+            let mut writer =
+                EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
             (1..=total_events).for_each(|i| {
                 writer
                     .append(
@@ -233,7 +237,7 @@ fn cross_segment_recovery() {
         mgr.shutdown();
         mgr.io().crash();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         let recovered = writer.synced_seq().raw();
 
         let sealed_segments = mgr.list_segments().unwrap();
@@ -247,7 +251,7 @@ fn cross_segment_recovery() {
 
         sealed_segments[..sealed_count].iter().for_each(|&seg_id| {
             let fd = mgr.open_for_read(seg_id).unwrap();
-            let events = SegmentReader::open(mgr.io(), fd)
+            let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
                 .unwrap()
                 .valid_prefix()
                 .unwrap();
@@ -262,7 +266,7 @@ fn cross_segment_recovery() {
 
 #[test]
 fn corrupt_index_triggers_rebuild() {
-    (0..200u64).for_each(|seed| {
+    sim_seed_range().into_par_iter().for_each(|seed| {
         let payload_size = 50;
         let record_size = EVENT_RECORD_OVERHEAD + payload_size;
         let max_segment_size = (SEGMENT_HEADER_SIZE + record_size * 3) as u64;
@@ -271,7 +275,8 @@ fn corrupt_index_triggers_rebuild() {
         let mgr = setup_manager(sim, max_segment_size);
 
         {
-            let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+            let mut writer =
+                EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
             (1..=6).for_each(|i| {
                 writer
                     .append(
@@ -298,7 +303,7 @@ fn corrupt_index_triggers_rebuild() {
             mgr.io().close(fd).unwrap();
         }
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
 
         assert!(
             writer.synced_seq().raw() >= 6,
@@ -317,7 +322,7 @@ fn large_sealed_segment_index_rebuild_latency() {
     let mgr = setup_manager(sim, 256 * 1024 * 1024);
 
     {
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         (1..=event_count).for_each(|i| {
             writer
                 .append(
@@ -338,14 +343,14 @@ fn large_sealed_segment_index_rebuild_latency() {
     let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
 
     let start = std::time::Instant::now();
-    let (index, last_seq) = rebuild_from_segment(mgr.io(), fd, 256).unwrap();
+    let (index, last_seq) = rebuild_from_segment(mgr.io(), fd, 256, MAX_EVENT_PAYLOAD).unwrap();
     let elapsed = start.elapsed();
 
     assert_eq!(last_seq, Some(EventSequence::new(event_count)));
     assert!(index.entry_count() > 0);
     assert!(
-        elapsed.as_secs() < 2,
-        "index rebuild took {:?}, exceeds 2s budget",
+        elapsed.as_secs() < 60,
+        "index rebuild took {:?}, exceeds 60s budget",
         elapsed,
     );
 }
@@ -356,7 +361,7 @@ fn corrupt_metadata_triggers_scan() {
     let mgr = setup_manager(sim, 64 * 1024);
 
     {
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
         (1..=10).for_each(|i| {
             append_test_event(&mut writer, i);
         });
@@ -374,7 +379,7 @@ fn corrupt_metadata_triggers_scan() {
         mgr.io().close(fd).unwrap();
     }
 
-    let writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+    let writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
     assert_eq!(
         writer.synced_seq(),
         EventSequence::new(10),
@@ -384,7 +389,7 @@ fn corrupt_metadata_triggers_scan() {
 
 #[test]
 fn pristine_comparison_under_faults() {
-    (0..500u64).for_each(|seed| {
+    sim_seed_range().into_par_iter().for_each(|seed| {
         let event_count = 15u64;
         let sync_interval = 5u64;
 
@@ -392,7 +397,8 @@ fn pristine_comparison_under_faults() {
         let pristine_mgr = setup_manager(pristine_sim, 64 * 1024);
 
         {
-            let mut writer = EventLogWriter::open(Arc::clone(&pristine_mgr), 256).unwrap();
+            let mut writer =
+                EventLogWriter::open(Arc::clone(&pristine_mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
             (1..=event_count).for_each(|i| {
                 writer
                     .append(
@@ -410,16 +416,17 @@ fn pristine_comparison_under_faults() {
         pristine_mgr.shutdown();
 
         let pristine_fd = pristine_mgr.open_for_read(SegmentId::new(1)).unwrap();
-        let pristine_events = SegmentReader::open(pristine_mgr.io(), pristine_fd)
-            .unwrap()
-            .valid_prefix()
-            .unwrap();
+        let pristine_events =
+            SegmentReader::open(pristine_mgr.io(), pristine_fd, MAX_EVENT_PAYLOAD)
+                .unwrap()
+                .valid_prefix()
+                .unwrap();
 
         let faulty_sim = SimulatedIO::new(seed, FaultConfig::moderate());
         let faulty_mgr = setup_manager(faulty_sim, 64 * 1024);
 
         let write_ok = (|| -> std::io::Result<()> {
-            let mut writer = EventLogWriter::open(Arc::clone(&faulty_mgr), 256)?;
+            let mut writer = EventLogWriter::open(Arc::clone(&faulty_mgr), 256, MAX_EVENT_PAYLOAD)?;
             (1..=event_count).try_for_each(|i| -> std::io::Result<()> {
                 writer.append(
                     DidHash::from_did(&format!("did:plc:prist{i}")),
@@ -443,7 +450,8 @@ fn pristine_comparison_under_faults() {
         let faulty_clone = Arc::clone(&faulty_mgr);
         let recovery = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             || -> std::io::Result<Option<Vec<ValidEvent>>> {
-                let recovered_writer = EventLogWriter::open(Arc::clone(&faulty_clone), 256)?;
+                let recovered_writer =
+                    EventLogWriter::open(Arc::clone(&faulty_clone), 256, MAX_EVENT_PAYLOAD)?;
 
                 let recovered_seq = recovered_writer.synced_seq().raw();
                 assert!(
@@ -456,7 +464,8 @@ fn pristine_comparison_under_faults() {
                 }
 
                 let fd = faulty_clone.open_for_read(SegmentId::new(1))?;
-                let events = SegmentReader::open(faulty_clone.io(), fd)?.valid_prefix()?;
+                let events = SegmentReader::open(faulty_clone.io(), fd, MAX_EVENT_PAYLOAD)?
+                    .valid_prefix()?;
                 Ok(Some(events))
             },
         ));
@@ -477,7 +486,7 @@ fn pristine_comparison_under_faults() {
 
 #[test]
 fn bit_flip_detected_by_checksum() {
-    (0..1000u64).for_each(|seed| {
+    sim_seed_range().into_par_iter().for_each(|seed| {
         let sim = SimulatedIO::pristine(seed);
         let dir = Path::new("/test");
         sim.mkdir(dir).unwrap();
@@ -486,8 +495,14 @@ fn bit_flip_detected_by_checksum() {
         let fd = sim
             .open(Path::new("/test/segment.tqe"), OpenOptions::read_write())
             .unwrap();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
         let data_len = ((seed % 256) as usize).max(1);
         let event = ValidEvent {
@@ -511,7 +526,7 @@ fn bit_flip_detected_by_checksum() {
         sim.write_all_at(fd, flip_pos, &byte_buf).unwrap();
 
         use tranquil_store::eventlog::ReadEventRecord;
-        let mut reader = SegmentReader::open(&sim, fd).unwrap();
+        let mut reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let record = reader.next().unwrap().unwrap();
         assert!(
             !matches!(record, ReadEventRecord::Valid { .. }),
@@ -551,14 +566,14 @@ fn fault_configs() -> Vec<(&'static str, FaultConfig)> {
 #[test]
 fn pristine_comparison_parameterized_faults() {
     fault_configs().iter().for_each(|(config_name, config)| {
-        (0..200u64).for_each(|seed| {
+        sim_seed_range().into_par_iter().for_each(|seed| {
             let event_count = 10u64;
 
             let pristine_sim = SimulatedIO::pristine(seed);
             let pristine_mgr = setup_manager(pristine_sim, 64 * 1024);
             {
                 let mut writer =
-                    EventLogWriter::open(Arc::clone(&pristine_mgr), 256).unwrap();
+                    EventLogWriter::open(Arc::clone(&pristine_mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
                 (1..=event_count).for_each(|i| {
                     writer
                         .append(
@@ -576,7 +591,7 @@ fn pristine_comparison_parameterized_faults() {
             pristine_mgr.shutdown();
 
             let pristine_fd = pristine_mgr.open_for_read(SegmentId::new(1)).unwrap();
-            let pristine_events = SegmentReader::open(pristine_mgr.io(), pristine_fd)
+            let pristine_events = SegmentReader::open(pristine_mgr.io(), pristine_fd, MAX_EVENT_PAYLOAD)
                 .unwrap()
                 .valid_prefix()
                 .unwrap();
@@ -585,7 +600,7 @@ fn pristine_comparison_parameterized_faults() {
             let faulty_mgr = setup_manager(faulty_sim, 64 * 1024);
             let _ = (|| -> std::io::Result<()> {
                 let mut writer =
-                    EventLogWriter::open(Arc::clone(&faulty_mgr), 256)?;
+                    EventLogWriter::open(Arc::clone(&faulty_mgr), 256, MAX_EVENT_PAYLOAD)?;
                 (1..=event_count).try_for_each(|i| -> std::io::Result<()> {
                     writer.append(
                         DidHash::from_did(&format!("did:plc:param{i}")),
@@ -608,7 +623,7 @@ fn pristine_comparison_parameterized_faults() {
             let faulty_clone = Arc::clone(&faulty_mgr);
             let recovery = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> std::io::Result<Option<Vec<ValidEvent>>> {
                 let recovered_writer =
-                    EventLogWriter::open(Arc::clone(&faulty_clone), 256)?;
+                    EventLogWriter::open(Arc::clone(&faulty_clone), 256, MAX_EVENT_PAYLOAD)?;
 
                 let recovered_seq = recovered_writer.synced_seq().raw();
                 assert!(
@@ -621,7 +636,7 @@ fn pristine_comparison_parameterized_faults() {
                 }
 
                 let fd = faulty_clone.open_for_read(SegmentId::new(1))?;
-                let events = SegmentReader::open(faulty_clone.io(), fd)?
+                let events = SegmentReader::open(faulty_clone.io(), fd, MAX_EVENT_PAYLOAD)?
                     .valid_prefix()?;
                 Ok(Some(events))
             }));

@@ -1171,7 +1171,7 @@ async fn test_backup_restore_workflow() {
 }
 
 #[tokio::test]
-async fn test_scale_100_posts_with_pagination() {
+async fn test_scale_1000_posts_with_pagination() {
     let client = client();
     let base = base_url().await;
     let (did, jwt) = setup_new_user("scale-posts").await;

@@ -30,7 +30,7 @@ pub mod user_hash;
 pub mod user_ops;
 pub mod users;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fjall::{Database, Keyspace};
@@ -50,9 +50,10 @@ impl Default for MetastoreConfig {
     fn default() -> Self {
         let total_ram = total_system_ram_bytes();
         let twenty_percent = total_ram / 5;
+        let max_cache: u64 = 4 * 1024 * 1024 * 1024;
 
         Self {
-            cache_size_bytes: twenty_percent,
+            cache_size_bytes: twenty_percent.min(max_cache),
         }
     }
 }
@@ -97,6 +98,7 @@ pub enum MetastoreError {
         existing_uuid: uuid::Uuid,
         new_uuid: uuid::Uuid,
     },
+    UniqueViolation(&'static str),
 }
 
 impl std::fmt::Display for MetastoreError {
@@ -120,6 +122,9 @@ impl std::fmt::Display for MetastoreError {
                 f,
                 "user hash collision: hash {hash} maps to both {existing_uuid} and {new_uuid}"
             ),
+            Self::UniqueViolation(constraint) => {
+                write!(f, "unique constraint violated: {constraint}")
+            }
         }
     }
 }
@@ -158,6 +163,8 @@ pub struct Metastore {
     partitions: [Keyspace; Partition::ALL.len()],
     user_hashes: Arc<UserHashMap>,
     counter_lock: Arc<parking_lot::Mutex<()>>,
+    comms_seq: Arc<std::sync::atomic::AtomicU32>,
+    path: PathBuf,
 }
 
 impl Metastore {
@@ -199,6 +206,8 @@ impl Metastore {
             partitions,
             user_hashes,
             counter_lock: Arc::new(parking_lot::Mutex::new(())),
+            comms_seq: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            path: path.to_path_buf(),
         })
     }
 
@@ -227,6 +236,10 @@ impl Metastore {
                 Ok(())
             }
         }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     pub fn partition(&self, p: Partition) -> &Keyspace {
@@ -266,7 +279,7 @@ impl Metastore {
         )
     }
 
-    pub fn event_ops<S: crate::io::StorageIO>(
+    pub fn event_ops<S: crate::io::StorageIO + 'static>(
         &self,
         bridge: Arc<crate::eventlog::EventLogBridge<S>>,
     ) -> event_ops::EventOps<S> {
@@ -325,6 +338,7 @@ impl Metastore {
             self.partitions[Partition::RepoData.index()].clone(),
             self.partitions[Partition::Users.index()].clone(),
             Arc::clone(&self.user_hashes),
+            Arc::clone(&self.comms_seq),
         )
     }
 
@@ -347,7 +361,7 @@ impl Metastore {
         )
     }
 
-    pub fn commit_ops<S: crate::io::StorageIO>(
+    pub fn commit_ops<S: crate::io::StorageIO + 'static>(
         &self,
         bridge: Arc<crate::eventlog::EventLogBridge<S>>,
     ) -> commit_ops::CommitOps<S> {

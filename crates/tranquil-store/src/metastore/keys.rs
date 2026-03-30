@@ -47,7 +47,6 @@ impl KeyTag {
     pub const USER_MAP_REVERSE: Self = Self(0x11);
 
     pub const REV_TO_SEQ: Self = Self(0x20);
-    pub const SEQ_META: Self = Self(0x21);
     pub const SEQ_TOMBSTONE: Self = Self(0x22);
     pub const METASTORE_CURSOR: Self = Self(0x23);
     pub const DID_EVENTS: Self = Self(0x24);
@@ -181,7 +180,6 @@ mod tests {
             KeyTag::USER_MAP,
             KeyTag::USER_MAP_REVERSE,
             KeyTag::REV_TO_SEQ,
-            KeyTag::SEQ_META,
             KeyTag::SEQ_TOMBSTONE,
             KeyTag::METASTORE_CURSOR,
             KeyTag::DID_EVENTS,

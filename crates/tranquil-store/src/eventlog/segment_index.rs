@@ -159,6 +159,7 @@ pub fn rebuild_from_segment<S: StorageIO>(
     io: &S,
     segment_fd: FileId,
     index_interval: usize,
+    max_payload: u32,
 ) -> io::Result<(SegmentIndex, Option<EventSequence>)> {
     assert!(index_interval > 0, "index_interval must be positive");
     let file_size = io.file_size(segment_fd)?;
@@ -193,7 +194,7 @@ pub fn rebuild_from_segment<S: StorageIO>(
         if offset.raw() >= file_size {
             return None;
         }
-        match validate_event_record(io, segment_fd, offset, file_size) {
+        match validate_event_record(io, segment_fd, offset, file_size, max_payload) {
             Err(e) => Some(Err(e)),
             Ok(None) => None,
             Ok(Some(ValidateEventRecord::Valid { seq, next_offset })) => {
@@ -254,7 +255,8 @@ mod tests {
         EVENT_HEADER_SIZE, SegmentWriter, ValidEvent, encode_event_record,
     };
     use crate::eventlog::types::{
-        DidHash, EventSequence, EventTypeTag, SegmentId, SegmentOffset, TimestampMicros,
+        DidHash, EventSequence, EventTypeTag, MAX_EVENT_PAYLOAD, SegmentId, SegmentOffset,
+        TimestampMicros,
     };
     use crate::sim::SimulatedIO;
     use std::path::Path;
@@ -285,8 +287,14 @@ mod tests {
         fd: FileId,
         count: u64,
     ) -> Vec<(EventSequence, SegmentOffset)> {
-        let mut writer =
-            SegmentWriter::new(io, fd, SegmentId::new(0), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            io,
+            fd,
+            SegmentId::new(0),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         let offsets: Vec<_> = (1..=count)
             .map(|i| {
                 let event = test_event(i, format!("payload-{i}").as_bytes());
@@ -436,10 +444,18 @@ mod tests {
     #[test]
     fn rebuild_empty_segment() {
         let (sim, fd) = setup();
-        SegmentWriter::new(&sim, fd, SegmentId::new(0), EventSequence::new(1)).unwrap();
+        SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(0),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         sim.sync(fd).unwrap();
 
-        let (index, last_seq) = rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        let (index, last_seq) =
+            rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(index.entry_count(), 0);
         assert_eq!(last_seq, None);
     }
@@ -450,7 +466,8 @@ mod tests {
         let offsets = write_n_events(&sim, fd, 1);
         sim.sync(fd).unwrap();
 
-        let (index, last_seq) = rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        let (index, last_seq) =
+            rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(last_seq, Some(EventSequence::new(1)));
         assert_eq!(index.entry_count(), 1);
         assert_eq!(index.first_seq(), Some(EventSequence::new(1)));
@@ -463,7 +480,8 @@ mod tests {
         let offsets = write_n_events(&sim, fd, 10);
         sim.sync(fd).unwrap();
 
-        let (index, last_seq) = rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        let (index, last_seq) =
+            rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(last_seq, Some(EventSequence::new(10)));
         assert_eq!(index.entry_count(), 2);
         assert_eq!(index.first_seq(), Some(EventSequence::new(1)));
@@ -478,7 +496,7 @@ mod tests {
         let offsets = write_n_events(&sim, fd, 600);
         sim.sync(fd).unwrap();
 
-        let (index, last_seq) = rebuild_from_segment(&sim, fd, 256).unwrap();
+        let (index, last_seq) = rebuild_from_segment(&sim, fd, 256, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(last_seq, Some(EventSequence::new(600)));
         assert_eq!(index.first_seq(), Some(EventSequence::new(1)));
         assert_eq!(index.last_seq(), Some(EventSequence::new(600)));
@@ -504,7 +522,8 @@ mod tests {
         let file_size_with_garbage = sim.file_size(fd).unwrap();
         assert!(file_size_with_garbage > file_size_before);
 
-        let (index, last_seq) = rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        let (index, last_seq) =
+            rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(last_seq, Some(EventSequence::new(5)));
         assert_eq!(index.first_seq(), Some(EventSequence::new(1)));
 
@@ -524,7 +543,8 @@ mod tests {
         sim.write_all_at(fd, valid_end, &partial_header).unwrap();
         sim.sync(fd).unwrap();
 
-        let (_, last_seq) = rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        let (_, last_seq) =
+            rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(last_seq, Some(EventSequence::new(3)));
         assert_eq!(sim.file_size(fd).unwrap(), valid_end);
     }
@@ -532,8 +552,14 @@ mod tests {
     #[test]
     fn rebuild_truncates_at_non_monotonic_seq() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(0), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(0),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
         let event1 = test_event(1, b"first");
         let event2 = test_event(2, b"second");
@@ -553,10 +579,11 @@ mod tests {
             event_type: EventTypeTag::COMMIT,
             payload: b"regressed".to_vec(),
         };
-        encode_event_record(&sim, fd, offset_after_two, &regressed).unwrap();
+        encode_event_record(&sim, fd, offset_after_two, &regressed, MAX_EVENT_PAYLOAD).unwrap();
         sim.sync(fd).unwrap();
 
-        let (index, last_seq) = rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        let (index, last_seq) =
+            rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(last_seq, Some(EventSequence::new(2)));
         assert_eq!(index.first_seq(), Some(EventSequence::new(1)));
         assert_eq!(index.last_seq(), Some(EventSequence::new(2)));
@@ -569,7 +596,7 @@ mod tests {
         let offsets = write_n_events(&sim, fd, 10);
         sim.sync(fd).unwrap();
 
-        let (index, _) = rebuild_from_segment(&sim, fd, 1).unwrap();
+        let (index, _) = rebuild_from_segment(&sim, fd, 1, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(index.entry_count(), 10);
 
         offsets.iter().enumerate().for_each(|(i, (seq, offset))| {
@@ -590,7 +617,7 @@ mod tests {
         write_n_events(&sim, fd, 300);
         sim.sync(fd).unwrap();
 
-        let (index, last_seq) = rebuild_from_segment(&sim, fd, 256).unwrap();
+        let (index, last_seq) = rebuild_from_segment(&sim, fd, 256, MAX_EVENT_PAYLOAD).unwrap();
         assert_eq!(last_seq, Some(EventSequence::new(300)));
 
         let index_path = Path::new("/test/00000000.tqi");
@@ -640,7 +667,7 @@ mod tests {
         sim.write_all_at(fd, 0, b"NOPE\x01").unwrap();
         sim.sync(fd).unwrap();
 
-        let result = rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL);
+        let result = rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD);
         assert!(result.is_err());
     }
 
@@ -651,7 +678,7 @@ mod tests {
         sim.sync(fd).unwrap();
 
         let size_before = sim.file_size(fd).unwrap();
-        rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        rebuild_from_segment(&sim, fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
         let size_after = sim.file_size(fd).unwrap();
         assert_eq!(size_before, size_after);
     }

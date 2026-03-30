@@ -22,6 +22,9 @@ lint: fmt-check clippy
 test-store:
     SQLX_OFFLINE=true cargo nextest run -p tranquil-store --features tranquil-store/test-harness
 
+test-store-sim-nightly:
+    SQLX_OFFLINE=true TRANQUIL_SIM_SEEDS=10000 cargo nextest run -p tranquil-store --features tranquil-store/test-harness --profile sim-nightly
+
 test-unit:
     SQLX_OFFLINE=true cargo test --test dpop_unit --test validation_edge_cases --test scope_edge_cases
 
@@ -56,6 +59,10 @@ test *args:
     @just test-store
     @just test-unit
     ./scripts/run-tests.sh {{args}}
+
+test-embedded *args:
+    @just test-unit
+    SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run -E 'not binary(store_parity)' {{args}}
 
 test-one name:
     ./scripts/run-tests.sh --test {{name}}

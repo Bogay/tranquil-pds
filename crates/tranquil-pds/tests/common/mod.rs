@@ -29,6 +29,7 @@ static TEST_DB_POOL: OnceLock<sqlx::PgPool> = OnceLock::new();
 static TEST_TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 static CLUSTER: OnceLock<Vec<ServerInstance>> = OnceLock::new();
 static TEST_REPOS: OnceLock<Arc<tranquil_db::PostgresRepositories>> = OnceLock::new();
+static TEST_BLOCK_STORE: OnceLock<tranquil_pds::repo::AnyBlockStore> = OnceLock::new();
 
 #[allow(dead_code)]
 pub fn is_store_backend() -> bool {
@@ -41,6 +42,8 @@ pub fn is_store_backend() -> bool {
 pub struct ServerConfig {
     pub pool: Option<sqlx::PgPool>,
     pub cache: Option<(Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>)>,
+    pub store_path: Option<PathBuf>,
+    pub shared_state: Option<AppState>,
 }
 
 #[allow(dead_code)]
@@ -574,12 +577,17 @@ async fn spawn_server(config: ServerConfig) -> ServerInstance {
         .with_oauth_authorize_limit(10000)
         .with_oauth_token_limit(10000);
     let cache_refs = config.cache.as_ref().map(|(c, r)| (c.clone(), r.clone()));
-    let mut state = match config.pool {
-        Some(pool) => AppState::from_db(pool, CancellationToken::new()).await,
-        None => AppState::from_store(CancellationToken::new()).await,
+    let mut state = match config.shared_state {
+        Some(s) => s,
+        None => match (config.pool, config.store_path) {
+            (Some(pool), _) => AppState::from_db(pool, CancellationToken::new()).await,
+            (None, Some(path)) => AppState::from_store_at(&path, CancellationToken::new()).await,
+            (None, None) => AppState::from_store(CancellationToken::new()).await,
+        },
     };
     state = state.with_rate_limiters(rate_limiters);
     TEST_REPOS.set(state.repos.clone()).ok();
+    TEST_BLOCK_STORE.set(state.block_store.clone()).ok();
     if let Some((cache, distributed_rate_limiter)) = config.cache {
         state = state.with_cache(cache, distributed_rate_limiter);
     }
@@ -637,6 +645,8 @@ async fn setup_store_backend() -> String {
     let instance = spawn_server(ServerConfig {
         pool: None,
         cache: None,
+        store_path: None,
+        shared_state: None,
     })
     .await;
     APP_PORT.set(instance.port).ok();
@@ -664,6 +674,8 @@ async fn spawn_app(database_url: String) -> String {
     let instance = spawn_server(ServerConfig {
         pool: Some(pool),
         cache: None,
+        store_path: None,
+        shared_state: None,
     })
     .await;
     APP_PORT.set(instance.port).ok();
@@ -671,26 +683,8 @@ async fn spawn_app(database_url: String) -> String {
 }
 
 #[allow(dead_code)]
-pub async fn spawn_cluster(database_url: String, node_count: usize) -> Vec<ServerInstance> {
+pub async fn spawn_cluster(pool: Option<sqlx::PgPool>, node_count: usize) -> Vec<ServerInstance> {
     use tranquil_ripple::{RippleConfig, RippleEngine};
-
-    let pool = PgPoolOptions::new()
-        .max_connections(10)
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .connect(&database_url)
-        .await
-        .expect("Failed to connect to Postgres for cluster");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations for cluster");
-    let test_pool = PgPoolOptions::new()
-        .max_connections(2)
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .connect(&database_url)
-        .await
-        .expect("Failed to create test pool for cluster");
-    TEST_DB_POOL.set(test_pool).ok();
 
     let shutdown = CancellationToken::new();
 
@@ -713,11 +707,28 @@ pub async fn spawn_cluster(database_url: String, node_count: usize) -> Vec<Serve
         ripple_nodes.push((cache, rate_limiter));
     }
 
+    unsafe {
+        std::env::set_var("PDS_HOSTNAME", "pds.test");
+    }
+    tranquil_config::ensure_test_defaults();
+    let base_state = match is_store_backend() {
+        true => {
+            let path = std::env::temp_dir().join(format!(
+                "tranquil-pds-cluster-store-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&path).expect("failed to create cluster store dir");
+            Some(AppState::from_store_at(&path, CancellationToken::new()).await)
+        }
+        false => None,
+    };
     let mut instances: Vec<ServerInstance> = Vec::with_capacity(node_count);
     for (cache, rate_limiter) in ripple_nodes {
         let server_config = ServerConfig {
-            pool: Some(pool.clone()),
+            pool: pool.clone(),
             cache: Some((cache, rate_limiter)),
+            store_path: None,
+            shared_state: base_state.clone(),
         };
         let instance = spawn_server(server_config).await;
         instances.push(instance);
@@ -757,12 +768,14 @@ pub async fn cluster() -> &'static [ServerInstance] {
                 unsafe {
                     std::env::remove_var("DISABLE_RATE_LIMITING");
                 }
-                let database_url = if has_external_infra() {
+                let pool = if is_store_backend() {
+                    setup_cluster_store_backend().await
+                } else if has_external_infra() {
                     setup_cluster_external_infra().await
                 } else {
                     setup_cluster_testcontainers().await
                 };
-                let nodes = spawn_cluster(database_url, 3).await;
+                let nodes = spawn_cluster(pool, 3).await;
                 tx.send(nodes).unwrap();
                 std::future::pending::<()>().await;
             });
@@ -771,7 +784,36 @@ pub async fn cluster() -> &'static [ServerInstance] {
     })
 }
 
-async fn setup_cluster_external_infra() -> String {
+async fn setup_cluster_store_backend() -> Option<sqlx::PgPool> {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "tranquil-pds-cluster-store-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let blob_path = temp_dir.join("blobs");
+    let backup_path = temp_dir.join("backups");
+    let store_path = temp_dir.join("store");
+    std::fs::create_dir_all(&blob_path).expect("failed to create blob temp directory");
+    std::fs::create_dir_all(&backup_path).expect("failed to create backup temp directory");
+    std::fs::create_dir_all(&store_path).expect("failed to create store temp directory");
+    TEST_TEMP_DIR.set(temp_dir).ok();
+    let plc_url = setup_mock_plc_directory().await;
+    unsafe {
+        std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
+        std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
+        std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
+        std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
+        std::env::set_var("MAX_IMPORT_SIZE", "100000000");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
+        std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
+        std::env::set_var("REPO_BACKEND", "tranquil-store");
+        std::env::set_var("TRANQUIL_STORE_DATA_DIR", store_path.to_str().unwrap());
+        std::env::set_var("DATABASE_URL", "postgres://unused/unused");
+    }
+    register_mock_appview().await;
+    None
+}
+
+async fn setup_cluster_external_infra() -> Option<sqlx::PgPool> {
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set when using external infra");
     let plc_url = setup_mock_plc_directory().await;
@@ -780,11 +822,28 @@ async fn setup_cluster_external_infra() -> String {
         std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
     }
     register_mock_appview().await;
-    database_url
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .connect(&database_url)
+        .await
+        .expect("Failed to connect to Postgres for cluster");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations for cluster");
+    let test_pool = PgPoolOptions::new()
+        .max_connections(2)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .connect(&database_url)
+        .await
+        .expect("Failed to create test pool for cluster");
+    TEST_DB_POOL.set(test_pool).ok();
+    Some(pool)
 }
 
 #[cfg(not(feature = "external-infra"))]
-async fn setup_cluster_testcontainers() -> String {
+async fn setup_cluster_testcontainers() -> Option<sqlx::PgPool> {
     let temp_dir =
         std::env::temp_dir().join(format!("tranquil-pds-cluster-{}", uuid::Uuid::new_v4()));
     let blob_path = temp_dir.join("blobs");
@@ -817,11 +876,28 @@ async fn setup_cluster_testcontainers() -> String {
             .expect("Failed to get port")
     );
     DB_CONTAINER.set(container).ok();
-    connection_string
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to Postgres for cluster");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations for cluster");
+    let test_pool = PgPoolOptions::new()
+        .max_connections(2)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .connect(&connection_string)
+        .await
+        .expect("Failed to create test pool for cluster");
+    TEST_DB_POOL.set(test_pool).ok();
+    Some(pool)
 }
 
 #[cfg(feature = "external-infra")]
-async fn setup_cluster_testcontainers() -> String {
+async fn setup_cluster_testcontainers() -> Option<sqlx::PgPool> {
     panic!(
         "Testcontainers disabled with external-infra feature. Set DATABASE_URL and BLOB_STORAGE_PATH (or S3_ENDPOINT)."
     );
@@ -859,6 +935,14 @@ pub async fn get_test_db_pool() -> &'static sqlx::PgPool {
 pub async fn get_test_repos() -> &'static Arc<tranquil_db::PostgresRepositories> {
     base_url().await;
     TEST_REPOS.get().expect("TEST_REPOS not initialized")
+}
+
+#[allow(dead_code)]
+pub async fn get_test_block_store() -> &'static tranquil_pds::repo::AnyBlockStore {
+    base_url().await;
+    TEST_BLOCK_STORE
+        .get()
+        .expect("TEST_BLOCK_STORE not initialized")
 }
 
 fn extract_verification_code(body_text: &str) -> String {

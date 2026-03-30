@@ -33,11 +33,12 @@ pub use oauth::{
     ScopePreference, TokenFamilyId, TrustedDeviceRow, TwoFactorChallenge,
 };
 pub use repo::{
-    AccountStatus, ApplyCommitError, ApplyCommitInput, ApplyCommitResult, BrokenGenesisCommit,
-    CommitEventData, EventBlocksCids, FullRecordInfo, ImportBlock, ImportRecord, ImportRepoError,
-    RecordDelete, RecordInfo, RecordUpsert, RecordWithTakedown, RepoAccountInfo, RepoEventNotifier,
-    RepoEventReceiver, RepoEventType, RepoInfo, RepoListItem, RepoRepository, RepoSeqEvent,
-    RepoWithoutRev, SequencedEvent, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
+    AccountStatus, ApplyCommitError, ApplyCommitInput, ApplyCommitResult, CommitEventData,
+    EventBlockInline, EventBlocks, FullRecordInfo, ImportBlock, ImportRecord, ImportRepoError,
+    PruneCount, RecordDelete, RecordInfo, RecordUpsert, RecordWithTakedown, RepoAccountInfo,
+    RepoEventNotifier, RepoEventReceiver, RepoEventType, RepoInfo, RepoListItem, RepoRepository,
+    RepoSeqEvent, RepoWithoutRev, SequencedEvent, UserNeedingRecordBlobsBackfill,
+    UserWithoutBlocks,
 };
 pub use scope::{DbScope, InvalidScopeError};
 pub use sequence::{SequenceNumber, deserialize_optional_sequence};

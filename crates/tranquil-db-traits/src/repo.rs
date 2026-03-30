@@ -166,13 +166,6 @@ pub struct RepoWithoutRev {
 }
 
 #[derive(Debug, Clone)]
-pub struct BrokenGenesisCommit {
-    pub seq: SequenceNumber,
-    pub did: Did,
-    pub commit_cid: Option<CidLink>,
-}
-
-#[derive(Debug, Clone)]
 pub struct UserWithoutBlocks {
     pub user_id: Uuid,
     pub repo_root_cid: CidLink,
@@ -190,6 +183,51 @@ pub struct RepoSeqEvent {
     pub seq: SequenceNumber,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneCount {
+    Rows(u64),
+    Segments(u64),
+}
+
+impl PruneCount {
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Self::Rows(n) | Self::Segments(n) => *n == 0,
+        }
+    }
+
+    pub fn count(&self) -> u64 {
+        match self {
+            Self::Rows(n) | Self::Segments(n) => *n,
+        }
+    }
+
+    pub fn unit(&self) -> &'static str {
+        match self {
+            Self::Rows(_) => "rows",
+            Self::Segments(_) => "segments",
+        }
+    }
+}
+
+impl std::fmt::Display for PruneCount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.count(), self.unit())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventBlockInline {
+    pub cid_bytes: Vec<u8>,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EventBlocks {
+    Inline(Vec<EventBlockInline>),
+    LegacyCids(Vec<String>),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SequencedEvent {
     pub seq: SequenceNumber,
@@ -201,7 +239,7 @@ pub struct SequencedEvent {
     pub prev_data_cid: Option<CidLink>,
     pub ops: Option<serde_json::Value>,
     pub blobs: Option<Vec<String>>,
-    pub blocks_cids: Option<Vec<String>>,
+    pub blocks: Option<EventBlocks>,
     pub handle: Option<Handle>,
     pub active: Option<bool>,
     pub status: Option<AccountStatus>,
@@ -216,15 +254,9 @@ pub struct CommitEventData {
     pub prev_cid: Option<CidLink>,
     pub ops: Option<serde_json::Value>,
     pub blobs: Option<Vec<String>>,
-    pub blocks_cids: Option<Vec<String>>,
+    pub blocks: Option<Vec<EventBlockInline>>,
     pub prev_data_cid: Option<CidLink>,
     pub rev: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EventBlocksCids {
-    pub blocks_cids: Option<Vec<String>>,
-    pub commit_cid: Option<CidLink>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -413,11 +445,6 @@ pub trait RepoRepository: Send + Sync {
 
     async fn count_user_blocks(&self, user_id: Uuid) -> Result<i64, DbError>;
 
-    async fn find_unreferenced_blocks(
-        &self,
-        candidate_cids: &[Vec<u8>],
-    ) -> Result<Vec<Vec<u8>>, DbError>;
-
     async fn insert_commit_event(&self, data: &CommitEventData) -> Result<SequenceNumber, DbError>;
 
     async fn insert_identity_event(
@@ -437,6 +464,7 @@ pub trait RepoRepository: Send + Sync {
         did: &Did,
         commit_cid: &CidLink,
         rev: Option<&str>,
+        commit_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError>;
 
     async fn insert_genesis_commit_event(
@@ -445,19 +473,17 @@ pub trait RepoRepository: Send + Sync {
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
         rev: &str,
+        commit_bytes: &[u8],
+        mst_root_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError>;
-
-    async fn update_seq_blocks_cids(
-        &self,
-        seq: SequenceNumber,
-        blocks_cids: &[String],
-    ) -> Result<(), DbError>;
 
     async fn delete_sequences_except(
         &self,
         did: &Did,
         keep_seq: SequenceNumber,
     ) -> Result<(), DbError>;
+
+    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<PruneCount, DbError>;
 
     async fn get_max_seq(&self) -> Result<SequenceNumber, DbError>;
 
@@ -491,12 +517,6 @@ pub trait RepoRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<SequencedEvent>, DbError>;
 
-    async fn get_events_since_rev(
-        &self,
-        did: &Did,
-        since_rev: &str,
-    ) -> Result<Vec<EventBlocksCids>, DbError>;
-
     async fn list_repos_paginated(
         &self,
         cursor_did: Option<&Did>,
@@ -520,8 +540,6 @@ pub trait RepoRepository: Send + Sync {
         &self,
         input: ApplyCommitInput,
     ) -> Result<ApplyCommitResult, ApplyCommitError>;
-
-    async fn get_broken_genesis_commits(&self) -> Result<Vec<BrokenGenesisCommit>, DbError>;
 
     async fn get_users_without_blocks(&self) -> Result<Vec<UserWithoutBlocks>, DbError>;
 

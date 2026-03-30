@@ -134,7 +134,7 @@ fn to_firehose_event(event: tranquil_db_traits::SequencedEvent) -> SequencedEven
         prev_data_cid: event.prev_data_cid,
         ops: event.ops,
         blobs: event.blobs,
-        blocks_cids: event.blocks_cids,
+        blocks: event.blocks,
         handle: event.handle,
         active: event.active,
         status: event.status,

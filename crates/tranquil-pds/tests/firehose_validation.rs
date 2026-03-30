@@ -245,11 +245,11 @@ async fn test_firehose_frame_structure() {
     assert!(timeout.is_ok(), "Timed out waiting for event for our DID");
     let (header, frame) = frame_opt.expect("No matching frame found");
 
-    println!("\n=== Frame Structure Validation ===\n");
+    println!("\n-- frame structure validation --\n");
 
     println!("Header:");
-    println!("  op: {} (expected: 1)", header.op);
-    println!("  t: {} (expected: #commit)", header.t);
+    println!("  op: {}, expected 1", header.op);
+    println!("  t: {}, expected #commit", header.t);
     assert_eq!(header.op, 1, "Header op should be 1");
     assert_eq!(header.t, "#commit", "Header t should be #commit");
 
@@ -260,7 +260,7 @@ async fn test_firehose_frame_structure() {
     println!("  repo: {}", frame.repo);
     println!("  commit: {}", frame.commit);
     println!(
-        "  rev: {} (valid TID: {})",
+        "  rev: {}, valid TID: {}",
         frame.rev,
         is_valid_tid(&frame.rev)
     );
@@ -269,12 +269,12 @@ async fn test_firehose_frame_structure() {
     println!("  ops count: {}", frame.ops.len());
     println!("  blobs count: {}", frame.blobs.len());
     println!(
-        "  time: {} (valid format: {})",
+        "  time: {}, valid format: {}",
         frame.time,
         is_valid_time_format(&frame.time)
     );
     println!(
-        "  prevData: {:?} (IMPORTANT - should have value for updates)",
+        "  prevData: {:?}, should have value for updates",
         frame.prev_data
     );
 
@@ -297,7 +297,7 @@ async fn test_firehose_frame_structure() {
         println!("    path: {}", op.path);
         println!("    cid: {:?}", op.cid);
         println!(
-            "    prev: {:?} (should be Some for updates/deletes)",
+            "    prev: {:?}, should be Some for updates/deletes",
             op.prev
         );
 
@@ -351,7 +351,7 @@ async fn test_firehose_frame_structure() {
         }
     }
 
-    println!("\n=== Validation Complete ===\n");
+    println!("\n-- validation complete --\n");
 
     ws_stream.send(tungstenite::Message::Close(None)).await.ok();
 }
@@ -435,7 +435,7 @@ async fn test_firehose_update_has_prev_field() {
     assert!(timeout.is_ok(), "Timed out waiting for update commit");
     let frame = frame_opt.expect("No matching frame found");
 
-    println!("\n=== Update Operation Validation ===\n");
+    println!("\n-- update operation validation --\n");
     println!("First profile CID: {}", first_cid);
     println!("Frame prevData: {:?}", frame.prev_data);
 
@@ -455,7 +455,7 @@ async fn test_firehose_update_has_prev_field() {
         }
     }
 
-    println!("\n=== Validation Complete ===\n");
+    println!("\n-- validation complete --\n");
 
     ws_stream.send(tungstenite::Message::Close(None)).await.ok();
 }
@@ -512,13 +512,13 @@ async fn test_firehose_commit_has_prev_data() {
     assert!(timeout.is_ok(), "Timed out waiting for first commit");
     let first_frame = first_frame_opt.expect("No first frame found");
 
-    println!("\n=== First Commit ===");
+    println!("\n-- first commit --");
     println!(
-        "  prevData: {:?} (first commit may be None)",
+        "  prevData: {:?}, first commit may be None",
         first_frame.prev_data
     );
     println!(
-        "  since: {:?} (first commit should be None)",
+        "  since: {:?}, first commit should be None",
         first_frame.since
     );
 
@@ -562,13 +562,13 @@ async fn test_firehose_commit_has_prev_data() {
     assert!(timeout.is_ok(), "Timed out waiting for second commit");
     let second_frame = second_frame_opt.expect("No second frame found");
 
-    println!("\n=== Second Commit ===");
+    println!("\n-- second commit --");
     println!(
-        "  prevData: {:?} (should have value - MST root CID)",
+        "  prevData: {:?}, should have value as MST root CID",
         second_frame.prev_data
     );
     println!(
-        "  since: {:?} (should have value - previous rev)",
+        "  since: {:?}, should have value as previous rev",
         second_frame.since
     );
 
@@ -577,7 +577,7 @@ async fn test_firehose_commit_has_prev_data() {
         "Second commit should have 'since' field pointing to first commit rev"
     );
 
-    println!("\n=== Validation Complete ===\n");
+    println!("\n-- validation complete --\n");
 
     ws_stream.send(tungstenite::Message::Close(None)).await.ok();
 }
@@ -634,7 +634,7 @@ async fn test_compare_raw_cbor_encoding() {
     assert!(timeout.is_ok(), "Timed out waiting for event for our DID");
     let raw_bytes = raw_bytes_opt.expect("No matching frame found");
 
-    println!("\n=== Raw CBOR Analysis ===\n");
+    println!("\n-- raw CBOR analysis --\n");
     println!("Total frame size: {} bytes", raw_bytes.len());
 
     fn bytes_to_hex(bytes: &[u8]) -> String {
@@ -657,7 +657,7 @@ async fn test_compare_raw_cbor_encoding() {
 
     println!("\nPayload section: {} bytes", raw_bytes.len() - header_end);
 
-    println!("\n=== Analysis Complete ===\n");
+    println!("\n-- analysis complete --\n");
 
     ws_stream.send(tungstenite::Message::Close(None)).await.ok();
 }

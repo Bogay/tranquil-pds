@@ -11,8 +11,19 @@ use super::segment_file::SEGMENT_HEADER_SIZE;
 use super::segment_index::SegmentIndex;
 use super::types::{SegmentId, SegmentOffset};
 
-pub(crate) const SEGMENT_FILE_EXTENSION: &str = "tqe";
+pub const SEGMENT_FILE_EXTENSION: &str = "tqe";
 pub(crate) const INDEX_FILE_EXTENSION: &str = "tqi";
+pub(crate) const SIDECAR_FILE_EXTENSION: &str = "tqs";
+
+pub fn segment_path(dir: &Path, id: SegmentId) -> PathBuf {
+    dir.join(format!("{id}.{SEGMENT_FILE_EXTENSION}"))
+}
+
+pub fn parse_segment_id(path: &Path) -> Option<SegmentId> {
+    let stem = path.file_stem()?.to_str()?;
+    let ext = path.extension()?.to_str()?;
+    (ext == SEGMENT_FILE_EXTENSION).then(|| stem.parse::<u32>().ok().map(SegmentId::new))?
+}
 
 struct CachedSegmentHandle {
     fd: FileId,
@@ -33,6 +44,10 @@ impl<S: StorageIO> SegmentManager<S> {
         assert!(
             max_segment_size > SEGMENT_HEADER_SIZE as u64,
             "max_segment_size ({max_segment_size}) must exceed SEGMENT_HEADER_SIZE ({SEGMENT_HEADER_SIZE})"
+        );
+        assert!(
+            max_segment_size <= u32::MAX as u64,
+            "max_segment_size ({max_segment_size}) must not exceed u32::MAX (sidecar offsets are u32)"
         );
         io.mkdir(&segments_dir)?;
         Ok(Self {
@@ -57,8 +72,7 @@ impl<S: StorageIO> SegmentManager<S> {
     }
 
     pub fn segment_path(&self, id: SegmentId) -> PathBuf {
-        self.segments_dir
-            .join(format!("{id}.{SEGMENT_FILE_EXTENSION}"))
+        segment_path(&self.segments_dir, id)
     }
 
     pub fn index_path(&self, id: SegmentId) -> PathBuf {
@@ -66,17 +80,14 @@ impl<S: StorageIO> SegmentManager<S> {
             .join(format!("{id}.{INDEX_FILE_EXTENSION}"))
     }
 
+    pub fn sidecar_path(&self, id: SegmentId) -> PathBuf {
+        self.segments_dir
+            .join(format!("{id}.{SIDECAR_FILE_EXTENSION}"))
+    }
+
     pub fn list_segments(&self) -> io::Result<Vec<SegmentId>> {
         let entries = self.io.list_dir(&self.segments_dir)?;
-        let mut ids: Vec<SegmentId> = entries
-            .iter()
-            .filter_map(|path| {
-                let stem = path.file_stem()?.to_str()?;
-                let ext = path.extension()?.to_str()?;
-                (ext == SEGMENT_FILE_EXTENSION)
-                    .then(|| stem.parse::<u32>().ok().map(SegmentId::new))?
-            })
-            .collect();
+        let mut ids: Vec<SegmentId> = entries.iter().filter_map(|p| parse_segment_id(p)).collect();
         ids.sort();
         Ok(ids)
     }
@@ -222,11 +233,13 @@ impl<S: StorageIO> SegmentManager<S> {
                 let _ = self.io.close(entry.fd);
             }
         }
-        match self.io.delete(&self.index_path(id)) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
-        }
+        [self.index_path(id), self.sidecar_path(id)]
+            .iter()
+            .try_for_each(|path| match self.io.delete(path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e),
+            })?;
         self.io.delete(&self.segment_path(id))?;
         self.io.sync_dir(&self.segments_dir)?;
         self.retention_epoch.fetch_add(1, Ordering::Relaxed);
@@ -260,7 +273,7 @@ mod tests {
     use crate::eventlog::segment_file::{SegmentWriter, ValidEvent};
     use crate::eventlog::segment_index::{DEFAULT_INDEX_INTERVAL, rebuild_from_segment};
     use crate::eventlog::types::{
-        DidHash, EventSequence, EventTypeTag, SegmentOffset, TimestampMicros,
+        DidHash, EventSequence, EventTypeTag, MAX_EVENT_PAYLOAD, SegmentOffset, TimestampMicros,
     };
     use crate::sim::SimulatedIO;
 
@@ -431,8 +444,14 @@ mod tests {
     fn seal_segment_persists_index_and_marks_sealed() {
         let mgr = setup_manager(64 * 1024);
         let fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
-        let mut writer =
-            SegmentWriter::new(mgr.io(), fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            mgr.io(),
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
         (1u64..=10).for_each(|i| {
             writer
@@ -441,7 +460,8 @@ mod tests {
         });
         writer.sync(mgr.io()).unwrap();
 
-        let (index, _) = rebuild_from_segment(mgr.io(), fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        let (index, _) =
+            rebuild_from_segment(mgr.io(), fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
 
         assert!(!mgr.is_sealed(SegmentId::new(1)));
         mgr.seal_segment(SegmentId::new(1), &index).unwrap();
@@ -457,14 +477,21 @@ mod tests {
     fn delete_segment_removes_files_and_handle() {
         let mgr = setup_manager(64 * 1024);
         let fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
-        let mut writer =
-            SegmentWriter::new(mgr.io(), fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            mgr.io(),
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         writer
             .append_event(mgr.io(), &test_event(1, b"will be deleted"))
             .unwrap();
         writer.sync(mgr.io()).unwrap();
 
-        let (index, _) = rebuild_from_segment(mgr.io(), fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        let (index, _) =
+            rebuild_from_segment(mgr.io(), fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
         mgr.seal_segment(SegmentId::new(1), &index).unwrap();
 
         let epoch_before = mgr.retention_epoch();
@@ -498,8 +525,14 @@ mod tests {
         let mgr = setup_manager(1024);
 
         let fd1 = mgr.open_for_append(SegmentId::new(1)).unwrap();
-        let mut writer1 =
-            SegmentWriter::new(mgr.io(), fd1, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer1 = SegmentWriter::new(
+            mgr.io(),
+            fd1,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         writer1
             .append_event(mgr.io(), &test_event(1, b"first segment"))
             .unwrap();
@@ -508,14 +541,16 @@ mod tests {
         let (id2, fd2) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
         mgr.commit_rotation(id2, fd2);
 
-        let mut writer2 = SegmentWriter::new(mgr.io(), fd2, id2, EventSequence::new(2)).unwrap();
+        let mut writer2 =
+            SegmentWriter::new(mgr.io(), fd2, id2, EventSequence::new(2), MAX_EVENT_PAYLOAD)
+                .unwrap();
         writer2
             .append_event(mgr.io(), &test_event(2, b"second segment"))
             .unwrap();
         writer2.sync(mgr.io()).unwrap();
 
         let fd1_read = mgr.open_for_read(SegmentId::new(1)).unwrap();
-        let events1 = crate::eventlog::SegmentReader::open(mgr.io(), fd1_read)
+        let events1 = crate::eventlog::SegmentReader::open(mgr.io(), fd1_read, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
             .unwrap();
@@ -523,7 +558,7 @@ mod tests {
         assert_eq!(events1[0].payload, b"first segment");
 
         let fd2_read = mgr.open_for_read(id2).unwrap();
-        let events2 = crate::eventlog::SegmentReader::open(mgr.io(), fd2_read)
+        let events2 = crate::eventlog::SegmentReader::open(mgr.io(), fd2_read, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
             .unwrap();
@@ -535,7 +570,14 @@ mod tests {
     fn seal_then_append_errors() {
         let mgr = setup_manager(64 * 1024);
         let fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
-        SegmentWriter::new(mgr.io(), fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        SegmentWriter::new(
+            mgr.io(),
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
         let index = SegmentIndex::new();
         mgr.seal_segment(SegmentId::new(1), &index).unwrap();
@@ -569,14 +611,21 @@ mod tests {
     fn open_for_read_does_not_infer_sealed_from_index_file() {
         let mgr = setup_manager(64 * 1024);
         let fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
-        let mut writer =
-            SegmentWriter::new(mgr.io(), fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            mgr.io(),
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         writer
             .append_event(mgr.io(), &test_event(1, b"sealed test"))
             .unwrap();
         writer.sync(mgr.io()).unwrap();
 
-        let (index, _) = rebuild_from_segment(mgr.io(), fd, DEFAULT_INDEX_INTERVAL).unwrap();
+        let (index, _) =
+            rebuild_from_segment(mgr.io(), fd, DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD).unwrap();
         mgr.seal_segment(SegmentId::new(1), &index).unwrap();
 
         mgr.handles.write().remove(&SegmentId::new(1));

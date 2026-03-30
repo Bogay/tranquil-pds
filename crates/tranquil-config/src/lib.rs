@@ -269,6 +269,38 @@ impl TranquilConfig {
         {
             errors.push("tranquil_store.handler_threads must be at least 1".to_string());
         }
+        if self.tranquil_store.eventlog_max_event_payload == 0 {
+            errors.push(
+                "tranquil_store.eventlog_max_event_payload \
+                 (TRANQUIL_STORE_EVENTLOG_MAX_EVENT_PAYLOAD) must be at least 1; \
+                 a value of 0 would reject every event"
+                    .to_string(),
+            );
+        }
+
+        // -- scheduled / event retention --------------------------------------
+        const MAX_RETENTION_SECS: u64 = (i64::MAX / 1000) as u64;
+        if self.scheduled.event_retention_max_age_secs > MAX_RETENTION_SECS {
+            errors.push(format!(
+                "scheduled.event_retention_max_age_secs (EVENT_RETENTION_MAX_AGE_SECS) \
+                 must be at most {MAX_RETENTION_SECS} (chrono::Duration limit); got {}",
+                self.scheduled.event_retention_max_age_secs
+            ));
+        }
+        if self.scheduled.event_retention_interval_secs > 0 {
+            let backfill_secs = u64::try_from(self.firehose.backfill_hours.max(0))
+                .unwrap_or(0)
+                .saturating_mul(3600);
+            if self.scheduled.event_retention_max_age_secs < backfill_secs {
+                errors.push(format!(
+                    "scheduled.event_retention_max_age_secs ({}) is shorter than \
+                     firehose.backfill_hours ({}h = {backfill_secs}s): \
+                     relays would receive cursor responses pointing at pruned events. \
+                     Increase event_retention_max_age_secs or decrease firehose.backfill_hours.",
+                    self.scheduled.event_retention_max_age_secs, self.firehose.backfill_hours,
+                ));
+            }
+        }
 
         // -- cache ------------------------------------------------------------
         match self.cache.backend.as_str() {
@@ -1057,9 +1089,45 @@ pub struct ScheduledConfig {
     #[config(env = "SCHEDULED_DELETE_CHECK_INTERVAL_SECS", default = 3600)]
     pub delete_check_interval_secs: u64,
 
-    /// Interval in seconds between block garbage collection cycles.
-    #[config(env = "BLOCK_GC_INTERVAL_SECS", default = 21600)]
-    pub block_gc_interval_secs: u64,
+    /// Interval in seconds between data file compaction scans (tranquil-store only).
+    /// Set to 0 to disable.
+    #[config(env = "COMPACTION_INTERVAL_SECS", default = 3600)]
+    pub compaction_interval_secs: u64,
+
+    /// Liveness ratio threshold below which a data file is compacted (0.0-1.0).
+    #[config(env = "COMPACTION_LIVENESS_THRESHOLD", default = 0.7)]
+    pub compaction_liveness_threshold: f64,
+
+    /// Grace period in milliseconds before a zero-refcount block can be removed by compaction.
+    #[config(env = "COMPACTION_GRACE_PERIOD_MS", default = 600000)]
+    pub compaction_grace_period_ms: u64,
+
+    /// Interval in seconds between reachability walk runs (tranquil-store only).
+    /// Set to 0 to disable. Default: weekly.
+    #[config(env = "REACHABILITY_WALK_INTERVAL_SECS", default = 604800)]
+    pub reachability_walk_interval_secs: u64,
+
+    /// Interval in seconds between continuous archival passes (tranquil-store only).
+    /// Sealed eventlog segments are copied to the archival destination each tick.
+    /// Set to 0 to disable. Default: 60 seconds.
+    #[config(env = "ARCHIVAL_INTERVAL_SECS", default = 60)]
+    pub archival_interval_secs: u64,
+
+    /// Archival destination directory for sealed eventlog segments.
+    /// If unset, archival is disabled.
+    #[config(env = "ARCHIVAL_DEST_DIR")]
+    pub archival_dest_dir: Option<String>,
+
+    /// Maximum age of events retained in the eventlog before pruning.
+    /// Per the atproto firehose spec, the relay backfill window only needs
+    /// to cover "hours or days". Default: 7 days.
+    #[config(env = "EVENT_RETENTION_MAX_AGE_SECS", default = 604800)]
+    pub event_retention_max_age_secs: u64,
+
+    /// Interval in seconds between event retention prune passes.
+    /// Set to 0 to disable. Default: hourly.
+    #[config(env = "EVENT_RETENTION_INTERVAL_SECS", default = 3600)]
+    pub event_retention_interval_secs: u64,
 }
 
 #[derive(Debug, Config)]
@@ -1079,6 +1147,38 @@ pub struct TranquilStoreConfig {
     /// Number of handler threads. Defaults to available_parallelism / 2.
     #[config(env = "TRANQUIL_STORE_HANDLER_THREADS")]
     pub handler_threads: Option<usize>,
+
+    /// Maximum total bytes of pending (unsynced) eventlog payloads. Appenders
+    /// block once this budget is exhausted until in-flight events drain via
+    /// fsync. Set to 0 to disable backpressure (unbounded). Default: 1 GiB.
+    #[config(
+        env = "TRANQUIL_STORE_EVENTLOG_PENDING_BYTES_BUDGET",
+        default = 1_073_741_824
+    )]
+    pub eventlog_pending_bytes_budget: u64,
+
+    /// Maximum size of an individual eventlog payload in bytes. Single events
+    /// larger than this are rejected at append time. Default: 256 MiB.
+    #[config(
+        env = "TRANQUIL_STORE_EVENTLOG_MAX_EVENT_PAYLOAD",
+        default = 268_435_456
+    )]
+    pub eventlog_max_event_payload: u32,
+
+    /// Maximum size of an individual blockstore data file in bytes. When the
+    /// active data file reaches this size it is rolled over and becomes
+    /// eligible for compaction. Default: 256 MiB.
+    #[config(env = "TRANQUIL_STORE_MAX_BLOCKSTORE_FILE_SIZE", default = 268_435_456)]
+    pub max_blockstore_file_size: u64,
+
+    /// Maximum size of an individual eventlog segment file in bytes. When the
+    /// active segment reaches this size it is sealed and a new one is created.
+    /// Safe to change on a running instance. Default: 256 MiB.
+    #[config(
+        env = "TRANQUIL_STORE_MAX_EVENTLOG_SEGMENT_SIZE",
+        default = 268_435_456
+    )]
+    pub max_eventlog_segment_size: u64,
 }
 
 /// Generate a TOML configuration template with all available options,

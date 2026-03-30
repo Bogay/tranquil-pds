@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use tranquil_db_traits::{
-    AccountStatus, BrokenGenesisCommit, CommitEventData, DbError, EventBlocksCids, FullRecordInfo,
-    ImportBlock, ImportRecord, ImportRepoError, RecordInfo, RecordWithTakedown, RepoAccountInfo,
-    RepoEventType, RepoInfo, RepoListItem, RepoRepository, RepoWithoutRev, SequenceNumber,
-    SequencedEvent, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
+    AccountStatus, CommitEventData, DbError, EventBlockInline, EventBlocks, FullRecordInfo,
+    ImportBlock, ImportRecord, ImportRepoError, PruneCount, RecordInfo, RecordWithTakedown,
+    RepoAccountInfo, RepoEventType, RepoInfo, RepoListItem, RepoRepository, RepoWithoutRev,
+    SequenceNumber, SequencedEvent, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
 };
 use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey};
 use uuid::Uuid;
@@ -27,11 +27,88 @@ struct SequencedEventRow {
     prev_data_cid: Option<String>,
     ops: Option<serde_json::Value>,
     blobs: Option<Vec<String>>,
+    block_cids: Option<Vec<Vec<u8>>>,
+    block_data: Option<Vec<Vec<u8>>>,
     blocks_cids: Option<Vec<String>>,
     handle: Option<String>,
     active: Option<bool>,
     status: Option<String>,
     rev: Option<String>,
+}
+
+fn row_to_event_blocks(
+    block_cids: Option<Vec<Vec<u8>>>,
+    block_data: Option<Vec<Vec<u8>>>,
+    legacy_blocks_cids: Option<Vec<String>>,
+) -> Result<Option<EventBlocks>, DbError> {
+    match (block_cids, block_data) {
+        (Some(cids), Some(data)) if cids.len() == data.len() => match cids.is_empty() {
+            true => Ok(legacy_fallback(legacy_blocks_cids)),
+            false => Ok(Some(EventBlocks::Inline(
+                cids.into_iter()
+                    .zip(data)
+                    .map(|(cid_bytes, data)| EventBlockInline { cid_bytes, data })
+                    .collect(),
+            ))),
+        },
+        (Some(_), Some(_)) => Err(DbError::CorruptData(
+            "repo_seq.block_cids/block_data length mismatch",
+        )),
+        (Some(_), None) | (None, Some(_)) => Err(DbError::CorruptData(
+            "repo_seq.block_cids/block_data partially populated",
+        )),
+        (None, None) => Ok(legacy_fallback(legacy_blocks_cids)),
+    }
+}
+
+fn legacy_fallback(legacy_blocks_cids: Option<Vec<String>>) -> Option<EventBlocks> {
+    match legacy_blocks_cids {
+        Some(cids) if !cids.is_empty() => Some(EventBlocks::LegacyCids(cids)),
+        _ => None,
+    }
+}
+
+fn inline_to_paired_blocks(blocks: Option<&[EventBlockInline]>) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    blocks
+        .map(|bs| {
+            bs.iter()
+                .map(|b| (b.cid_bytes.clone(), b.data.clone()))
+                .unzip()
+        })
+        .unwrap_or_default()
+}
+
+fn inline_into_paired_blocks(
+    blocks: Option<Vec<EventBlockInline>>,
+) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    blocks
+        .map(|bs| bs.into_iter().map(|b| (b.cid_bytes, b.data)).unzip())
+        .unwrap_or_default()
+}
+
+fn map_sequenced_row(r: SequencedEventRow) -> Result<SequencedEvent, DbError> {
+    let status = r
+        .status
+        .as_deref()
+        .and_then(AccountStatus::parse)
+        .or_else(|| r.active.filter(|a| *a).map(|_| AccountStatus::Active));
+    let blocks = row_to_event_blocks(r.block_cids, r.block_data, r.blocks_cids)?;
+    Ok(SequencedEvent {
+        seq: r.seq.into(),
+        did: Did::from(r.did),
+        created_at: r.created_at,
+        event_type: r.event_type,
+        commit_cid: r.commit_cid.map(CidLink::from),
+        prev_cid: r.prev_cid.map(CidLink::from),
+        prev_data_cid: r.prev_data_cid.map(CidLink::from),
+        ops: r.ops,
+        blobs: r.blobs,
+        blocks,
+        handle: r.handle.map(Handle::from),
+        active: r.active,
+        status,
+        rev: r.rev,
+    })
 }
 
 pub struct PostgresRepoRepository {
@@ -618,30 +695,6 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(count)
     }
 
-    async fn find_unreferenced_blocks(
-        &self,
-        candidate_cids: &[Vec<u8>],
-    ) -> Result<Vec<Vec<u8>>, DbError> {
-        match candidate_cids.is_empty() {
-            true => Ok(Vec::new()),
-            false => {
-                let rows = sqlx::query!(
-                    r#"
-                    SELECT t.cid FROM UNNEST($1::bytea[]) AS t(cid)
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM user_blocks WHERE block_cid = t.cid
-                    )
-                    "#,
-                    candidate_cids,
-                )
-                .fetch_all(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?;
-                Ok(rows.into_iter().filter_map(|r| r.cid).collect())
-            }
-        }
-    }
-
     async fn get_user_block_cids_since_rev(
         &self,
         user_id: Uuid,
@@ -664,10 +717,11 @@ impl RepoRepository for PostgresRepoRepository {
     }
 
     async fn insert_commit_event(&self, data: &CommitEventData) -> Result<SequenceNumber, DbError> {
+        let (block_cids, block_data) = inline_to_paired_blocks(data.blocks.as_deref());
         let seq = sqlx::query_scalar!(
             r#"
-            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, prev_data_cid, rev)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, block_cids, block_data, prev_data_cid, rev)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING seq
             "#,
             data.did.as_str(),
@@ -676,7 +730,8 @@ impl RepoRepository for PostgresRepoRepository {
             data.prev_cid.as_ref().map(|c| c.as_str()),
             data.ops,
             data.blobs.as_deref(),
-            data.blocks_cids.as_deref(),
+            &block_cids as &[Vec<u8>],
+            &block_data as &[Vec<u8>],
             data.prev_data_cid.as_ref().map(|c| c.as_str()),
             data.rev
         )
@@ -748,16 +803,25 @@ impl RepoRepository for PostgresRepoRepository {
         did: &Did,
         commit_cid: &CidLink,
         rev: Option<&str>,
+        commit_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError> {
+        let cid_bytes = commit_cid
+            .to_cid()
+            .map(|c| c.to_bytes())
+            .unwrap_or_default();
+        let block_cids: Vec<Vec<u8>> = vec![cid_bytes];
+        let block_data: Vec<Vec<u8>> = vec![commit_bytes.to_vec()];
         let seq = sqlx::query_scalar!(
             r#"
-            INSERT INTO repo_seq (did, event_type, commit_cid, rev)
-            VALUES ($1, 'sync', $2, $3)
+            INSERT INTO repo_seq (did, event_type, commit_cid, rev, block_cids, block_data)
+            VALUES ($1, 'sync', $2, $3, $4, $5)
             RETURNING seq
             "#,
             did.as_str(),
             commit_cid.as_str(),
-            rev
+            rev,
+            &block_cids as &[Vec<u8>],
+            &block_data as &[Vec<u8>]
         )
         .fetch_one(&self.pool)
         .await
@@ -777,16 +841,27 @@ impl RepoRepository for PostgresRepoRepository {
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
         rev: &str,
+        commit_bytes: &[u8],
+        mst_root_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError> {
         let ops = serde_json::json!([]);
         let blobs: Vec<String> = vec![];
-        let blocks_cids: Vec<String> = vec![mst_root_cid.to_string(), commit_cid.to_string()];
+        let commit_cid_bytes = commit_cid
+            .to_cid()
+            .map(|c| c.to_bytes())
+            .unwrap_or_default();
+        let mst_cid_bytes = mst_root_cid
+            .to_cid()
+            .map(|c| c.to_bytes())
+            .unwrap_or_default();
+        let block_cids: Vec<Vec<u8>> = vec![commit_cid_bytes, mst_cid_bytes];
+        let block_data: Vec<Vec<u8>> = vec![commit_bytes.to_vec(), mst_root_bytes.to_vec()];
         let prev_cid: Option<&str> = None;
 
         let seq = sqlx::query_scalar!(
             r#"
-            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, rev)
-            VALUES ($1, 'commit', $2, $3::TEXT, $4, $5, $6, $7)
+            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, block_cids, block_data, rev)
+            VALUES ($1, 'commit', $2, $3::TEXT, $4, $5, $6, $7, $8)
             RETURNING seq
             "#,
             did.as_str(),
@@ -794,7 +869,8 @@ impl RepoRepository for PostgresRepoRepository {
             prev_cid,
             ops,
             &blobs,
-            &blocks_cids,
+            &block_cids as &[Vec<u8>],
+            &block_data as &[Vec<u8>],
             rev
         )
         .fetch_one(&self.pool)
@@ -807,23 +883,6 @@ impl RepoRepository for PostgresRepoRepository {
             .map_err(map_sqlx_error)?;
 
         Ok(seq.into())
-    }
-
-    async fn update_seq_blocks_cids(
-        &self,
-        seq: SequenceNumber,
-        blocks_cids: &[String],
-    ) -> Result<(), DbError> {
-        sqlx::query!(
-            "UPDATE repo_seq SET blocks_cids = $1 WHERE seq = $2",
-            blocks_cids,
-            seq.as_i64()
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(())
     }
 
     async fn delete_sequences_except(
@@ -841,6 +900,15 @@ impl RepoRepository for PostgresRepoRepository {
         .map_err(map_sqlx_error)?;
 
         Ok(())
+    }
+
+    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<PruneCount, DbError> {
+        let result = sqlx::query!("DELETE FROM repo_seq WHERE created_at < $1", cutoff)
+            .execute(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(PruneCount::Rows(result.rows_affected()))
     }
 
     async fn get_max_seq(&self) -> Result<SequenceNumber, DbError> {
@@ -893,35 +961,12 @@ impl RepoRepository for PostgresRepoRepository {
         since_seq: SequenceNumber,
         limit: Option<i64>,
     ) -> Result<Vec<SequencedEvent>, DbError> {
-        let map_row = |r: SequencedEventRow| {
-            let status = r
-                .status
-                .as_deref()
-                .and_then(AccountStatus::parse)
-                .or_else(|| r.active.filter(|a| *a).map(|_| AccountStatus::Active));
-            SequencedEvent {
-                seq: r.seq.into(),
-                did: Did::from(r.did),
-                created_at: r.created_at,
-                event_type: r.event_type,
-                commit_cid: r.commit_cid.map(CidLink::from),
-                prev_cid: r.prev_cid.map(CidLink::from),
-                prev_data_cid: r.prev_data_cid.map(CidLink::from),
-                ops: r.ops,
-                blobs: r.blobs,
-                blocks_cids: r.blocks_cids,
-                handle: r.handle.map(Handle::from),
-                active: r.active,
-                status,
-                rev: r.rev,
-            }
-        };
         match limit {
             Some(lim) => {
                 let rows = sqlx::query_as!(
                     SequencedEventRow,
                     r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
-                              ops, blobs, blocks_cids, handle, active, status, rev
+                              ops, blobs, block_cids, block_data, blocks_cids, handle, active, status, rev
                        FROM repo_seq
                        WHERE seq > $1
                        ORDER BY seq ASC
@@ -932,13 +977,13 @@ impl RepoRepository for PostgresRepoRepository {
                 .fetch_all(&self.pool)
                 .await
                 .map_err(map_sqlx_error)?;
-                Ok(rows.into_iter().map(map_row).collect())
+                rows.into_iter().map(map_sequenced_row).collect()
             }
             None => {
                 let rows = sqlx::query_as!(
                     SequencedEventRow,
                     r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
-                              ops, blobs, blocks_cids, handle, active, status, rev
+                              ops, blobs, block_cids, block_data, blocks_cids, handle, active, status, rev
                        FROM repo_seq
                        WHERE seq > $1
                        ORDER BY seq ASC"#,
@@ -947,7 +992,7 @@ impl RepoRepository for PostgresRepoRepository {
                 .fetch_all(&self.pool)
                 .await
                 .map_err(map_sqlx_error)?;
-                Ok(rows.into_iter().map(map_row).collect())
+                rows.into_iter().map(map_sequenced_row).collect()
             }
         }
     }
@@ -957,9 +1002,10 @@ impl RepoRepository for PostgresRepoRepository {
         start_seq: SequenceNumber,
         end_seq: SequenceNumber,
     ) -> Result<Vec<SequencedEvent>, DbError> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query_as!(
+            SequencedEventRow,
             r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
-                      ops, blobs, blocks_cids, handle, active, status, rev
+                      ops, blobs, block_cids, block_data, blocks_cids, handle, active, status, rev
                FROM repo_seq
                WHERE seq > $1 AND seq < $2
                ORDER BY seq ASC"#,
@@ -969,41 +1015,17 @@ impl RepoRepository for PostgresRepoRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(rows
-            .into_iter()
-            .map(|r| {
-                let status = r
-                    .status
-                    .as_deref()
-                    .and_then(AccountStatus::parse)
-                    .or_else(|| r.active.filter(|a| *a).map(|_| AccountStatus::Active));
-                SequencedEvent {
-                    seq: r.seq.into(),
-                    did: Did::from(r.did),
-                    created_at: r.created_at,
-                    event_type: r.event_type,
-                    commit_cid: r.commit_cid.map(CidLink::from),
-                    prev_cid: r.prev_cid.map(CidLink::from),
-                    prev_data_cid: r.prev_data_cid.map(CidLink::from),
-                    ops: r.ops,
-                    blobs: r.blobs,
-                    blocks_cids: r.blocks_cids,
-                    handle: r.handle.map(Handle::from),
-                    active: r.active,
-                    status,
-                    rev: r.rev,
-                }
-            })
-            .collect())
+        rows.into_iter().map(map_sequenced_row).collect()
     }
 
     async fn get_event_by_seq(
         &self,
         seq: SequenceNumber,
     ) -> Result<Option<SequencedEvent>, DbError> {
-        let row = sqlx::query!(
+        let row = sqlx::query_as!(
+            SequencedEventRow,
             r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
-                      ops, blobs, blocks_cids, handle, active, status, rev
+                      ops, blobs, block_cids, block_data, blocks_cids, handle, active, status, rev
                FROM repo_seq
                WHERE seq = $1"#,
             seq.as_i64()
@@ -1011,29 +1033,7 @@ impl RepoRepository for PostgresRepoRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| {
-            let status = r
-                .status
-                .as_deref()
-                .and_then(AccountStatus::parse)
-                .or_else(|| r.active.filter(|a| *a).map(|_| AccountStatus::Active));
-            SequencedEvent {
-                seq: r.seq.into(),
-                did: Did::from(r.did),
-                created_at: r.created_at,
-                event_type: r.event_type,
-                commit_cid: r.commit_cid.map(CidLink::from),
-                prev_cid: r.prev_cid.map(CidLink::from),
-                prev_data_cid: r.prev_data_cid.map(CidLink::from),
-                ops: r.ops,
-                blobs: r.blobs,
-                blocks_cids: r.blocks_cids,
-                handle: r.handle.map(Handle::from),
-                active: r.active,
-                status,
-                rev: r.rev,
-            }
-        }))
+        row.map(map_sequenced_row).transpose()
     }
 
     async fn get_events_since_cursor(
@@ -1041,9 +1041,10 @@ impl RepoRepository for PostgresRepoRepository {
         cursor: SequenceNumber,
         limit: i64,
     ) -> Result<Vec<SequencedEvent>, DbError> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query_as!(
+            SequencedEventRow,
             r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
-                      ops, blobs, blocks_cids, handle, active, status, rev
+                      ops, blobs, block_cids, block_data, blocks_cids, handle, active, status, rev
                FROM repo_seq
                WHERE seq > $1
                ORDER BY seq ASC
@@ -1054,58 +1055,7 @@ impl RepoRepository for PostgresRepoRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(rows
-            .into_iter()
-            .map(|r| {
-                let status = r
-                    .status
-                    .as_deref()
-                    .and_then(AccountStatus::parse)
-                    .or_else(|| r.active.filter(|a| *a).map(|_| AccountStatus::Active));
-                SequencedEvent {
-                    seq: r.seq.into(),
-                    did: Did::from(r.did),
-                    created_at: r.created_at,
-                    event_type: r.event_type,
-                    commit_cid: r.commit_cid.map(CidLink::from),
-                    prev_cid: r.prev_cid.map(CidLink::from),
-                    prev_data_cid: r.prev_data_cid.map(CidLink::from),
-                    ops: r.ops,
-                    blobs: r.blobs,
-                    blocks_cids: r.blocks_cids,
-                    handle: r.handle.map(Handle::from),
-                    active: r.active,
-                    status,
-                    rev: r.rev,
-                }
-            })
-            .collect())
-    }
-
-    async fn get_events_since_rev(
-        &self,
-        did: &Did,
-        since_rev: &str,
-    ) -> Result<Vec<EventBlocksCids>, DbError> {
-        let rows = sqlx::query!(
-            r#"SELECT blocks_cids, commit_cid
-               FROM repo_seq
-               WHERE did = $1 AND rev > $2
-               ORDER BY seq DESC"#,
-            did.as_str(),
-            since_rev
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(rows
-            .into_iter()
-            .map(|r| EventBlocksCids {
-                blocks_cids: r.blocks_cids,
-                commit_cid: r.commit_cid.map(CidLink::from),
-            })
-            .collect())
+        rows.into_iter().map(map_sequenced_row).collect()
     }
 
     async fn list_repos_paginated(
@@ -1450,22 +1400,24 @@ impl RepoRepository for PostgresRepoRepository {
             .map_err(|e| ApplyCommitError::Database(e.to_string()))?;
         }
 
-        let event = &input.commit_event;
+        let event = input.commit_event;
+        let (event_block_cids, event_block_data) = inline_into_paired_blocks(event.blocks);
         let seq: i64 = sqlx::query_scalar(
             r#"
-            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, prev_data_cid, rev)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, block_cids, block_data, prev_data_cid, rev)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING seq
             "#,
         )
-        .bind(&event.did)
+        .bind(event.did.as_str())
         .bind(event.event_type.as_str())
-        .bind(&event.commit_cid)
-        .bind(&event.prev_cid)
+        .bind(event.commit_cid.as_ref().map(|c| c.as_str()))
+        .bind(event.prev_cid.as_ref().map(|c| c.as_str()))
         .bind(&event.ops)
         .bind(&event.blobs)
-        .bind(&event.blocks_cids)
-        .bind(&event.prev_data_cid)
+        .bind(&event_block_cids)
+        .bind(&event_block_data)
+        .bind(event.prev_data_cid.as_ref().map(|c| c.as_str()))
         .bind(&event.rev)
         .fetch_one(&mut *tx)
         .await
@@ -1484,32 +1436,6 @@ impl RepoRepository for PostgresRepoRepository {
             seq,
             is_account_active,
         })
-    }
-
-    async fn get_broken_genesis_commits(
-        &self,
-    ) -> Result<Vec<tranquil_db_traits::BrokenGenesisCommit>, DbError> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT seq, did, commit_cid
-            FROM repo_seq
-            WHERE event_type = 'commit'
-              AND prev_cid IS NULL
-              AND (blocks_cids IS NULL OR array_length(blocks_cids, 1) IS NULL OR array_length(blocks_cids, 1) = 0)
-            "#
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(rows
-            .into_iter()
-            .map(|r| BrokenGenesisCommit {
-                seq: r.seq.into(),
-                did: Did::from(r.did),
-                commit_cid: r.commit_cid.map(CidLink::from),
-            })
-            .collect())
     }
 
     async fn get_users_without_blocks(&self) -> Result<Vec<UserWithoutBlocks>, DbError> {

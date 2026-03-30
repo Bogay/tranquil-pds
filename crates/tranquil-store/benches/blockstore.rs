@@ -61,11 +61,16 @@ fn compute_stats(durations: &mut [Duration]) -> Option<LatencyStats> {
 }
 
 fn open_store(dir: &Path) -> TranquilBlockStore {
+    open_store_sharded(dir, 1)
+}
+
+fn open_store_sharded(dir: &Path, shard_count: u8) -> TranquilBlockStore {
     TranquilBlockStore::open(BlockStoreConfig {
         data_dir: dir.join("data"),
         index_dir: dir.join("index"),
         max_file_size: DEFAULT_MAX_FILE_SIZE,
         group_commit: GroupCommitConfig::default(),
+        shard_count,
     })
     .unwrap()
 }
@@ -81,7 +86,7 @@ fn format_latency(stats: Option<&LatencyStats>) -> String {
 }
 
 async fn bench_write_throughput(block_count: usize, concurrency: usize) {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir = bench_temp_dir();
     let store = open_store(dir.path());
 
     let blocks_per_task = block_count / concurrency;
@@ -162,7 +167,7 @@ async fn bench_write_throughput(block_count: usize, concurrency: usize) {
 }
 
 async fn bench_read_throughput(block_count: usize, concurrency: usize) {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir = bench_temp_dir();
     let store = open_store(dir.path());
 
     let cids_per_task = block_count / concurrency;
@@ -238,7 +243,7 @@ async fn bench_read_throughput(block_count: usize, concurrency: usize) {
 }
 
 async fn bench_mixed_workload(block_count: usize, concurrency: usize) {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir = bench_temp_dir();
     let store = open_store(dir.path());
 
     let ops_per_task = block_count / concurrency;
@@ -351,7 +356,7 @@ async fn bench_group_commit_effectiveness(block_count: usize) {
     println!("-- group commit effectiveness at {block_count} blocks --");
 
     let baseline_cycle_time = {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = bench_temp_dir();
         let store = open_store(dir.path());
 
         let start = Instant::now();
@@ -377,7 +382,7 @@ async fn bench_group_commit_effectiveness(block_count: usize) {
                 if block_count < concurrency {
                     return;
                 }
-                let dir = tempfile::TempDir::new().unwrap();
+                let dir = bench_temp_dir();
                 let store = open_store(dir.path());
                 let blocks_per_task = block_count / concurrency;
                 let actual_count = blocks_per_task * concurrency;
@@ -422,29 +427,10 @@ async fn bench_group_commit_effectiveness(block_count: usize) {
         .await;
 }
 
-async fn bench_postgres_write_throughput(block_count: usize, concurrency: usize) {
-    let database_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            println!("skipped, set DATABASE_URL to enable");
-            return;
-        }
-    };
+async fn bench_sharded_write_throughput(block_count: usize, concurrency: usize, shard_count: u8) {
+    let dir = bench_temp_dir();
+    let store = open_store_sharded(dir.path(), shard_count);
 
-    let max_conns = u32::try_from(concurrency).expect("concurrency exceeds u32") + 5;
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(max_conns)
-        .connect(&database_url)
-        .await
-        .unwrap();
-
-    sqlx::query("CREATE TABLE IF NOT EXISTS blocks (cid bytea PRIMARY KEY, data bytea NOT NULL)")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("TRUNCATE blocks").execute(&pool).await.unwrap();
-
-    let pg_store = tranquil_repo::PostgresBlockStore::new(pool.clone());
     let blocks_per_task = block_count / concurrency;
     let actual_count = blocks_per_task * concurrency;
     let blocks: Vec<Vec<u8>> = (0..actual_count).map(make_block).collect();
@@ -454,7 +440,7 @@ async fn bench_postgres_write_throughput(block_count: usize, concurrency: usize)
 
     let handles: Vec<_> = (0..concurrency)
         .map(|task_id| {
-            let store = pg_store.clone();
+            let store = store.clone();
             let task_blocks: Vec<Vec<u8>> =
                 blocks[task_id * blocks_per_task..(task_id + 1) * blocks_per_task].to_vec();
             tokio::spawn(async move {
@@ -462,38 +448,39 @@ async fn bench_postgres_write_throughput(block_count: usize, concurrency: usize)
                     .then(|block| {
                         let store = store.clone();
                         async move {
-                            let t = Instant::now();
                             store.put(&block).await.unwrap();
-                            t.elapsed()
                         }
                     })
-                    .collect::<Vec<Duration>>()
-                    .await
+                    .collect::<Vec<()>>()
+                    .await;
             })
         })
         .collect();
 
-    let mut all_latencies: Vec<Duration> = futures::future::join_all(handles)
-        .await
-        .into_iter()
-        .flat_map(Result::unwrap)
-        .collect();
+    futures::future::join_all(handles).await;
     let elapsed = start.elapsed();
-    let stats = compute_stats(&mut all_latencies);
 
-    let lat = format_latency(stats.as_ref());
     println!(
-        "{:.0} blocks/sec, {:.1} MB/sec, {:.1}ms{lat}",
+        "{:.0} blocks/sec, {:.1} MB/sec, {:.1}ms",
         actual_count as f64 / elapsed.as_secs_f64(),
         total_bytes as f64 / elapsed.as_secs_f64() / (1024.0 * 1024.0),
         elapsed.as_secs_f64() * 1000.0,
     );
+}
 
-    sqlx::query("TRUNCATE blocks").execute(&pool).await.unwrap();
-    pool.close().await;
+fn bench_temp_dir() -> tempfile::TempDir {
+    match std::env::var("BENCH_DIR") {
+        Ok(dir) => tempfile::TempDir::new_in(dir).unwrap(),
+        Err(_) => tempfile::TempDir::new().unwrap(),
+    }
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .init();
+
     let worker_threads = std::env::var("BENCH_WORKER_THREADS")
         .ok()
         .and_then(|s| s.trim().parse::<usize>().ok())
@@ -558,20 +545,23 @@ fn main() {
 
     rt.block_on(bench_group_commit_effectiveness(1000));
 
-    if std::env::var("DATABASE_URL").is_ok() {
-        block_counts.iter().for_each(|&block_count| {
-            concurrency_levels.iter().for_each(|&concurrency| {
-                if block_count < concurrency {
-                    return;
-                }
-                println!(
-                    "-- postgres write: {} blocks, {} writers --",
-                    block_count, concurrency
-                );
-                rt.block_on(bench_postgres_write_throughput(block_count, concurrency));
+    let shard_counts = parse_env_list("BENCH_SHARDS", vec![1, 2, 4]);
+    if shard_counts.iter().any(|&s| s > 1) {
+        println!("\n-- sharded write throughput :p --");
+        shard_counts.iter().for_each(|&shards| {
+            block_counts.iter().for_each(|&block_count| {
+                concurrency_levels.iter().for_each(|&concurrency| {
+                    if block_count < concurrency {
+                        return;
+                    }
+                    let sc = u8::try_from(shards).unwrap_or(4);
+                    println!(
+                        "-- sharded write: {} shards, {} blocks, {} writers --",
+                        sc, block_count, concurrency
+                    );
+                    rt.block_on(bench_sharded_write_throughput(block_count, concurrency, sc));
+                });
             });
         });
-    } else {
-        println!("set DATABASE_URL for postgres comparison");
     }
 }

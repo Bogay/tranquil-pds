@@ -49,6 +49,7 @@ pub struct AppState {
     pub bootstrap_invite_code: Option<String>,
     pub signal_sender: Option<Arc<tranquil_signal::SignalSlot>>,
     pub signal_store_provider: Option<Arc<dyn tranquil_signal::SignalStoreProvider>>,
+    pub eventlog_segments_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -214,9 +215,7 @@ impl AppState {
 
         match cfg.storage.repo_backend() {
             tranquil_config::RepoBackend::TranquilStore => {
-                tracing::info!(
-                    "tranquil-store repo backend active. EXPERIMENTAL! No garbage collection, no backup/restore"
-                );
+                tracing::info!("tranquil-store repo backend active. EXPERIMENTAL!");
                 Ok(Self::from_store(shutdown).await)
             }
             tranquil_config::RepoBackend::Postgres => {
@@ -273,10 +272,11 @@ impl AppState {
 
     pub async fn from_db(db: PgPool, shutdown: CancellationToken) -> Self {
         let cfg = tranquil_config::get();
-        let (repos, block_store, signal_store_provider): (
+        let (repos, block_store, signal_store_provider, eventlog_segments_dir): (
             PostgresRepositories,
             crate::repo::AnyBlockStore,
             Option<Arc<dyn tranquil_signal::SignalStoreProvider>>,
+            Option<PathBuf>,
         ) = match cfg.storage.repo_backend() == tranquil_config::RepoBackend::TranquilStore {
             true => {
                 let wiring = wire_tranquil_store(&cfg.tranquil_store, shutdown.clone());
@@ -284,6 +284,7 @@ impl AppState {
                     wiring.repos,
                     crate::repo::AnyBlockStore::TranquilStore(wiring.blockstore),
                     Some(wiring.signal_provider),
+                    Some(wiring.segments_dir),
                 )
             }
             false => {
@@ -294,11 +295,19 @@ impl AppState {
                     repos,
                     crate::repo::AnyBlockStore::Postgres(PostgresBlockStore::new(db)),
                     Some(provider),
+                    None,
                 )
             }
         };
 
-        Self::build(repos, block_store, signal_store_provider, shutdown).await
+        Self::build(
+            repos,
+            block_store,
+            signal_store_provider,
+            eventlog_segments_dir,
+            shutdown,
+        )
+        .await
     }
 
     pub async fn from_store(shutdown: CancellationToken) -> Self {
@@ -309,6 +318,30 @@ impl AppState {
             wiring.repos,
             crate::repo::AnyBlockStore::TranquilStore(wiring.blockstore),
             Some(wiring.signal_provider),
+            Some(wiring.segments_dir),
+            shutdown,
+        )
+        .await
+    }
+
+    pub async fn from_store_at(data_dir: &std::path::Path, shutdown: CancellationToken) -> Self {
+        let base = &tranquil_config::get().tranquil_store;
+        let store_cfg = tranquil_config::TranquilStoreConfig {
+            data_dir: data_dir.to_string_lossy().into_owned(),
+            memory_budget_mb: base.memory_budget_mb,
+            handler_threads: base.handler_threads,
+            eventlog_pending_bytes_budget: base.eventlog_pending_bytes_budget,
+            eventlog_max_event_payload: base.eventlog_max_event_payload,
+            max_blockstore_file_size: base.max_blockstore_file_size,
+            max_eventlog_segment_size: base.max_eventlog_segment_size,
+        };
+        let wiring = wire_tranquil_store(&store_cfg, shutdown.clone());
+
+        Self::build(
+            wiring.repos,
+            crate::repo::AnyBlockStore::TranquilStore(wiring.blockstore),
+            Some(wiring.signal_provider),
+            Some(wiring.segments_dir),
             shutdown,
         )
         .await
@@ -318,6 +351,7 @@ impl AppState {
         repos: PostgresRepositories,
         block_store: crate::repo::AnyBlockStore,
         signal_store_provider: Option<Arc<dyn tranquil_signal::SignalStoreProvider>>,
+        eventlog_segments_dir: Option<PathBuf>,
         shutdown: CancellationToken,
     ) -> Self {
         AuthConfig::init();
@@ -359,6 +393,7 @@ impl AppState {
             bootstrap_invite_code: None,
             signal_sender: None,
             signal_store_provider,
+            eventlog_segments_dir,
         }
     }
 
@@ -442,6 +477,7 @@ struct TranquilStoreWiring {
     blockstore: tranquil_store::blockstore::TranquilBlockStore,
     signal_provider: Arc<dyn tranquil_signal::SignalStoreProvider>,
     repos: PostgresRepositories,
+    segments_dir: PathBuf,
 }
 
 fn wire_tranquil_store(
@@ -486,14 +522,18 @@ fn wire_tranquil_store(
     let blockstore = TranquilBlockStore::open(BlockStoreConfig {
         data_dir: blockstore_data_dir,
         index_dir: blockstore_index_dir,
-        max_file_size: tranquil_store::blockstore::DEFAULT_MAX_FILE_SIZE,
+        max_file_size: store_cfg.max_blockstore_file_size,
         group_commit: Default::default(),
+        shard_count: tranquil_store::blockstore::DEFAULT_SHARD_COUNT,
     })
     .expect("failed to open blockstore");
 
     let event_log = EventLog::open(
         EventLogConfig {
             segments_dir,
+            pending_bytes_budget: store_cfg.eventlog_pending_bytes_budget,
+            max_event_payload: store_cfg.eventlog_max_event_payload,
+            max_segment_size: store_cfg.max_eventlog_segment_size,
             ..EventLogConfig::default()
         },
         RealIO::new(),
@@ -503,6 +543,10 @@ fn wire_tranquil_store(
 
     let bridge = Arc::new(EventLogBridge::new(Arc::clone(&event_log)));
 
+    let was_clean = tranquil_store::consistency::had_clean_shutdown(&data_dir);
+    tranquil_store::consistency::remove_clean_shutdown_marker(&data_dir)
+        .expect("failed to remove clean shutdown marker");
+
     let indexes = metastore.partition(Partition::Indexes).clone();
     let event_ops = metastore.event_ops(Arc::clone(&bridge));
     let recovered = event_ops
@@ -510,6 +554,41 @@ fn wire_tranquil_store(
         .expect("metastore crash recovery failed");
     if recovered > 0 {
         tracing::info!(recovered, "replayed metastore mutations from eventlog");
+    }
+
+    let skip_check = std::env::var("TRANQUIL_SKIP_CONSISTENCY_CHECK").is_ok_and(|v| v == "1");
+    if (!was_clean || recovered > 0) && !skip_check {
+        let report = tranquil_store::consistency::verify_store_consistency(
+            &blockstore,
+            &metastore,
+            &event_log,
+        );
+        report.log_findings();
+
+        if report.has_repairable_issues() {
+            let repair = tranquil_store::consistency::repair_known_issues(&blockstore, &report);
+            if repair.orphan_files_removed > 0 {
+                tracing::info!(
+                    removed = repair.orphan_files_removed,
+                    "repaired orphan data files"
+                );
+            }
+            if repair.had_errors() {
+                tracing::warn!(errors = repair.repair_errors, "some repairs failed");
+            }
+        }
+
+        if report.has_unrecoverable_issues() {
+            panic!(
+                "unrecoverable store inconsistencies detected: {} dangling root CIDs, {} dangling record CIDs, \
+                 {} deserialization failures, cursor_ahead={}. \
+                 manual intervention required. set TRANQUIL_SKIP_CONSISTENCY_CHECK=1 to bypass.",
+                report.dangling_root_cids.len(),
+                report.dangling_record_cids.len(),
+                report.deserialization_failures,
+                report.cursor_ahead_of_eventlog,
+            );
+        }
     }
 
     let notifier = bridge.notifier();
@@ -525,13 +604,23 @@ fn wire_tranquil_store(
 
     tokio::spawn({
         let pool = Arc::clone(&pool);
+        let shutdown_event_log = Arc::clone(&event_log);
+        let shutdown_data_dir = data_dir.clone();
         async move {
             shutdown.cancelled().await;
             pool.close().await;
+            if let Err(e) = shutdown_event_log.shutdown() {
+                tracing::warn!(error = %e, "eventlog shutdown failed");
+            }
+            if let Err(e) =
+                tranquil_store::consistency::write_clean_shutdown_marker(&shutdown_data_dir)
+            {
+                tracing::warn!(error = %e, "failed to write clean shutdown marker");
+            }
         }
     });
 
-    let client = MetastoreClient::<RealIO>::new(pool);
+    let client = MetastoreClient::<RealIO>::new(pool, Arc::clone(&event_log));
 
     tracing::info!(data_dir = %store_cfg.data_dir, "tranquil-store data directory");
 
@@ -553,9 +642,12 @@ fn wire_tranquil_store(
         tranquil_signal::fjall_store::FjallSignalStoreProvider::new(signal_db, signal_ks),
     );
 
+    let eventlog_segments_dir = event_log.segments_dir().to_path_buf();
+
     TranquilStoreWiring {
         blockstore,
         signal_provider,
         repos,
+        segments_dir: eventlog_segments_dir,
     }
 }

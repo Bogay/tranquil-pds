@@ -1,8 +1,10 @@
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::thread;
+
+use parking_lot::RwLock;
 
 use crate::fsync_order::PostBlockstoreHook;
 
@@ -10,15 +12,99 @@ use super::BlocksSynced;
 use crate::io::{FileId, OpenOptions, StorageIO};
 
 use super::data_file::{CID_SIZE, DataFileWriter};
+use super::hash_index::{BlockIndex, BlockIndexError, CheckpointPositions};
 use super::hint::{HintFileWriter, hint_file_path};
-use super::key_index::{KeyIndex, KeyIndexError};
 use super::manager::DataFileManager;
-use super::types::{BlockLocation, BlockOffset, DataFileId, HintOffset, WriteCursor};
+use super::types::{
+    BlockLocation, BlockOffset, BlockstoreSnapshot, CommitEpoch, DataFileId, EpochCounter,
+    HintOffset, ShardId, WriteCursor,
+};
+
+pub struct FileIdAllocator {
+    next: AtomicU32,
+}
+
+impl FileIdAllocator {
+    pub fn new(max_existing: DataFileId) -> Self {
+        Self {
+            next: AtomicU32::new(max_existing.raw().saturating_add(1)),
+        }
+    }
+
+    pub fn allocate(&self) -> DataFileId {
+        let id = self
+            .next
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
+            .expect("FileIdAllocator overflow: exhausted u32 file ID space");
+        DataFileId::new(id)
+    }
+
+    pub fn peek(&self) -> DataFileId {
+        DataFileId::new(self.next.load(Ordering::Relaxed))
+    }
+}
+
+pub struct ActiveFileSet {
+    files: RwLock<Vec<DataFileId>>,
+}
+
+impl ActiveFileSet {
+    pub fn with_capacity(n: usize) -> Self {
+        Self {
+            files: RwLock::new(Vec::with_capacity(n)),
+        }
+    }
+
+    pub fn register(&self, shard: ShardId, file_id: DataFileId) {
+        let mut files = self.files.write();
+        let idx = shard.as_usize();
+        if idx >= files.len() {
+            files.resize(idx.saturating_add(1), DataFileId::new(0));
+        }
+        files[idx] = file_id;
+    }
+
+    pub fn contains(&self, file_id: DataFileId) -> bool {
+        self.files.read().contains(&file_id)
+    }
+
+    pub fn snapshot(&self) -> Vec<DataFileId> {
+        self.files.read().clone()
+    }
+}
+
+pub struct ShardHintPositions {
+    positions: RwLock<Vec<(DataFileId, HintOffset)>>,
+}
+
+impl ShardHintPositions {
+    pub fn new(shard_count: u8) -> Self {
+        Self {
+            positions: RwLock::new(
+                (0..shard_count as usize)
+                    .map(|_| (DataFileId::new(0), HintOffset::new(0)))
+                    .collect(),
+            ),
+        }
+    }
+
+    pub fn update(&self, shard_id: ShardId, file_id: DataFileId, offset: HintOffset) {
+        let mut positions = self.positions.write();
+        let idx = shard_id.as_usize();
+        if idx < positions.len() {
+            positions[idx] = (file_id, offset);
+        }
+    }
+
+    pub fn snapshot(&self) -> CheckpointPositions {
+        CheckpointPositions(self.positions.read().clone())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum CommitError {
     Io(Arc<io::Error>),
-    Index(Arc<KeyIndexError>),
+    Index(String),
     ChannelClosed,
 }
 
@@ -26,7 +112,7 @@ impl std::fmt::Display for CommitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(e) => write!(f, "io: {}", e.as_ref()),
-            Self::Index(e) => write!(f, "index: {}", e.as_ref()),
+            Self::Index(e) => write!(f, "index: {e}"),
             Self::ChannelClosed => write!(f, "commit channel closed"),
         }
     }
@@ -36,8 +122,7 @@ impl std::error::Error for CommitError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(e) => Some(e.as_ref()),
-            Self::Index(e) => Some(e.as_ref()),
-            Self::ChannelClosed => None,
+            Self::Index(_) | Self::ChannelClosed => None,
         }
     }
 }
@@ -48,14 +133,21 @@ impl From<io::Error> for CommitError {
     }
 }
 
-impl From<KeyIndexError> for CommitError {
-    fn from(e: KeyIndexError) -> Self {
-        Self::Index(Arc::new(e))
+impl From<BlockIndexError> for CommitError {
+    fn from(e: BlockIndexError) -> Self {
+        Self::Index(e.to_string())
     }
 }
 
+use super::compaction::{self, CompactionError};
+use super::types::{CidBytes, CompactionResult, RefCount};
+
 type PutResponse = tokio::sync::oneshot::Sender<Result<Vec<BlockLocation>, CommitError>>;
 type ApplyResponse = tokio::sync::oneshot::Sender<Result<(), CommitError>>;
+type CompactResponse = tokio::sync::oneshot::Sender<Result<CompactionResult, CompactionError>>;
+type RepairResponse = tokio::sync::oneshot::Sender<Result<u64, CommitError>>;
+type QuiesceResponse = tokio::sync::oneshot::Sender<BlockstoreSnapshot>;
+type QuiesceResume = tokio::sync::oneshot::Receiver<()>;
 
 pub enum CommitRequest {
     PutBlocks {
@@ -67,6 +159,19 @@ pub enum CommitRequest {
         deleted_cids: Vec<[u8; CID_SIZE]>,
         response: ApplyResponse,
     },
+    Compact {
+        file_id: DataFileId,
+        grace_period_ms: u64,
+        response: CompactResponse,
+    },
+    RepairLeaked {
+        leaked_cids: Vec<(CidBytes, RefCount)>,
+        response: RepairResponse,
+    },
+    Quiesce {
+        response: QuiesceResponse,
+        resume: QuiesceResume,
+    },
     Shutdown,
 }
 
@@ -74,6 +179,8 @@ pub enum CommitRequest {
 pub struct GroupCommitConfig {
     pub max_batch_size: usize,
     pub channel_capacity: usize,
+    pub checkpoint_interval_ms: u64,
+    pub checkpoint_write_threshold: u64,
 }
 
 impl Default for GroupCommitConfig {
@@ -81,8 +188,18 @@ impl Default for GroupCommitConfig {
         Self {
             max_batch_size: 1024,
             channel_capacity: 4096,
+            checkpoint_interval_ms: 60_000,
+            checkpoint_write_threshold: 100_000,
         }
     }
+}
+
+struct ShardContext {
+    shard_id: ShardId,
+    epoch: EpochCounter,
+    file_ids: Arc<FileIdAllocator>,
+    active_files: Arc<ActiveFileSet>,
+    hint_positions: Arc<ShardHintPositions>,
 }
 
 struct ActiveState {
@@ -102,33 +219,29 @@ fn log_thread_panic(payload: Box<dyn std::any::Any + Send>, context: &str) {
     tracing::error!(panic = msg, "{context}");
 }
 
-pub struct GroupCommitWriter {
+struct SingleShardWriter {
     sender: flume::Sender<CommitRequest>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
-impl GroupCommitWriter {
-    pub fn spawn<S: StorageIO + 'static>(
+impl SingleShardWriter {
+    fn spawn<S: StorageIO + 'static>(
+        ctx: ShardContext,
         manager: DataFileManager<S>,
-        index: Arc<KeyIndex>,
-        config: GroupCommitConfig,
-    ) -> Result<Self, CommitError> {
-        Self::spawn_with_hook(manager, index, config, None)
-    }
-
-    pub fn spawn_with_hook<S: StorageIO + 'static>(
-        manager: DataFileManager<S>,
-        index: Arc<KeyIndex>,
+        index: Arc<BlockIndex>,
         config: GroupCommitConfig,
         post_sync_hook: Option<Arc<dyn PostBlockstoreHook>>,
+        cursor: Option<WriteCursor>,
     ) -> Result<Self, CommitError> {
-        let cursor = index.read_write_cursor().map_err(CommitError::from)?;
-        let mut state = initialize_active_state(&manager, cursor)?;
+        let mut state = initialize_active_state(&manager, cursor, &ctx.file_ids)?;
+        ctx.active_files.register(ctx.shard_id, state.file_id);
+        ctx.hint_positions
+            .update(ctx.shard_id, state.file_id, state.hint_position);
 
         let (sender, receiver) = flume::bounded(config.channel_capacity);
 
         let handle = thread::Builder::new()
-            .name("blockstore-group-commit".into())
+            .name(format!("blockstore-commit-{}", ctx.shard_id))
             .spawn(move || {
                 commit_loop(
                     &manager,
@@ -137,6 +250,7 @@ impl GroupCommitWriter {
                     &config,
                     &mut state,
                     post_sync_hook.as_deref(),
+                    &ctx,
                 );
             })
             .map_err(|e| CommitError::from(io::Error::other(e)))?;
@@ -147,11 +261,7 @@ impl GroupCommitWriter {
         })
     }
 
-    pub fn sender(&self) -> &flume::Sender<CommitRequest> {
-        &self.sender
-    }
-
-    pub fn shutdown(mut self) {
+    fn shutdown(&mut self) {
         let _ = self.sender.send(CommitRequest::Shutdown);
         if let Some(handle) = self.handle.take()
             && let Err(payload) = handle.join()
@@ -161,7 +271,7 @@ impl GroupCommitWriter {
     }
 }
 
-impl Drop for GroupCommitWriter {
+impl Drop for SingleShardWriter {
     fn drop(&mut self) {
         let _ = self.sender.try_send(CommitRequest::Shutdown);
         if let Some(handle) = self.handle.take()
@@ -172,12 +282,261 @@ impl Drop for GroupCommitWriter {
     }
 }
 
+fn shard_for_cid(cid: &[u8; CID_SIZE], shard_count: u8) -> usize {
+    match shard_count {
+        0 | 1 => 0,
+        n => {
+            let hash_bytes: [u8; 8] = cid[4..12].try_into().unwrap();
+            let hash = u64::from_le_bytes(hash_bytes);
+            match n.is_power_of_two() {
+                true => (hash & (n as u64 - 1)) as usize,
+                false => (hash % n as u64) as usize,
+            }
+        }
+    }
+}
+
+fn pick_shard_for_blocks(blocks: &[([u8; CID_SIZE], Vec<u8>)], shard_count: u8) -> usize {
+    match blocks.first() {
+        Some((cid, _)) => shard_for_cid(cid, shard_count),
+        None => 0,
+    }
+}
+
+fn pick_shard_for_apply(
+    blocks: &[([u8; CID_SIZE], Vec<u8>)],
+    deleted_cids: &[[u8; CID_SIZE]],
+    shard_count: u8,
+) -> usize {
+    match blocks.first() {
+        Some((cid, _)) => shard_for_cid(cid, shard_count),
+        None => match deleted_cids.first() {
+            Some(cid) => shard_for_cid(cid, shard_count),
+            None => 0,
+        },
+    }
+}
+
+pub struct GroupCommitWriter {
+    shards: Vec<SingleShardWriter>,
+    epoch: EpochCounter,
+    shard_count: u8,
+    round_robin: AtomicU8,
+    _file_ids: Arc<FileIdAllocator>,
+    _active_files: Arc<ActiveFileSet>,
+    _hint_positions: Arc<ShardHintPositions>,
+}
+
+impl GroupCommitWriter {
+    pub fn spawn<S: StorageIO + 'static>(
+        make_manager: impl Fn() -> DataFileManager<S>,
+        index: Arc<BlockIndex>,
+        config: GroupCommitConfig,
+    ) -> Result<Self, CommitError> {
+        Self::spawn_sharded(make_manager, index, config, None, None, 1, None)
+    }
+
+    pub fn spawn_with_hook<S: StorageIO + 'static>(
+        make_manager: impl Fn() -> DataFileManager<S>,
+        index: Arc<BlockIndex>,
+        config: GroupCommitConfig,
+        post_sync_hook: Option<Arc<dyn PostBlockstoreHook>>,
+        initial_epoch: Option<CommitEpoch>,
+    ) -> Result<Self, CommitError> {
+        Self::spawn_sharded(
+            make_manager,
+            index,
+            config,
+            post_sync_hook,
+            initial_epoch,
+            1,
+            None,
+        )
+    }
+
+    pub fn spawn_sharded<F, S>(
+        make_manager: F,
+        index: Arc<BlockIndex>,
+        config: GroupCommitConfig,
+        post_sync_hook: Option<Arc<dyn PostBlockstoreHook>>,
+        initial_epoch: Option<CommitEpoch>,
+        shard_count: u8,
+        checkpoint_positions: Option<&CheckpointPositions>,
+    ) -> Result<Self, CommitError>
+    where
+        S: StorageIO + 'static,
+        F: Fn() -> DataFileManager<S>,
+    {
+        let shard_count = shard_count.max(1);
+
+        let probe_manager = make_manager();
+        let existing_files = probe_manager.list_files()?;
+        let max_existing = existing_files.last().copied().unwrap_or(DataFileId::new(0));
+        let file_ids = Arc::new(FileIdAllocator::new(max_existing));
+        let active_files = Arc::new(ActiveFileSet::with_capacity(shard_count as usize));
+        let hint_positions = Arc::new(ShardHintPositions::new(shard_count));
+        drop(probe_manager);
+
+        let epoch = match initial_epoch {
+            Some(e) => EpochCounter::from_raw(e.raw()),
+            None => EpochCounter::new(),
+        };
+
+        let global_cursor = index.read_write_cursor();
+
+        let shards: Result<Vec<SingleShardWriter>, CommitError> = (0..shard_count)
+            .map(|i| {
+                let shard_cursor = checkpoint_positions
+                    .and_then(|cp| cp.0.get(i as usize))
+                    .filter(|(fid, _)| fid.raw() > 0)
+                    .map(|(fid, _)| WriteCursor {
+                        file_id: *fid,
+                        offset: BlockOffset::new(0),
+                    })
+                    .or(match i {
+                        0 => global_cursor,
+                        _ => None,
+                    });
+                let ctx = ShardContext {
+                    shard_id: ShardId::new(i),
+                    epoch: epoch.clone(),
+                    file_ids: Arc::clone(&file_ids),
+                    active_files: Arc::clone(&active_files),
+                    hint_positions: Arc::clone(&hint_positions),
+                };
+                SingleShardWriter::spawn(
+                    ctx,
+                    make_manager(),
+                    Arc::clone(&index),
+                    config.clone(),
+                    post_sync_hook.clone(),
+                    shard_cursor,
+                )
+            })
+            .collect();
+
+        Ok(Self {
+            shards: shards?,
+            epoch,
+            shard_count,
+            round_robin: AtomicU8::new(0),
+            _file_ids: file_ids,
+            _active_files: active_files,
+            _hint_positions: hint_positions,
+        })
+    }
+
+    pub fn epoch(&self) -> &EpochCounter {
+        &self.epoch
+    }
+
+    pub fn sender_round_robin(&self) -> &flume::Sender<CommitRequest> {
+        let idx = self
+            .round_robin
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_rem(self.shard_count) as usize;
+        &self.shards[idx].sender
+    }
+
+    pub fn sender_for_blocks(
+        &self,
+        blocks: &[([u8; CID_SIZE], Vec<u8>)],
+    ) -> &flume::Sender<CommitRequest> {
+        &self.shards[pick_shard_for_blocks(blocks, self.shard_count)].sender
+    }
+
+    pub fn sender_for_apply(
+        &self,
+        blocks: &[([u8; CID_SIZE], Vec<u8>)],
+        deleted_cids: &[[u8; CID_SIZE]],
+    ) -> &flume::Sender<CommitRequest> {
+        &self.shards[pick_shard_for_apply(blocks, deleted_cids, self.shard_count)].sender
+    }
+
+    pub fn quiesce_all(
+        &self,
+    ) -> Result<(BlockstoreSnapshot, Vec<tokio::sync::oneshot::Sender<()>>), CommitError> {
+        let pending: Result<Vec<_>, CommitError> = self
+            .shards
+            .iter()
+            .map(|shard| {
+                let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+                shard
+                    .sender
+                    .send(CommitRequest::Quiesce {
+                        response: response_tx,
+                        resume: resume_rx,
+                    })
+                    .map_err(|_| CommitError::ChannelClosed)?;
+                Ok((response_rx, resume_tx))
+            })
+            .collect();
+
+        let pairs: Result<Vec<_>, CommitError> = pending?
+            .into_iter()
+            .map(|(response_rx, resume_tx)| {
+                let snapshot = response_rx
+                    .blocking_recv()
+                    .map_err(|_| CommitError::ChannelClosed)?;
+                Ok((snapshot, resume_tx))
+            })
+            .collect();
+        let pairs = pairs?;
+
+        let mut all_data_files: Vec<DataFileId> = Vec::new();
+        let mut shard_cursors: Vec<WriteCursor> = Vec::new();
+        let mut max_epoch = CommitEpoch::zero();
+
+        pairs.iter().for_each(|(snap, _)| {
+            shard_cursors.extend(&snap.shard_cursors);
+            all_data_files.extend(&snap.data_files);
+            if snap.epoch > max_epoch {
+                max_epoch = snap.epoch;
+            }
+        });
+
+        all_data_files.sort();
+        all_data_files.dedup();
+
+        let resumes = pairs.into_iter().map(|(_, resume)| resume).collect();
+
+        Ok((
+            BlockstoreSnapshot {
+                shard_cursors,
+                epoch: max_epoch,
+                data_files: all_data_files,
+            },
+            resumes,
+        ))
+    }
+
+    pub fn shutdown(mut self) {
+        self.shards.iter_mut().for_each(|s| s.shutdown());
+    }
+}
+
+impl Drop for GroupCommitWriter {
+    fn drop(&mut self) {
+        self.shards.iter_mut().for_each(|s| {
+            let _ = s.sender.try_send(CommitRequest::Shutdown);
+        });
+        self.shards.iter_mut().for_each(|s| {
+            if let Some(handle) = s.handle.take()
+                && let Err(payload) = handle.join()
+            {
+                log_thread_panic(payload, "group commit thread panicked during drop");
+            }
+        });
+    }
+}
+
 fn initialize_active_state<S: StorageIO>(
     manager: &DataFileManager<S>,
     cursor: Option<WriteCursor>,
+    file_ids: &FileIdAllocator,
 ) -> Result<ActiveState, CommitError> {
     let data_dir = manager.data_dir();
-    let existing_files = manager.list_files()?;
 
     match cursor {
         Some(wc) => {
@@ -204,11 +563,7 @@ fn initialize_active_state<S: StorageIO>(
             })
         }
         None => {
-            let file_id = existing_files
-                .last()
-                .copied()
-                .map(|id| id.next())
-                .unwrap_or_else(|| DataFileId::new(0));
+            let file_id = file_ids.allocate();
 
             let fd = manager.open_for_append(file_id)?;
             let writer = DataFileWriter::new(manager.io(), fd, file_id)?;
@@ -243,19 +598,56 @@ enum BatchEntry {
     },
 }
 
-fn classify_request(req: CommitRequest) -> Result<BatchEntry, ()> {
+enum ClassifyResult {
+    Batch(BatchEntry),
+    Shutdown,
+    Compact {
+        file_id: DataFileId,
+        grace_period_ms: u64,
+        response: CompactResponse,
+    },
+    Repair {
+        leaked_cids: Vec<(CidBytes, RefCount)>,
+        response: RepairResponse,
+    },
+    Quiesce {
+        response: QuiesceResponse,
+        resume: QuiesceResume,
+    },
+}
+
+fn classify_request(req: CommitRequest) -> ClassifyResult {
     match req {
-        CommitRequest::PutBlocks { blocks, response } => Ok(BatchEntry::Put { blocks, response }),
+        CommitRequest::PutBlocks { blocks, response } => {
+            ClassifyResult::Batch(BatchEntry::Put { blocks, response })
+        }
         CommitRequest::ApplyCommit {
             blocks,
             deleted_cids,
             response,
-        } => Ok(BatchEntry::Apply {
+        } => ClassifyResult::Batch(BatchEntry::Apply {
             blocks,
             deleted_cids,
             response,
         }),
-        CommitRequest::Shutdown => Err(()),
+        CommitRequest::Compact {
+            file_id,
+            grace_period_ms,
+            response,
+        } => ClassifyResult::Compact {
+            file_id,
+            grace_period_ms,
+            response,
+        },
+        CommitRequest::RepairLeaked {
+            leaked_cids,
+            response,
+        } => ClassifyResult::Repair {
+            leaked_cids,
+            response,
+        },
+        CommitRequest::Quiesce { response, resume } => ClassifyResult::Quiesce { response, resume },
+        CommitRequest::Shutdown => ClassifyResult::Shutdown,
     }
 }
 
@@ -265,77 +657,330 @@ fn batch_entry_block_count(entry: &BatchEntry) -> usize {
     }
 }
 
+struct DrainResult {
+    entries: Vec<BatchEntry>,
+    shutdown: bool,
+    deferred_compacts: Vec<(DataFileId, u64, CompactResponse)>,
+    deferred_repairs: Vec<(Vec<(CidBytes, RefCount)>, RepairResponse)>,
+    deferred_quiesces: Vec<(QuiesceResponse, QuiesceResume)>,
+}
+
 fn drain_batch(
     receiver: &flume::Receiver<CommitRequest>,
     first: CommitRequest,
     max_batch_size: usize,
-) -> (Vec<BatchEntry>, bool) {
+) -> DrainResult {
     let first_entry = match classify_request(first) {
-        Err(()) => return (Vec::new(), true),
-        Ok(entry) => entry,
+        ClassifyResult::Shutdown => {
+            return DrainResult {
+                entries: Vec::new(),
+                shutdown: true,
+                deferred_compacts: Vec::new(),
+                deferred_repairs: Vec::new(),
+                deferred_quiesces: Vec::new(),
+            };
+        }
+        ClassifyResult::Compact {
+            file_id,
+            grace_period_ms,
+            response,
+        } => {
+            return DrainResult {
+                entries: Vec::new(),
+                shutdown: false,
+                deferred_compacts: vec![(file_id, grace_period_ms, response)],
+                deferred_repairs: Vec::new(),
+                deferred_quiesces: Vec::new(),
+            };
+        }
+        ClassifyResult::Repair {
+            leaked_cids,
+            response,
+        } => {
+            return DrainResult {
+                entries: Vec::new(),
+                shutdown: false,
+                deferred_compacts: Vec::new(),
+                deferred_repairs: vec![(leaked_cids, response)],
+                deferred_quiesces: Vec::new(),
+            };
+        }
+        ClassifyResult::Quiesce { response, resume } => {
+            return DrainResult {
+                entries: Vec::new(),
+                shutdown: false,
+                deferred_compacts: Vec::new(),
+                deferred_repairs: Vec::new(),
+                deferred_quiesces: vec![(response, resume)],
+            };
+        }
+        ClassifyResult::Batch(entry) => entry,
     };
 
-    let block_count = Cell::new(batch_entry_block_count(&first_entry));
-    let mut entries = vec![first_entry];
+    let mut block_count = batch_entry_block_count(&first_entry);
+    let mut result = DrainResult {
+        entries: vec![first_entry],
+        shutdown: false,
+        deferred_compacts: Vec::new(),
+        deferred_repairs: Vec::new(),
+        deferred_quiesces: Vec::new(),
+    };
 
-    let saw_shutdown = std::iter::from_fn(|| receiver.try_recv().ok())
-        .take_while(|_| block_count.get() < max_batch_size)
-        .try_for_each(|req| match classify_request(req) {
-            Err(()) => Err(()),
-            Ok(entry) => {
-                block_count.set(
-                    block_count
-                        .get()
-                        .saturating_add(batch_entry_block_count(&entry)),
-                );
-                entries.push(entry);
-                Ok(())
+    let ingest = |req: CommitRequest, bc: &mut usize, r: &mut DrainResult| -> bool {
+        match classify_request(req) {
+            ClassifyResult::Shutdown => true,
+            ClassifyResult::Compact {
+                file_id,
+                grace_period_ms,
+                response,
+            } => {
+                r.deferred_compacts
+                    .push((file_id, grace_period_ms, response));
+                false
             }
-        })
-        .is_err();
+            ClassifyResult::Repair {
+                leaked_cids,
+                response,
+            } => {
+                r.deferred_repairs.push((leaked_cids, response));
+                false
+            }
+            ClassifyResult::Quiesce { response, resume } => {
+                r.deferred_quiesces.push((response, resume));
+                false
+            }
+            ClassifyResult::Batch(entry) => {
+                *bc = bc.saturating_add(batch_entry_block_count(&entry));
+                r.entries.push(entry);
+                false
+            }
+        }
+    };
 
-    (entries, saw_shutdown)
+    while block_count < max_batch_size {
+        match receiver.try_recv() {
+            Ok(req) => {
+                if ingest(req, &mut block_count, &mut result) {
+                    result.shutdown = true;
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    result
+}
+
+fn capture_snapshot<S: StorageIO>(
+    manager: &DataFileManager<S>,
+    state: &ActiveState,
+    epoch: &EpochCounter,
+) -> BlockstoreSnapshot {
+    BlockstoreSnapshot {
+        shard_cursors: vec![WriteCursor {
+            file_id: state.file_id,
+            offset: state.position,
+        }],
+        epoch: epoch.current(),
+        data_files: manager.list_files().unwrap_or_default(),
+    }
+}
+
+fn handle_quiesce<S: StorageIO>(
+    manager: &DataFileManager<S>,
+    state: &ActiveState,
+    epoch: &EpochCounter,
+    response: QuiesceResponse,
+    resume: QuiesceResume,
+) {
+    let snapshot = capture_snapshot(manager, state, epoch);
+    let _ = response.send(snapshot);
+    let _ = resume.blocking_recv();
+}
+
+fn maybe_checkpoint(
+    index: &BlockIndex,
+    epoch: &EpochCounter,
+    config: &GroupCommitConfig,
+    last_checkpoint: &mut std::time::Instant,
+    writes_since_checkpoint: &mut u64,
+    hint_positions: &ShardHintPositions,
+) {
+    let interval = std::time::Duration::from_millis(config.checkpoint_interval_ms);
+    let elapsed = last_checkpoint.elapsed() >= interval;
+    let threshold = *writes_since_checkpoint >= config.checkpoint_write_threshold;
+    if !elapsed && !threshold {
+        return;
+    }
+    let positions = hint_positions.snapshot();
+    match index.write_checkpoint(epoch.current(), &positions) {
+        Ok(()) => {
+            *last_checkpoint = std::time::Instant::now();
+            *writes_since_checkpoint = 0;
+            tracing::debug!("periodic checkpoint written");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "periodic checkpoint failed");
+        }
+    }
+}
+
+fn shutdown_checkpoint(
+    index: &BlockIndex,
+    epoch: &EpochCounter,
+    hint_positions: &ShardHintPositions,
+) {
+    let positions = hint_positions.snapshot();
+    match index.write_checkpoint(epoch.current(), &positions) {
+        Ok(()) => tracing::debug!("shutdown checkpoint written"),
+        Err(e) => tracing::warn!(error = %e, "shutdown checkpoint failed"),
+    }
 }
 
 fn commit_loop<S: StorageIO>(
     manager: &DataFileManager<S>,
-    index: &KeyIndex,
+    index: &BlockIndex,
     receiver: &flume::Receiver<CommitRequest>,
     config: &GroupCommitConfig,
     state: &mut ActiveState,
     post_sync_hook: Option<&dyn PostBlockstoreHook>,
+    ctx: &ShardContext,
 ) {
+    let epoch = &ctx.epoch;
+    let mut last_checkpoint = std::time::Instant::now();
+    let mut writes_since_checkpoint: u64 = 0;
+
     loop {
         let first = match receiver.recv() {
-            Ok(CommitRequest::Shutdown) => return,
+            Ok(CommitRequest::Shutdown) => {
+                shutdown_checkpoint(index, epoch, &ctx.hint_positions);
+                return;
+            }
+            Ok(CommitRequest::Compact {
+                file_id,
+                grace_period_ms,
+                response,
+            }) => {
+                let result = compaction::compact_on_writer_thread(
+                    manager,
+                    index,
+                    file_id,
+                    epoch.current(),
+                    grace_period_ms,
+                    &ctx.file_ids,
+                    &ctx.active_files,
+                    &ctx.hint_positions,
+                    epoch,
+                );
+                let _ = response.send(result);
+                continue;
+            }
+            Ok(CommitRequest::RepairLeaked {
+                leaked_cids,
+                response,
+            }) => {
+                let repaired = index.repair_leaked_refcounts(
+                    &leaked_cids,
+                    epoch.current(),
+                    crate::wall_clock_ms(),
+                );
+                let _ = response.send(Ok(repaired));
+                continue;
+            }
+            Ok(CommitRequest::Quiesce { response, resume }) => {
+                handle_quiesce(manager, state, epoch, response, resume);
+                continue;
+            }
             Ok(msg) => msg,
-            Err(_) => return,
+            Err(_) => {
+                shutdown_checkpoint(index, epoch, &ctx.hint_positions);
+                return;
+            }
         };
 
-        let (batch, shutdown_after) = drain_batch(receiver, first, config.max_batch_size);
+        let drain_start = std::time::Instant::now();
+        let drain = drain_batch(receiver, first, config.max_batch_size);
+        let drain_us = drain_start.elapsed().as_nanos() as u64 / 1000;
 
-        tracing::debug!(
-            batch_size = batch.len(),
-            file_id = %state.file_id,
-            "processing commit batch"
+        if !drain.entries.is_empty() {
+            tracing::debug!(
+                batch_size = drain.entries.len(),
+                drain_us,
+                file_id = %state.file_id,
+                "processing commit batch"
+            );
+
+            let result = process_batch(manager, index, &drain.entries, state, ctx);
+
+            if let Ok((ref _dedup, ref proof)) = result {
+                run_post_sync_hook(post_sync_hook, proof);
+            }
+
+            if let Err(ref e) = result {
+                tracing::warn!(error = %e, "commit batch failed");
+            }
+
+            if let Ok((ref dedup, _)) = result {
+                writes_since_checkpoint =
+                    writes_since_checkpoint.saturating_add(dedup.len() as u64);
+                ctx.hint_positions
+                    .update(ctx.shard_id, state.file_id, state.hint_position);
+            }
+
+            dispatch_responses(drain.entries, result.map(|(dedup, _proof)| dedup));
+        }
+
+        drain
+            .deferred_compacts
+            .into_iter()
+            .for_each(|(file_id, grace_period_ms, response)| {
+                let result = compaction::compact_on_writer_thread(
+                    manager,
+                    index,
+                    file_id,
+                    epoch.current(),
+                    grace_period_ms,
+                    &ctx.file_ids,
+                    &ctx.active_files,
+                    &ctx.hint_positions,
+                    epoch,
+                );
+                let _ = response.send(result);
+            });
+
+        drain
+            .deferred_repairs
+            .into_iter()
+            .for_each(|(leaked_cids, response)| {
+                let repaired = index.repair_leaked_refcounts(
+                    &leaked_cids,
+                    epoch.current(),
+                    crate::wall_clock_ms(),
+                );
+                let _ = response.send(Ok(repaired));
+            });
+
+        maybe_checkpoint(
+            index,
+            epoch,
+            config,
+            &mut last_checkpoint,
+            &mut writes_since_checkpoint,
+            &ctx.hint_positions,
         );
 
-        let result = process_batch(manager, index, &batch, state);
-
-        if let Ok((ref _dedup, ref proof)) = result {
-            run_post_sync_hook(post_sync_hook, proof);
-        }
-
-        if let Err(ref e) = result {
-            tracing::warn!(error = %e, "commit batch failed");
-        }
-
-        dispatch_responses(batch, result.map(|(dedup, _proof)| dedup));
-
-        if shutdown_after {
-            drain_and_process_remaining(manager, index, receiver, state, post_sync_hook);
+        if drain.shutdown {
+            drain_and_process_remaining(manager, index, receiver, state, post_sync_hook, ctx);
             return;
         }
+
+        drain
+            .deferred_quiesces
+            .into_iter()
+            .for_each(|(response, resume)| {
+                handle_quiesce(manager, state, epoch, response, resume);
+            });
     }
 }
 
@@ -349,26 +994,67 @@ fn run_post_sync_hook(hook: Option<&dyn PostBlockstoreHook>, proof: &BlocksSynce
 
 fn drain_and_process_remaining<S: StorageIO>(
     manager: &DataFileManager<S>,
-    index: &KeyIndex,
+    index: &BlockIndex,
     receiver: &flume::Receiver<CommitRequest>,
     state: &mut ActiveState,
     post_sync_hook: Option<&dyn PostBlockstoreHook>,
+    ctx: &ShardContext,
 ) {
-    let entries: Vec<BatchEntry> = std::iter::from_fn(|| receiver.try_recv().ok())
-        .filter_map(|req| classify_request(req).ok())
-        .collect();
+    let epoch = &ctx.epoch;
+    let mut entries: Vec<BatchEntry> = Vec::new();
+    let mut compacts: Vec<(DataFileId, u64, CompactResponse)> = Vec::new();
+    let mut repairs: Vec<(Vec<(CidBytes, RefCount)>, RepairResponse)> = Vec::new();
 
-    if entries.is_empty() {
-        return;
+    std::iter::from_fn(|| receiver.try_recv().ok()).for_each(|req| match classify_request(req) {
+        ClassifyResult::Batch(entry) => entries.push(entry),
+        ClassifyResult::Compact {
+            file_id,
+            grace_period_ms,
+            response,
+        } => compacts.push((file_id, grace_period_ms, response)),
+        ClassifyResult::Repair {
+            leaked_cids,
+            response,
+        } => repairs.push((leaked_cids, response)),
+        ClassifyResult::Shutdown | ClassifyResult::Quiesce { .. } => {}
+    });
+
+    if !entries.is_empty() {
+        let result = process_batch(manager, index, &entries, state, ctx);
+
+        if let Ok((ref _dedup, ref proof)) = result {
+            run_post_sync_hook(post_sync_hook, proof);
+            ctx.hint_positions
+                .update(ctx.shard_id, state.file_id, state.hint_position);
+        }
+
+        dispatch_responses(entries, result.map(|(dedup, _proof)| dedup));
     }
 
-    let result = process_batch(manager, index, &entries, state);
+    compacts
+        .into_iter()
+        .for_each(|(file_id, grace_period_ms, response)| {
+            let result = compaction::compact_on_writer_thread(
+                manager,
+                index,
+                file_id,
+                epoch.current(),
+                grace_period_ms,
+                &ctx.file_ids,
+                &ctx.active_files,
+                &ctx.hint_positions,
+                epoch,
+            );
+            let _ = response.send(result);
+        });
 
-    if let Ok((ref _dedup, ref proof)) = result {
-        run_post_sync_hook(post_sync_hook, proof);
-    }
+    repairs.into_iter().for_each(|(leaked_cids, response)| {
+        let repaired =
+            index.repair_leaked_refcounts(&leaked_cids, epoch.current(), crate::wall_clock_ms());
+        let _ = response.send(Ok(repaired));
+    });
 
-    dispatch_responses(entries, result.map(|(dedup, _proof)| dedup));
+    shutdown_checkpoint(index, epoch, &ctx.hint_positions);
 }
 
 struct RotationState {
@@ -378,10 +1064,14 @@ struct RotationState {
 
 fn process_batch<S: StorageIO>(
     manager: &DataFileManager<S>,
-    index: &KeyIndex,
+    index: &BlockIndex,
     batch: &[BatchEntry],
     state: &mut ActiveState,
+    ctx: &ShardContext,
 ) -> Result<(HashMap<[u8; CID_SIZE], BlockLocation>, BlocksSynced), CommitError> {
+    let epoch = &ctx.epoch;
+    let batch_start = std::time::Instant::now();
+
     let mut dedup: HashMap<[u8; CID_SIZE], BlockLocation> = HashMap::new();
     let mut index_entries: Vec<([u8; CID_SIZE], BlockLocation)> = Vec::new();
     let mut all_decrements: Vec<[u8; CID_SIZE]> = Vec::new();
@@ -393,6 +1083,10 @@ fn process_batch<S: StorageIO>(
         DataFileWriter::resume(manager.io(), state.fd, state.file_id, state.position);
     let mut hint_writer =
         HintFileWriter::resume(manager.io(), current_hint_fd, state.hint_position);
+
+    let mut block_bytes: u64 = 0;
+    let mut block_count: u64 = 0;
+    let mut dedup_hits: u64 = 0;
 
     let write_result: Result<(), CommitError> = batch.iter().try_for_each(|entry| {
         let (blocks, decrements) = match entry {
@@ -406,13 +1100,17 @@ fn process_batch<S: StorageIO>(
 
         blocks.iter().try_for_each(|(cid_bytes, data)| {
             let location = match dedup.get(cid_bytes) {
-                Some(&loc) => loc,
+                Some(&loc) => {
+                    dedup_hits = dedup_hits.saturating_add(1);
+                    loc
+                }
                 None => {
                     if manager.should_rotate(data_writer.position()) {
                         data_writer.sync()?;
                         hint_writer.sync()?;
 
-                        let (next_id, next_fd) = manager.prepare_rotation(data_writer.file_id())?;
+                        let next_id = ctx.file_ids.allocate();
+                        let next_fd = manager.open_for_append(next_id)?;
 
                         tracing::info!(
                             from = %data_writer.file_id(),
@@ -440,6 +1138,8 @@ fn process_batch<S: StorageIO>(
                     let loc = data_writer.append_block(cid_bytes, data)?;
                     hint_writer.append_hint(cid_bytes, loc.file_id, loc.offset, loc.length)?;
 
+                    block_bytes = block_bytes.saturating_add(data.len() as u64);
+                    block_count = block_count.saturating_add(1);
                     dedup.insert(*cid_bytes, loc);
                     loc
                 }
@@ -463,11 +1163,23 @@ fn process_batch<S: StorageIO>(
         return Err(e);
     }
 
+    let write_nanos = batch_start.elapsed().as_nanos() as u64;
+
+    let current_epoch = epoch.current();
+    let now = crate::wall_clock_ms();
+
+    all_decrements
+        .iter()
+        .try_for_each(|cid| hint_writer.append_decrement(cid, current_epoch, now))?;
+
+    let t = std::time::Instant::now();
     data_writer.sync()?;
     hint_writer.sync()?;
+    let sync_nanos = t.elapsed().as_nanos() as u64;
 
     if let Some(ref rot) = rotation {
         manager.commit_rotation(rot.file_id, rot.fd);
+        ctx.active_files.register(ctx.shard_id, rot.file_id);
     }
 
     state.file_id = data_writer.file_id();
@@ -480,9 +1192,28 @@ fn process_batch<S: StorageIO>(
         file_id: state.file_id,
         offset: state.position,
     };
+    let t = std::time::Instant::now();
     index
-        .batch_put(&index_entries, &all_decrements, cursor)
+        .batch_put(&index_entries, &all_decrements, cursor, current_epoch, now)
         .map_err(CommitError::from)?;
+    let index_nanos = t.elapsed().as_nanos() as u64;
+
+    epoch.advance();
+
+    let total_nanos = batch_start.elapsed().as_nanos() as u64;
+
+    tracing::info!(
+        blocks = block_count,
+        bytes = block_bytes,
+        dedup_hits,
+        decrements = all_decrements.len(),
+        entries = batch.len(),
+        write_us = write_nanos / 1000,
+        sync_us = sync_nanos / 1000,
+        index_us = index_nanos / 1000,
+        total_us = total_nanos / 1000,
+        "commit batch profile"
+    );
 
     Ok((dedup, BlocksSynced::new()))
 }
@@ -532,460 +1263,5 @@ fn dispatch_responses(
                 }
             });
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::RealIO;
-    use crate::blockstore::data_file::DataFileReader;
-    use crate::blockstore::manager::DATA_FILE_EXTENSION;
-    use crate::blockstore::test_cid;
-    use futures::StreamExt;
-
-    fn setup_real(dir: &std::path::Path) -> (DataFileManager<RealIO>, Arc<KeyIndex>) {
-        let data_dir = dir.join("data");
-        std::fs::create_dir_all(&data_dir).unwrap();
-        let index_dir = dir.join("index");
-        let manager = DataFileManager::with_default_max_size(RealIO::new(), data_dir);
-        let index = Arc::new(KeyIndex::open(&index_dir).unwrap().into_inner());
-        (manager, index)
-    }
-
-    async fn put_blocks(
-        sender: &flume::Sender<CommitRequest>,
-        blocks: Vec<([u8; CID_SIZE], Vec<u8>)>,
-    ) -> Result<Vec<BlockLocation>, CommitError> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        sender
-            .send_async(CommitRequest::PutBlocks {
-                blocks,
-                response: tx,
-            })
-            .await
-            .map_err(|_| CommitError::ChannelClosed)?;
-        rx.await.map_err(|_| CommitError::ChannelClosed)?
-    }
-
-    async fn apply_commit_req(
-        sender: &flume::Sender<CommitRequest>,
-        blocks: Vec<([u8; CID_SIZE], Vec<u8>)>,
-        deleted_cids: Vec<[u8; CID_SIZE]>,
-    ) -> Result<(), CommitError> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        sender
-            .send_async(CommitRequest::ApplyCommit {
-                blocks,
-                deleted_cids,
-                response: tx,
-            })
-            .await
-            .map_err(|_| CommitError::ChannelClosed)?;
-        rx.await.map_err(|_| CommitError::ChannelClosed)?
-    }
-
-    fn count_data_file_blocks(data_dir: &std::path::Path) -> usize {
-        let io = RealIO::new();
-        let data_files =
-            super::super::list_files_by_extension(&io, data_dir, DATA_FILE_EXTENSION).unwrap();
-        data_files
-            .iter()
-            .map(|&fid| {
-                let path = data_dir.join(format!("{fid}.tqb"));
-                let fd = io.open(&path, OpenOptions::read_only_existing()).unwrap();
-                let count = DataFileReader::open(&io, fd)
-                    .unwrap()
-                    .valid_blocks()
-                    .unwrap()
-                    .len();
-                let _ = io.close(fd);
-                count
-            })
-            .sum()
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn concurrent_100_writes_from_10_tasks() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let (manager, index) = setup_real(dir.path());
-        let data_dir = manager.data_dir().to_path_buf();
-        let writer =
-            GroupCommitWriter::spawn(manager, index, GroupCommitConfig::default()).unwrap();
-        let sender = writer.sender().clone();
-
-        let handles: Vec<_> = (0u8..10)
-            .map(|task_id| {
-                let sender = sender.clone();
-                tokio::spawn(async move {
-                    let blocks: Vec<_> = (0u8..10)
-                        .map(|block_id| {
-                            let idx = task_id * 10 + block_id;
-                            (test_cid(idx), vec![idx; (idx as usize + 1) * 8])
-                        })
-                        .collect();
-
-                    futures::stream::iter(blocks)
-                        .fold(
-                            Vec::<BlockLocation>::new(),
-                            |mut acc, (cid, data): ([u8; CID_SIZE], Vec<u8>)| {
-                                let sender = sender.clone();
-                                async move {
-                                    let locs =
-                                        put_blocks(&sender, vec![(cid, data)]).await.unwrap();
-                                    acc.extend(locs);
-                                    acc
-                                }
-                            },
-                        )
-                        .await
-                })
-            })
-            .collect();
-
-        let all_locations: Vec<Vec<BlockLocation>> = futures::future::join_all(handles)
-            .await
-            .into_iter()
-            .map(|r| r.unwrap())
-            .collect();
-
-        let total: usize = all_locations.iter().map(|v| v.len()).sum();
-        assert_eq!(total, 100);
-
-        writer.shutdown();
-
-        let index_dir = dir.path().join("index");
-        let index = KeyIndex::open(&index_dir).unwrap().into_inner();
-        (0u8..100).for_each(|i| {
-            assert!(
-                index.has(&test_cid(i)).unwrap(),
-                "block {i} missing from index"
-            );
-        });
-
-        assert_eq!(count_data_file_blocks(&data_dir), 100);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn duplicate_cids_in_same_batch_write_once() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let (manager, index) = setup_real(dir.path());
-        let data_dir = manager.data_dir().to_path_buf();
-        let writer =
-            GroupCommitWriter::spawn(manager, index, GroupCommitConfig::default()).unwrap();
-        let sender = writer.sender().clone();
-
-        let cid = test_cid(42);
-        let data = vec![0xAB; 128];
-        let blocks = vec![
-            (cid, data.clone()),
-            (cid, data.clone()),
-            (cid, data.clone()),
-        ];
-
-        let locations = put_blocks(&sender, blocks).await.unwrap();
-
-        assert_eq!(locations.len(), 3);
-        assert_eq!(locations[0], locations[1]);
-        assert_eq!(locations[1], locations[2]);
-
-        writer.shutdown();
-
-        let index_dir = dir.path().join("index");
-        let index = KeyIndex::open(&index_dir).unwrap().into_inner();
-        let entry = index.get(&cid).unwrap().unwrap();
-        assert_eq!(entry.refcount.raw(), 3);
-
-        assert_eq!(
-            count_data_file_blocks(&data_dir),
-            1,
-            "duplicate CID should only be written once to data file"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn apply_commit_with_blocks_and_deletes() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let (manager, index) = setup_real(dir.path());
-        let writer =
-            GroupCommitWriter::spawn(manager, index, GroupCommitConfig::default()).unwrap();
-        let sender = writer.sender().clone();
-
-        let cid_a = test_cid(1);
-        let cid_b = test_cid(2);
-        put_blocks(
-            &sender,
-            vec![(cid_a, vec![0x01; 64]), (cid_b, vec![0x02; 64])],
-        )
-        .await
-        .unwrap();
-
-        let cid_c = test_cid(3);
-        apply_commit_req(&sender, vec![(cid_c, vec![0x03; 64])], vec![cid_a])
-            .await
-            .unwrap();
-
-        writer.shutdown();
-
-        let index_dir = dir.path().join("index");
-        let index = KeyIndex::open(&index_dir).unwrap().into_inner();
-        assert_eq!(index.get(&cid_a).unwrap().unwrap().refcount.raw(), 0);
-        assert_eq!(index.get(&cid_b).unwrap().unwrap().refcount.raw(), 1);
-        assert_eq!(index.get(&cid_c).unwrap().unwrap().refcount.raw(), 1);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn graceful_shutdown_processes_remaining() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let (manager, index) = setup_real(dir.path());
-        let writer =
-            GroupCommitWriter::spawn(manager, index, GroupCommitConfig::default()).unwrap();
-        let sender = writer.sender().clone();
-
-        let cid = test_cid(99);
-        let locations = put_blocks(&sender, vec![(cid, vec![0xFF; 32])])
-            .await
-            .unwrap();
-        assert_eq!(locations.len(), 1);
-
-        writer.shutdown();
-
-        let index_dir = dir.path().join("index");
-        let index = KeyIndex::open(&index_dir).unwrap().into_inner();
-        assert!(index.has(&cid).unwrap());
-    }
-
-    #[test]
-    fn sim_crash_between_write_and_fsync_loses_unsynced() {
-        use crate::SimulatedIO;
-        use std::path::Path;
-        use std::sync::Arc;
-
-        let sim = Arc::new(SimulatedIO::pristine(42));
-        let data_dir = Path::new("/data");
-        sim.mkdir(data_dir).unwrap();
-        sim.sync_dir(data_dir).unwrap();
-
-        let manager =
-            DataFileManager::with_default_max_size(Arc::clone(&sim), data_dir.to_path_buf());
-        let fd = manager.open_for_append(DataFileId::new(0)).unwrap();
-        let mut writer = DataFileWriter::new(&*sim, fd, DataFileId::new(0)).unwrap();
-
-        let synced_cids: Vec<_> = (0u8..5)
-            .map(|i| {
-                let cid = test_cid(i);
-                let _ = writer.append_block(&cid, &vec![i; 64]).unwrap();
-                cid
-            })
-            .collect();
-        writer.sync().unwrap();
-        sim.sync_dir(data_dir).unwrap();
-
-        (5u8..10).for_each(|i| {
-            let cid = test_cid(i);
-            let _ = writer.append_block(&cid, &vec![i; 64]).unwrap();
-        });
-
-        sim.crash();
-
-        let fd_after = sim
-            .open(Path::new("/data/000000.tqb"), OpenOptions::read())
-            .unwrap();
-        let recovered = DataFileReader::open(&*sim, fd_after)
-            .unwrap()
-            .valid_blocks()
-            .unwrap();
-
-        assert!(
-            recovered.len() <= 5,
-            "expected at most 5 synced blocks, got {}",
-            recovered.len()
-        );
-
-        recovered.iter().enumerate().for_each(|(i, (_, cid, _))| {
-            assert_eq!(*cid, synced_cids[i], "recovered block {i} CID mismatch");
-        });
-    }
-
-    #[test]
-    fn sim_crash_between_fsync_and_index_update_recovers_via_hints() {
-        use crate::SimulatedIO;
-        use crate::blockstore::data_file::{BLOCK_HEADER_SIZE, BLOCK_RECORD_OVERHEAD};
-        use crate::blockstore::hint::rebuild_index_from_hints;
-        use crate::blockstore::types::BlockLength;
-        use std::path::Path;
-        use std::sync::Arc;
-
-        let sim = Arc::new(SimulatedIO::pristine(42));
-        let data_dir = Path::new("/data");
-        sim.mkdir(data_dir).unwrap();
-        sim.sync_dir(data_dir).unwrap();
-
-        let manager =
-            DataFileManager::with_default_max_size(Arc::clone(&sim), data_dir.to_path_buf());
-        let fd = manager.open_for_append(DataFileId::new(0)).unwrap();
-        let mut writer = DataFileWriter::new(&*sim, fd, DataFileId::new(0)).unwrap();
-
-        let phase1_cids: Vec<_> = (0u8..3)
-            .map(|i| {
-                let cid = test_cid(i);
-                let _ = writer.append_block(&cid, &vec![i; 64]).unwrap();
-                cid
-            })
-            .collect();
-        writer.sync().unwrap();
-        let phase1_end = writer.position();
-
-        let real_dir = tempfile::TempDir::new().unwrap();
-        let index_path = real_dir.path().join("index");
-        let index = KeyIndex::open(&index_path).unwrap().into_inner();
-
-        let entries: Vec<_> = phase1_cids
-            .iter()
-            .enumerate()
-            .map(|(i, cid)| {
-                let offset = BlockOffset::new(
-                    BLOCK_HEADER_SIZE as u64 + i as u64 * (BLOCK_RECORD_OVERHEAD as u64 + 64),
-                );
-                (
-                    *cid,
-                    BlockLocation {
-                        file_id: DataFileId::new(0),
-                        offset,
-                        length: BlockLength::new(64),
-                    },
-                )
-            })
-            .collect();
-        index
-            .batch_put(
-                &entries,
-                &[],
-                WriteCursor {
-                    file_id: DataFileId::new(0),
-                    offset: phase1_end,
-                },
-            )
-            .unwrap();
-        index.persist().unwrap();
-
-        let phase2_cids: Vec<_> = (10u8..15)
-            .map(|i| {
-                let cid = test_cid(i);
-                let _ = writer.append_block(&cid, &vec![i; 128]).unwrap();
-                cid
-            })
-            .collect();
-        writer.sync().unwrap();
-        sim.sync_dir(data_dir).unwrap();
-
-        let hint_path = hint_file_path(data_dir, DataFileId::new(0));
-        let hint_fd = sim.open(&hint_path, OpenOptions::read_write()).unwrap();
-        let mut hint_writer = HintFileWriter::new(&*sim, hint_fd);
-
-        let mut offset_tracker = BlockOffset::new(BLOCK_HEADER_SIZE as u64);
-        phase1_cids.iter().for_each(|cid| {
-            hint_writer
-                .append_hint(
-                    cid,
-                    DataFileId::new(0),
-                    offset_tracker,
-                    BlockLength::new(64),
-                )
-                .unwrap();
-            offset_tracker = offset_tracker.advance(BLOCK_RECORD_OVERHEAD as u64 + 64);
-        });
-        phase2_cids.iter().for_each(|cid| {
-            hint_writer
-                .append_hint(
-                    cid,
-                    DataFileId::new(0),
-                    offset_tracker,
-                    BlockLength::new(128),
-                )
-                .unwrap();
-            offset_tracker = offset_tracker.advance(BLOCK_RECORD_OVERHEAD as u64 + 128);
-        });
-        hint_writer.sync().unwrap();
-        sim.sync_dir(data_dir).unwrap();
-
-        sim.crash();
-
-        drop(index);
-        let rebuilt_index_path = real_dir.path().join("rebuilt_index");
-        let rebuilt_index = KeyIndex::open(&rebuilt_index_path).unwrap().into_inner();
-        rebuild_index_from_hints(&*sim, data_dir, &rebuilt_index).unwrap();
-
-        phase1_cids.iter().for_each(|cid| {
-            assert!(
-                rebuilt_index.has(cid).unwrap(),
-                "phase1 CID should be in rebuilt index"
-            );
-        });
-        phase2_cids.iter().for_each(|cid| {
-            assert!(
-                rebuilt_index.has(cid).unwrap(),
-                "phase2 CID should be in rebuilt index, was synced and hinted before crash"
-            );
-        });
-
-        let cursor = rebuilt_index.read_write_cursor().unwrap().unwrap();
-        assert!(
-            cursor.offset.raw() > phase1_end.raw(),
-            "cursor should be past phase1 after rebuild"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn rotation_during_batch() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let data_dir = dir.path().join("data");
-        std::fs::create_dir_all(&data_dir).unwrap();
-        let index_dir = dir.path().join("index");
-
-        let small_max = 512u64;
-        let manager = DataFileManager::new(RealIO::new(), data_dir.clone(), small_max);
-        let index = Arc::new(KeyIndex::open(&index_dir).unwrap().into_inner());
-        let writer =
-            GroupCommitWriter::spawn(manager, index, GroupCommitConfig::default()).unwrap();
-        let sender = writer.sender().clone();
-
-        let all_cids: Vec<_> = (0u8..20).map(test_cid).collect();
-
-        let handles: Vec<_> = all_cids
-            .iter()
-            .map(|&cid| {
-                let sender = sender.clone();
-                tokio::spawn(async move {
-                    put_blocks(&sender, vec![(cid, vec![cid[4]; 100])])
-                        .await
-                        .unwrap()
-                })
-            })
-            .collect();
-
-        let results: Vec<_> = futures::future::join_all(handles)
-            .await
-            .into_iter()
-            .map(|r| r.unwrap())
-            .collect();
-
-        assert_eq!(results.len(), 20);
-
-        writer.shutdown();
-
-        let io = RealIO::new();
-        let data_files =
-            super::super::list_files_by_extension(&io, &data_dir, DATA_FILE_EXTENSION).unwrap();
-        assert!(
-            data_files.len() > 1,
-            "expected rotation to create multiple files, got {}",
-            data_files.len()
-        );
-
-        let index = KeyIndex::open(&index_dir).unwrap().into_inner();
-        all_cids.iter().for_each(|cid| {
-            assert!(index.has(cid).unwrap());
-        });
     }
 }

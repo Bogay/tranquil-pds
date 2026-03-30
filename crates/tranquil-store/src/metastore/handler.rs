@@ -7,13 +7,13 @@ use tokio::sync::oneshot;
 use tranquil_db_traits::DbScope;
 use tranquil_db_traits::{
     AccountSearchResult, AccountStatus, AdminAccountInfo, ApplyCommitError, ApplyCommitInput,
-    ApplyCommitResult, Backlink, BrokenGenesisCommit, CommitEventData, CommsChannel, CommsType,
+    ApplyCommitResult, Backlink, CommitEventData, CommsChannel, CommsType,
     CompletePasskeySetupInput, CreateAccountError, CreateDelegatedAccountInput,
     CreatePasskeyAccountInput, CreatePasswordAccountInput, CreatePasswordAccountResult,
     CreateSsoAccountInput, DbError, DelegationActionType, DeletionRequest,
-    DeletionRequestWithToken, DidWebOverrides, EventBlocksCids, ImportBlock, ImportRecord,
-    ImportRepoError, InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder,
-    InviteCodeUse, MigrationReactivationError, MigrationReactivationInput, NotificationHistoryRow,
+    DeletionRequestWithToken, DidWebOverrides, ImportBlock, ImportRecord, ImportRepoError,
+    InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder, InviteCodeUse,
+    MigrationReactivationError, MigrationReactivationInput, NotificationHistoryRow,
     NotificationPrefs, OAuthTokenWithUser, PasswordResetResult, PlcTokenInfo, QueuedComms,
     ReactivatedAccountInfo, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
     RefreshSessionResult, ReservedSigningKey, ReservedSigningKeyFull, ScheduledDeletionAccount,
@@ -64,6 +64,9 @@ fn metastore_to_db(e: MetastoreError) -> DbError {
         } => DbError::Constraint(format!(
             "user hash collision: {hash} maps to both {existing_uuid} and {new_uuid}"
         )),
+        MetastoreError::UniqueViolation(constraint) => {
+            DbError::Constraint(format!("unique constraint violated: {constraint}"))
+        }
     }
 }
 
@@ -315,10 +318,6 @@ pub enum UserBlockRequest {
         user_id: Uuid,
         tx: Tx<i64>,
     },
-    FindUnreferencedBlocks {
-        candidate_cids: Vec<Vec<u8>>,
-        tx: Tx<Vec<Vec<u8>>>,
-    },
 }
 
 impl UserBlockRequest {
@@ -328,7 +327,6 @@ impl UserBlockRequest {
             | Self::DeleteUserBlocks { user_id, .. }
             | Self::GetUserBlockCidsSinceRev { user_id, .. }
             | Self::CountUserBlocks { user_id, .. } => uuid_to_routing(user_hashes, user_id),
-            Self::FindUnreferencedBlocks { .. } => Routing::Global,
         }
     }
 }
@@ -352,6 +350,7 @@ pub enum EventRequest {
         did: Did,
         commit_cid: CidLink,
         rev: Option<String>,
+        commit_bytes: Vec<u8>,
         tx: Tx<SequenceNumber>,
     },
     InsertGenesisCommitEvent {
@@ -359,12 +358,9 @@ pub enum EventRequest {
         commit_cid: CidLink,
         mst_root_cid: CidLink,
         rev: String,
+        commit_bytes: Vec<u8>,
+        mst_root_bytes: Vec<u8>,
         tx: Tx<SequenceNumber>,
-    },
-    UpdateSeqBlocksCids {
-        seq: SequenceNumber,
-        blocks_cids: Vec<String>,
-        tx: Tx<()>,
     },
     DeleteSequencesExcept {
         did: Did,
@@ -397,11 +393,6 @@ pub enum EventRequest {
         limit: i64,
         tx: Tx<Vec<SequencedEvent>>,
     },
-    GetEventsSinceRev {
-        did: Did,
-        since_rev: String,
-        tx: Tx<Vec<EventBlocksCids>>,
-    },
     NotifyUpdate {
         seq: SequenceNumber,
         tx: Tx<()>,
@@ -418,12 +409,10 @@ impl EventRequest {
             | Self::InsertAccountEvent { did, .. }
             | Self::InsertSyncEvent { did, .. }
             | Self::InsertGenesisCommitEvent { did, .. }
-            | Self::DeleteSequencesExcept { did, .. }
-            | Self::GetEventsSinceRev { did, .. } => {
+            | Self::DeleteSequencesExcept { did, .. } => {
                 Routing::Sharded(UserHash::from_did(did.as_str()).raw())
             }
-            Self::UpdateSeqBlocksCids { .. }
-            | Self::GetMaxSeq { .. }
+            Self::GetMaxSeq { .. }
             | Self::GetMinSeqSince { .. }
             | Self::GetEventsSinceSeq { .. }
             | Self::GetEventsInSeqRange { .. }
@@ -445,9 +434,6 @@ pub enum CommitRequest {
         records: Vec<ImportRecord>,
         expected_root_cid: Option<CidLink>,
         tx: oneshot::Sender<Result<(), ImportRepoError>>,
-    },
-    GetBrokenGenesisCommits {
-        tx: Tx<Vec<BrokenGenesisCommit>>,
     },
     GetUsersWithoutBlocks {
         tx: Tx<Vec<UserWithoutBlocks>>,
@@ -472,8 +458,7 @@ impl CommitRequest {
             | Self::InsertRecordBlobs {
                 repo_id: user_id, ..
             } => uuid_to_routing(user_hashes, user_id),
-            Self::GetBrokenGenesisCommits { .. }
-            | Self::GetUsersWithoutBlocks { .. }
+            Self::GetUsersWithoutBlocks { .. }
             | Self::GetUsersNeedingRecordBlobsBackfill { .. } => Routing::Global,
         }
     }
@@ -2912,17 +2897,10 @@ fn dispatch_user_block<S: StorageIO>(state: &HandlerState<S>, req: UserBlockRequ
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
-        UserBlockRequest::FindUnreferencedBlocks { candidate_cids, tx } => {
-            let result = state
-                .metastore
-                .user_block_ops()
-                .find_unreferenced(&candidate_cids);
-            let _ = tx.send(Ok(result));
-        }
     }
 }
 
-fn dispatch_event<S: StorageIO>(state: &HandlerState<S>, req: EventRequest) {
+fn dispatch_event<S: StorageIO + 'static>(state: &HandlerState<S>, req: EventRequest) {
     match req {
         EventRequest::InsertCommitEvent { data, tx } => {
             let result = state.event_ops.insert_commit_event(&data);
@@ -2940,11 +2918,13 @@ fn dispatch_event<S: StorageIO>(state: &HandlerState<S>, req: EventRequest) {
             did,
             commit_cid,
             rev,
+            commit_bytes,
             tx,
         } => {
-            let result = state
-                .event_ops
-                .insert_sync_event(&did, &commit_cid, rev.as_deref());
+            let result =
+                state
+                    .event_ops
+                    .insert_sync_event(&did, &commit_cid, rev.as_deref(), &commit_bytes);
             let _ = tx.send(result);
         }
         EventRequest::InsertGenesisCommitEvent {
@@ -2952,20 +2932,18 @@ fn dispatch_event<S: StorageIO>(state: &HandlerState<S>, req: EventRequest) {
             commit_cid,
             mst_root_cid,
             rev,
+            commit_bytes,
+            mst_root_bytes,
             tx,
         } => {
-            let result =
-                state
-                    .event_ops
-                    .insert_genesis_commit_event(&did, &commit_cid, &mst_root_cid, &rev);
-            let _ = tx.send(result);
-        }
-        EventRequest::UpdateSeqBlocksCids {
-            seq,
-            blocks_cids,
-            tx,
-        } => {
-            let result = state.event_ops.update_seq_blocks_cids(seq, &blocks_cids);
+            let result = state.event_ops.insert_genesis_commit_event(
+                &did,
+                &commit_cid,
+                &mst_root_cid,
+                &rev,
+                &commit_bytes,
+                &mst_root_bytes,
+            );
             let _ = tx.send(result);
         }
         EventRequest::DeleteSequencesExcept { did, keep_seq, tx } => {
@@ -2998,16 +2976,13 @@ fn dispatch_event<S: StorageIO>(state: &HandlerState<S>, req: EventRequest) {
         EventRequest::GetEventsSinceCursor { cursor, limit, tx } => {
             let _ = tx.send(state.event_ops.get_events_since_cursor(cursor, limit));
         }
-        EventRequest::GetEventsSinceRev { did, since_rev, tx } => {
-            let _ = tx.send(state.event_ops.get_events_since_rev(&did, &since_rev));
-        }
         EventRequest::NotifyUpdate { seq, tx } => {
             let _ = tx.send(state.event_ops.notify_update(seq));
         }
     }
 }
 
-fn dispatch_commit<S: StorageIO>(state: &HandlerState<S>, req: CommitRequest) {
+fn dispatch_commit<S: StorageIO + 'static>(state: &HandlerState<S>, req: CommitRequest) {
     match req {
         CommitRequest::ApplyCommit { input, tx } => {
             let _ = tx.send(state.commit_ops.apply_commit(*input));
@@ -3025,14 +3000,6 @@ fn dispatch_commit<S: StorageIO>(state: &HandlerState<S>, req: CommitRequest) {
                 &records,
                 expected_root_cid.as_ref(),
             ));
-        }
-        CommitRequest::GetBrokenGenesisCommits { tx } => {
-            let _ = tx.send(
-                state
-                    .commit_ops
-                    .get_broken_genesis_commits()
-                    .map_err(metastore_to_db),
-            );
         }
         CommitRequest::GetUsersWithoutBlocks { tx } => {
             let _ = tx.send(
@@ -3138,7 +3105,7 @@ fn dispatch_backlink<S: StorageIO>(state: &HandlerState<S>, req: BacklinkRequest
     }
 }
 
-fn dispatch_blob<S: StorageIO>(state: &HandlerState<S>, req: BlobRequest) {
+fn dispatch_blob<S: StorageIO + 'static>(state: &HandlerState<S>, req: BlobRequest) {
     match req {
         BlobRequest::InsertBlob {
             cid,
@@ -4160,6 +4127,13 @@ fn dispatch_infra<S: StorageIO>(state: &HandlerState<S>, req: InfraRequest) {
             value_json,
             tx,
         } => {
+            if name == "email_auth_factor" {
+                let enabled = value_json.as_bool().unwrap_or(false);
+                let _ = state
+                    .metastore
+                    .user_ops()
+                    .set_email_2fa_enabled(user_id, enabled);
+            }
             let result = state
                 .metastore
                 .infra_ops()
@@ -5005,7 +4979,7 @@ fn dispatch_oauth<S: StorageIO>(state: &HandlerState<S>, req: OAuthRequest) {
     }
 }
 
-fn dispatch<S: StorageIO>(state: &HandlerState<S>, request: MetastoreRequest) {
+fn dispatch<S: StorageIO + 'static>(state: &HandlerState<S>, request: MetastoreRequest) {
     match request {
         MetastoreRequest::Repo(r) => dispatch_repo(state, r),
         MetastoreRequest::Record(r) => dispatch_record(state, r),
@@ -5023,7 +4997,7 @@ fn dispatch<S: StorageIO>(state: &HandlerState<S>, request: MetastoreRequest) {
     }
 }
 
-fn dispatch_user<S: StorageIO>(state: &HandlerState<S>, req: UserRequest) {
+fn dispatch_user<S: StorageIO + 'static>(state: &HandlerState<S>, req: UserRequest) {
     let user = state.metastore.user_ops();
     match req {
         UserRequest::GetByDid { did, tx } => {
@@ -5768,7 +5742,17 @@ fn dispatch_user<S: StorageIO>(state: &HandlerState<S>, req: UserRequest) {
             let _ = tx.send(result.map(|seq| seq.as_i64()));
         }
         UserRequest::CreatePasswordAccount { input, tx } => {
-            let _ = tx.send(user.create_password_account(&input));
+            let result = user.create_password_account(&input).and_then(|result| {
+                if let Some(key_id) = input.reserved_key_id {
+                    state
+                        .metastore
+                        .infra_ops()
+                        .mark_signing_key_used(key_id)
+                        .map_err(|e| CreateAccountError::Database(e.to_string()))?;
+                }
+                Ok(result)
+            });
+            let _ = tx.send(result);
         }
         UserRequest::CreateDelegatedAccount { input, tx } => {
             let result = user.create_delegated_account(&input).and_then(|account| {
@@ -5797,10 +5781,39 @@ fn dispatch_user<S: StorageIO>(state: &HandlerState<S>, req: UserRequest) {
             let _ = tx.send(result);
         }
         UserRequest::CreatePasskeyAccount { input, tx } => {
-            let _ = tx.send(user.create_passkey_account(&input));
+            let result = user.create_passkey_account(&input).and_then(|result| {
+                if let Some(key_id) = input.reserved_key_id {
+                    state
+                        .metastore
+                        .infra_ops()
+                        .mark_signing_key_used(key_id)
+                        .map_err(|e| CreateAccountError::Database(e.to_string()))?;
+                }
+                Ok(result)
+            });
+            let _ = tx.send(result);
         }
         UserRequest::CreateSsoAccount { input, tx } => {
-            let _ = tx.send(user.create_sso_account(&input));
+            let sso_ops = state.metastore.sso_ops();
+            let result = sso_ops
+                .consume_pending_registration(&input.pending_registration_token)
+                .map_err(|e| CreateAccountError::Database(e.to_string()))
+                .and_then(|consumed| match consumed {
+                    Some(_) => user.create_sso_account(&input).and_then(|result| {
+                        sso_ops
+                            .create_external_identity(
+                                &input.did,
+                                input.sso_provider,
+                                &input.sso_provider_user_id,
+                                input.sso_provider_username.as_deref(),
+                                input.sso_provider_email.as_deref(),
+                            )
+                            .map_err(|e| CreateAccountError::Database(e.to_string()))?;
+                        Ok(result)
+                    }),
+                    None => Err(CreateAccountError::InvalidToken),
+                });
+            let _ = tx.send(result);
         }
         UserRequest::ReactivateMigrationAccount { input, tx } => {
             let _ = tx.send(user.reactivate_migration_account(&input));
@@ -5884,7 +5897,7 @@ fn dispatch_user<S: StorageIO>(state: &HandlerState<S>, req: UserRequest) {
     }
 }
 
-fn handler_loop<S: StorageIO>(
+fn handler_loop<S: StorageIO + 'static>(
     metastore: Metastore,
     bridge: Arc<EventLogBridge<S>>,
     blockstore: Option<TranquilBlockStore>,

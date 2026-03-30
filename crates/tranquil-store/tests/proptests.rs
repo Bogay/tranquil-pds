@@ -2,8 +2,8 @@ use proptest::prelude::*;
 use std::path::Path;
 
 use tranquil_store::{
-    FaultConfig, OpenOptions, ReadRecord, RecordReader, RecordWriter, SimulatedIO, StorageIO,
-    run_crash_test, run_pristine_comparison,
+    FaultConfig, HEADER_SIZE, OpenOptions, ReadRecord, RecordReader, RecordWriter, SimulatedIO,
+    StorageIO, run_crash_test, run_pristine_comparison, sim_proptest_cases,
 };
 
 fn arb_payloads(max_count: usize, max_size: usize) -> BoxedStrategy<Vec<Vec<u8>>> {
@@ -22,7 +22,7 @@ fn sim_with_dir(seed: u64, config: FaultConfig) -> SimulatedIO {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(2000))]
+    #![proptest_config(ProptestConfig::with_cases(sim_proptest_cases()))]
 
     #[test]
     fn synced_records_survive_crash(

@@ -393,13 +393,13 @@ pub async fn create_passkey_account(
             Ok(token_meta) => {
                 let refresh_jti = uuid::Uuid::new_v4().to_string();
                 let refresh_expires = chrono::Utc::now() + chrono::Duration::hours(24);
-                let session_data = tranquil_db::SessionTokenCreate {
+                let session_data = tranquil_db_traits::SessionTokenCreate {
                     did: did_typed.clone(),
                     access_jti: token_meta.jti.clone(),
                     refresh_jti,
                     access_expires_at: token_meta.expires_at,
                     refresh_expires_at: refresh_expires,
-                    login_type: tranquil_db::LoginType::Modern,
+                    login_type: tranquil_db_traits::LoginType::Modern,
                     mfa_verified: false,
                     scope: Some("transition:generic".to_string()),
                     controller_did: None,

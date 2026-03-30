@@ -175,7 +175,7 @@
 # Can also be specified via environment variable `S3_BUCKET`.
 #s3_bucket =
 
-# Custom S3 endpoint URL (for MinIO, R2, etc.).
+# Custom S3 endpoint URL.
 #
 # Can also be specified via environment variable `S3_ENDPOINT`.
 #s3_endpoint =
@@ -206,8 +206,27 @@
 # Can also be specified via environment variable `TRANQUIL_STORE_HANDLER_THREADS`.
 #handler_threads =
 
+# Maximum total bytes of pending (unsynced) eventlog payloads. Appenders block
+# once this budget is exhausted until in-flight events drain via fsync. Set to
+# 0 to disable backpressure. Default: 1 GiB.
+#
+# Can also be specified via environment variable
+# `TRANQUIL_STORE_EVENTLOG_PENDING_BYTES_BUDGET`.
+#
+# Default value: 1073741824
+#eventlog_pending_bytes_budget = 1073741824
+
+# Maximum size of an individual eventlog payload in bytes. Single events
+# larger than this are rejected at append time. Default: 256 MiB.
+#
+# Can also be specified via environment variable
+# `TRANQUIL_STORE_EVENTLOG_MAX_EVENT_PAYLOAD`.
+#
+# Default value: 268435456
+#eventlog_max_event_payload = 268435456
+
 [cache]
-# Cache backend: `ripple` (default, built-in gossip) or `valkey`.
+# Cache backend: `ripple` by default, or `valkey`.
 #
 # Can also be specified via environment variable `CACHE_BACKEND`.
 #
@@ -509,10 +528,19 @@
 # Default value: 3600
 #delete_check_interval_secs = 3600
 
-# Interval in seconds between block garbage collection cycles.
-# Reclaims orphaned ipld blocks that were stored but never committed.
+# Maximum age of events retained in the eventlog before pruning.
+# Per the atproto firehose spec, the relay backfill window only needs
+# to cover "hours or days".
 #
-# Can also be specified via environment variable `BLOCK_GC_INTERVAL_SECS`.
+# Can also be specified via environment variable `EVENT_RETENTION_MAX_AGE_SECS`.
 #
-# Default value: 21600
-#block_gc_interval_secs = 21600
+# Default value: 604800 (7 days)
+#event_retention_max_age_secs = 604800
+
+# Interval in seconds between event retention prune passes.
+# Set to 0 to disable.
+#
+# Can also be specified via environment variable `EVENT_RETENTION_INTERVAL_SECS`.
+#
+# Default value: 3600
+#event_retention_interval_secs = 3600

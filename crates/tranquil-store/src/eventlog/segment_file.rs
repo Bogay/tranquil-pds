@@ -3,8 +3,7 @@ use std::io;
 use crate::io::{FileId, StorageIO};
 
 use super::types::{
-    DidHash, EventSequence, EventTypeTag, MAX_EVENT_PAYLOAD, SegmentId, SegmentOffset,
-    TimestampMicros,
+    DidHash, EventSequence, EventTypeTag, SegmentId, SegmentOffset, TimestampMicros,
 };
 
 pub const SEGMENT_MAGIC: [u8; 4] = *b"TQEV";
@@ -46,6 +45,7 @@ pub fn encode_event_record<S: StorageIO>(
     fd: FileId,
     offset: SegmentOffset,
     event: &ValidEvent,
+    max_payload: u32,
 ) -> io::Result<u64> {
     let payload_len = u32::try_from(event.payload.len()).map_err(|_| {
         io::Error::new(
@@ -53,10 +53,10 @@ pub fn encode_event_record<S: StorageIO>(
             "event payload exceeds u32::MAX",
         )
     })?;
-    if payload_len > MAX_EVENT_PAYLOAD {
+    if payload_len > max_payload {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "event payload exceeds MAX_EVENT_PAYLOAD",
+            format!("event payload {payload_len} exceeds configured max_payload {max_payload}"),
         ));
     }
 
@@ -96,6 +96,7 @@ pub fn decode_event_record<S: StorageIO>(
     fd: FileId,
     offset: SegmentOffset,
     file_size: u64,
+    max_payload: u32,
 ) -> io::Result<Option<ReadEventRecord>> {
     let raw = offset.raw();
     if raw > file_size {
@@ -128,7 +129,7 @@ pub fn decode_event_record<S: StorageIO>(
     };
 
     let payload_len = u32::from_le_bytes(header[21..25].try_into().unwrap());
-    if payload_len > MAX_EVENT_PAYLOAD {
+    if payload_len > max_payload {
         return Ok(Some(ReadEventRecord::Corrupted { offset }));
     }
 
@@ -186,6 +187,7 @@ pub fn validate_event_record<S: StorageIO>(
     fd: FileId,
     offset: SegmentOffset,
     file_size: u64,
+    max_payload: u32,
 ) -> io::Result<Option<ValidateEventRecord>> {
     let raw = offset.raw();
     assert!(
@@ -216,7 +218,7 @@ pub fn validate_event_record<S: StorageIO>(
     }
 
     let payload_len = u32::from_le_bytes(header[21..25].try_into().unwrap());
-    if payload_len > MAX_EVENT_PAYLOAD {
+    if payload_len > max_payload {
         return Ok(Some(ValidateEventRecord::Corrupted));
     }
 
@@ -266,6 +268,7 @@ pub struct SegmentWriter {
     position: SegmentOffset,
     base_seq: EventSequence,
     last_seq: Option<EventSequence>,
+    max_payload: u32,
 }
 
 impl SegmentWriter {
@@ -274,6 +277,7 @@ impl SegmentWriter {
         fd: FileId,
         segment_id: SegmentId,
         base_seq: EventSequence,
+        max_payload: u32,
     ) -> io::Result<Self> {
         let mut header = [0u8; SEGMENT_HEADER_SIZE];
         header[..4].copy_from_slice(&SEGMENT_MAGIC);
@@ -285,6 +289,7 @@ impl SegmentWriter {
             position: SegmentOffset::new(SEGMENT_HEADER_SIZE as u64),
             base_seq,
             last_seq: None,
+            max_payload,
         })
     }
 
@@ -295,6 +300,7 @@ impl SegmentWriter {
         position: SegmentOffset,
         base_seq: EventSequence,
         last_seq: Option<EventSequence>,
+        max_payload: u32,
     ) -> Self {
         assert!(
             position.raw() >= SEGMENT_HEADER_SIZE as u64,
@@ -315,7 +321,12 @@ impl SegmentWriter {
             position,
             base_seq,
             last_seq,
+            max_payload,
         }
+    }
+
+    pub fn max_payload(&self) -> u32 {
+        self.max_payload
     }
 
     pub fn append_event<S: StorageIO>(
@@ -330,7 +341,8 @@ impl SegmentWriter {
             self.last_seq.unwrap()
         );
         let record_offset = self.position;
-        let bytes_written = encode_event_record(io, self.fd, record_offset, event)?;
+        let bytes_written =
+            encode_event_record(io, self.fd, record_offset, event, self.max_payload)?;
         self.position = self.position.advance(bytes_written);
         self.last_seq = Some(event.seq);
         Ok(record_offset)
@@ -362,10 +374,11 @@ pub struct SegmentReader<'a, S: StorageIO> {
     fd: FileId,
     position: SegmentOffset,
     file_size: u64,
+    max_payload: u32,
 }
 
 impl<'a, S: StorageIO> SegmentReader<'a, S> {
-    pub fn open(io: &'a S, fd: FileId) -> io::Result<Self> {
+    pub fn open(io: &'a S, fd: FileId, max_payload: u32) -> io::Result<Self> {
         let file_size = io.file_size(fd)?;
         if file_size < SEGMENT_HEADER_SIZE as u64 {
             return Err(io::Error::new(
@@ -395,7 +408,12 @@ impl<'a, S: StorageIO> SegmentReader<'a, S> {
             fd,
             position: SegmentOffset::new(SEGMENT_HEADER_SIZE as u64),
             file_size,
+            max_payload,
         })
+    }
+
+    pub fn max_payload(&self) -> u32 {
+        self.max_payload
     }
 
     pub fn valid_prefix(self) -> io::Result<Vec<ValidEvent>> {
@@ -430,7 +448,13 @@ impl<S: StorageIO> Iterator for SegmentReader<'_, S> {
     type Item = io::Result<ReadEventRecord>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match decode_event_record(self.io, self.fd, self.position, self.file_size) {
+        match decode_event_record(
+            self.io,
+            self.fd,
+            self.position,
+            self.file_size,
+            self.max_payload,
+        ) {
             Err(e) => {
                 self.position = SegmentOffset::new(self.file_size);
                 Some(Err(e))
@@ -455,6 +479,7 @@ impl<S: StorageIO> Iterator for SegmentReader<'_, S> {
 mod tests {
     use super::*;
     use crate::OpenOptions;
+    use crate::eventlog::types::MAX_EVENT_PAYLOAD;
     use crate::sim::SimulatedIO;
     use proptest::prelude::*;
     use std::path::Path;
@@ -487,8 +512,14 @@ mod tests {
     #[test]
     fn write_and_read_single_event() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
         let event = test_event(1, b"test event payload");
         let offset = writer.append_event(&sim, &event).unwrap();
@@ -496,7 +527,7 @@ mod tests {
 
         assert_eq!(offset, SegmentOffset::new(SEGMENT_HEADER_SIZE as u64));
 
-        let reader = SegmentReader::open(&sim, fd).unwrap();
+        let reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let events = reader.valid_prefix().unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0], event);
@@ -505,8 +536,14 @@ mod tests {
     #[test]
     fn write_and_read_multiple_events() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
         let written: Vec<ValidEvent> = (1u64..=3)
             .map(|i| {
@@ -517,7 +554,7 @@ mod tests {
             .collect();
         writer.sync(&sim).unwrap();
 
-        let reader = SegmentReader::open(&sim, fd).unwrap();
+        let reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let events = reader.valid_prefix().unwrap();
         assert_eq!(events, written);
     }
@@ -525,9 +562,16 @@ mod tests {
     #[test]
     fn empty_segment_has_no_events() {
         let (sim, fd) = setup();
-        SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
-        let reader = SegmentReader::open(&sim, fd).unwrap();
+        let reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let events = reader.valid_prefix().unwrap();
         assert!(events.is_empty());
     }
@@ -535,8 +579,14 @@ mod tests {
     #[test]
     fn detects_truncated_event() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         writer
             .append_event(&sim, &test_event(1, b"complete event"))
             .unwrap();
@@ -546,7 +596,7 @@ mod tests {
             .unwrap();
         sim.sync(fd).unwrap();
 
-        let mut reader = SegmentReader::open(&sim, fd).unwrap();
+        let mut reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let first = reader.next().unwrap().unwrap();
         assert!(matches!(first, ReadEventRecord::Valid { .. }));
 
@@ -557,8 +607,14 @@ mod tests {
     #[test]
     fn checksum_detects_corruption() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         writer
             .append_event(&sim, &test_event(1, &vec![0xAA; 256]))
             .unwrap();
@@ -567,7 +623,7 @@ mod tests {
         let corrupt_offset = SEGMENT_HEADER_SIZE as u64 + EVENT_HEADER_SIZE as u64 + 128;
         sim.write_all_at(fd, corrupt_offset, &[0x00]).unwrap();
 
-        let mut reader = SegmentReader::open(&sim, fd).unwrap();
+        let mut reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let record = reader.next().unwrap().unwrap();
         assert!(matches!(record, ReadEventRecord::Corrupted { .. }));
     }
@@ -575,8 +631,14 @@ mod tests {
     #[test]
     fn crash_before_sync_loses_events() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         writer
             .append_event(&sim, &test_event(1, b"synced"))
             .unwrap();
@@ -592,7 +654,7 @@ mod tests {
         let fd = sim
             .open(Path::new("/test/segment.tqe"), OpenOptions::read())
             .unwrap();
-        let reader = SegmentReader::open(&sim, fd).unwrap();
+        let reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let events = reader.valid_prefix().unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].payload, b"synced");
@@ -601,20 +663,76 @@ mod tests {
     #[test]
     fn rejects_oversized_payload() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
-        let result = writer.append_event(
+        const SMALL_MAX: u32 = 1024;
+        let mut writer = SegmentWriter::new(
             &sim,
-            &test_event(1, &vec![0u8; MAX_EVENT_PAYLOAD as usize + 1]),
-        );
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            SMALL_MAX,
+        )
+        .unwrap();
+        let result = writer.append_event(&sim, &test_event(1, &vec![0u8; SMALL_MAX as usize + 1]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn reader_rejects_corrupt_header_claiming_oversize() {
+        let (sim, fd) = setup();
+        const SMALL_MAX: u32 = 1024;
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
+        writer
+            .append_event(&sim, &test_event(1, &vec![0xAA; 2048]))
+            .unwrap();
+        writer.sync(&sim).unwrap();
+
+        let mut reader = SegmentReader::open(&sim, fd, SMALL_MAX).unwrap();
+        let record = reader.next().unwrap().unwrap();
+        assert!(matches!(record, ReadEventRecord::Corrupted { .. }));
+    }
+
+    #[test]
+    fn reader_with_larger_max_reads_writer_segment() {
+        let (sim, fd) = setup();
+        const WRITER_MAX: u32 = 16 * 1024;
+        const READER_MAX: u32 = 1024 * 1024 * 1024;
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            WRITER_MAX,
+        )
+        .unwrap();
+        writer
+            .append_event(&sim, &test_event(1, &vec![0xCD; 8 * 1024]))
+            .unwrap();
+        writer.sync(&sim).unwrap();
+
+        let reader = SegmentReader::open(&sim, fd, READER_MAX).unwrap();
+        let events = reader.valid_prefix().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].payload.len(), 8 * 1024);
     }
 
     #[test]
     fn zero_length_payload_round_trips() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         let event = ValidEvent {
             seq: EventSequence::new(1),
             timestamp: TimestampMicros::new(1_000_000),
@@ -625,7 +743,7 @@ mod tests {
         writer.append_event(&sim, &event).unwrap();
         writer.sync(&sim).unwrap();
 
-        let reader = SegmentReader::open(&sim, fd).unwrap();
+        let reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let events = reader.valid_prefix().unwrap();
         assert_eq!(events, vec![event]);
     }
@@ -633,12 +751,16 @@ mod tests {
     #[test]
     fn accepts_exact_max_payload() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
-        let result = writer.append_event(
+        const SMALL_MAX: u32 = 4096;
+        let mut writer = SegmentWriter::new(
             &sim,
-            &test_event(1, &vec![0xBB; MAX_EVENT_PAYLOAD as usize]),
-        );
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            SMALL_MAX,
+        )
+        .unwrap();
+        let result = writer.append_event(&sim, &test_event(1, &vec![0xBB; SMALL_MAX as usize]));
         assert!(result.is_ok());
     }
 
@@ -653,7 +775,7 @@ mod tests {
             .unwrap();
         sim.write_all_at(fd, 0, b"NOPE\x01").unwrap();
 
-        let result = SegmentReader::open(&sim, fd);
+        let result = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD);
         assert!(result.is_err());
     }
 
@@ -671,12 +793,13 @@ mod tests {
             event_type: EventTypeTag::ACCOUNT,
             payload: b"round trip test data".to_vec(),
         };
-        let bytes_written = encode_event_record(&sim, fd, offset, &event).unwrap();
+        let bytes_written =
+            encode_event_record(&sim, fd, offset, &event, MAX_EVENT_PAYLOAD).unwrap();
         let expected_size = EVENT_RECORD_OVERHEAD as u64 + event.payload.len() as u64;
         assert_eq!(bytes_written, expected_size);
 
         let file_size = sim.file_size(fd).unwrap();
-        let record = decode_event_record(&sim, fd, offset, file_size)
+        let record = decode_event_record(&sim, fd, offset, file_size, MAX_EVENT_PAYLOAD)
             .unwrap()
             .unwrap();
         match record {
@@ -688,8 +811,14 @@ mod tests {
     #[test]
     fn resume_writer_continues_at_position() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         writer.append_event(&sim, &test_event(1, b"first")).unwrap();
         writer.sync(&sim).unwrap();
 
@@ -701,13 +830,14 @@ mod tests {
             resume_pos,
             EventSequence::new(1),
             Some(EventSequence::new(1)),
+            MAX_EVENT_PAYLOAD,
         );
         writer2
             .append_event(&sim, &test_event(2, b"second"))
             .unwrap();
         writer2.sync(&sim).unwrap();
 
-        let reader = SegmentReader::open(&sim, fd).unwrap();
+        let reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let events = reader.valid_prefix().unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].payload, b"first");
@@ -717,8 +847,14 @@ mod tests {
     #[test]
     fn all_event_types_round_trip() {
         let (sim, fd) = setup();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
         let types = [
             EventTypeTag::COMMIT,
@@ -739,7 +875,7 @@ mod tests {
         });
         writer.sync(&sim).unwrap();
 
-        let reader = SegmentReader::open(&sim, fd).unwrap();
+        let reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let events = reader.valid_prefix().unwrap();
         assert_eq!(events.len(), 4);
         events
@@ -753,7 +889,14 @@ mod tests {
     #[test]
     fn seq_zero_detected_as_corrupted() {
         let (sim, fd) = setup();
-        SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
         let mut raw_header = [0u8; EVENT_HEADER_SIZE];
         raw_header[0..8].copy_from_slice(&0u64.to_le_bytes());
@@ -777,7 +920,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut reader = SegmentReader::open(&sim, fd).unwrap();
+        let mut reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let record = reader.next().unwrap().unwrap();
         assert!(matches!(record, ReadEventRecord::Corrupted { .. }));
     }
@@ -785,8 +928,14 @@ mod tests {
     #[test]
     fn writer_accessors() {
         let (sim, fd) = setup();
-        let writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(7), EventSequence::new(100)).unwrap();
+        let writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(7),
+            EventSequence::new(100),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
         assert_eq!(writer.segment_id(), SegmentId::new(7));
         assert_eq!(writer.base_seq(), EventSequence::new(100));
         assert_eq!(
@@ -804,9 +953,13 @@ mod tests {
 
         let written_count =
             if let Ok(fd) = sim.open(Path::new("/data/segment.tqe"), OpenOptions::read_write()) {
-                if let Ok(mut writer) =
-                    SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1))
-                {
+                if let Ok(mut writer) = SegmentWriter::new(
+                    &sim,
+                    fd,
+                    SegmentId::new(1),
+                    EventSequence::new(1),
+                    MAX_EVENT_PAYLOAD,
+                ) {
                     let count = (1u64..=20).fold(0u64, |count, i| {
                         let event = ValidEvent {
                             seq: EventSequence::new(i),
@@ -833,7 +986,7 @@ mod tests {
         sim.crash();
 
         if let Ok(fd) = sim.open(Path::new("/data/segment.tqe"), OpenOptions::read())
-            && let Ok(reader) = SegmentReader::open(&sim, fd)
+            && let Ok(reader) = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD)
         {
             let recovered: Vec<_> = reader
                 .map_while(|r| match r {
@@ -878,8 +1031,14 @@ mod tests {
         let fd = sim
             .open(Path::new("/data/segment.tqe"), OpenOptions::read_write())
             .unwrap();
-        let mut writer =
-            SegmentWriter::new(&sim, fd, SegmentId::new(1), EventSequence::new(1)).unwrap();
+        let mut writer = SegmentWriter::new(
+            &sim,
+            fd,
+            SegmentId::new(1),
+            EventSequence::new(1),
+            MAX_EVENT_PAYLOAD,
+        )
+        .unwrap();
 
         let data_len = ((seed % 256) as usize).max(1);
         let event = ValidEvent {
@@ -902,7 +1061,7 @@ mod tests {
         byte_buf[0] ^= 1 << flip_bit;
         sim.write_all_at(fd, flip_pos, &byte_buf).unwrap();
 
-        let mut reader = SegmentReader::open(&sim, fd).unwrap();
+        let mut reader = SegmentReader::open(&sim, fd, MAX_EVENT_PAYLOAD).unwrap();
         let record = reader.next().unwrap().unwrap();
         assert!(
             !matches!(record, ReadEventRecord::Valid { .. }),

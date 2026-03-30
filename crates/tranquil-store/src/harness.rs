@@ -207,6 +207,8 @@ pub struct PristineComparisonResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::sim_seed_range;
+    use rayon::prelude::*;
 
     #[test]
     fn no_fault_recovers_all_synced() {
@@ -242,7 +244,7 @@ mod tests {
 
     #[test]
     fn faulted_recovery_never_exceeds_written() {
-        (0..1000).for_each(|seed| {
+        sim_seed_range().into_par_iter().for_each(|seed| {
             let payloads: Vec<Vec<u8>> = (0..5).map(|i| format!("data-{i}").into_bytes()).collect();
             let Ok(result) = run_crash_test(seed, FaultConfig::moderate(), &payloads, 2) else {
                 return;
@@ -258,7 +260,7 @@ mod tests {
 
     #[test]
     fn pristine_comparison_with_faults() {
-        (0..1000).for_each(|seed| {
+        sim_seed_range().into_par_iter().for_each(|seed| {
             let payloads: Vec<Vec<u8>> = (0..8).map(|i| format!("item-{i}").into_bytes()).collect();
             let Ok(result) = run_pristine_comparison(seed, FaultConfig::moderate(), &payloads, 4)
             else {

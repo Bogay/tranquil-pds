@@ -7,11 +7,10 @@ use tranquil_db_traits::{DbError, SequenceNumber, SequencedEvent};
 
 use super::notifier::EventLogNotifier;
 use super::types::{EventSequence, TimestampMicros};
-use super::writer::SyncResult;
 use super::{EventLog, EventWithMutations, decode_payload, to_sequenced_event};
 use crate::io::StorageIO;
 
-pub struct DeferredBroadcast(SyncResult);
+pub struct DeferredBroadcast;
 
 fn io_to_db(e: io::Error) -> DbError {
     DbError::Query(e.to_string())
@@ -39,7 +38,7 @@ pub struct EventLogBridge<S: StorageIO> {
     log: Arc<EventLog<S>>,
 }
 
-impl<S: StorageIO> EventLogBridge<S> {
+impl<S: StorageIO + 'static> EventLogBridge<S> {
     pub fn new(log: Arc<EventLog<S>>) -> Self {
         Self { log }
     }
@@ -156,21 +155,22 @@ impl<S: StorageIO> EventLogBridge<S> {
     fn scan_for_timestamp(
         &self,
         reader: &super::EventLogReader<S>,
-        cursor: EventSequence,
+        mut cursor: EventSequence,
         target_ts: TimestampMicros,
         batch_size: usize,
     ) -> Result<Option<SequenceNumber>, DbError> {
-        let batch = reader
-            .read_events_from(cursor, batch_size)
-            .map_err(io_to_db)?;
-        if batch.is_empty() {
-            return Ok(None);
-        }
-        match batch.iter().find(|e| e.timestamp >= target_ts) {
-            Some(e) => Ok(Some(SequenceNumber::from_raw(e.seq.as_i64()))),
-            None => {
-                let next_cursor = batch.last().map(|e| e.seq).unwrap_or(cursor);
-                self.scan_for_timestamp(reader, next_cursor, target_ts, batch_size)
+        loop {
+            let batch = reader
+                .read_events_from(cursor, batch_size)
+                .map_err(io_to_db)?;
+            if batch.is_empty() {
+                return Ok(None);
+            }
+            match batch.iter().find(|e| e.timestamp >= target_ts) {
+                Some(e) => return Ok(Some(SequenceNumber::from_raw(e.seq.as_i64()))),
+                None => {
+                    cursor = batch.last().map(|e| e.seq).unwrap_or(cursor);
+                }
             }
         }
     }
@@ -264,33 +264,16 @@ impl<S: StorageIO> EventLogBridge<S> {
         Ok(SequenceNumber::from_raw(seq.as_i64()))
     }
 
-    pub fn insert_event_deferred(
-        &self,
-        event: &SequencedEvent,
-    ) -> Result<(SequenceNumber, DeferredBroadcast), io::Error> {
-        let seq = self.log.append_event(&event.did, event.event_type, event)?;
-        let sync_result = self.log.sync_data()?;
-        Ok((
-            SequenceNumber::from_raw(seq.as_i64()),
-            DeferredBroadcast(sync_result),
-        ))
-    }
-
-    pub fn insert_event_deferred_raw(
+    pub fn insert_event_group_commit_raw(
         &self,
         did: &tranquil_types::Did,
         event_type: tranquil_db_traits::RepoEventType,
         payload: Vec<u8>,
     ) -> Result<(SequenceNumber, DeferredBroadcast), io::Error> {
         let seq = self.log.append_raw_payload(did, event_type, payload)?;
-        let sync_result = self.log.sync_data()?;
-        Ok((
-            SequenceNumber::from_raw(seq.as_i64()),
-            DeferredBroadcast(sync_result),
-        ))
+        self.log.group_sync(seq)?;
+        Ok((SequenceNumber::from_raw(seq.as_i64()), DeferredBroadcast))
     }
 
-    pub fn complete_broadcast(&self, deferred: DeferredBroadcast) {
-        self.log.broadcast_result(&deferred.0);
-    }
+    pub fn complete_broadcast(&self, _deferred: DeferredBroadcast) {}
 }

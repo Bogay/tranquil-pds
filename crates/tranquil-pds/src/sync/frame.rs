@@ -142,7 +142,6 @@ pub struct CommitFrameBuilder {
     seq: i64,
     did: Did,
     commit_cid: Cid,
-    prev_cid: Option<Cid>,
     ops_json: serde_json::Value,
     blob_cids: Vec<Cid>,
     time: chrono::DateTime<chrono::Utc>,
@@ -150,12 +149,10 @@ pub struct CommitFrameBuilder {
 }
 
 impl CommitFrameBuilder {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         seq: i64,
         did: Did,
         commit_cid_str: &str,
-        prev_cid_str: Option<&str>,
         ops_json: serde_json::Value,
         blob_strs: Vec<String>,
         time: chrono::DateTime<chrono::Utc>,
@@ -163,9 +160,6 @@ impl CommitFrameBuilder {
     ) -> Result<Self, CommitFrameError> {
         let commit_cid = Cid::from_str(commit_cid_str)
             .map_err(|_| CommitFrameError::InvalidCommitCid(commit_cid_str.to_string()))?;
-        let prev_cid = prev_cid_str.map(Cid::from_str).transpose().map_err(|_| {
-            CommitFrameError::InvalidCommitCid(prev_cid_str.unwrap_or("").to_string())
-        })?;
         let blob_cids: Vec<Cid> = blob_strs
             .iter()
             .filter_map(|s| Cid::from_str(s).ok())
@@ -174,7 +168,6 @@ impl CommitFrameBuilder {
             seq,
             did,
             commit_cid,
-            prev_cid,
             ops_json,
             blob_cids,
             time,
@@ -197,7 +190,7 @@ impl CommitFrameBuilder {
             })
             .collect();
         let rev = self.rev.unwrap_or_else(placeholder_rev);
-        let since = self.prev_cid.as_ref().map(|_| rev.clone());
+        let since = None;
         CommitFrame {
             seq: self.seq,
             rebase: false,
@@ -235,7 +228,6 @@ impl TryFrom<SequencedEvent> for CommitFrame {
             event.seq.as_i64(),
             event.did.clone(),
             commit_cid.as_str(),
-            event.prev_cid.as_ref().map(|c| c.as_str()),
             event.ops.unwrap_or_default(),
             event.blobs.unwrap_or_default(),
             event.created_at,

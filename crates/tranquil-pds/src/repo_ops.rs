@@ -1,16 +1,19 @@
 use crate::api::error::ApiError;
-use crate::cid_types::CommitCid;
+use crate::cid_types::{CommitCid, RecordCid};
 use crate::repo::TrackingBlockStore;
 use crate::state::AppState;
 use crate::types::{Did, Handle, Nsid, Rkey};
+use backon::{ExponentialBuilder, Retryable};
 use bytes::Bytes;
 use cid::Cid;
 use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::commit::Commit;
 use jacquard_repo::mst::Mst;
+use jacquard_repo::mst::util::compute_cid;
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::OwnedMutexGuard;
@@ -147,6 +150,7 @@ pub fn extract_backlinks(uri: &AtUri, record: &Value) -> Vec<Backlink> {
 pub struct RepoWriteContext {
     pub tracking_store: TrackingBlockStore,
     pub current_root_cid: Cid,
+    pub prev_commit_bytes: Bytes,
     pub prev_data_cid: Cid,
     pub write_lock: OwnedMutexGuard<()>,
 }
@@ -197,26 +201,53 @@ pub async fn begin_repo_write(
         .get(&current_root_cid)
         .await
         .map_err(|e| {
-            error!("Failed to load commit block: {:?}", e);
+            error!("Failed to load commit block: {}", e);
             ApiError::InternalError(None)
         })?
         .ok_or_else(|| ApiError::InternalError(Some("Commit block not found".into())))?;
 
-    let commit = Commit::from_cbor(&commit_bytes).map_err(|e| {
-        error!("Failed to parse commit: {:?}", e);
-        ApiError::InternalError(None)
-    })?;
+    let prev_data_cid = Commit::from_cbor(&commit_bytes)
+        .map_err(|e| {
+            error!("Failed to parse commit: {}", e);
+            ApiError::InternalError(None)
+        })?
+        .data;
 
-    let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
+    let mst = Mst::load(Arc::new(tracking_store.clone()), prev_data_cid, None);
 
     let ctx = RepoWriteContext {
         tracking_store,
         current_root_cid,
-        prev_data_cid: commit.data,
+        prev_commit_bytes: commit_bytes,
+        prev_data_cid,
         write_lock,
     };
 
     Ok((ctx, mst))
+}
+
+pub async fn compute_obsolete_cids(
+    original_mst: &Mst<TrackingBlockStore>,
+    new_mst: &Mst<TrackingBlockStore>,
+    original_root_cid: CommitCid,
+) -> Result<Vec<Cid>, jacquard_repo::error::RepoError> {
+    let (old_nodes, new_nodes, old_leaves, new_leaves) = tokio::try_join!(
+        original_mst.collect_node_cids(),
+        new_mst.collect_node_cids(),
+        original_mst.leaves(),
+        new_mst.leaves(),
+    )?;
+    let old_nodes_set: BTreeSet<Cid> = old_nodes.into_iter().collect();
+    let new_nodes_set: BTreeSet<Cid> = new_nodes.into_iter().collect();
+    let old_leaf_set: BTreeSet<Cid> = old_leaves.iter().map(|(_, cid)| *cid).collect();
+    let new_leaf_set: BTreeSet<Cid> = new_leaves.iter().map(|(_, cid)| *cid).collect();
+    let removed_nodes = old_nodes_set.difference(&new_nodes_set).copied();
+    let removed_leaves = old_leaf_set.difference(&new_leaf_set).copied();
+    let obsolete: BTreeSet<Cid> = std::iter::once(original_root_cid.into_cid())
+        .chain(removed_nodes)
+        .chain(removed_leaves)
+        .collect();
+    Ok(obsolete.into_iter().collect())
 }
 
 pub async fn finalize_repo_write(
@@ -226,18 +257,44 @@ pub async fn finalize_repo_write(
     params: FinalizeParams<'_>,
 ) -> Result<CommitResult, ApiError> {
     let new_mst_root = mst.persist().await.map_err(|e| {
-        error!("MST persist failed: {:?}", e);
+        error!("MST persist failed: {}", e);
         ApiError::InternalError(None)
     })?;
 
-    let written_cids: Vec<Cid> = ctx
-        .tracking_store
-        .get_all_relevant_cids()
-        .into_iter()
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let written_cids_str: Vec<String> = written_cids.iter().map(ToString::to_string).collect();
+    let block_bytes = ctx.tracking_store.take_written_blocks();
+
+    let storage_for_diff = Arc::new(ctx.tracking_store.clone());
+    let original_settled = Mst::load(storage_for_diff.clone(), ctx.prev_data_cid, None);
+    let new_settled = Mst::load(storage_for_diff, new_mst_root, None);
+    let (obsolete_cids, new_tree_cids) = tokio::try_join!(
+        async {
+            compute_obsolete_cids(
+                &original_settled,
+                &new_settled,
+                CommitCid::from(ctx.current_root_cid),
+            )
+            .await
+            .map_err(|e| {
+                error!("MST diff failed during finalize_repo_write: {}", e);
+                ApiError::InternalError(Some("MST diff failed".into()))
+            })
+        },
+        async {
+            let (nodes, leaves) =
+                tokio::try_join!(new_settled.collect_node_cids(), new_settled.leaves(),).map_err(
+                    |e| {
+                        error!("new tree walk failed: {}", e);
+                        ApiError::InternalError(None)
+                    },
+                )?;
+            Ok::<Vec<Cid>, ApiError>(
+                nodes
+                    .into_iter()
+                    .chain(leaves.iter().map(|(_, cid)| *cid))
+                    .collect(),
+            )
+        },
+    )?;
 
     let result = commit_and_log(
         state,
@@ -245,12 +302,14 @@ pub async fn finalize_repo_write(
             did: params.did,
             user_id: params.user_id,
             current_root_cid: Some(ctx.current_root_cid),
+            prev_commit_bytes: Some(ctx.prev_commit_bytes),
             prev_data_cid: Some(ctx.prev_data_cid),
             new_mst_root,
             ops: params.ops,
-            blocks_cids: &written_cids_str,
+            block_bytes,
+            new_tree_cids,
             blobs: params.blob_cids,
-            obsolete_cids: vec![ctx.current_root_cid],
+            obsolete_cids,
             backlinks_to_add: params.backlinks_to_add,
             backlinks_to_remove: params.backlinks_to_remove,
         },
@@ -297,7 +356,7 @@ pub fn create_signed_commit(
     let sig_bytes = signed.sig().clone();
     let signed_bytes = signed
         .to_cbor()
-        .map_err(|e| CommitError::SerializationFailed(format!("{:?}", e)))?;
+        .map_err(|e| CommitError::SerializationFailed(e.to_string()))?;
     Ok((signed_bytes, sig_bytes))
 }
 
@@ -305,18 +364,18 @@ pub enum RecordOp {
     Create {
         collection: Nsid,
         rkey: Rkey,
-        cid: Cid,
+        cid: RecordCid,
     },
     Update {
         collection: Nsid,
         rkey: Rkey,
-        cid: Cid,
-        prev: Option<Cid>,
+        cid: RecordCid,
+        prev: RecordCid,
     },
     Delete {
         collection: Nsid,
         rkey: Rkey,
-        prev: Option<Cid>,
+        prev: RecordCid,
     },
 }
 
@@ -329,10 +388,12 @@ pub struct CommitParams<'a> {
     pub did: &'a Did,
     pub user_id: Uuid,
     pub current_root_cid: Option<Cid>,
+    pub prev_commit_bytes: Option<Bytes>,
     pub prev_data_cid: Option<Cid>,
     pub new_mst_root: Cid,
     pub ops: Vec<RecordOp>,
-    pub blocks_cids: &'a [String],
+    pub block_bytes: std::collections::HashMap<Cid, Bytes>,
+    pub new_tree_cids: Vec<Cid>,
     pub blobs: &'a [String],
     pub obsolete_cids: Vec<Cid>,
     pub backlinks_to_add: Vec<Backlink>,
@@ -344,8 +405,8 @@ pub async fn commit_and_log(
     params: CommitParams<'_>,
 ) -> Result<CommitResult, CommitError> {
     use tranquil_db_traits::{
-        ApplyCommitError, ApplyCommitInput, CommitEventData, RecordDelete, RecordUpsert,
-        RepoEventType,
+        ApplyCommitError, ApplyCommitInput, CommitEventData, EventBlockInline, RecordDelete,
+        RecordUpsert, RepoEventType,
     };
 
     let backlinks_to_add = params.backlinks_to_add;
@@ -354,14 +415,21 @@ pub async fn commit_and_log(
         did,
         user_id,
         current_root_cid,
+        prev_commit_bytes,
         prev_data_cid,
         new_mst_root,
         ops,
-        blocks_cids,
+        mut block_bytes,
+        new_tree_cids,
         blobs,
         obsolete_cids,
         ..
     } = params;
+    debug_assert_eq!(
+        current_root_cid.is_some(),
+        prev_commit_bytes.is_some(),
+        "current_root_cid and prev_commit_bytes must be both Some (non-genesis) or both None (genesis)"
+    );
     let key_row = state
         .repos
         .user
@@ -377,18 +445,27 @@ pub async fn commit_and_log(
     let rev_str = rev.to_string();
     let (new_commit_bytes, _sig) =
         create_signed_commit(did, new_mst_root, &rev_str, current_root_cid, &signing_key)?;
-    let new_root_cid = state
+    let new_root_cid =
+        compute_cid(&new_commit_bytes).map_err(|e| CommitError::BlockStoreFailed(e.to_string()))?;
+
+    let commit_bytes_owned = Bytes::from(new_commit_bytes.clone());
+    state
         .block_store
         .put(&new_commit_bytes)
         .await
-        .map_err(|e| CommitError::BlockStoreFailed(format!("{:?}", e)))?;
+        .map_err(|e| CommitError::BlockStoreFailed(format!("failed to write commit block: {e}")))?;
 
-    let mut all_block_cids: Vec<Vec<u8>> = blocks_cids
+    block_bytes.insert(new_root_cid, commit_bytes_owned);
+
+    if let (Some(prev_root), Some(prev_bytes)) = (current_root_cid, prev_commit_bytes) {
+        block_bytes.entry(prev_root).or_insert(prev_bytes);
+    }
+
+    let all_block_cids: Vec<Vec<u8>> = new_tree_cids
         .iter()
-        .filter_map(|s| Cid::from_str(s).ok())
+        .chain(std::iter::once(&new_root_cid))
         .map(|c| c.to_bytes())
         .collect();
-    all_block_cids.push(new_root_cid.to_bytes());
 
     let obsolete_bytes: Vec<Vec<u8>> = obsolete_cids.iter().map(|c| c.to_bytes()).collect();
 
@@ -410,7 +487,7 @@ pub async fn commit_and_log(
                     upserts.push(RecordUpsert {
                         collection: collection.clone(),
                         rkey: rkey.clone(),
-                        cid: crate::types::CidLink::from(cid),
+                        cid: crate::types::CidLink::from(cid.as_cid()),
                     });
                 }
                 RecordOp::Delete {
@@ -443,32 +520,30 @@ pub async fn commit_and_log(
                 rkey,
                 cid,
                 prev,
-            } => {
-                let mut obj = json!({
-                    "action": "update",
-                    "path": format!("{}/{}", collection, rkey),
-                    "cid": cid.to_string()
-                });
-                if let Some(prev_cid) = prev {
-                    obj["prev"] = json!(prev_cid.to_string());
-                }
-                obj
-            }
+            } => json!({
+                "action": "update",
+                "path": format!("{}/{}", collection, rkey),
+                "cid": cid.to_string(),
+                "prev": prev.to_string(),
+            }),
             RecordOp::Delete {
                 collection,
                 rkey,
                 prev,
-            } => {
-                let mut obj = json!({
-                    "action": "delete",
-                    "path": format!("{}/{}", collection, rkey),
-                    "cid": null
-                });
-                if let Some(prev_cid) = prev {
-                    obj["prev"] = json!(prev_cid.to_string());
-                }
-                obj
-            }
+            } => json!({
+                "action": "delete",
+                "path": format!("{}/{}", collection, rkey),
+                "cid": null,
+                "prev": prev.to_string(),
+            }),
+        })
+        .collect();
+
+    let inline_blocks: Vec<EventBlockInline> = block_bytes
+        .iter()
+        .map(|(cid, data)| EventBlockInline {
+            cid_bytes: cid.to_bytes(),
+            data: data.to_vec(),
         })
         .collect();
 
@@ -479,7 +554,7 @@ pub async fn commit_and_log(
         prev_cid: current_root_cid.map(crate::types::CidLink::from),
         ops: Some(json!(ops_json)),
         blobs: Some(blobs.to_vec()),
-        blocks_cids: Some(blocks_cids.to_vec()),
+        blocks: Some(inline_blocks),
         prev_data_cid: prev_data_cid.map(crate::types::CidLink::from),
         rev: Some(rev_str.clone()),
     };
@@ -510,6 +585,31 @@ pub async fn commit_and_log(
             ApplyCommitError::Database(msg) => CommitError::DatabaseError(msg),
         })?;
 
+    let apply_result = (|| {
+        let bs = state.block_store.clone();
+        let decrements = obsolete_cids.clone();
+        async move { bs.decrement_refs(&decrements).await }
+    })
+    .retry(
+        ExponentialBuilder::default()
+            .with_min_delay(std::time::Duration::from_millis(50))
+            .with_max_delay(std::time::Duration::from_secs(2))
+            .with_max_times(5),
+    )
+    .await;
+
+    if let Err(e) = apply_result {
+        let leaked: Vec<String> = obsolete_cids.iter().map(Cid::to_string).collect();
+        tracing::error!(
+            error = %e,
+            user_id = %user_id,
+            new_root = %new_root_cid,
+            leaked_cids = ?leaked,
+            "blockstore decrement_refs failed after metastore commit succeeded \
+             and exhausted retries; blocks may leak refcounts"
+        );
+    }
+
     Ok(CommitResult {
         commit_cid: new_root_cid,
         rev: rev_str,
@@ -530,98 +630,57 @@ pub async fn create_record_internal(
         .map_err(|e| CommitError::DatabaseError(e.to_string()))?
         .ok_or(CommitError::UserNotFound)?;
 
-    let _write_lock = state.repo_write_locks.lock(user_id).await;
+    let to_commit_err = |e: ApiError| CommitError::DatabaseError(format!("{:?}", e));
 
-    let root_cid_link = state
-        .repos
-        .repo
-        .get_repo_root_cid_by_user_id(user_id)
+    let (ctx, mst) = begin_repo_write(state, user_id, None)
         .await
-        .map_err(|e| CommitError::DatabaseError(e.to_string()))?
-        .ok_or(CommitError::RepoNotFound)?;
-    let current_root_cid = Cid::from_str(root_cid_link.as_str())
-        .map_err(|e| CommitError::InvalidCid(e.to_string()))?;
-    let tracking_store = TrackingBlockStore::new(state.block_store.clone());
-    let commit_bytes = tracking_store
-        .get(&current_root_cid)
-        .await
-        .map_err(|e| CommitError::BlockStoreFailed(format!("{:?}", e)))?
-        .ok_or(CommitError::BlockStoreFailed(
-            "Commit block not found".into(),
-        ))?;
-    let commit = jacquard_repo::commit::Commit::from_cbor(&commit_bytes)
-        .map_err(|e| CommitError::CommitParseFailed(format!("{:?}", e)))?;
-    let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
+        .map_err(to_commit_err)?;
+
     let record_ipld = crate::util::json_to_ipld(record);
     let mut record_bytes = Vec::new();
     serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld)
-        .map_err(|e| CommitError::RecordSerializationFailed(format!("{:?}", e)))?;
-    let record_cid = tracking_store
+        .map_err(|e| CommitError::RecordSerializationFailed(e.to_string()))?;
+    let record_cid = ctx
+        .tracking_store
         .put(&record_bytes)
         .await
-        .map_err(|e| CommitError::BlockStoreFailed(format!("{:?}", e)))?;
+        .map_err(|e| CommitError::BlockStoreFailed(e.to_string()))?;
+
     let key = format!("{}/{}", collection, rkey);
     let new_mst = mst
         .add(&key, record_cid)
         .await
-        .map_err(|e| CommitError::MstOperationFailed(format!("{:?}", e)))?;
-    let new_mst_root = new_mst
-        .persist()
-        .await
-        .map_err(|e| CommitError::MstOperationFailed(format!("{:?}", e)))?;
+        .map_err(|e| CommitError::MstOperationFailed(e.to_string()))?;
+
     let op = RecordOp::Create {
         collection: collection.clone(),
         rkey: rkey.clone(),
-        cid: record_cid,
+        cid: RecordCid::from(record_cid),
     };
-    let mut new_mst_blocks = std::collections::BTreeMap::new();
-    let mut old_mst_blocks = std::collections::BTreeMap::new();
-    new_mst
-        .blocks_for_path(&key, &mut new_mst_blocks)
-        .await
-        .map_err(|e| CommitError::MstOperationFailed(format!("{:?}", e)))?;
-    mst.blocks_for_path(&key, &mut old_mst_blocks)
-        .await
-        .map_err(|e| CommitError::MstOperationFailed(format!("{:?}", e)))?;
-    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid)
-        .chain(
-            old_mst_blocks
-                .keys()
-                .filter(|cid| !new_mst_blocks.contains_key(*cid))
-                .copied(),
-        )
-        .collect();
-    let mut relevant_blocks = new_mst_blocks;
-    relevant_blocks.extend(old_mst_blocks);
-    relevant_blocks.insert(record_cid, bytes::Bytes::from(record_bytes));
-    let written_cids: Vec<Cid> = tracking_store
-        .get_all_relevant_cids()
-        .into_iter()
-        .chain(relevant_blocks.keys().copied())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
+    let modified_keys = [key];
     let blob_cids = extract_blob_cids(record);
     let record_uri = AtUri::from_parts(did.as_str(), collection.as_str(), rkey.as_str());
     let backlinks = extract_backlinks(&record_uri, record);
-    let result = commit_and_log(
+
+    let result = finalize_repo_write(
         state,
-        CommitParams {
+        ctx,
+        new_mst,
+        FinalizeParams {
             did,
             user_id,
-            current_root_cid: Some(current_root_cid),
-            prev_data_cid: Some(commit.data),
-            new_mst_root,
+            controller_did: None,
+            delegation_detail: None,
             ops: vec![op],
-            blocks_cids: &written_cids_str,
-            blobs: &blob_cids,
-            obsolete_cids,
+            modified_keys: &modified_keys,
+            blob_cids: &blob_cids,
             backlinks_to_add: backlinks,
             backlinks_to_remove: vec![],
         },
     )
-    .await?;
+    .await
+    .map_err(to_commit_err)?;
+
     let uri = format!("at://{}/{}/{}", did, collection, rkey);
     Ok((uri, result.commit_cid))
 }
@@ -659,10 +718,20 @@ pub async fn sequence_sync_event(
     let cid_link: crate::types::CidLink = commit_cid
         .parse()
         .map_err(|_| CommitError::InvalidCid(commit_cid.to_string()))?;
+    let commit_cid_parsed =
+        Cid::from_str(commit_cid).map_err(|e| CommitError::InvalidCid(e.to_string()))?;
+    let commit_bytes = state
+        .block_store
+        .get(&commit_cid_parsed)
+        .await
+        .map_err(|e| CommitError::BlockStoreFailed(format!("{:?}", e)))?
+        .ok_or(CommitError::BlockStoreFailed(
+            "Commit block not found for sync event".into(),
+        ))?;
     state
         .repos
         .repo
-        .insert_sync_event(did, &cid_link, rev)
+        .insert_sync_event(did, &cid_link, rev, &commit_bytes)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("sync event: {}", e)))
 }
@@ -676,10 +745,33 @@ pub async fn sequence_genesis_commit(
 ) -> Result<SequenceNumber, CommitError> {
     let commit_cid_link = crate::types::CidLink::from(commit_cid);
     let mst_root_cid_link = crate::types::CidLink::from(mst_root_cid);
+    let commit_bytes = state
+        .block_store
+        .get(commit_cid)
+        .await
+        .map_err(|e| CommitError::BlockStoreFailed(format!("{:?}", e)))?
+        .ok_or(CommitError::BlockStoreFailed(
+            "Genesis commit block not found".into(),
+        ))?;
+    let mst_root_bytes = state
+        .block_store
+        .get(mst_root_cid)
+        .await
+        .map_err(|e| CommitError::BlockStoreFailed(format!("{:?}", e)))?
+        .ok_or(CommitError::BlockStoreFailed(
+            "Genesis MST root block not found".into(),
+        ))?;
     state
         .repos
         .repo
-        .insert_genesis_commit_event(did, &commit_cid_link, &mst_root_cid_link, rev)
+        .insert_genesis_commit_event(
+            did,
+            &commit_cid_link,
+            &mst_root_cid_link,
+            rev,
+            &commit_bytes,
+            &mst_root_bytes,
+        )
         .await
         .map_err(|e| CommitError::DatabaseError(format!("genesis commit event: {}", e)))
 }

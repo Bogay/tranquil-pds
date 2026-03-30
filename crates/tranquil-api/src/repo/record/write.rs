@@ -172,7 +172,7 @@ pub async fn create_record(
                 ops.push(RecordOp::Delete {
                     collection: conflict_collection,
                     rkey: conflict_rkey,
-                    prev: Some(prev_cid),
+                    prev: tranquil_pds::cid_types::RecordCid::from(prev_cid),
                 });
                 conflict_uris_to_cleanup.push(conflict_uri);
             }
@@ -197,7 +197,7 @@ pub async fn create_record(
     ops.push(RecordOp::Create {
         collection: input.collection.clone(),
         rkey: rkey.clone(),
-        cid: record_cid,
+        cid: tranquil_pds::cid_types::RecordCid::from(record_cid),
     });
 
     let modified_keys: Vec<String> = ops
@@ -338,41 +338,38 @@ pub async fn put_record(
         }));
     }
 
-    let is_update = existing_cid.is_some();
-    let new_mst = if is_update {
-        mst.update(&key, record_cid)
-            .await
-            .map_err(|_| ApiError::InternalError(Some("Failed to update MST".into())))?
-    } else {
-        mst.add(&key, record_cid)
-            .await
-            .map_err(|_| ApiError::InternalError(Some("Failed to add to MST".into())))?
-    };
-
-    let op = if is_update {
-        RecordOp::Update {
-            collection: input.collection.clone(),
-            rkey: input.rkey.clone(),
-            cid: record_cid,
-            prev: existing_cid,
+    let record_uri = AtUri::from_parts(&did, &input.collection, &input.rkey);
+    let (new_mst, op, is_update, backlinks_to_remove) = match existing_cid {
+        Some(prev_cid) => {
+            let new_mst = mst
+                .update(&key, record_cid)
+                .await
+                .map_err(|_| ApiError::InternalError(Some("Failed to update MST".into())))?;
+            let op = RecordOp::Update {
+                collection: input.collection.clone(),
+                rkey: input.rkey.clone(),
+                cid: tranquil_pds::cid_types::RecordCid::from(record_cid),
+                prev: tranquil_pds::cid_types::RecordCid::from(prev_cid),
+            };
+            (new_mst, op, true, vec![record_uri.clone()])
         }
-    } else {
-        RecordOp::Create {
-            collection: input.collection.clone(),
-            rkey: input.rkey.clone(),
-            cid: record_cid,
+        None => {
+            let new_mst = mst
+                .add(&key, record_cid)
+                .await
+                .map_err(|_| ApiError::InternalError(Some("Failed to add to MST".into())))?;
+            let op = RecordOp::Create {
+                collection: input.collection.clone(),
+                rkey: input.rkey.clone(),
+                cid: tranquil_pds::cid_types::RecordCid::from(record_cid),
+            };
+            (new_mst, op, false, vec![])
         }
     };
 
     let modified_keys = [key];
     let blob_cids = extract_blob_cids(&input.record);
-
-    let record_uri = AtUri::from_parts(&did, &input.collection, &input.rkey);
     let backlinks_to_add = extract_backlinks(&record_uri, &input.record);
-    let backlinks_to_remove = match is_update {
-        true => vec![record_uri.clone()],
-        false => vec![],
-    };
 
     let commit_result = finalize_repo_write(
         &state,

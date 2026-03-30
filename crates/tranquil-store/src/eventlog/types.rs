@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use tranquil_db_traits::SequenceNumber;
 
-pub const MAX_EVENT_PAYLOAD: u32 = 4 * 1024 * 1024;
-pub const DEFAULT_SEGMENT_SIZE: u64 = 64 * 1024 * 1024;
+pub const MAX_EVENT_PAYLOAD: u32 = u32::MAX;
+pub const DEFAULT_MAX_EVENT_PAYLOAD: u32 = 256 * 1024 * 1024;
+pub const DEFAULT_SEGMENT_SIZE: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EventSequence(u64);
@@ -114,15 +115,11 @@ impl SegmentOffset {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EventLength(u32);
 
 impl EventLength {
     pub fn new(length: u32) -> Self {
-        assert!(
-            length <= MAX_EVENT_PAYLOAD,
-            "EventLength {length} exceeds MAX_EVENT_PAYLOAD {MAX_EVENT_PAYLOAD}"
-        );
         Self(length)
     }
 
@@ -132,18 +129,6 @@ impl EventLength {
 
     pub fn as_u64(self) -> u64 {
         u64::from(self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for EventLength {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = u32::deserialize(deserializer)?;
-        if raw > MAX_EVENT_PAYLOAD {
-            return Err(serde::de::Error::custom(format_args!(
-                "EventLength {raw} exceeds MAX_EVENT_PAYLOAD {MAX_EVENT_PAYLOAD}"
-            )));
-        }
-        Ok(Self(raw))
     }
 }
 
@@ -360,12 +345,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "exceeds MAX_EVENT_PAYLOAD")]
-    fn event_length_overflow_panics() {
-        EventLength::new(MAX_EVENT_PAYLOAD + 1);
-    }
-
-    #[test]
     fn did_hash_deterministic() {
         let hash1 = DidHash::from_did("did:plc:abc123");
         let hash2 = DidHash::from_did("did:plc:abc123");
@@ -472,13 +451,6 @@ mod tests {
 
         let bytes = postcard::to_allocvec(&255u8).unwrap();
         assert!(postcard::from_bytes::<EventTypeTag>(&bytes).is_err());
-    }
-
-    #[test]
-    fn postcard_rejects_oversized_event_length() {
-        let oversized = MAX_EVENT_PAYLOAD + 1;
-        let bytes = postcard::to_allocvec(&oversized).unwrap();
-        assert!(postcard::from_bytes::<EventLength>(&bytes).is_err());
     }
 
     #[test]

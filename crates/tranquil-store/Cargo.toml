@@ -28,8 +28,10 @@ jacquard-repo = { workspace = true }
 cid = { workspace = true }
 multihash = { workspace = true }
 sha2 = { workspace = true }
+serde_ipld_dagcbor = { workspace = true }
 siphasher = "1"
 dashmap = "6"
+rayon = "1"
 smallvec = "1"
 uuid = { workspace = true }
 
@@ -37,6 +39,7 @@ uuid = { workspace = true }
 test-harness = []
 
 [dev-dependencies]
+tranquil-store = { path = ".", features = ["test-harness"] }
 proptest = "1"
 tempfile = "3"
 futures = { workspace = true }
@@ -47,8 +50,8 @@ tranquil-db = { workspace = true }
 sqlx = { workspace = true }
 k256 = { workspace = true }
 rand = { workspace = true }
-serde_ipld_dagcbor = { workspace = true }
 tikv-jemallocator = "0.6"
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [[bench]]
 name = "blockstore"
@@ -68,4 +71,12 @@ harness = false
 
 [[bench]]
 name = "profile_reads"
+harness = false
+
+[[bench]]
+name = "profile_eventlog_reads"
+harness = false
+
+[[bench]]
+name = "recovery"
 harness = false

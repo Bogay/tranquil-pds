@@ -5,15 +5,14 @@ use chrono::{DateTime, Utc};
 use fjall::{Database, Keyspace};
 use tracing::warn;
 use tranquil_db_traits::{
-    AccountStatus, CommitEventData, DbError, EventBlocksCids, RepoEventType, SequenceNumber,
-    SequencedEvent,
+    AccountStatus, CommitEventData, DbError, RepoEventType, SequenceNumber, SequencedEvent,
 };
 use tranquil_types::{CidLink, Did, Handle};
 
 use super::encoding::{KeyReader, exclusive_upper_bound};
 use super::event_keys::{
-    SeqMetaValue, did_events_key, did_events_prefix, metastore_cursor_key, rev_to_seq_key,
-    rev_to_seq_user_prefix, seq_meta_key, seq_tombstone_key,
+    did_events_key, did_events_prefix, metastore_cursor_key, rev_to_seq_key,
+    rev_to_seq_user_prefix, seq_tombstone_key,
 };
 use super::keys::UserHash;
 use super::recovery::CommitMutationSet;
@@ -29,7 +28,7 @@ pub struct EventOps<S: StorageIO> {
     bridge: Arc<EventLogBridge<S>>,
 }
 
-impl<S: StorageIO> EventOps<S> {
+impl<S: StorageIO + 'static> EventOps<S> {
     pub fn new(db: Database, repo_data: Keyspace, bridge: Arc<EventLogBridge<S>>) -> Self {
         Self {
             db,
@@ -61,7 +60,7 @@ impl<S: StorageIO> EventOps<S> {
         let payload = crate::eventlog::encode_payload_with_mutations(&event, mutation_set_bytes);
         let (seq, deferred) = self
             .bridge
-            .insert_event_deferred_raw(&data.did, data.event_type, payload)
+            .insert_event_group_commit_raw(&data.did, data.event_type, payload)
             .map_err(|e| DbError::Query(e.to_string()))?;
 
         let seq_u64 = seq_to_u64(seq)?;
@@ -90,7 +89,10 @@ impl<S: StorageIO> EventOps<S> {
             prev_data_cid: data.prev_data_cid.clone(),
             ops: data.ops.clone(),
             blobs: data.blobs.clone(),
-            blocks_cids: data.blocks_cids.clone(),
+            blocks: data
+                .blocks
+                .clone()
+                .map(tranquil_db_traits::EventBlocks::Inline),
             handle: None,
             active: None,
             status: None,
@@ -113,7 +115,7 @@ impl<S: StorageIO> EventOps<S> {
             prev_data_cid: None,
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: None,
             handle: handle.cloned(),
             active: None,
             status: None,
@@ -139,7 +141,7 @@ impl<S: StorageIO> EventOps<S> {
             prev_data_cid: None,
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: None,
             handle: None,
             active,
             status: Some(status),
@@ -154,7 +156,15 @@ impl<S: StorageIO> EventOps<S> {
         did: &Did,
         commit_cid: &CidLink,
         rev: Option<&str>,
+        commit_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError> {
+        let inline = tranquil_db_traits::EventBlockInline {
+            cid_bytes: commit_cid
+                .to_cid()
+                .expect("CidLink invariant: validated at construction")
+                .to_bytes(),
+            data: commit_bytes.to_vec(),
+        };
         let event = SequencedEvent {
             seq: SequenceNumber::ZERO,
             did: did.clone(),
@@ -165,7 +175,7 @@ impl<S: StorageIO> EventOps<S> {
             prev_data_cid: None,
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: Some(tranquil_db_traits::EventBlocks::Inline(vec![inline])),
             handle: None,
             active: None,
             status: None,
@@ -181,7 +191,23 @@ impl<S: StorageIO> EventOps<S> {
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
         rev: &str,
+        commit_bytes: &[u8],
+        mst_root_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError> {
+        let commit_block = tranquil_db_traits::EventBlockInline {
+            cid_bytes: commit_cid
+                .to_cid()
+                .expect("CidLink invariant: validated at construction")
+                .to_bytes(),
+            data: commit_bytes.to_vec(),
+        };
+        let mst_block = tranquil_db_traits::EventBlockInline {
+            cid_bytes: mst_root_cid
+                .to_cid()
+                .expect("CidLink invariant: validated at construction")
+                .to_bytes(),
+            data: mst_root_bytes.to_vec(),
+        };
         let event = SequencedEvent {
             seq: SequenceNumber::ZERO,
             did: did.clone(),
@@ -192,7 +218,10 @@ impl<S: StorageIO> EventOps<S> {
             prev_data_cid: Some(mst_root_cid.clone()),
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: Some(tranquil_db_traits::EventBlocks::Inline(vec![
+                commit_block,
+                mst_block,
+            ])),
             handle: None,
             active: None,
             status: None,
@@ -208,7 +237,7 @@ impl<S: StorageIO> EventOps<S> {
         limit: Option<i64>,
     ) -> Result<Vec<SequencedEvent>, DbError> {
         let events = self.bridge.get_events_since_seq(since, limit)?;
-        self.apply_sidecars_and_filter(events)
+        self.filter_tombstoned(events)
     }
 
     pub fn get_events_in_seq_range(
@@ -217,7 +246,7 @@ impl<S: StorageIO> EventOps<S> {
         end: SequenceNumber,
     ) -> Result<Vec<SequencedEvent>, DbError> {
         let events = self.bridge.get_events_in_seq_range(start, end)?;
-        self.apply_sidecars_and_filter(events)
+        self.filter_tombstoned(events)
     }
 
     pub fn get_event_by_seq(&self, seq: SequenceNumber) -> Result<Option<SequencedEvent>, DbError> {
@@ -230,9 +259,7 @@ impl<S: StorageIO> EventOps<S> {
             return Ok(None);
         }
 
-        self.bridge
-            .get_event_by_seq(seq)
-            .map(|opt| opt.map(|e| self.merge_sidecar(e)))
+        self.bridge.get_event_by_seq(seq)
     }
 
     pub fn get_events_since_cursor(
@@ -241,7 +268,7 @@ impl<S: StorageIO> EventOps<S> {
         limit: i64,
     ) -> Result<Vec<SequencedEvent>, DbError> {
         let events = self.bridge.get_events_since_cursor(cursor, limit)?;
-        self.apply_sidecars_and_filter(events)
+        self.filter_tombstoned(events)
     }
 
     pub fn get_max_seq(&self) -> SequenceNumber {
@@ -253,56 +280,6 @@ impl<S: StorageIO> EventOps<S> {
         since: DateTime<Utc>,
     ) -> Result<Option<SequenceNumber>, DbError> {
         self.bridge.get_min_seq_since(since)
-    }
-
-    pub fn get_events_since_rev(
-        &self,
-        did: &Did,
-        since_rev: &str,
-    ) -> Result<Vec<EventBlocksCids>, DbError> {
-        let user_hash = UserHash::from_did(did.as_str());
-
-        let key = rev_to_seq_key(user_hash, since_rev);
-        let since_seq_u64 = match self.repo_data.get(key).map_err(fjall_to_db)? {
-            Some(bytes) => {
-                let arr: [u8; 8] = bytes
-                    .as_ref()
-                    .try_into()
-                    .map_err(|_| DbError::Query("corrupt rev_to_seq value".to_owned()))?;
-                u64::from_be_bytes(arr)
-            }
-            None => return Ok(Vec::new()),
-        };
-
-        let start_seq = match since_seq_u64.checked_add(1) {
-            Some(s) => s,
-            None => return Ok(Vec::new()),
-        };
-
-        let user_seqs = self.scan_did_events(user_hash, start_seq)?;
-
-        user_seqs
-            .into_iter()
-            .try_fold(Vec::new(), |mut acc, seq_u64| {
-                if self.is_tombstoned(seq_u64)? {
-                    return Ok(acc);
-                }
-                let seq_sn = SequenceNumber::from_raw(
-                    i64::try_from(seq_u64)
-                        .map_err(|_| DbError::Query("seq exceeds i64::MAX".to_owned()))?,
-                );
-                match self.bridge.get_event_by_seq(seq_sn)? {
-                    Some(event) if event.rev.is_some() => {
-                        let merged = self.merge_sidecar(event);
-                        acc.push(EventBlocksCids {
-                            blocks_cids: merged.blocks_cids,
-                            commit_cid: merged.commit_cid,
-                        });
-                        Ok(acc)
-                    }
-                    _ => Ok(acc),
-                }
-            })
     }
 
     pub fn get_blob_cids_since_rev(
@@ -359,23 +336,6 @@ impl<S: StorageIO> EventOps<S> {
             })
     }
 
-    pub fn update_seq_blocks_cids(
-        &self,
-        seq: SequenceNumber,
-        blocks_cids: &[String],
-    ) -> Result<(), DbError> {
-        let seq_u64 = seq
-            .as_u64()
-            .ok_or_else(|| DbError::Query("invalid sequence number".to_owned()))?;
-        let key = seq_meta_key(seq_u64);
-        let value = SeqMetaValue {
-            blocks_cids: blocks_cids.to_vec(),
-        };
-        self.repo_data
-            .insert(key.as_slice(), value.serialize())
-            .map_err(fjall_to_db)
-    }
-
     pub fn delete_sequences_except(
         &self,
         did: &Did,
@@ -413,7 +373,6 @@ impl<S: StorageIO> EventOps<S> {
         seqs.iter().for_each(|&seq| {
             batch.insert(&self.repo_data, seq_tombstone_key(seq).as_slice(), []);
             batch.remove(&self.repo_data, did_events_key(user_hash, seq).as_slice());
-            batch.remove(&self.repo_data, seq_meta_key(seq).as_slice());
         });
         stale_rev_keys.iter().for_each(|key| {
             batch.remove(&self.repo_data, key.as_slice());
@@ -707,29 +666,7 @@ impl<S: StorageIO> EventOps<S> {
         }
     }
 
-    fn merge_sidecar(&self, mut event: SequencedEvent) -> SequencedEvent {
-        let seq_u64 = match event.seq.as_u64() {
-            Some(v) => v,
-            None => return event,
-        };
-
-        let key = seq_meta_key(seq_u64);
-        match self.repo_data.get(key.as_slice()) {
-            Ok(Some(sidecar_bytes)) => {
-                if let Some(sidecar) = SeqMetaValue::deserialize(sidecar_bytes.as_ref()) {
-                    event.blocks_cids = Some(sidecar.blocks_cids);
-                }
-            }
-            Ok(None) => {}
-            Err(e) => {
-                warn!(seq = seq_u64, error = %e, "failed to read seq sidecar, returning event without sidecar merge");
-            }
-        }
-
-        event
-    }
-
-    fn apply_sidecars_and_filter(
+    fn filter_tombstoned(
         &self,
         events: Vec<SequencedEvent>,
     ) -> Result<Vec<SequencedEvent>, DbError> {
@@ -739,7 +676,7 @@ impl<S: StorageIO> EventOps<S> {
                 None => false,
             };
             if !tombstoned {
-                acc.push(self.merge_sidecar(e));
+                acc.push(e);
             }
             Ok(acc)
         })
@@ -832,7 +769,7 @@ mod tests {
             prev_cid: None,
             ops: Some(serde_json::json!([{"action": "create", "path": "app.bsky.feed.post/abc"}])),
             blobs: None,
-            blocks_cids: None,
+            blocks: None,
             prev_data_cid: None,
             rev: Some("3k2abcde".to_owned()),
         };
@@ -850,7 +787,7 @@ mod tests {
     #[test]
     fn insert_and_query_identity_event() {
         let h = setup();
-        let handle = Handle::new("alice.test").unwrap();
+        let handle = Handle::new("olaren.test").unwrap();
 
         let seq = h
             .event_ops
@@ -862,7 +799,7 @@ mod tests {
         assert_eq!(event.event_type, RepoEventType::Identity);
         assert_eq!(
             event.handle.as_ref().map(|h| h.as_str()),
-            Some("alice.test")
+            Some("olaren.test")
         );
     }
 
@@ -888,7 +825,7 @@ mod tests {
 
         let seq = h
             .event_ops
-            .insert_sync_event(&test_did(), &cid, Some("rev1"))
+            .insert_sync_event(&test_did(), &cid, Some("rev1"), b"sync_commit_bytes")
             .unwrap();
         assert!(seq.as_i64() > 0);
 
@@ -906,7 +843,14 @@ mod tests {
 
         let seq = h
             .event_ops
-            .insert_genesis_commit_event(&test_did(), &commit_cid, &mst_cid, "genesis_rev")
+            .insert_genesis_commit_event(
+                &test_did(),
+                &commit_cid,
+                &mst_cid,
+                "genesis_rev",
+                b"genesis_commit_bytes",
+                b"genesis_mst_bytes",
+            )
             .unwrap();
         assert!(seq.as_i64() > 0);
 
@@ -1020,30 +964,6 @@ mod tests {
     }
 
     #[test]
-    fn update_seq_blocks_cids_merges_on_query() {
-        let h = setup();
-        let data = CommitEventData {
-            did: test_did(),
-            event_type: RepoEventType::Commit,
-            commit_cid: Some(test_cid_link()),
-            prev_cid: None,
-            ops: None,
-            blobs: None,
-            blocks_cids: None,
-            prev_data_cid: None,
-            rev: Some("rev1".to_owned()),
-        };
-
-        let seq = h.event_ops.insert_commit_event(&data).unwrap();
-
-        let blocks = vec!["bafyblock1".to_owned(), "bafyblock2".to_owned()];
-        h.event_ops.update_seq_blocks_cids(seq, &blocks).unwrap();
-
-        let event = h.event_ops.get_event_by_seq(seq).unwrap().unwrap();
-        assert_eq!(event.blocks_cids, Some(blocks));
-    }
-
-    #[test]
     fn delete_sequences_except_tombstones_others() {
         let h = setup();
         let did = test_did();
@@ -1058,7 +978,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_a".to_owned()),
             })
@@ -1073,7 +993,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_b".to_owned()),
             })
@@ -1100,7 +1020,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_x".to_owned()),
             })
@@ -1115,7 +1035,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_y".to_owned()),
             })
@@ -1129,56 +1049,6 @@ mod tests {
             .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].seq, seq2);
-    }
-
-    #[test]
-    fn get_events_since_rev() {
-        let h = setup();
-        let did = test_did();
-        let cid = test_cid_link();
-
-        h.event_ops
-            .insert_commit_event(&CommitEventData {
-                did: did.clone(),
-                event_type: RepoEventType::Commit,
-                commit_cid: Some(cid.clone()),
-                prev_cid: None,
-                ops: None,
-                blobs: None,
-                blocks_cids: Some(vec!["block_a".to_owned()]),
-                prev_data_cid: None,
-                rev: Some("rev_1".to_owned()),
-            })
-            .unwrap();
-
-        h.event_ops
-            .insert_commit_event(&CommitEventData {
-                did: did.clone(),
-                event_type: RepoEventType::Commit,
-                commit_cid: Some(cid.clone()),
-                prev_cid: None,
-                ops: None,
-                blobs: None,
-                blocks_cids: Some(vec!["block_b".to_owned()]),
-                prev_data_cid: None,
-                rev: Some("rev_2".to_owned()),
-            })
-            .unwrap();
-
-        let events = h.event_ops.get_events_since_rev(&did, "rev_1").unwrap();
-
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].blocks_cids, Some(vec!["block_b".to_owned()]));
-    }
-
-    #[test]
-    fn get_events_since_rev_unknown_rev_returns_empty() {
-        let h = setup();
-        let events = h
-            .event_ops
-            .get_events_since_rev(&test_did(), "nonexistent_rev")
-            .unwrap();
-        assert!(events.is_empty());
     }
 
     #[test]
@@ -1251,7 +1121,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("r1".to_owned()),
             })
@@ -1263,7 +1133,7 @@ mod tests {
             .unwrap();
         let s4 = h
             .event_ops
-            .insert_sync_event(&did, &cid, Some("r2"))
+            .insert_sync_event(&did, &cid, Some("r2"), b"sync_commit_bytes")
             .unwrap();
 
         let events = h
@@ -1296,7 +1166,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_keep".to_owned()),
             })
@@ -1311,7 +1181,7 @@ mod tests {
 
         let keep_seq = h
             .event_ops
-            .insert_sync_event(&did, &cid, Some("rev_sync"))
+            .insert_sync_event(&did, &cid, Some("rev_sync"), b"sync_commit_bytes")
             .unwrap();
 
         h.event_ops.delete_sequences_except(&did, keep_seq).unwrap();
@@ -1351,7 +1221,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_old".to_owned()),
             })
@@ -1366,7 +1236,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_keep".to_owned()),
             })
@@ -1417,7 +1287,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_a".to_owned()),
             })
@@ -1432,7 +1302,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_b".to_owned()),
             })
@@ -1461,154 +1331,6 @@ mod tests {
     }
 
     #[test]
-    fn delete_sequences_except_cleans_seq_meta_entries() {
-        let h = setup();
-        let did = test_did();
-        let cid = test_cid_link();
-
-        let seq1 = h
-            .event_ops
-            .insert_commit_event(&CommitEventData {
-                did: did.clone(),
-                event_type: RepoEventType::Commit,
-                commit_cid: Some(cid.clone()),
-                prev_cid: None,
-                ops: None,
-                blobs: None,
-                blocks_cids: None,
-                prev_data_cid: None,
-                rev: Some("rev_a".to_owned()),
-            })
-            .unwrap();
-
-        let seq2 = h
-            .event_ops
-            .insert_commit_event(&CommitEventData {
-                did: did.clone(),
-                event_type: RepoEventType::Commit,
-                commit_cid: Some(cid.clone()),
-                prev_cid: None,
-                ops: None,
-                blobs: None,
-                blocks_cids: None,
-                prev_data_cid: None,
-                rev: Some("rev_b".to_owned()),
-            })
-            .unwrap();
-
-        h.event_ops
-            .update_seq_blocks_cids(seq1, &["block1".to_owned()])
-            .unwrap();
-        h.event_ops
-            .update_seq_blocks_cids(seq2, &["block2".to_owned()])
-            .unwrap();
-
-        let stale_key = super::super::event_keys::seq_meta_key(seq1.as_u64().unwrap());
-        assert!(
-            h.event_ops
-                .repo_data
-                .get(stale_key.as_slice())
-                .unwrap()
-                .is_some()
-        );
-
-        h.event_ops.delete_sequences_except(&did, seq2).unwrap();
-
-        assert!(
-            h.event_ops
-                .repo_data
-                .get(stale_key.as_slice())
-                .unwrap()
-                .is_none()
-        );
-
-        let kept_key = super::super::event_keys::seq_meta_key(seq2.as_u64().unwrap());
-        assert!(
-            h.event_ops
-                .repo_data
-                .get(kept_key.as_slice())
-                .unwrap()
-                .is_some()
-        );
-    }
-
-    #[test]
-    fn get_events_since_rev_excludes_events_without_rev() {
-        let h = setup();
-        let did = test_did();
-        let cid = test_cid_link();
-
-        h.event_ops
-            .insert_commit_event(&CommitEventData {
-                did: did.clone(),
-                event_type: RepoEventType::Commit,
-                commit_cid: Some(cid.clone()),
-                prev_cid: None,
-                ops: None,
-                blobs: None,
-                blocks_cids: Some(vec!["block_1".to_owned()]),
-                prev_data_cid: None,
-                rev: Some("rev_1".to_owned()),
-            })
-            .unwrap();
-
-        h.event_ops.insert_identity_event(&did, None).unwrap();
-
-        h.event_ops
-            .insert_account_event(&did, AccountStatus::Active)
-            .unwrap();
-
-        h.event_ops
-            .insert_commit_event(&CommitEventData {
-                did: did.clone(),
-                event_type: RepoEventType::Commit,
-                commit_cid: Some(cid.clone()),
-                prev_cid: None,
-                ops: None,
-                blobs: None,
-                blocks_cids: Some(vec!["block_2".to_owned()]),
-                prev_data_cid: None,
-                rev: Some("rev_2".to_owned()),
-            })
-            .unwrap();
-
-        let events = h.event_ops.get_events_since_rev(&did, "rev_1").unwrap();
-
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].blocks_cids, Some(vec!["block_2".to_owned()]));
-    }
-
-    #[test]
-    fn sync_event_with_rev_appears_in_get_events_since_rev() {
-        let h = setup();
-        let did = test_did();
-        let cid = test_cid_link();
-
-        h.event_ops
-            .insert_commit_event(&CommitEventData {
-                did: did.clone(),
-                event_type: RepoEventType::Commit,
-                commit_cid: Some(cid.clone()),
-                prev_cid: None,
-                ops: None,
-                blobs: None,
-                blocks_cids: None,
-                prev_data_cid: None,
-                rev: Some("rev_a".to_owned()),
-            })
-            .unwrap();
-
-        h.event_ops
-            .insert_sync_event(&did, &cid, Some("rev_b"))
-            .unwrap();
-
-        let events = h.event_ops.get_events_since_rev(&did, "rev_a").unwrap();
-
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].commit_cid, Some(cid));
-    }
-
-    #[test]
     fn recover_sidecar_indexes_no_gap() {
         let h = setup();
         let did = test_did();
@@ -1622,7 +1344,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_1".to_owned()),
             })
@@ -1651,7 +1373,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_1".to_owned()),
             })
@@ -1671,7 +1393,7 @@ mod tests {
             prev_data_cid: None,
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: None,
             handle: None,
             active: None,
             status: None,
@@ -1689,7 +1411,7 @@ mod tests {
             prev_data_cid: None,
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: None,
             handle: None,
             active: None,
             status: None,
@@ -1707,7 +1429,7 @@ mod tests {
             prev_data_cid: None,
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: None,
             handle: None,
             active: None,
             status: None,
@@ -1715,18 +1437,26 @@ mod tests {
         };
         h.event_ops.bridge.insert_event(&crash_event_3).unwrap();
 
+        let user_hash = super::UserHash::from_did(did.as_str());
+        let rev2_key = super::super::event_keys::rev_to_seq_key(user_hash, "rev_2");
         assert!(
             h.event_ops
-                .get_events_since_rev(&did, "rev_2")
+                .repo_data
+                .get(rev2_key.as_slice())
                 .unwrap()
-                .is_empty()
+                .is_none()
         );
 
         let recovered = h.event_ops.recover_sidecar_indexes().unwrap();
         assert_eq!(recovered, 3);
 
-        let events = h.event_ops.get_events_since_rev(&did, "rev_2").unwrap();
-        assert_eq!(events.len(), 1);
+        assert!(
+            h.event_ops
+                .repo_data
+                .get(rev2_key.as_slice())
+                .unwrap()
+                .is_some()
+        );
 
         let cursor = h.event_ops.read_last_applied_cursor().unwrap();
         assert!(cursor.is_some());

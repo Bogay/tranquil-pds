@@ -103,6 +103,33 @@ impl SsoOps {
     ) -> Result<Uuid, MetastoreError> {
         let user_hash = UserHash::from_did(did.as_str());
         let prov_u8 = provider_to_u8(provider);
+
+        let provider_index = by_provider_key(prov_u8, provider_user_id);
+        if self
+            .indexes
+            .get(provider_index.as_slice())
+            .map_err(MetastoreError::Fjall)?
+            .is_some()
+        {
+            return Err(MetastoreError::UniqueViolation(
+                "provider and provider_user_id",
+            ));
+        }
+
+        let did_provider_exists = self
+            .indexes
+            .prefix(identity_user_prefix(user_hash).as_slice())
+            .any(|guard| {
+                guard
+                    .into_inner()
+                    .ok()
+                    .and_then(|(_, val_bytes)| ExternalIdentityValue::deserialize(&val_bytes))
+                    .is_some_and(|v| v.provider == prov_u8)
+            });
+        if did_provider_exists {
+            return Err(MetastoreError::UniqueViolation("did and provider"));
+        }
+
         let id = Uuid::new_v4();
         let now_ms = Utc::now().timestamp_millis();
 
@@ -119,7 +146,6 @@ impl SsoOps {
         };
 
         let primary = identity_key(user_hash, prov_u8, provider_user_id);
-        let provider_index = by_provider_key(prov_u8, provider_user_id);
         let id_index = by_id_key(id);
 
         let provider_index_val = {
@@ -252,7 +278,7 @@ impl SsoOps {
         }
     }
 
-    pub fn delete_external_identity(&self, id: Uuid, _did: &Did) -> Result<bool, MetastoreError> {
+    pub fn delete_external_identity(&self, id: Uuid, did: &Did) -> Result<bool, MetastoreError> {
         let id_idx = by_id_key(id);
         let id_val = match self
             .indexes
@@ -275,6 +301,11 @@ impl SsoOps {
         let provider = raw[8];
         let provider_user_id = std::str::from_utf8(&raw[9..])
             .map_err(|_| MetastoreError::CorruptData("corrupt sso by_id index"))?;
+
+        let expected_hash = UserHash::from_did(did.as_str());
+        if user_hash.raw() != expected_hash.raw() {
+            return Ok(false);
+        }
 
         let primary = identity_key(user_hash, provider, provider_user_id);
         let provider_idx = by_provider_key(provider, provider_user_id);

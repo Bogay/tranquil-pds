@@ -32,6 +32,7 @@ pub struct ParsedCommitFrame {
     pub prev_data: Option<Cid>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ParsedRepoOp {
     pub action: RepoAction,
@@ -223,6 +224,7 @@ impl FirehoseConsumer {
         self.frames.lock().unwrap().drain(..).collect()
     }
 
+    #[allow(dead_code)]
     pub fn all_commits(&self) -> Vec<ParsedCommitFrame> {
         self.frames
             .lock()

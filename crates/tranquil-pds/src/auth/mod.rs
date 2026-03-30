@@ -7,8 +7,7 @@ use crate::api::ApiError;
 use crate::cache::Cache;
 use crate::oauth::scopes::ScopePermissions;
 use crate::types::Did;
-use tranquil_db::UserRepository;
-use tranquil_db_traits::OAuthRepository;
+use tranquil_db_traits::{OAuthRepository, UserRepository};
 
 pub mod account_verified;
 pub mod email_token;

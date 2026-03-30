@@ -1,30 +1,35 @@
+mod compaction;
 mod data_file;
 mod group_commit;
+pub mod hash_index;
 mod hint;
-mod key_index;
 mod manager;
 mod reader;
 mod store;
 mod types;
 
+pub use compaction::CompactionError;
 pub use data_file::{
     BLOCK_FORMAT_VERSION, BLOCK_HEADER_SIZE, BLOCK_MAGIC, BLOCK_RECORD_OVERHEAD, CID_SIZE,
     DataFileReader, DataFileWriter, ReadBlockRecord, ValidBlock, decode_block_record,
     encode_block_record,
 };
-pub use group_commit::{CommitError, CommitRequest, GroupCommitConfig, GroupCommitWriter};
-pub use hint::{
-    HINT_FILE_EXTENSION, HINT_RECORD_SIZE, HintFileReader, HintFileWriter, ReadHintRecord,
-    RebuildError, decode_hint_record, hint_file_path, rebuild_index_from_data_files,
-    rebuild_index_from_hints,
+pub use group_commit::{
+    ActiveFileSet, CommitError, CommitRequest, FileIdAllocator, GroupCommitConfig,
+    GroupCommitWriter, ShardHintPositions,
 };
-pub use key_index::{KeyIndex, KeyIndexError, KeyIndexOpenOutcome};
+pub use hint::{
+    HINT_FILE_EXTENSION, HINT_RECORD_SIZE, HintFileReader, HintFileWriter, HintIndex,
+    ReadHintRecord, RebuildError, decode_hint_record, hint_file_path, scan_hints_to_memory,
+};
 pub use manager::{DEFAULT_MAX_FILE_SIZE, DataFileManager};
 pub use reader::{BlockStoreReader, ReadError};
-pub use store::{BlockStoreConfig, TranquilBlockStore};
+pub use store::QuiesceGuard;
+pub use store::{BlockStoreConfig, DEFAULT_SHARD_COUNT, TranquilBlockStore};
 pub use types::{
-    BlockLength, BlockLocation, BlockOffset, DataFileId, HintOffset, IndexEntry, MAX_BLOCK_SIZE,
-    RefCount, WriteCursor,
+    BlockLength, BlockLocation, BlockOffset, BlockstoreSnapshot, CidBytes, CollectionResult,
+    CommitEpoch, CompactionResult, DataFileId, EpochCounter, HintOffset, IndexEntry, LivenessInfo,
+    MAX_BLOCK_SIZE, RefCount, ShardId, WallClockMs, WriteCursor,
 };
 
 use std::io;
@@ -40,7 +45,7 @@ impl BlocksSynced {
     }
 }
 
-pub(crate) fn list_files_by_extension<S: StorageIO>(
+pub fn list_files_by_extension<S: StorageIO>(
     io: &S,
     dir: &Path,
     extension: &str,

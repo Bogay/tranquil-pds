@@ -24,9 +24,8 @@ use crate::eventlog::EventLogBridge;
 use crate::io::StorageIO;
 
 use tranquil_db_traits::{
-    ApplyCommitError, ApplyCommitInput, ApplyCommitResult, BrokenGenesisCommit, ImportBlock,
-    ImportRecord, ImportRepoError, RepoEventType, SequenceNumber, UserNeedingRecordBlobsBackfill,
-    UserWithoutBlocks,
+    ApplyCommitError, ApplyCommitInput, ApplyCommitResult, ImportBlock, ImportRecord,
+    ImportRepoError, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
 };
 use tranquil_types::{AtUri, CidLink, Did};
 
@@ -85,7 +84,7 @@ pub struct CommitOps<S: StorageIO> {
     blockstore: Option<TranquilBlockStore>,
 }
 
-impl<S: StorageIO> CommitOps<S> {
+impl<S: StorageIO + 'static> CommitOps<S> {
     pub fn new(
         db: Database,
         repo_data: Keyspace,
@@ -382,46 +381,6 @@ impl<S: StorageIO> CommitOps<S> {
         )
     }
 
-    pub fn get_broken_genesis_commits(&self) -> Result<Vec<BrokenGenesisCommit>, MetastoreError> {
-        const PAGE_SIZE: usize = 4096;
-        self.collect_broken_genesis_page(SequenceNumber::ZERO, Vec::new(), PAGE_SIZE)
-    }
-
-    fn collect_broken_genesis_page(
-        &self,
-        cursor: SequenceNumber,
-        acc: Vec<BrokenGenesisCommit>,
-        page_size: usize,
-    ) -> Result<Vec<BrokenGenesisCommit>, MetastoreError> {
-        let limit = i64::try_from(page_size).unwrap_or(i64::MAX);
-        let events = self
-            .event_ops
-            .get_events_since_seq(cursor, Some(limit))
-            .map_err(|_| MetastoreError::CorruptData("failed to read events"))?;
-
-        let page_len = events.len();
-        let page_high_seq = events.last().map(|e| e.seq).unwrap_or(cursor);
-
-        let results = events.into_iter().fold(acc, |mut results, e| {
-            if e.event_type == RepoEventType::Commit
-                && e.prev_cid.is_none()
-                && e.commit_cid.is_none()
-            {
-                results.push(BrokenGenesisCommit {
-                    seq: e.seq,
-                    did: e.did,
-                    commit_cid: e.commit_cid,
-                });
-            }
-            results
-        });
-
-        match page_len < page_size {
-            true => Ok(results),
-            false => self.collect_broken_genesis_page(page_high_seq, results, page_size),
-        }
-    }
-
     pub fn get_users_without_blocks(&self) -> Result<Vec<UserWithoutBlocks>, MetastoreError> {
         const MAX_RESULTS: usize = 10_000;
 
@@ -518,7 +477,7 @@ mod tests {
     use crate::eventlog::{EventLog, EventLogConfig};
     use crate::io::RealIO;
     use crate::metastore::{Metastore, MetastoreConfig};
-    use tranquil_db_traits::CommitEventData;
+    use tranquil_db_traits::{CommitEventData, RepoEventType, SequenceNumber};
     use tranquil_types::{Handle, Nsid, Rkey};
 
     struct TestHarness {
@@ -603,7 +562,7 @@ mod tests {
     fn apply_commit_updates_records_and_meta() {
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id, did, root_cid) = create_test_repo(&h, "alice", 1);
+        let (user_id, did, root_cid) = create_test_repo(&h, "olaren", 1);
 
         let new_root = test_cid_link(2);
         let record_cid = test_cid_link(3);
@@ -633,7 +592,7 @@ mod tests {
                 prev_cid: Some(root_cid.clone()),
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev1".to_string()),
             },
@@ -660,7 +619,7 @@ mod tests {
     fn apply_commit_cas_rejects_stale_root() {
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id, did, _root_cid) = create_test_repo(&h, "bob", 10);
+        let (user_id, did, _root_cid) = create_test_repo(&h, "teq", 10);
 
         let stale_root = test_cid_link(99);
         let new_root = test_cid_link(11);
@@ -678,13 +637,13 @@ mod tests {
             backlinks_to_add: vec![],
             backlinks_to_remove: vec![],
             commit_event: CommitEventData {
-                did: test_did("bob"),
+                did: test_did("teq"),
                 event_type: RepoEventType::Commit,
                 commit_cid: None,
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev1".to_string()),
             },
@@ -704,7 +663,7 @@ mod tests {
 
         let input = ApplyCommitInput {
             user_id: Uuid::new_v4(),
-            did: test_did("nobody"),
+            did: test_did("nonexistent"),
             expected_root_cid: None,
             new_root_cid: test_cid_link(1),
             new_rev: "rev1".to_string(),
@@ -715,13 +674,13 @@ mod tests {
             backlinks_to_add: vec![],
             backlinks_to_remove: vec![],
             commit_event: CommitEventData {
-                did: test_did("nobody"),
+                did: test_did("nonexistent"),
                 event_type: RepoEventType::Commit,
                 commit_cid: None,
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: None,
             },
@@ -737,7 +696,7 @@ mod tests {
     fn apply_commit_record_deletes() {
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id, did, root_cid) = create_test_repo(&h, "carol", 20);
+        let (user_id, did, root_cid) = create_test_repo(&h, "nel", 20);
 
         let mid_root = test_cid_link(21);
         let record_cid = test_cid_link(22);
@@ -767,7 +726,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev1".to_string()),
             },
@@ -805,7 +764,7 @@ mod tests {
                 prev_cid: Some(mid_root.clone()),
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev2".to_string()),
             },
@@ -825,7 +784,7 @@ mod tests {
     fn apply_commit_event_visible_after_commit() {
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id, did, root_cid) = create_test_repo(&h, "dave", 30);
+        let (user_id, did, root_cid) = create_test_repo(&h, "lyna", 30);
 
         let new_root = test_cid_link(31);
         let input = ApplyCommitInput {
@@ -847,7 +806,7 @@ mod tests {
                 prev_cid: Some(root_cid.clone()),
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev1".to_string()),
             },
@@ -866,7 +825,7 @@ mod tests {
     fn import_repo_data_inserts_records() {
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id, _did, root_cid) = create_test_repo(&h, "eve", 40);
+        let (user_id, _did, root_cid) = create_test_repo(&h, "bailey", 40);
 
         let collection = Nsid::from("app.bsky.feed.post".to_string());
         let rkey = Rkey::from("3k2import".to_string());
@@ -897,7 +856,7 @@ mod tests {
     fn import_repo_data_cas_rejects_stale_root() {
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id, _did, _root_cid) = create_test_repo(&h, "frank", 50);
+        let (user_id, _did, _root_cid) = create_test_repo(&h, "olaren", 50);
 
         let stale = test_cid_link(99);
         let result = ops.import_repo_data(user_id, &[], &[], Some(&stale));
@@ -908,8 +867,8 @@ mod tests {
     fn insert_record_blobs_and_backfill_query() {
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id_a, did_a, _) = create_test_repo(&h, "grace", 60);
-        let (user_id_b, _did_b, _) = create_test_repo(&h, "henry", 61);
+        let (user_id_a, did_a, _) = create_test_repo(&h, "teq", 60);
+        let (user_id_b, _did_b, _) = create_test_repo(&h, "nel", 61);
 
         let needing = ops.get_users_needing_record_blobs_backfill(100).unwrap();
         assert_eq!(needing.len(), 2);
@@ -928,8 +887,8 @@ mod tests {
     fn get_users_without_blocks_returns_users_with_no_blocks() {
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id_a, did_a, root_a) = create_test_repo(&h, "ivan", 70);
-        let (user_id_b, _did_b, _root_b) = create_test_repo(&h, "julia", 71);
+        let (user_id_a, did_a, root_a) = create_test_repo(&h, "lyna", 70);
+        let (user_id_b, _did_b, _root_b) = create_test_repo(&h, "bailey", 71);
 
         let new_root = test_cid_link(72);
         let input = ApplyCommitInput {
@@ -951,7 +910,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev1".to_string()),
             },
@@ -989,7 +948,7 @@ mod tests {
                 prev_cid: None,
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev_force".to_string()),
             },
@@ -1041,7 +1000,7 @@ mod tests {
                 prev_cid: Some(root_cid.clone()),
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev1".to_string()),
             },
@@ -1085,7 +1044,7 @@ mod tests {
                 prev_cid: Some(mid_root.clone()),
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev2".to_string()),
             },
@@ -1179,7 +1138,7 @@ mod tests {
                     prev_cid: Some(initial_root.clone()),
                     ops: None,
                     blobs: None,
-                    blocks_cids: None,
+                    blocks: None,
                     prev_data_cid: None,
                     rev: Some("rev1".to_string()),
                 },
@@ -1305,7 +1264,7 @@ mod tests {
                 prev_cid: Some(initial_root.clone()),
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev1".to_string()),
             };
@@ -1432,7 +1391,7 @@ mod tests {
                 prev_cid: Some(root_cid.clone()),
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev1".to_string()),
             },
@@ -1479,7 +1438,7 @@ mod tests {
                 prev_cid: Some(mid_root.clone()),
                 ops: None,
                 blobs: None,
-                blocks_cids: None,
+                blocks: None,
                 prev_data_cid: None,
                 rev: Some("rev2".to_string()),
             },

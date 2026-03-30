@@ -175,7 +175,6 @@ impl BacklinkOps {
                     )?;
 
                     let uri: AtUri = val.source_uri.into();
-                    let is_self = uri.as_str() == bl.uri.as_str();
                     let matches_collection = uri.collection().is_some_and(|c| c == collection_str);
                     let matches_path = match discriminant_to_path(val.path) {
                         Some(p) => p == bl.path,
@@ -188,11 +187,7 @@ impl BacklinkOps {
                             false
                         }
                     };
-                    if !is_self
-                        && matches_collection
-                        && matches_path
-                        && !seen.contains(uri.as_str())
-                    {
+                    if matches_collection && matches_path && !seen.contains(uri.as_str()) {
                         seen.insert(uri.as_str().to_owned());
                         conflicts.push(uri);
                     }
@@ -263,9 +258,9 @@ mod tests {
     fn add_and_query_by_target() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (_user_id, user_hash) = create_repo(&h, "alice", 1);
+        let (_user_id, user_hash) = create_repo(&h, "olaren", 1);
 
-        let uri = AtUri::from_parts("did:plc:alice", "app.bsky.feed.like", "3k2abc");
+        let uri = AtUri::from_parts("did:plc:olaren", "app.bsky.feed.like", "3k2abc");
         let backlinks = vec![Backlink {
             uri: uri.clone(),
             path: BacklinkPath::SubjectUri,
@@ -290,9 +285,9 @@ mod tests {
     fn remove_by_uri_deletes_both_indexes() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (_user_id, user_hash) = create_repo(&h, "bob", 2);
+        let (_user_id, user_hash) = create_repo(&h, "teq", 2);
 
-        let uri = AtUri::from_parts("did:plc:bob", "app.bsky.graph.follow", "3k2fol");
+        let uri = AtUri::from_parts("did:plc:teq", "app.bsky.graph.follow", "3k2fol");
         let backlinks = vec![Backlink {
             uri: uri.clone(),
             path: BacklinkPath::Subject,
@@ -335,11 +330,11 @@ mod tests {
     fn remove_by_repo_deletes_all_user_backlinks() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (_user_id, user_hash) = create_repo(&h, "carol", 3);
+        let (_user_id, user_hash) = create_repo(&h, "nel", 3);
 
         let backlinks: Vec<Backlink> = (0..5)
             .map(|i| Backlink {
-                uri: AtUri::from_parts("did:plc:carol", "app.bsky.feed.like", &format!("3k2r{i}")),
+                uri: AtUri::from_parts("did:plc:nel", "app.bsky.feed.like", &format!("3k2r{i}")),
                 path: BacklinkPath::SubjectUri,
                 link_to: format!("at://did:plc:target{i}/app.bsky.feed.post/3k2p{i}"),
             })
@@ -376,10 +371,10 @@ mod tests {
     fn get_backlink_conflicts_finds_matching() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (user_id, user_hash) = create_repo(&h, "dave", 4);
+        let (user_id, user_hash) = create_repo(&h, "lyna", 4);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:dave", "app.bsky.feed.like", "3k2old"),
+            uri: AtUri::from_parts("did:plc:lyna", "app.bsky.feed.like", "3k2old"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         };
@@ -390,7 +385,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:dave", "app.bsky.feed.like", "3k2new"),
+            uri: AtUri::from_parts("did:plc:lyna", "app.bsky.feed.like", "3k2new"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         }];
@@ -403,7 +398,7 @@ mod tests {
         assert_eq!(conflicts.len(), 1);
         assert_eq!(
             conflicts[0].as_str(),
-            "at://did:plc:dave/app.bsky.feed.like/3k2old"
+            "at://did:plc:lyna/app.bsky.feed.like/3k2old"
         );
     }
 
@@ -411,10 +406,10 @@ mod tests {
     fn get_backlink_conflicts_ignores_different_collection() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (user_id, user_hash) = create_repo(&h, "eve", 5);
+        let (user_id, user_hash) = create_repo(&h, "bailey", 5);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:eve", "app.bsky.feed.like", "3k2old"),
+            uri: AtUri::from_parts("did:plc:bailey", "app.bsky.feed.like", "3k2old"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         };
@@ -425,7 +420,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:eve", "app.bsky.feed.repost", "3k2new"),
+            uri: AtUri::from_parts("did:plc:bailey", "app.bsky.feed.repost", "3k2new"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         }];
@@ -442,10 +437,10 @@ mod tests {
     fn get_backlink_conflicts_ignores_different_path() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (user_id, user_hash) = create_repo(&h, "frank", 6);
+        let (user_id, user_hash) = create_repo(&h, "olaren", 6);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:frank", "app.bsky.graph.follow", "3k2old"),
+            uri: AtUri::from_parts("did:plc:olaren", "app.bsky.graph.follow", "3k2old"),
             path: BacklinkPath::Subject,
             link_to: "did:plc:target".to_string(),
         };
@@ -456,7 +451,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:frank", "app.bsky.graph.follow", "3k2new"),
+            uri: AtUri::from_parts("did:plc:olaren", "app.bsky.graph.follow", "3k2new"),
             path: BacklinkPath::SubjectUri,
             link_to: "did:plc:target".to_string(),
         }];
@@ -473,11 +468,11 @@ mod tests {
     fn get_backlink_conflicts_ignores_other_users() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (_user_id_a, user_hash_a) = create_repo(&h, "grace", 7);
-        let (user_id_b, _user_hash_b) = create_repo(&h, "henry", 8);
+        let (_user_id_a, user_hash_a) = create_repo(&h, "teq", 7);
+        let (user_id_b, _user_hash_b) = create_repo(&h, "nel", 8);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:grace", "app.bsky.feed.like", "3k2old"),
+            uri: AtUri::from_parts("did:plc:teq", "app.bsky.feed.like", "3k2old"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:target/app.bsky.feed.post/3k2p1".to_string(),
         };
@@ -488,7 +483,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:henry", "app.bsky.feed.like", "3k2new"),
+            uri: AtUri::from_parts("did:plc:nel", "app.bsky.feed.like", "3k2new"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:target/app.bsky.feed.post/3k2p1".to_string(),
         }];
@@ -502,13 +497,13 @@ mod tests {
     }
 
     #[test]
-    fn get_backlink_conflicts_excludes_self_match() {
+    fn get_backlink_conflicts_includes_self_match() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (user_id, user_hash) = create_repo(&h, "luna", 12);
+        let (user_id, user_hash) = create_repo(&h, "lyna", 12);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:luna", "app.bsky.feed.like", "3k2same"),
+            uri: AtUri::from_parts("did:plc:lyna", "app.bsky.feed.like", "3k2same"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         };
@@ -519,7 +514,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:luna", "app.bsky.feed.like", "3k2same"),
+            uri: AtUri::from_parts("did:plc:lyna", "app.bsky.feed.like", "3k2same"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         }];
@@ -529,14 +524,14 @@ mod tests {
             .get_backlink_conflicts(user_id, &collection, &proposed)
             .unwrap();
 
-        assert!(conflicts.is_empty());
+        assert_eq!(conflicts.len(), 1);
     }
 
     #[test]
     fn empty_backlinks_returns_empty_conflicts() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (user_id, _user_hash) = create_repo(&h, "ivan", 9);
+        let (user_id, _user_hash) = create_repo(&h, "bailey", 9);
 
         let collection = Nsid::from("app.bsky.feed.like".to_string());
         let conflicts = ops
@@ -549,15 +544,15 @@ mod tests {
     fn remove_by_uri_only_removes_matching_rkey() {
         let h = setup();
         let ops = h.metastore.backlink_ops();
-        let (_user_id, user_hash) = create_repo(&h, "julia", 10);
+        let (_user_id, user_hash) = create_repo(&h, "bailey", 10);
 
         let bl1 = Backlink {
-            uri: AtUri::from_parts("did:plc:julia", "app.bsky.feed.like", "3k2aaa"),
+            uri: AtUri::from_parts("did:plc:bailey", "app.bsky.feed.like", "3k2aaa"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:t1/app.bsky.feed.post/p1".to_string(),
         };
         let bl2 = Backlink {
-            uri: AtUri::from_parts("did:plc:julia", "app.bsky.feed.like", "3k2bbb"),
+            uri: AtUri::from_parts("did:plc:bailey", "app.bsky.feed.like", "3k2bbb"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:t2/app.bsky.feed.post/p2".to_string(),
         };

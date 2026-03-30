@@ -6,6 +6,8 @@ pub mod fjall_store;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_fjall;
 
 pub use client::{
     DeviceName, InvalidDeviceName, InvalidSignalUsername, LinkGeneration, LinkResult, MessageBody,

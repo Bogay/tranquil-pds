@@ -8,7 +8,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::debug;
-use tranquil_db::{ImportBlock, ImportRecord, ImportRepoError, RepoRepository};
+use tranquil_db_traits::{ImportBlock, ImportRecord, ImportRepoError, RepoRepository};
 use tranquil_types::CidLink;
 use uuid::Uuid;
 

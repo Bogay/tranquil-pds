@@ -580,6 +580,30 @@ impl StorageIO for SimulatedIO {
     }
 }
 
+pub fn sim_seed_count() -> u64 {
+    std::env::var("TRANQUIL_SIM_SEEDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1_000)
+}
+
+pub fn sim_single_seed() -> Option<u64> {
+    std::env::var("TRANQUIL_SIM_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+}
+
+pub fn sim_seed_range() -> std::ops::Range<u64> {
+    match sim_single_seed() {
+        Some(seed) => seed..seed + 1,
+        None => 0..sim_seed_count(),
+    }
+}
+
+pub fn sim_proptest_cases() -> u32 {
+    u32::try_from(sim_seed_count()).unwrap_or(u32::MAX)
+}
+
 fn splitmix64(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9e3779b97f4a7c15);
     x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);

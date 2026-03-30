@@ -13,9 +13,22 @@ fail-fast = false
 test-threads = "num-cpus"
 slow-timeout = { period = "30s", terminate-after = 4 }
 
+[profile.sim-pr]
+retries = 0
+fail-fast = true
+test-threads = "num-cpus"
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+[profile.sim-nightly]
+retries = 0
+fail-fast = false
+test-threads = "num-cpus"
+slow-timeout = { period = "300s", terminate-after = 2 }
+
 [test-groups]
 serial-env-tests = { max-threads = 1 }
 heavy-load-tests = { max-threads = 4 }
+io-heavy-sim = { max-threads = 2 }
 
 [[profile.default.overrides]]
 filter = "test(/import_with_verification/) | test(/plc_migration/)"
@@ -44,6 +57,20 @@ test-group = "heavy-load-tests"
 [[profile.default.overrides]]
 filter = "binary(repo_lifecycle)"
 test-group = "heavy-load-tests"
+
+[[profile.default.overrides]]
+filter = "binary(sim_soak)"
+slow-timeout = { period = "300s", terminate-after = 10 }
+test-group = "io-heavy-sim"
+
+[[profile.default.overrides]]
+filter = "binary(metastore_crash) | binary(sim_cross_store) | binary(sim_gc_concurrent) | binary(sim_reachability) | binary(sim_eventlog) | test(/sim_/)"
+slow-timeout = { period = "120s", terminate-after = 8 }
+test-group = "io-heavy-sim"
+
+[[profile.default.overrides]]
+filter = "test(/test_scale_/) | test(/full_backup_and_restore/)"
+slow-timeout = { period = "120s", terminate-after = 4 }
 
 [[profile.ci.overrides]]
 filter = "test(/import_with_verification/) | test(/plc_migration/)"

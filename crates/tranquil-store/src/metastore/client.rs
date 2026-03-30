@@ -6,26 +6,25 @@ use chrono::{DateTime, Utc};
 use tokio::sync::oneshot;
 use tranquil_db_traits::{
     AccountSearchResult, AccountStatus, AdminAccountInfo, ApplyCommitError, ApplyCommitInput,
-    ApplyCommitResult, Backlink, BrokenGenesisCommit, CommitEventData, CommsChannel, CommsType,
+    ApplyCommitResult, Backlink, CommitEventData, CommsChannel, CommsType,
     CompletePasskeySetupInput, CreateAccountError, CreateDelegatedAccountInput,
     CreatePasskeyAccountInput, CreatePasswordAccountInput, CreatePasswordAccountResult,
     CreateSsoAccountInput, DbError, DeletionRequest, DeletionRequestWithToken, DidWebOverrides,
-    EventBlocksCids, ImportBlock, ImportRecord, ImportRepoError, InviteCodeError, InviteCodeInfo,
-    InviteCodeRow, InviteCodeSortOrder, InviteCodeUse, MigrationReactivationError,
-    MigrationReactivationInput, NotificationHistoryRow, NotificationPrefs, OAuthTokenWithUser,
-    PasswordResetResult, PlcTokenInfo, QueuedComms, ReactivatedAccountInfo,
-    RecoverPasskeyAccountInput, RecoverPasskeyAccountResult, RepoAccountInfo, RepoInfo,
-    RepoListItem, RepoWithoutRev, ReservedSigningKey, ReservedSigningKeyFull,
-    ScheduledDeletionAccount, ScopePreference, SequenceNumber, SequencedEvent, StoredBackupCode,
-    StoredPasskey, TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus, UserAuthInfo,
-    UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo, UserForDeletion,
-    UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery, UserForPasskeySetup,
-    UserForRecovery, UserForVerification, UserIdAndHandle, UserIdAndPasswordHash,
-    UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref,
-    UserLoginCheck, UserLoginFull, UserLoginInfo, UserNeedingRecordBlobsBackfill, UserPasswordInfo,
-    UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus,
-    UserVerificationInfo, UserWithKey, UserWithoutBlocks, ValidatedInviteCode,
-    WebauthnChallengeType,
+    ImportBlock, ImportRecord, ImportRepoError, InviteCodeError, InviteCodeInfo, InviteCodeRow,
+    InviteCodeSortOrder, InviteCodeUse, MigrationReactivationError, MigrationReactivationInput,
+    NotificationHistoryRow, NotificationPrefs, OAuthTokenWithUser, PasswordResetResult,
+    PlcTokenInfo, PruneCount, QueuedComms, ReactivatedAccountInfo, RecoverPasskeyAccountInput,
+    RecoverPasskeyAccountResult, RepoAccountInfo, RepoInfo, RepoListItem, RepoWithoutRev,
+    ReservedSigningKey, ReservedSigningKeyFull, ScheduledDeletionAccount, ScopePreference,
+    SequenceNumber, SequencedEvent, StoredBackupCode, StoredPasskey, TokenFamilyId, TotpRecord,
+    TotpRecordState, User2faStatus, UserAuthInfo, UserCommsPrefs, UserConfirmSignup,
+    UserDidWebInfo, UserEmailInfo, UserForDeletion, UserForDidDoc, UserForDidDocBuild,
+    UserForPasskeyRecovery, UserForPasskeySetup, UserForRecovery, UserForVerification,
+    UserIdAndHandle, UserIdAndPasswordHash, UserIdHandleEmail, UserInfoForAuth, UserKeyInfo,
+    UserKeyWithId, UserLegacyLoginPref, UserLoginCheck, UserLoginFull, UserLoginInfo,
+    UserNeedingRecordBlobsBackfill, UserPasswordInfo, UserResendVerification, UserResetCodeInfo,
+    UserRow, UserSessionInfo, UserStatus, UserVerificationInfo, UserWithKey, UserWithoutBlocks,
+    ValidatedInviteCode, WebauthnChallengeType,
 };
 use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
@@ -40,6 +39,7 @@ use super::handler::{
     SsoRequest, UserBlockRequest, UserRequest,
 };
 use super::keys::UserHash;
+use crate::eventlog::{EventLog, TimestampMicros};
 use crate::io::StorageIO;
 
 async fn recv<T>(rx: oneshot::Receiver<Result<T, DbError>>) -> Result<T, DbError> {
@@ -88,6 +88,7 @@ async fn recv_migration_reactivation(
 
 pub struct MetastoreClient<S: StorageIO> {
     pool: Arc<HandlerPool>,
+    event_log: Arc<EventLog<S>>,
     _phantom: PhantomData<S>,
 }
 
@@ -95,21 +96,27 @@ impl<S: StorageIO> Clone for MetastoreClient<S> {
     fn clone(&self) -> Self {
         Self {
             pool: Arc::clone(&self.pool),
+            event_log: Arc::clone(&self.event_log),
             _phantom: PhantomData,
         }
     }
 }
 
 impl<S: StorageIO> MetastoreClient<S> {
-    pub fn new(pool: Arc<HandlerPool>) -> Self {
+    pub fn new(pool: Arc<HandlerPool>, event_log: Arc<EventLog<S>>) -> Self {
         Self {
             pool,
+            event_log,
             _phantom: PhantomData,
         }
     }
 
     pub fn pool(&self) -> &Arc<HandlerPool> {
         &self.pool
+    }
+
+    pub fn event_log(&self) -> &Arc<EventLog<S>> {
+        &self.event_log
     }
 
     pub async fn create_repo_full(
@@ -467,20 +474,6 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         recv(rx).await
     }
 
-    async fn find_unreferenced_blocks(
-        &self,
-        candidate_cids: &[Vec<u8>],
-    ) -> Result<Vec<Vec<u8>>, DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool.send(MetastoreRequest::UserBlock(
-            UserBlockRequest::FindUnreferencedBlocks {
-                candidate_cids: candidate_cids.to_vec(),
-                tx,
-            },
-        ))?;
-        recv(rx).await
-    }
-
     async fn insert_commit_event(&self, data: &CommitEventData) -> Result<SequenceNumber, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
@@ -526,6 +519,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         did: &Did,
         commit_cid: &CidLink,
         rev: Option<&str>,
+        commit_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
@@ -533,6 +527,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
                 did: did.clone(),
                 commit_cid: commit_cid.clone(),
                 rev: rev.map(str::to_owned),
+                commit_bytes: commit_bytes.to_vec(),
                 tx,
             }))?;
         recv(rx).await
@@ -544,6 +539,8 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
         rev: &str,
+        commit_bytes: &[u8],
+        mst_root_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Event(
@@ -552,24 +549,11 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
                 commit_cid: commit_cid.clone(),
                 mst_root_cid: mst_root_cid.clone(),
                 rev: rev.to_string(),
+                commit_bytes: commit_bytes.to_vec(),
+                mst_root_bytes: mst_root_bytes.to_vec(),
                 tx,
             },
         ))?;
-        recv(rx).await
-    }
-
-    async fn update_seq_blocks_cids(
-        &self,
-        seq: SequenceNumber,
-        blocks_cids: &[String],
-    ) -> Result<(), DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool
-            .send(MetastoreRequest::Event(EventRequest::UpdateSeqBlocksCids {
-                seq,
-                blocks_cids: blocks_cids.to_vec(),
-                tx,
-            }))?;
         recv(rx).await
     }
 
@@ -587,6 +571,34 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
             },
         ))?;
         recv(rx).await
+    }
+
+    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<PruneCount, DbError> {
+        let cutoff_micros = cutoff.timestamp_micros();
+        if cutoff_micros < 0 {
+            return Err(DbError::Query(format!(
+                "eventlog retention: refusing pre-epoch cutoff {cutoff_micros} us (would prune entire log)"
+            )));
+        }
+        let now_micros = Utc::now().timestamp_micros();
+        let now_us = u64::try_from(now_micros).map_err(|_| {
+            DbError::Query(format!(
+                "eventlog retention: current wall time {now_micros} us out of u64 range"
+            ))
+        })?;
+        let cutoff_us = u64::try_from(cutoff_micros).map_err(|_| {
+            DbError::Query(format!(
+                "eventlog retention: cutoff {cutoff_micros} us out of u64 range"
+            ))
+        })?;
+        let max_age = std::time::Duration::from_micros(now_us.saturating_sub(cutoff_us));
+        let event_log = Arc::clone(&self.event_log);
+        let now = TimestampMicros::new(now_us);
+        tokio::task::spawn_blocking(move || event_log.run_retention_at(now, max_age))
+            .await
+            .map_err(|e| DbError::Connection(format!("retention task panicked: {e}")))?
+            .map(|n| PruneCount::Segments(n as u64))
+            .map_err(|e| DbError::Query(format!("eventlog retention failed: {e}")))
     }
 
     async fn get_max_seq(&self) -> Result<SequenceNumber, DbError> {
@@ -674,21 +686,6 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         recv(rx).await
     }
 
-    async fn get_events_since_rev(
-        &self,
-        did: &Did,
-        since_rev: &str,
-    ) -> Result<Vec<EventBlocksCids>, DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool
-            .send(MetastoreRequest::Event(EventRequest::GetEventsSinceRev {
-                did: did.clone(),
-                since_rev: since_rev.to_string(),
-                tx,
-            }))?;
-        recv(rx).await
-    }
-
     async fn list_repos_paginated(
         &self,
         cursor_did: Option<&Did>,
@@ -762,14 +759,6 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
             )))
             .map_err(|e| ApplyCommitError::Database(e.to_string()))?;
         recv_commit(rx).await
-    }
-
-    async fn get_broken_genesis_commits(&self) -> Result<Vec<BrokenGenesisCommit>, DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool.send(MetastoreRequest::Commit(Box::new(
-            CommitRequest::GetBrokenGenesisCommits { tx },
-        )))?;
-        recv(rx).await
     }
 
     async fn get_users_without_blocks(&self) -> Result<Vec<UserWithoutBlocks>, DbError> {

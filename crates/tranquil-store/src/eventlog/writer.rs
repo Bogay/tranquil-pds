@@ -8,9 +8,9 @@ use crate::io::StorageIO;
 use super::manager::SegmentManager;
 use super::segment_file::{SEGMENT_HEADER_SIZE, SegmentWriter, ValidEvent};
 use super::segment_index::{DEFAULT_INDEX_INTERVAL, SegmentIndex, rebuild_from_segment};
+use super::sidecar::build_sidecar_from_segment;
 use super::types::{
-    DidHash, EventSequence, EventTypeTag, MAX_EVENT_PAYLOAD, SegmentId, SegmentOffset,
-    TimestampMicros,
+    DidHash, EventSequence, EventTypeTag, SegmentId, SegmentOffset, TimestampMicros,
 };
 
 #[derive(Debug)]
@@ -28,14 +28,20 @@ pub struct EventLogWriter<S: StorageIO> {
     next_seq: EventSequence,
     synced_seq: EventSequence,
     index_interval: usize,
+    max_payload: u32,
     event_count_in_segment: usize,
     last_event_offset: Option<SegmentOffset>,
     pending_events: Vec<ValidEvent>,
 }
 
 impl<S: StorageIO> EventLogWriter<S> {
-    pub fn open(manager: Arc<SegmentManager<S>>, index_interval: usize) -> io::Result<Self> {
+    pub fn open(
+        manager: Arc<SegmentManager<S>>,
+        index_interval: usize,
+        max_payload: u32,
+    ) -> io::Result<Self> {
         assert!(index_interval > 0, "index_interval must be positive");
+        assert!(max_payload > 0, "max_payload must be positive");
 
         let segments = manager.list_segments()?;
 
@@ -45,8 +51,11 @@ impl<S: StorageIO> EventLogWriter<S> {
                 SegmentId::new(1),
                 EventSequence::new(1),
                 index_interval,
+                max_payload,
             ),
-            Some(&last_id) => Self::recover_active(manager, &segments, last_id, index_interval),
+            Some(&last_id) => {
+                Self::recover_active(manager, &segments, last_id, index_interval, max_payload)
+            }
         }
     }
 
@@ -55,10 +64,11 @@ impl<S: StorageIO> EventLogWriter<S> {
         segment_id: SegmentId,
         next_seq: EventSequence,
         index_interval: usize,
+        max_payload: u32,
     ) -> io::Result<Self> {
         let fd = manager.open_for_append(segment_id)?;
         manager.io().truncate(fd, 0)?;
-        let writer = SegmentWriter::new(manager.io(), fd, segment_id, next_seq)?;
+        let writer = SegmentWriter::new(manager.io(), fd, segment_id, next_seq, max_payload)?;
         writer.sync(manager.io())?;
         manager.io().sync_dir(manager.segments_dir())?;
 
@@ -69,6 +79,7 @@ impl<S: StorageIO> EventLogWriter<S> {
             next_seq,
             synced_seq: next_seq.prev_or_before_all(),
             index_interval,
+            max_payload,
             event_count_in_segment: 0,
             last_event_offset: None,
             pending_events: Vec::new(),
@@ -80,6 +91,7 @@ impl<S: StorageIO> EventLogWriter<S> {
         segments: &[SegmentId],
         active_id: SegmentId,
         index_interval: usize,
+        max_payload: u32,
     ) -> io::Result<Self> {
         let fd = manager.open_for_append(active_id)?;
 
@@ -87,6 +99,7 @@ impl<S: StorageIO> EventLogWriter<S> {
             manager.io(),
             fd,
             index_interval,
+            max_payload,
         ) {
             Ok(result) => result,
             Err(rebuild_err) => {
@@ -94,13 +107,15 @@ impl<S: StorageIO> EventLogWriter<S> {
                 if file_size <= SEGMENT_HEADER_SIZE as u64 {
                     manager.io().truncate(fd, 0)?;
                     let prev_segments = &segments[..segments.len().saturating_sub(1)];
-                    let next_seq = find_last_seq_from_segments(&manager, prev_segments)?
-                        .map_or(EventSequence::new(1), |s| s.next());
+                    let next_seq =
+                        find_last_seq_from_segments(&manager, prev_segments, max_payload)?
+                            .map_or(EventSequence::new(1), |s| s.next());
                     return Self::init_fresh(
                         Arc::clone(&manager),
                         active_id,
                         next_seq,
                         index_interval,
+                        max_payload,
                     );
                 }
                 return Err(io::Error::new(
@@ -118,7 +133,8 @@ impl<S: StorageIO> EventLogWriter<S> {
 
         let next_seq = match last_seq_in_active {
             Some(seq) => {
-                if let Some(sealed_last) = find_last_seq_from_segments(&manager, prev_segments)?
+                if let Some(sealed_last) =
+                    find_last_seq_from_segments(&manager, prev_segments, max_payload)?
                     && seq <= sealed_last
                 {
                     return Err(io::Error::new(
@@ -131,7 +147,7 @@ impl<S: StorageIO> EventLogWriter<S> {
                 }
                 seq.next()
             }
-            None => find_last_seq_from_segments(&manager, prev_segments)?
+            None => find_last_seq_from_segments(&manager, prev_segments, max_payload)?
                 .map_or(EventSequence::new(1), |s| s.next()),
         };
 
@@ -159,6 +175,7 @@ impl<S: StorageIO> EventLogWriter<S> {
             position,
             base_seq,
             last_seq_in_active,
+            max_payload,
         );
 
         if let Err(e) = manager.io().delete(&manager.index_path(active_id))
@@ -174,6 +191,7 @@ impl<S: StorageIO> EventLogWriter<S> {
             next_seq,
             synced_seq,
             index_interval,
+            max_payload,
             event_count_in_segment,
             last_event_offset,
             pending_events: Vec::new(),
@@ -188,12 +206,11 @@ impl<S: StorageIO> EventLogWriter<S> {
     ) -> io::Result<EventSequence> {
         let payload_len = u32::try_from(payload.len())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "payload exceeds u32::MAX"))?;
-        if payload_len > MAX_EVENT_PAYLOAD {
+        if payload_len > self.max_payload {
+            let max = self.max_payload;
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!(
-                    "payload length {payload_len} exceeds MAX_EVENT_PAYLOAD {MAX_EVENT_PAYLOAD}"
-                ),
+                format!("payload length {payload_len} exceeds configured max_payload {max}"),
             ));
         }
 
@@ -229,6 +246,32 @@ impl<S: StorageIO> EventLogWriter<S> {
         Ok(seq)
     }
 
+    pub fn append_valid_event(&mut self, event: ValidEvent) -> io::Result<()> {
+        let offset = self.active_writer.append_event(self.manager.io(), &event)?;
+
+        let should_index = self.event_count_in_segment == 0
+            || self
+                .event_count_in_segment
+                .is_multiple_of(self.index_interval);
+        if should_index {
+            self.active_index.record(event.seq, offset);
+        }
+
+        self.event_count_in_segment = self
+            .event_count_in_segment
+            .checked_add(1)
+            .expect("event_count_in_segment overflow");
+        self.last_event_offset = Some(offset);
+        self.next_seq = event.seq.next();
+        self.pending_events.push(event);
+
+        Ok(())
+    }
+
+    pub fn peek_pending_event(&self, seq: EventSequence) -> Option<&ValidEvent> {
+        self.pending_events.iter().find(|e| e.seq == seq)
+    }
+
     pub fn sync(&mut self) -> io::Result<SyncResult> {
         if !self.pending_events.is_empty() {
             self.active_writer.sync(self.manager.io())?;
@@ -260,9 +303,20 @@ impl<S: StorageIO> EventLogWriter<S> {
 
         self.manager.seal_segment(old_id, &self.active_index)?;
 
+        match self.build_sidecar_for_segment(old_id) {
+            Ok(()) => {}
+            Err(e) => warn!(segment = %old_id, error = %e, "sidecar build failed (non-fatal)"),
+        }
+
         let (new_id, new_fd) = self.manager.prepare_rotation(old_id)?;
 
-        match SegmentWriter::new::<S>(self.manager.io(), new_fd, new_id, self.next_seq) {
+        match SegmentWriter::new::<S>(
+            self.manager.io(),
+            new_fd,
+            new_id,
+            self.next_seq,
+            self.max_payload,
+        ) {
             Ok(writer) => {
                 self.active_writer = writer;
                 self.active_index = SegmentIndex::new();
@@ -306,6 +360,13 @@ impl<S: StorageIO> EventLogWriter<S> {
         self.active_writer.position()
     }
 
+    fn build_sidecar_for_segment(&self, segment_id: SegmentId) -> io::Result<()> {
+        let fd = self.manager.open_for_read(segment_id)?;
+        let sidecar = build_sidecar_from_segment(self.manager.io(), fd, self.max_payload)?;
+        let path = self.manager.sidecar_path(segment_id);
+        sidecar.save(self.manager.io(), &path)
+    }
+
     pub fn shutdown(&mut self) -> io::Result<()> {
         let _ = self.sync()?;
         self.ensure_last_event_indexed();
@@ -325,6 +386,7 @@ impl<S: StorageIO> EventLogWriter<S> {
 fn find_last_seq_from_segments<S: StorageIO>(
     manager: &SegmentManager<S>,
     segments: &[SegmentId],
+    max_payload: u32,
 ) -> io::Result<Option<EventSequence>> {
     segments.iter().rev().try_fold(None, |acc, &seg_id| {
         if acc.is_some() {
@@ -336,7 +398,8 @@ fn find_last_seq_from_segments<S: StorageIO>(
             Err(e) if e.kind() != io::ErrorKind::InvalidData => Err(e),
             _ => {
                 let fd = manager.open_for_read(seg_id)?;
-                let (_, last_seq) = rebuild_from_segment(manager.io(), fd, DEFAULT_INDEX_INTERVAL)?;
+                let (_, last_seq) =
+                    rebuild_from_segment(manager.io(), fd, DEFAULT_INDEX_INTERVAL, max_payload)?;
                 Ok(last_seq)
             }
         }
@@ -348,6 +411,7 @@ mod tests {
     use super::*;
     use crate::eventlog::segment_file::{EVENT_RECORD_OVERHEAD, SegmentReader};
     use crate::eventlog::segment_index::DEFAULT_INDEX_INTERVAL;
+    use crate::eventlog::types::MAX_EVENT_PAYLOAD;
     use crate::sim::SimulatedIO;
     use std::path::{Path, PathBuf};
 
@@ -372,7 +436,9 @@ mod tests {
     #[test]
     fn open_fresh_creates_segment() {
         let mgr = setup_manager(64 * 1024);
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         assert_eq!(writer.active_segment_id(), SegmentId::new(1));
         assert_eq!(writer.current_seq(), EventSequence::BEFORE_ALL);
@@ -389,7 +455,9 @@ mod tests {
     #[test]
     fn append_assigns_contiguous_sequences() {
         let mgr = setup_manager(64 * 1024);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         let seqs: Vec<EventSequence> = (1..=5)
             .map(|i| append_test_event(&mut writer, &format!("did:plc:user{i}")))
@@ -402,7 +470,9 @@ mod tests {
     #[test]
     fn sync_returns_flushed_events() {
         let mgr = setup_manager(64 * 1024);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         (1..=3).for_each(|i| {
             append_test_event(&mut writer, &format!("did:plc:user{i}"));
@@ -427,7 +497,9 @@ mod tests {
     #[test]
     fn sync_without_pending_is_noop() {
         let mgr = setup_manager(64 * 1024);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         let result = writer.sync().unwrap();
         assert_eq!(result.synced_through, EventSequence::BEFORE_ALL);
@@ -437,7 +509,9 @@ mod tests {
     #[test]
     fn second_sync_returns_only_new_events() {
         let mgr = setup_manager(64 * 1024);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         (1..=3).for_each(|i| {
             append_test_event(&mut writer, &format!("did:plc:user{i}"));
@@ -460,7 +534,8 @@ mod tests {
 
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=5).for_each(|i| {
                 append_test_event(&mut writer, &format!("did:plc:user{i}"));
             });
@@ -469,13 +544,15 @@ mod tests {
 
         mgr.shutdown();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
         assert_eq!(writer.current_seq(), EventSequence::new(5));
         assert_eq!(writer.synced_seq(), EventSequence::new(5));
         assert_eq!(writer.active_segment_id(), SegmentId::new(1));
 
         let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
-        let events = SegmentReader::open(mgr.io(), fd)
+        let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
             .unwrap();
@@ -488,7 +565,8 @@ mod tests {
 
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=3).for_each(|i| {
                 append_test_event(&mut writer, &format!("did:plc:user{i}"));
             });
@@ -503,7 +581,9 @@ mod tests {
         mgr.shutdown();
         mgr.io().crash();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
         assert_eq!(writer.current_seq(), EventSequence::new(3));
         assert_eq!(writer.next_seq, EventSequence::new(4));
     }
@@ -515,7 +595,9 @@ mod tests {
         let max_segment_size = SEGMENT_HEADER_SIZE + record_size * 3;
 
         let mgr = setup_manager(max_segment_size as u64);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         (1..=3).for_each(|i| {
             writer
@@ -546,7 +628,9 @@ mod tests {
         let max_segment_size = SEGMENT_HEADER_SIZE + record_size * 2;
 
         let mgr = setup_manager(max_segment_size as u64);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         (1..=2).for_each(|i| {
             writer
@@ -576,7 +660,9 @@ mod tests {
         let max_segment_size = SEGMENT_HEADER_SIZE + record_size * 2;
 
         let mgr = setup_manager(max_segment_size as u64);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         (1..=2).for_each(|i| {
             writer
@@ -610,7 +696,8 @@ mod tests {
 
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=2).for_each(|i| {
                 writer
                     .append(
@@ -635,7 +722,9 @@ mod tests {
 
         mgr.shutdown();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
         assert_eq!(writer.active_segment_id(), SegmentId::new(2));
         assert_eq!(writer.current_seq(), EventSequence::new(3));
         assert_eq!(writer.next_seq, EventSequence::new(4));
@@ -651,7 +740,8 @@ mod tests {
 
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=2).for_each(|i| {
                 writer
                     .append(
@@ -668,7 +758,9 @@ mod tests {
         mgr.shutdown();
         mgr.io().crash();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
         assert_eq!(writer.next_seq, EventSequence::new(3));
     }
 
@@ -682,7 +774,8 @@ mod tests {
 
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=2).for_each(|i| {
                 writer
                     .append(
@@ -698,11 +791,13 @@ mod tests {
 
         mgr.shutdown();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
         assert_eq!(writer.next_seq, EventSequence::new(3));
 
         let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
-        let events = SegmentReader::open(mgr.io(), fd)
+        let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
             .unwrap();
@@ -712,7 +807,9 @@ mod tests {
     #[test]
     fn checkpoint_creates_index_file() {
         let mgr = setup_manager(64 * 1024);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         (1..=10).for_each(|i| {
             append_test_event(&mut writer, &format!("did:plc:user{i}"));
@@ -729,7 +826,9 @@ mod tests {
     #[test]
     fn checkpoint_empty_index_is_noop() {
         let mgr = setup_manager(64 * 1024);
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         writer.checkpoint_index().unwrap();
 
@@ -741,7 +840,9 @@ mod tests {
     #[test]
     fn current_seq_and_synced_seq_diverge_before_sync() {
         let mgr = setup_manager(64 * 1024);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         append_test_event(&mut writer, "did:plc:user1");
         append_test_event(&mut writer, "did:plc:user2");
@@ -758,7 +859,7 @@ mod tests {
     #[test]
     fn sparse_index_built_at_intervals() {
         let mgr = setup_manager(64 * 1024);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 4).unwrap();
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 4, MAX_EVENT_PAYLOAD).unwrap();
 
         (1..=10).for_each(|i| {
             append_test_event(&mut writer, &format!("did:plc:user{i}"));
@@ -781,7 +882,8 @@ mod tests {
 
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=9).for_each(|i| {
                 writer
                     .append(
@@ -801,7 +903,9 @@ mod tests {
 
         mgr.shutdown();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
         assert_eq!(writer.next_seq, EventSequence::new(10));
 
         let segments = mgr.list_segments().unwrap();
@@ -811,7 +915,9 @@ mod tests {
     #[test]
     fn shutdown_syncs_and_checkpoints() {
         let mgr = setup_manager(64 * 1024);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         (1..=5).for_each(|i| {
             append_test_event(&mut writer, &format!("did:plc:user{i}"));
@@ -834,7 +940,7 @@ mod tests {
         let max_segment_size = SEGMENT_HEADER_SIZE + record_size * 5;
 
         let mgr = setup_manager(max_segment_size as u64);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256).unwrap();
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
 
         (1..=5).for_each(|i| {
             writer
@@ -861,11 +967,15 @@ mod tests {
         let mgr = setup_manager(64 * 1024);
 
         {
-            let _writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+            let _writer =
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
         }
         mgr.shutdown();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
         assert_eq!(writer.active_segment_id(), SegmentId::new(1));
         assert_eq!(writer.current_seq(), EventSequence::BEFORE_ALL);
     }
@@ -876,7 +986,8 @@ mod tests {
 
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=3).for_each(|i| {
                 append_test_event(&mut writer, &format!("did:plc:user{i}"));
             });
@@ -885,13 +996,15 @@ mod tests {
 
         mgr.shutdown();
 
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
         let seq = append_test_event(&mut writer, "did:plc:user4");
         assert_eq!(seq, EventSequence::new(4));
         writer.sync().unwrap();
 
         let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
-        let events = SegmentReader::open(mgr.io(), fd)
+        let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
             .unwrap();
@@ -909,7 +1022,8 @@ mod tests {
 
         {
             let mut writer =
-                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+                EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                    .unwrap();
             (1..=2).for_each(|i| {
                 writer
                     .append(
@@ -955,14 +1069,18 @@ mod tests {
         mgr.io().sync(fd2).unwrap();
         mgr.io().close(fd2).unwrap();
 
-        let writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
         assert_eq!(writer.next_seq, EventSequence::new(5));
     }
 
     #[test]
     fn rotation_not_needed_returns_false() {
         let mgr = setup_manager(64 * 1024);
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL).unwrap();
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
 
         append_test_event(&mut writer, "did:plc:user1");
         writer.sync().unwrap();

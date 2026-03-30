@@ -1,33 +1,7 @@
-use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use super::encoding::KeyBuilder;
 use super::keys::{KeyTag, UserHash};
-
-const SEQ_META_SCHEMA_VERSION: u8 = 1;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SeqMetaValue {
-    pub blocks_cids: Vec<String>,
-}
-
-impl SeqMetaValue {
-    pub fn serialize(&self) -> Vec<u8> {
-        let payload = postcard::to_allocvec(self).expect("SeqMetaValue serialization cannot fail");
-        let mut buf = Vec::with_capacity(1 + payload.len());
-        buf.push(SEQ_META_SCHEMA_VERSION);
-        buf.extend_from_slice(&payload);
-        buf
-    }
-
-    pub fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let (&version, payload) = bytes.split_first()?;
-        match version {
-            SEQ_META_SCHEMA_VERSION => postcard::from_bytes(payload).ok(),
-            _ => None,
-        }
-    }
-}
 
 pub fn rev_to_seq_key(user_hash: UserHash, rev: &str) -> SmallVec<[u8; 128]> {
     KeyBuilder::new()
@@ -42,10 +16,6 @@ pub fn rev_to_seq_user_prefix(user_hash: UserHash) -> SmallVec<[u8; 128]> {
         .tag(KeyTag::REV_TO_SEQ)
         .u64(user_hash.raw())
         .build()
-}
-
-pub fn seq_meta_key(seq: u64) -> SmallVec<[u8; 128]> {
-    KeyBuilder::new().tag(KeyTag::SEQ_META).u64(seq).build()
 }
 
 pub fn seq_tombstone_key(seq: u64) -> SmallVec<[u8; 128]> {
@@ -83,50 +53,6 @@ mod tests {
     use crate::metastore::encoding::KeyReader;
 
     #[test]
-    fn seq_meta_value_roundtrip() {
-        let value = SeqMetaValue {
-            blocks_cids: vec!["bafyreiblock1".to_owned(), "bafyreiblock2".to_owned()],
-        };
-        let bytes = value.serialize();
-        let decoded = SeqMetaValue::deserialize(&bytes).unwrap();
-        assert_eq!(decoded, value);
-    }
-
-    #[test]
-    fn seq_meta_value_empty_blocks() {
-        let value = SeqMetaValue {
-            blocks_cids: vec![],
-        };
-        let bytes = value.serialize();
-        let decoded = SeqMetaValue::deserialize(&bytes).unwrap();
-        assert_eq!(decoded, value);
-    }
-
-    #[test]
-    fn seq_meta_schema_version_first_byte() {
-        let value = SeqMetaValue {
-            blocks_cids: vec![],
-        };
-        let bytes = value.serialize();
-        assert_eq!(bytes[0], SEQ_META_SCHEMA_VERSION);
-    }
-
-    #[test]
-    fn seq_meta_rejects_unknown_version() {
-        let value = SeqMetaValue {
-            blocks_cids: vec![],
-        };
-        let mut bytes = value.serialize();
-        bytes[0] = 99;
-        assert!(SeqMetaValue::deserialize(&bytes).is_none());
-    }
-
-    #[test]
-    fn seq_meta_rejects_empty_input() {
-        assert!(SeqMetaValue::deserialize(&[]).is_none());
-    }
-
-    #[test]
     fn rev_to_seq_key_roundtrip() {
         let hash = UserHash::from_raw(0xDEAD_BEEF_CAFE_BABE);
         let key = rev_to_seq_key(hash, "3k2abcde");
@@ -154,24 +80,6 @@ mod tests {
         let prefix = rev_to_seq_user_prefix(hash);
         let full = rev_to_seq_key(hash, "some_rev");
         assert!(full.as_slice().starts_with(prefix.as_slice()));
-    }
-
-    #[test]
-    fn seq_meta_key_roundtrip() {
-        let key = seq_meta_key(12345);
-        let mut reader = KeyReader::new(&key);
-        assert_eq!(reader.tag(), Some(KeyTag::SEQ_META.raw()));
-        assert_eq!(reader.u64(), Some(12345));
-        assert!(reader.is_empty());
-    }
-
-    #[test]
-    fn seq_meta_keys_sort_by_seq() {
-        let k1 = seq_meta_key(1);
-        let k2 = seq_meta_key(2);
-        let k3 = seq_meta_key(100);
-        assert!(k1.as_slice() < k2.as_slice());
-        assert!(k2.as_slice() < k3.as_slice());
     }
 
     #[test]

@@ -328,7 +328,8 @@ pub async fn import_repo(
                 new_root_str, new_rev_str
             );
             if !is_migration
-                && let Err(e) = sequence_import_event(&state, did, &new_root_cid_link).await
+                && let Err(e) =
+                    sequence_import_event(&state, did, &new_root_cid_link, &commit_bytes).await
             {
                 warn!("Failed to sequence import event: {:?}", e);
             }
@@ -395,15 +396,23 @@ async fn sequence_import_event(
     state: &AppState,
     did: &Did,
     commit_cid: &CidLink,
-) -> Result<(), tranquil_db::DbError> {
-    let data = tranquil_db::CommitEventData {
+    commit_bytes: &[u8],
+) -> Result<(), tranquil_db_traits::DbError> {
+    let commit_cid_parsed = commit_cid
+        .to_cid()
+        .expect("CidLink invariant: validated at construction");
+    let inline_commit = tranquil_db_traits::EventBlockInline {
+        cid_bytes: commit_cid_parsed.to_bytes(),
+        data: commit_bytes.to_vec(),
+    };
+    let data = tranquil_db_traits::CommitEventData {
         did: did.clone(),
-        event_type: tranquil_db::RepoEventType::Commit,
+        event_type: tranquil_db_traits::RepoEventType::Commit,
         commit_cid: Some(commit_cid.clone()),
         prev_cid: None,
         ops: Some(serde_json::json!([])),
         blobs: Some(vec![]),
-        blocks_cids: Some(vec![]),
+        blocks: Some(vec![inline_commit]),
         prev_data_cid: None,
         rev: None,
     };

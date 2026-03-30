@@ -25,6 +25,7 @@ impl AsRef<[u8]> for MappedFile {
 pub struct FileId(u64);
 
 impl FileId {
+    #[cfg(any(test, feature = "test-harness"))]
     pub(crate) fn new(id: u64) -> Self {
         Self(id)
     }

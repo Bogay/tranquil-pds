@@ -94,7 +94,7 @@ async fn process_single_write(
             ops.push(RecordOp::Create {
                 collection: collection.clone(),
                 rkey: rkey.clone(),
-                cid: record_cid,
+                cid: tranquil_pds::cid_types::RecordCid::from(record_cid),
             });
             Ok(WriteAccumulator {
                 mst: new_mst,
@@ -134,7 +134,15 @@ async fn process_single_write(
                 .map_err(|_| ApiError::InternalError(Some("Failed to store record".into())))?;
             let key = format!("{}/{}", collection, rkey);
             modified_keys.push(key.clone());
-            let prev_record_cid = mst.get(&key).await.ok().flatten();
+            let prev_record_cid = mst
+                .get(&key)
+                .await
+                .map_err(|e| {
+                    ApiError::InternalError(Some(format!("Failed to read prev record: {}", e)))
+                })?
+                .ok_or_else(|| {
+                    ApiError::InvalidRequest("Update target record does not exist".into())
+                })?;
             let new_mst = mst
                 .update(&key, record_cid)
                 .await
@@ -150,8 +158,8 @@ async fn process_single_write(
             ops.push(RecordOp::Update {
                 collection: collection.clone(),
                 rkey: rkey.clone(),
-                cid: record_cid,
-                prev: prev_record_cid,
+                cid: tranquil_pds::cid_types::RecordCid::from(record_cid),
+                prev: tranquil_pds::cid_types::RecordCid::from(prev_record_cid),
             });
             Ok(WriteAccumulator {
                 mst: new_mst,
@@ -166,7 +174,15 @@ async fn process_single_write(
         WriteOp::Delete { collection, rkey } => {
             let key = format!("{}/{}", collection, rkey);
             modified_keys.push(key.clone());
-            let prev_record_cid = mst.get(&key).await.ok().flatten();
+            let prev_record_cid = mst
+                .get(&key)
+                .await
+                .map_err(|e| {
+                    ApiError::InternalError(Some(format!("Failed to read prev record: {}", e)))
+                })?
+                .ok_or_else(|| {
+                    ApiError::InvalidRequest("Delete target record does not exist".into())
+                })?;
             let new_mst = mst
                 .delete(&key)
                 .await
@@ -176,7 +192,7 @@ async fn process_single_write(
             ops.push(RecordOp::Delete {
                 collection: collection.clone(),
                 rkey: rkey.clone(),
-                prev: prev_record_cid,
+                prev: tranquil_pds::cid_types::RecordCid::from(prev_record_cid),
             });
             Ok(WriteAccumulator {
                 mst: new_mst,

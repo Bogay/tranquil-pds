@@ -1171,19 +1171,15 @@ impl UserOps {
 
     pub fn verify_email_channel(&self, user_id: Uuid, email: &str) -> Result<bool, MetastoreError> {
         let user_hash = self.resolve_hash_from_uuid(user_id)?;
-        let val = match self.load_user(user_hash)? {
-            Some(v) => v,
-            None => return Ok(false),
-        };
-
-        match val.email.as_deref() == Some(email) {
-            true => {
+        match self.load_user(user_hash)? {
+            Some(_) => {
                 self.mutate_user(user_hash, |u| {
+                    u.email = Some(email.to_owned());
                     u.email_verified = true;
                 })?;
                 Ok(true)
             }
-            false => Ok(false),
+            None => Ok(false),
         }
     }
 
@@ -1884,6 +1880,17 @@ impl UserOps {
         })
     }
 
+    pub fn set_email_2fa_enabled(
+        &self,
+        user_id: Uuid,
+        enabled: bool,
+    ) -> Result<bool, MetastoreError> {
+        let user_hash = self.resolve_hash_from_uuid(user_id)?;
+        self.mutate_user(user_hash, |u| {
+            u.email_2fa_enabled = enabled;
+        })
+    }
+
     pub fn update_locale(&self, did: &Did, locale: &str) -> Result<bool, MetastoreError> {
         let user_hash = self.resolve_hash(did.as_str());
         self.mutate_user(user_hash, |u| {
@@ -2048,23 +2055,16 @@ impl UserOps {
 
         match val {
             Some(rc) => {
-                let now_ms = Utc::now().timestamp_millis();
-                match rc.expires_at_ms > now_ms {
-                    true => {
-                        let user_hash = UserHash::from_raw(rc.user_hash);
-                        let user = self.load_user(user_hash)?;
-                        match user {
-                            Some(u) => Ok(Some(UserResetCodeInfo {
-                                id: u.id,
-                                did: Did::new(u.did.clone())
-                                    .map_err(|_| MetastoreError::CorruptData("invalid user did"))?,
-                                preferred_comms_channel: Self::comms_channel(&u),
-                                expires_at: DateTime::from_timestamp_millis(rc.expires_at_ms),
-                            })),
-                            None => Ok(None),
-                        }
-                    }
-                    false => Ok(None),
+                let user_hash = UserHash::from_raw(rc.user_hash);
+                match self.load_user(user_hash)? {
+                    Some(u) => Ok(Some(UserResetCodeInfo {
+                        id: u.id,
+                        did: Did::new(u.did.clone())
+                            .map_err(|_| MetastoreError::CorruptData("invalid user did"))?,
+                        preferred_comms_channel: Self::comms_channel(&u),
+                        expires_at: DateTime::from_timestamp_millis(rc.expires_at_ms),
+                    })),
+                    None => Ok(None),
                 }
             }
             None => Ok(None),
@@ -2145,7 +2145,7 @@ impl UserOps {
             .map_err(|_| MetastoreError::CorruptData("invalid user did"))?;
 
         let prefix = super::sessions::session_by_did_prefix(user_hash);
-        let session_jtis: Vec<String> = self
+        let sessions: Vec<(Vec<u8>, i32, String)> = self
             .auth
             .prefix(prefix.as_slice())
             .filter_map(|guard| {
@@ -2153,19 +2153,43 @@ impl UserOps {
                 let remaining = key_bytes.get(9..13)?;
                 let sid = i32::from_be_bytes(remaining.try_into().ok()?);
                 let session_key = super::sessions::session_primary_key(sid);
-                self.auth
+                let jti = self
+                    .auth
                     .get(session_key.as_slice())
                     .ok()
                     .flatten()
                     .and_then(|raw| super::sessions::SessionTokenValue::deserialize(&raw))
-                    .map(|s| s.access_jti)
+                    .map(|s| s.access_jti)?;
+                Some((key_bytes.to_vec(), sid, jti))
             })
             .collect();
 
+        let session_jtis: Vec<String> = sessions.iter().map(|(_, _, jti)| jti.clone()).collect();
+
+        let mut batch = self.db.batch();
+
         let mut updated = user;
         updated.password_hash = Some(password_hash.to_owned());
+        updated.password_required = true;
+        batch.insert(
+            &self.users,
+            super::encoding::KeyBuilder::new()
+                .tag(super::keys::KeyTag::USER_PRIMARY)
+                .u64(user_hash.raw())
+                .build()
+                .as_slice(),
+            updated.serialize(),
+        );
 
-        self.save_user(user_hash, &updated)?;
+        for (index_key, sid, _) in &sessions {
+            let session_key = super::sessions::session_primary_key(*sid);
+            batch.remove(&self.auth, session_key.as_slice());
+            batch.remove(&self.auth, index_key.as_slice());
+        }
+
+        batch.commit().map_err(MetastoreError::Fjall)?;
+
+        self.clear_password_reset_code(user_id)?;
 
         Ok(PasswordResetResult { did, session_jtis })
     }
@@ -3198,26 +3222,32 @@ impl UserOps {
             None => return Ok(()),
         };
 
+        let past_ms = Utc::now()
+            .checked_sub_signed(chrono::Duration::hours(1))
+            .unwrap_or_else(Utc::now)
+            .timestamp_millis();
+
         let prefix = [super::keys::KeyTag::USER_RESET_CODE.raw()];
-        let keys_to_remove: Vec<Vec<u8>> = self
+        let entries: Vec<(Vec<u8>, ResetCodeValue)> = self
             .auth
             .prefix(prefix)
             .filter_map(|guard| {
                 let (key_bytes, val_bytes) = guard.into_inner().ok()?;
                 let rc = ResetCodeValue::deserialize(&val_bytes)?;
                 match rc.user_id == user.id {
-                    true => Some(key_bytes.to_vec()),
+                    true => Some((key_bytes.to_vec(), rc)),
                     false => None,
                 }
             })
             .collect();
 
-        match keys_to_remove.is_empty() {
+        match entries.is_empty() {
             true => Ok(()),
             false => {
                 let mut batch = self.db.batch();
-                keys_to_remove.iter().for_each(|key| {
-                    batch.remove(&self.auth, key);
+                entries.into_iter().for_each(|(key, mut rc)| {
+                    rc.expires_at_ms = past_ms;
+                    batch.insert(&self.auth, &key, rc.serialize_with_ttl());
                 });
                 batch.commit().map_err(MetastoreError::Fjall)
             }

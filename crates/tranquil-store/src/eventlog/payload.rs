@@ -1,14 +1,16 @@
 use serde::{Deserialize, Serialize};
-use tranquil_db_traits::{AccountStatus, SequenceNumber, SequencedEvent};
+use tranquil_db_traits::{
+    AccountStatus, EventBlockInline, EventBlocks, SequenceNumber, SequencedEvent,
+};
 use tranquil_types::{CidLink, Did, Handle};
 
 use crate::eventlog::reader::RawEvent;
-use crate::eventlog::types::MAX_EVENT_PAYLOAD;
 
-const PAYLOAD_VERSION: u8 = 1;
-const LARGE_PAYLOAD_WARNING_THRESHOLD: usize = 1024 * 1024;
+pub(crate) const PAYLOAD_VERSION_V1: u8 = 1;
+const CURRENT_PAYLOAD_VERSION: u8 = PAYLOAD_VERSION_V1;
+const LARGE_PAYLOAD_WARNING_THRESHOLD: usize = 4 * 1024 * 1024;
 
-const CID_BYTE_LEN: usize = 36;
+pub(crate) const CID_BYTE_LEN: usize = 36;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventPayload {
@@ -18,7 +20,7 @@ pub struct EventPayload {
     pub prev_data_cid: Option<Vec<u8>>,
     pub ops: Option<Vec<u8>>,
     pub blobs: Option<Vec<String>>,
-    pub blocks_cids: Option<Vec<String>>,
+    pub blocks: Option<Vec<EventBlockInline>>,
     pub handle: Option<String>,
     pub active: Option<bool>,
     pub status: Option<u8>,
@@ -38,8 +40,8 @@ pub enum PayloadError {
     InvalidDid(String),
     #[error("invalid timestamp: {0}")]
     InvalidTimestamp(u64),
-    #[error("invalid ops JSON in payload: {0}")]
-    InvalidOps(serde_json::Error),
+    #[error("invalid ops DAG-CBOR in payload: {0}")]
+    InvalidDagCborOps(String),
     #[error("invalid handle in payload: {0}")]
     InvalidHandle(String),
     #[error("invalid CID length: got {got}, expected {expected}")]
@@ -96,7 +98,7 @@ pub fn encode_payload_with_mutations(
     let ops_bytes = event
         .ops
         .as_ref()
-        .map(|v| serde_json::to_vec(v).expect("serde_json::Value always serializes"));
+        .map(|v| serde_ipld_dagcbor::to_vec(v).expect("serde_json::Value serializes to DAG-CBOR"));
 
     let payload = EventPayload {
         did: event.did.as_str().to_owned(),
@@ -105,7 +107,10 @@ pub fn encode_payload_with_mutations(
         prev_data_cid: event.prev_data_cid.as_ref().and_then(cid_link_to_bytes),
         ops: ops_bytes,
         blobs: event.blobs.clone(),
-        blocks_cids: event.blocks_cids.clone(),
+        blocks: match event.blocks.as_ref() {
+            Some(EventBlocks::Inline(v)) => Some(v.clone()),
+            Some(EventBlocks::LegacyCids(_)) | None => None,
+        },
         handle: event
             .handle
             .as_ref()
@@ -127,7 +132,7 @@ pub fn encode_payload_with_mutations(
     }
 
     let mut buf = Vec::with_capacity(1 + body.len());
-    buf.push(PAYLOAD_VERSION);
+    buf.push(CURRENT_PAYLOAD_VERSION);
     buf.extend_from_slice(&body);
     buf
 }
@@ -137,15 +142,15 @@ pub fn decode_payload(bytes: &[u8]) -> Result<EventPayload, PayloadError> {
         postcard::Error::DeserializeUnexpectedEnd,
     ))?;
 
-    if version != PAYLOAD_VERSION {
+    if version != PAYLOAD_VERSION_V1 {
         return Err(PayloadError::UnknownVersion(version));
     }
 
     postcard::from_bytes(body).map_err(PayloadError::DeserializeFailed)
 }
 
-pub fn validate_payload_size(payload: &[u8]) -> Result<(), PayloadError> {
-    let max = MAX_EVENT_PAYLOAD as usize;
+pub fn validate_payload_size(payload: &[u8], max_payload: u32) -> Result<(), PayloadError> {
+    let max = max_payload as usize;
     if payload.len() > max {
         return Err(PayloadError::TooLarge {
             size: payload.len(),
@@ -174,9 +179,11 @@ pub fn to_sequenced_event(
     let ops = payload
         .ops
         .as_ref()
-        .map(|bytes| serde_json::from_slice(bytes))
-        .transpose()
-        .map_err(PayloadError::InvalidOps)?;
+        .map(|bytes| {
+            serde_ipld_dagcbor::from_slice(bytes)
+                .map_err(|e| PayloadError::InvalidDagCborOps(e.to_string()))
+        })
+        .transpose()?;
 
     let handle = payload
         .handle
@@ -209,7 +216,7 @@ pub fn to_sequenced_event(
             .flatten(),
         ops,
         blobs: payload.blobs.clone(),
-        blocks_cids: payload.blocks_cids.clone(),
+        blocks: payload.blocks.clone().map(EventBlocks::Inline),
         handle,
         active: payload.active,
         status: payload.status.and_then(u8_to_account_status),
@@ -248,7 +255,7 @@ mod tests {
             prev_data_cid: None,
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: None,
             handle: None,
             active: Some(true),
             status: Some(AccountStatus::Active),
@@ -256,7 +263,7 @@ mod tests {
         };
 
         let encoded = encode_payload(&event);
-        assert_eq!(encoded[0], PAYLOAD_VERSION);
+        assert_eq!(encoded[0], CURRENT_PAYLOAD_VERSION);
 
         let decoded = decode_payload(&encoded).unwrap();
         assert_eq!(decoded.did, event.did.as_str());
@@ -280,7 +287,10 @@ mod tests {
             prev_data_cid: Some(cid.clone()),
             ops: Some(ops.clone()),
             blobs: Some(vec!["bafkreibtest".to_owned()]),
-            blocks_cids: Some(vec!["bafyreiblock".to_owned()]),
+            blocks: Some(EventBlocks::Inline(vec![EventBlockInline {
+                cid_bytes: cid_link_to_bytes(&cid).unwrap(),
+                data: b"hello block".to_vec(),
+            }])),
             handle: Some(Handle::new("test.bsky.social").unwrap()),
             active: None,
             status: None,
@@ -304,7 +314,14 @@ mod tests {
         assert_eq!(reconstructed.prev_cid, event.prev_cid);
         assert_eq!(reconstructed.prev_data_cid, event.prev_data_cid);
         assert_eq!(reconstructed.blobs, event.blobs);
-        assert_eq!(reconstructed.blocks_cids, event.blocks_cids);
+        let inline_len = |b: &EventBlocks| match b {
+            EventBlocks::Inline(v) => v.len(),
+            EventBlocks::LegacyCids(_) => 0,
+        };
+        assert_eq!(
+            reconstructed.blocks.as_ref().map(inline_len),
+            event.blocks.as_ref().map(inline_len)
+        );
         assert_eq!(
             reconstructed.handle.as_ref().map(|h: &Handle| h.as_str()),
             event.handle.as_ref().map(|h: &Handle| h.as_str())
@@ -328,7 +345,7 @@ mod tests {
             prev_data_cid: None,
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: None,
             handle: None,
             active: None,
             status: None,
@@ -352,17 +369,18 @@ mod tests {
 
     #[test]
     fn validate_payload_size_accepts_within_limit() {
-        let data = vec![0u8; MAX_EVENT_PAYLOAD as usize];
-        assert!(validate_payload_size(&data).is_ok());
+        let data = vec![0u8; 1024];
+        assert!(validate_payload_size(&data, 4096).is_ok());
     }
 
     #[test]
     fn validate_payload_size_rejects_oversized() {
-        let data = vec![0u8; MAX_EVENT_PAYLOAD as usize + 1];
-        match validate_payload_size(&data) {
+        let limit: u32 = 1024;
+        let data = vec![0u8; limit as usize + 1];
+        match validate_payload_size(&data, limit) {
             Err(PayloadError::TooLarge { size, max }) => {
-                assert_eq!(size, MAX_EVENT_PAYLOAD as usize + 1);
-                assert_eq!(max, MAX_EVENT_PAYLOAD as usize);
+                assert_eq!(size, limit as usize + 1);
+                assert_eq!(max, limit as usize);
             }
             other => panic!("expected TooLarge, got {other:?}"),
         }
@@ -436,7 +454,7 @@ mod tests {
             timestamp: TimestampMicros::new(us),
             did_hash: DidHash::from_did("did:plc:test"),
             event_type: EventTypeTag::COMMIT,
-            payload: Bytes::new(),
+            payload: Bytes::from_static(&[PAYLOAD_VERSION_V1]),
         };
 
         let payload = EventPayload {
@@ -446,7 +464,7 @@ mod tests {
             prev_data_cid: None,
             ops: None,
             blobs: None,
-            blocks_cids: None,
+            blocks: None,
             handle: None,
             active: None,
             status: None,

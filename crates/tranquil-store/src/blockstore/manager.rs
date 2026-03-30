@@ -136,6 +136,27 @@ impl<S: StorageIO> DataFileManager<S> {
     pub fn list_files(&self) -> io::Result<Vec<DataFileId>> {
         list_files_by_extension(&self.io, &self.data_dir, DATA_FILE_EXTENSION)
     }
+
+    pub fn evict_handle(&self, file_id: DataFileId) {
+        let removed = self.handles.write().remove(&file_id);
+        if let Some(entry) = removed {
+            let _ = self.io.close(entry.fd);
+        }
+    }
+
+    pub fn delete_data_file(&self, file_id: DataFileId) -> io::Result<()> {
+        self.evict_handle(file_id);
+        let path = self.data_file_path(file_id);
+        self.io.delete(&path)
+    }
+}
+
+impl<S: StorageIO> Drop for DataFileManager<S> {
+    fn drop(&mut self) {
+        self.handles.write().drain().for_each(|(_, entry)| {
+            let _ = self.io.close(entry.fd);
+        });
+    }
 }
 
 #[cfg(test)]
