@@ -194,22 +194,33 @@ in {
           serviceConfig = {
             User = cfg.user;
             Group = cfg.group;
+            UMask = "0077";
             ExecStart = lib.getExe cfg.package;
             Restart = "on-failure";
             RestartSec = 5;
 
             WorkingDirectory = cfg.dataDir;
             StateDirectory = "tranquil-pds";
+            ReadWritePaths = [
+              cfg.settings.storage.path
+            ];
 
             EnvironmentFile = cfg.environmentFiles;
 
+            CapabilityBoundingSet = [ "CAP_NET_BIND_SERVICE" ];
+            ProtectProc = "invisible";
+            ProcSubset = "pid";
             NoNewPrivileges = true;
             ProtectSystem = "strict";
             ProtectHome = true;
             PrivateTmp = true;
             PrivateDevices = true;
+            PrivateUsers = true;
+            ProtectHostname = true;
+            ProtectClock = true;
             ProtectKernelTunables = true;
             ProtectKernelModules = true;
+            ProtectKernelLogs = true;
             ProtectControlGroups = true;
             RestrictAddressFamilies = [
               "AF_INET"
@@ -222,10 +233,12 @@ in {
             RestrictRealtime = true;
             RestrictSUIDSGID = true;
             RemoveIPC = true;
-
-            ReadWritePaths = [
-              cfg.settings.storage.path
+            PrivateMounts = true;
+            SystemCallFilter = [
+              "@system-service"
+              "~@privileged @resources"
             ];
+            SystemCallArchitectures = "native";
           };
         };
       }
