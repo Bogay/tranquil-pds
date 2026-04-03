@@ -166,8 +166,13 @@ fn test_token_type_confusion() {
             .contains("Invalid token type")
     );
 
-    let service_token =
-        create_service_token(did, "did:web:target", "com.example.method", &key_bytes).unwrap();
+    let service_token = create_service_token(
+        did,
+        "did:web:target",
+        Some("com.example.method"),
+        &key_bytes,
+    )
+    .unwrap();
     assert!(
         verify_access_token(&service_token, &key_bytes).is_err(),
         "Service token as access must be rejected"

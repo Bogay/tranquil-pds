@@ -74,7 +74,12 @@ pub fn create_refresh_token_with_metadata(
     )
 }
 
-pub fn create_service_token(did: &str, aud: &str, lxm: &str, key_bytes: &[u8]) -> Result<String> {
+pub fn create_service_token(
+    did: &str,
+    aud: &str,
+    lxm: Option<&str>,
+    key_bytes: &[u8],
+) -> Result<String> {
     let signing_key = SigningKey::from_slice(key_bytes)?;
 
     let expiration = Utc::now()
@@ -89,7 +94,7 @@ pub fn create_service_token(did: &str, aud: &str, lxm: &str, key_bytes: &[u8]) -
         exp: expiration,
         iat: Utc::now().timestamp(),
         scope: None,
-        lxm: Some(lxm.to_string()),
+        lxm: lxm.map(ToOwned::to_owned),
         jti: uuid::Uuid::new_v4().to_string(),
         act: None,
     };

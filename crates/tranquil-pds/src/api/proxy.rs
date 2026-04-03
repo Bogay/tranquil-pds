@@ -290,7 +290,7 @@ async fn proxy_handler(
                 match crate::auth::create_service_token(
                     &auth_user.did,
                     &resolved.did,
-                    method,
+                    Some(method),
                     &key_bytes,
                 ) {
                     Ok(new_token) => {

@@ -138,7 +138,7 @@ async fn proxy_to_report_service(
     let service_token = match tranquil_pds::auth::create_service_token(
         &auth_user.did,
         service_did,
-        "com.atproto.moderation.createReport",
+        Some("com.atproto.moderation.createReport"),
         &key_bytes,
     ) {
         Ok(t) => t,
@@ -226,7 +226,8 @@ async fn create_report_locally(
     let subject_json = json!(input.subject);
 
     if let Err(e) = state
-        .repos.infra
+        .repos
+        .infra
         .insert_report(
             report_id,
             input.reason_type.as_str(),

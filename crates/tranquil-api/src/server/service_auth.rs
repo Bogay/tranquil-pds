@@ -112,7 +112,6 @@ pub async fn get_service_auth(
     };
 
     let lxm = params.lxm.as_ref();
-    let lxm_for_token = lxm.map_or("*", |v| v.as_str());
 
     if let Some(method) = lxm {
         if let Err(e) = tranquil_pds::auth::scope_check::check_rpc_scope(
@@ -173,7 +172,7 @@ pub async fn get_service_auth(
     let service_token = match tranquil_pds::auth::create_service_token(
         &auth.did,
         params.aud.as_str(),
-        lxm_for_token,
+        lxm.map(|v| v.as_str()),
         &key_bytes,
     ) {
         Ok(t) => t,
