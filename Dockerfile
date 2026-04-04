@@ -35,7 +35,7 @@ COPY crates/tranquil-oauth-server ./crates/tranquil-oauth-server
 COPY crates/tranquil-store ./crates/tranquil-store
 COPY crates/tranquil-signal ./crates/tranquil-signal
 COPY crates/tranquil-server ./crates/tranquil-server
-COPY migrations ./crates/tranquil-pds/migrations
+COPY migrations ./migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     if [ "$SLIM" = "true" ]; then \

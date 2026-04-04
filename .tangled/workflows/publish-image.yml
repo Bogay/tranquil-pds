@@ -1,24 +1,36 @@
 when:
-  - event: []
-    branch: []
+  - event: [ "manual" ]
+  - event: [ "push" ]
+    branch: [ "main" ]
 
 engine: nixery
 
 dependencies:
   nixpkgs:
-    - podman
+    - kaniko
+
+environment:
+  DOCKER_CONFIG: "/kaniko/.docker"
 
 steps:
-  - name: Create podman config
+  - name: Configure Kaniko
     command: |
-      mkdir -p ~/.config/containers
-      echo "unqualified-search-registries = [\"docker.io\"]" >> ~/.config/containers/registries.conf
+      mkdir -p /kaniko/.docker/
+      echo "{
+        \"auths\": {
+          \"https://atcr.io/v1\":{
+            \"auth\": \"$ATCR_CREDENTIALS\"
+          }
+        }
+      }" > /kaniko/.docker/config.json
 
   - name: Build image
     command: |
-      podman build . -t tranquil-pds:latest -t "tranquil-pds:$TANGLED_COMMIT_SHA"
-
-  - name: Publish image
-    command: |
-      podman push --creds "$ATCR_USERNAME:$ATCR_PASSWORD" tranquil-pds:latest "atcr.io/tranquil.farm/tranquil-pds:latest"
-      podman push --creds "$ATCR_USERNAME:$ATCR_PASSWORD" "tranquil-pds:$TANGLED_COMMIT_SHA" "atcr.io/tranquil.farm/tranquil-pds:$TANGLED_COMMIT_SHA"
+      executor \
+        --context=$(pwd) \
+        --ignore-path=$(pwd) \
+        --dockerfile=$(pwd)/Dockerfile \
+        --destination="atcr.io/tranquil.farm/tranquil-pds:latest" \
+        --destination="atcr.io/tranquil.farm/tranquil-pds:$TANGLED_COMMIT_SHA" \
+        --push-retry=3 \
+        --skip-push-permission-check
