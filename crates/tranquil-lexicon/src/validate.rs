@@ -322,15 +322,7 @@ fn validate_blob_ref(
 
     if let Some(ref accept) = lex_blob.accept {
         let mime_type = obj.get("mimeType").and_then(|v| v.as_str()).unwrap_or("");
-        let matched = accept
-            .iter()
-            .any(|pattern| match pattern.strip_suffix("/*") {
-                Some(prefix) => {
-                    mime_type.starts_with(prefix)
-                        && mime_type.as_bytes().get(prefix.len()) == Some(&b'/')
-                }
-                None => mime_type == pattern,
-            });
+        let matched = accept.iter().any(|pattern| mime_type_matches_accept_pattern(mime_type, pattern));
         if !mime_type.is_empty() && !matched {
             return Err(LexValidationError::field(
                 path,
@@ -350,6 +342,34 @@ fn validate_blob_ref(
     }
 
     Ok(())
+}
+
+fn mime_type_matches_accept_pattern(mime_type: &str, pattern: &str) -> bool {
+    let normalized_mime = normalize_mime_for_match(mime_type);
+    let normalized = normalize_mime_for_match(pattern);
+
+    if normalized == "*/*" || normalized == "*" {
+        return true;
+    }
+
+    match normalized.strip_suffix("/*") {
+        Some(prefix) => {
+            !prefix.is_empty()
+                && normalized_mime.starts_with(prefix)
+                && normalized_mime.len() > prefix.len()
+                && normalized_mime.as_bytes()[prefix.len()] == b'/'
+        }
+        None => normalized_mime == normalized,
+    }
+}
+
+fn normalize_mime_for_match(value: &str) -> String {
+    value
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
 }
 
 fn validate_bytes(
@@ -731,6 +751,87 @@ mod tests {
             validate_record(&registry, "com.test.withreply", &bad_embed).is_err(),
             "union with bare NSID ref must validate the matched schema"
         );
+    }
+
+    #[test]
+    fn test_blob_accept_wildcard_allows_any_mime() {
+        let lex_blob = LexBlob {
+            accept: Some(vec!["*/*".to_string()]),
+            max_size: None,
+        };
+        let blob = json!({
+            "$type": "blob",
+            "ref": { "$link": "bafyreiabcdef" },
+            "mimeType": "application/gzip",
+            "size": 123
+        });
+
+        assert!(validate_blob_ref(&lex_blob, &blob, "root/entries/0/node/blob").is_ok());
+    }
+
+    #[test]
+    fn test_blob_accept_prefix_wildcard_matches_subtypes() {
+        let lex_blob = LexBlob {
+            accept: Some(vec!["image/*".to_string()]),
+            max_size: None,
+        };
+        let blob = json!({
+            "$type": "blob",
+            "ref": { "$link": "bafyreiabcdef" },
+            "mimeType": "image/png",
+            "size": 123
+        });
+
+        assert!(validate_blob_ref(&lex_blob, &blob, "blob").is_ok());
+    }
+
+    #[test]
+    fn test_blob_accept_exact_type_rejects_different_mime() {
+        let lex_blob = LexBlob {
+            accept: Some(vec!["image/png".to_string()]),
+            max_size: None,
+        };
+        let blob = json!({
+            "$type": "blob",
+            "ref": { "$link": "bafyreiabcdef" },
+            "mimeType": "application/gzip",
+            "size": 123
+        });
+
+        let err = validate_blob_ref(&lex_blob, &blob, "blob").unwrap_err();
+        assert!(matches!(err, LexValidationError::InvalidField { .. }));
+    }
+
+    #[test]
+    fn test_blob_accept_exact_type_ignores_params_and_case() {
+        let lex_blob = LexBlob {
+            accept: Some(vec!["text/html".to_string()]),
+            max_size: None,
+        };
+        let blob = json!({
+            "$type": "blob",
+            "ref": { "$link": "bafyreiabcdef" },
+            "mimeType": "Text/HTML; charset=utf-8",
+            "size": 123
+        });
+
+        assert!(validate_blob_ref(&lex_blob, &blob, "blob").is_ok());
+    }
+
+    #[test]
+    fn test_blob_accept_prefix_ignores_params_and_case() {
+        let lex_blob = LexBlob {
+            accept: Some(vec!["text/*".to_string()]),
+            max_size: None,
+        };
+        let blob = json!({
+            "$type": "blob",
+            "ref": { "$link": "bafyreiabcdef" },
+            "mimeType": "TEXT/HTML; charset=UTF-8",
+            "size": 123
+        });
+
+        assert!(validate_blob_ref(&lex_blob, &blob, "blob").is_ok());
     }
 
     #[test]
