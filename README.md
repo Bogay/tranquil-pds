@@ -63,12 +63,18 @@ podman-compose -f docker-compose.prod.yaml up -d
 - [Containers](docs/install-containers.md)
 - [Kubernetes](docs/install-kubernetes.md)
 
-## Core team
+## Community
 
-- [@lewis.moe](https://tangled.org/did:plc:3fwecdnvtcscjnrx2p4n7alz)
+### "Let's connect!" or whatever linkedin-types say
+
+We currently don't have a shared space to chat and organize Tranquil things, but we're very interested in changing that in the near future. What do you suggest? Anything but a discord server.
+
+### Core team
+
+- [@oyster.cafe](https://tangled.org/did:plc:3fwecdnvtcscjnrx2p4n7alz)
 - [@nel.pet](https://tangled.org/did:plc:h5wsnqetncv6lu2weom35lg2)
 
-## Amazing contributers
+### Amazing contributers
 
 - [@isabelroses.com](https://tangled.org/did:plc:qxichs7jsycphrsmbujwqbfb)
 - [@quilling.dev](https://tangled.org/did:plc:jrtgsidnmxaen4offglr5lsh)
@@ -78,13 +84,15 @@ podman-compose -f docker-compose.prod.yaml up -d
 - [@islacant.win](https://tangled.org/did:plc:aut6evcs6d6ngaunqgfhdzzu)
 - [@a.starrysky.fyi](https://tangled.org/did:plc:uuyqs6y3pwtbteet4swt5i5y)
 - [@sans-self.org](https://tangled.org/did:plc:wydyrngmxbcsqdvhmd7whmye)
+- [@tachyonism.tngl.sh](https://tangled.org/did:plc:w6qiwij62bmdugsd3gemhpy2)
+- Could be your name here too!
 
-## Community Tranquil PDS instances in the wild!
+### Tranquil PDS instances in the wild!
 
 - [Tranquil Farm](https://tranquil.farm)
 - Your instance here!! Don't be a stranger.
 
-## Special thanks
+### Special thanks
 
 This project is very grateful to [@nonbinary.computer](https://tangled.org/did:plc:yfvwmnlztr4dwkb7hwz55r2g), [@juliet.paris](https://tangled.org/did:plc:hs3aly5l26pozymy4b6hz7ae), [@mary.my.id](https://tangled.org/did:plc:ia76kvnndjutgedggx2ibrem), [@baileytownsend.dev](https://tangled.org/did:plc:rnpkyqnmsw4ipey6eotbdnnf), and [@ptr.pet](https://tangled.org/did:plc:dfl62fgb7wtjj3fcbb72naae) for their help and their code to lean on.
 
