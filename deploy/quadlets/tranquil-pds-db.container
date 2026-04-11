@@ -7,7 +7,8 @@ Pod=tranquil-pds.pod
 Environment=POSTGRES_USER=tranquil_pds
 Environment=POSTGRES_DB=pds
 Secret=tranquil-pds-db-password,type=env,target=POSTGRES_PASSWORD
-Volume=/srv/tranquil-pds/postgres:/var/lib/postgresql/data:Z
+# In memory of @cute.kyu.re when Lewis forgot to remove "/data" here after removing it from the compose file and another account was tragically lost :(
+Volume=/srv/tranquil-pds/postgres:/var/lib/postgresql:Z
 HealthCmd=pg_isready -U tranquil_pds -d pds
 HealthInterval=10s
 HealthTimeout=5s
