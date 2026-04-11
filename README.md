@@ -2,17 +2,25 @@
 
 A Personal Data Server for the AT Protocol.
 
-Bluesky runs on a federated protocol called AT Protocol. Your account lives on a PDS, a server that stores your posts, profile, follows, and cryptographic keys. Bluesky hosts one for you at bsky.social, but you can run your own. Self-hosting means you control your data; you're not dependent on any company's servers, and your account + data is actually yours.
+"A what for the what?" -> glad you asked: Bluesky, Tangled, and a bunch of other web applications use a federated protocol called AT Protocol (atproto). Your account lives on a PDS, a server that stores your posts, profile, follows, cryptographic keys, et cetera. The beauty is that a PDS is the *only* place your data lives permanently - so you can navigate any atproto app knowing that your data is yours and not getting locked behind any one app's walls.
 
-This particular PDS thrives under harsh conditions. It is a dandelion growing through the cracks in the sidewalk concrete.
+We came together to make this PDS to enable and empower our users to better host their data on this shared protocol. All of our decisions as a project are guided by their usefulness to the community: PDS hosters and end-users both. 
 
-It has full compatibility with Bluesky's reference PDS.
+Comparatively: Bluesky the company created a "reference PDS" that we can self-host quite easily, and that's great, but Bluesky has an incentive to make software for themselvess first & foremost, then secondly their software can be useful for us self-hosters. In contrast, Tranquil is not from a company, and will never be.
 
 ## What's different about Tranquil PDS
 
-It is a superset of the reference PDS, including: passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices), SSO login and signup, did:web support (PDS-hosted subdomains or bring-your-own), multi-channel communication (email, discord, telegram, signal) for verification and alerts, granular OAuth scopes with a consent UI showing human-readable descriptions, app passwords with granular permissions (read-only, post-only, or custom scopes), account delegation (letting others manage an account with configurable permission levels), and a built-in web UI for account management, repo browsing, and admin.
+It is a superset of the reference PDS, including:
+- passkeys and 2FA: WebAuthn/FIDO2, TOTP, backup codes, trusted devices
+- SSO login and signup
+- did:web support: PDS-hosted subdomains or bring-your-own
+- multi-channel communication: you can be notified via email, discord, telegram, and signal for verification and alerts
+- granular OAuth scopes with a consent UI that allows unchecking specific scopes
+- app passwords with the same granular permission scope system as OAuth
+- account delegation: letting others manage an account with configurable permission levels
+- a built-in web UI for account management, repo browsing, and admin
 
-The PDS itself is a single binary with no nodeJS runtime. However, at time of writing, Tranquil requires postgres running separately. Blobs are stored on the local filesystem by default (S3 optional). Valkey is also optional (as an alternative to the built-in cache).
+Unlike the ref PDS, Tranquil itself is compiled to a single binary with no nodeJS runtime. However, at time of writing, Tranquil requires postgres running separately.
 
 ## Quick Start
 
@@ -55,14 +63,30 @@ podman-compose -f docker-compose.prod.yaml up -d
 - [Containers](docs/install-containers.md)
 - [Kubernetes](docs/install-kubernetes.md)
 
-## Maintainers to ping
+## Core team
 
-- [@lewis.moe](https://bsky.app/profile/did:plc:3fwecdnvtcscjnrx2p4n7alz)
-- [@nel.pet](https://bsky.app/profile/did:plc:h5wsnqetncv6lu2weom35lg2)
+- [@lewis.moe](https://tangled.org/did:plc:3fwecdnvtcscjnrx2p4n7alz)
+- [@nel.pet](https://tangled.org/did:plc:h5wsnqetncv6lu2weom35lg2)
 
-## Thanks
+## Amazing contributers
 
-This project is very grateful to [@nonbinary.computer](https://bsky.app/profile/did:plc:yfvwmnlztr4dwkb7hwz55r2g), [@juli.ee](https://bsky.app/profile/did:plc:7vimlesenouvuaqvle42yhvo), [@mary.my.id](https://bsky.app/profile/did:plc:ia76kvnndjutgedggx2ibrem), and [@baileytownsend.dev](https://bsky.app/profile/did:plc:rnpkyqnmsw4ipey6eotbdnnf) for their help and their code to lean on.
+- [@isabelroses.com](https://tangled.org/did:plc:qxichs7jsycphrsmbujwqbfb)
+- [@quilling.dev](https://tangled.org/did:plc:jrtgsidnmxaen4offglr5lsh)
+- [@koi.rip](https://tangled.org/did:plc:b26ewgkrnx3yvsp2cdao3ntu)
+- [@bas.sh](https://tangled.org/did:plc:c52wep6lj4sfbsqiz3yvb55h)
+- [@nekomimi.pet](https://tangled.org/did:plc:ttdrpj45ibqunmfhdsb4zdwq)
+- [@islacant.win](https://tangled.org/did:plc:aut6evcs6d6ngaunqgfhdzzu)
+- [@a.starrysky.fyi](https://tangled.org/did:plc:uuyqs6y3pwtbteet4swt5i5y)
+- [@sans-self.org](https://tangled.org/did:plc:wydyrngmxbcsqdvhmd7whmye)
+
+## Community Tranquil PDS instances in the wild!
+
+- [Tranquil Farm](https://tranquil.farm)
+- Your instance here!! Don't be a stranger.
+
+## Special thanks
+
+This project is very grateful to [@nonbinary.computer](https://tangled.org/did:plc:yfvwmnlztr4dwkb7hwz55r2g), [@juliet.paris](https://tangled.org/did:plc:hs3aly5l26pozymy4b6hz7ae), [@mary.my.id](https://tangled.org/did:plc:ia76kvnndjutgedggx2ibrem), [@baileytownsend.dev](https://tangled.org/did:plc:rnpkyqnmsw4ipey6eotbdnnf), and [@ptr.pet](https://tangled.org/did:plc:dfl62fgb7wtjj3fcbb72naae) for their help and their code to lean on.
 
 ## License
 
