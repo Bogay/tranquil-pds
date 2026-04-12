@@ -207,11 +207,15 @@ if ! command -v rustc &>/dev/null; then
     source "$HOME/.cargo/env"
 fi
 
-log_info "Installing deno..."
-export PATH="$HOME/.deno/bin:$PATH"
-if ! command -v deno &>/dev/null && [[ ! -f "$HOME/.deno/bin/deno" ]]; then
-    curl -fsSL https://deno.land/install.sh | sh
-    grep -q 'deno/bin' ~/.bashrc 2>/dev/null || echo 'export PATH="$HOME/.deno/bin:$PATH"' >> ~/.bashrc
+log_info "Installing Node.js..."
+if ! command -v node &>/dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+    apt install -y nodejs
+fi
+
+log_info "Installing pnpm..."
+if ! command -v pnpm &>/dev/null; then
+    npm install -g pnpm
 fi
 
 log_info "Cloning Tranquil PDS..."
@@ -223,7 +227,7 @@ fi
 cd /opt/tranquil-pds
 
 log_info "Building frontend..."
-"$HOME/.deno/bin/deno" task build --filter=frontend
+cd frontend && pnpm install --frozen-lockfile && pnpm build && cd ..
 log_success "Frontend built"
 
 log_info "Building Tranquil PDS (this takes a while)..."

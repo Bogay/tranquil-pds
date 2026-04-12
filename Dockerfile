@@ -1,7 +1,10 @@
-FROM denoland/deno:alpine AS frontend
+FROM node:24-alpine AS builder
+RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
-RUN deno task build
+RUN pnpm build
 
 FROM rust:1.92-alpine AS builder
 RUN apk add --no-cache ca-certificates musl-dev pkgconfig openssl-dev openssl-libs-static mold clang protoc

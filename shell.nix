@@ -1,5 +1,4 @@
 {
-  lib,
   mkShell,
   callPackage,
   rustPlatform,
@@ -17,13 +16,18 @@
   cargo-nextest,
 
   # frontend tooling
-  deno,
   svelte-language-server,
   typescript-language-server,
-}: let
-  defaultPackage = callPackage ./default.nix { };
-in mkShell {
-  inputsFrom = [ defaultPackage ];
+}:
+let
+  pds = callPackage ./default.nix { };
+  frontend = callPackage ./frontend.nix { };
+in
+mkShell {
+  inputsFrom = [
+    pds
+    frontend
+  ];
 
   env = {
     RUST_SRC_PATH = rustPlatform.rustLibSrc;
@@ -39,10 +43,8 @@ in mkShell {
     rust-analyzer
     sqlx-cli
     cargo-nextest
-    
-    deno
+
     svelte-language-server
     typescript-language-server
   ];
 }
-

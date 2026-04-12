@@ -49,12 +49,12 @@ mkdir -p /var/lib/tranquil/blobs
 
 We'll set ownership after creating the service user.
 
-## Install deno (for frontend build)
+## Install Node.js and pnpm (for frontend build)
 
 ```bash
-curl -fsSL https://deno.land/install.sh | sh
-export PATH="$HOME/.deno/bin:$PATH"
-echo 'export PATH="$HOME/.deno/bin:$PATH"' >> ~/.bashrc
+curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+apt install -y nodejs
+npm install -g pnpm
 ```
 
 ## Clone and build Tranquil PDS
@@ -64,7 +64,8 @@ cd /opt
 git clone https://tangled.org/tranquil.farm/tranquil-pds tranquil-pds
 cd tranquil-pds
 cd frontend
-deno task build
+pnpm install --frozen-lockfile
+pnpm build
 cd ..
 cargo build --release
 ```
@@ -330,7 +331,7 @@ Update Tranquil PDS:
 ```bash
 cd /opt/tranquil-pds
 git pull
-cd frontend && deno task build && cd ..
+cd frontend && pnpm install --frozen-lockfile && pnpm build && cd ..
 cargo build --release
 systemctl stop tranquil-pds
 cp target/release/tranquil-pds /usr/local/bin/

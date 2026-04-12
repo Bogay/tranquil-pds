@@ -1,15 +1,17 @@
-self: {
+{
   lib,
   pkgs,
   config,
   ...
-}: let
+}:
+let
   cfg = config.services.tranquil-pds;
 
   inherit (lib) types mkOption;
 
   settingsFormat = pkgs.formats.toml { };
-in {
+in
+{
   _class = "nixos";
 
   options.services.tranquil-pds = {
@@ -17,8 +19,8 @@ in {
 
     package = mkOption {
       type = types.package;
-      default = self.packages.${pkgs.stdenv.hostPlatform.system}.tranquil-pds;
-      defaultText = lib.literalExpression "self.packages.\${pkgs.stdenv.hostPlatform.system}.tranquil-pds";
+      default = pkgs.callPackage ./default.nix { };
+      defaultText = lib.literalExpression "pkgs.tranquil-pds";
       description = "The tranquil-pds package to use";
     };
 
@@ -97,13 +99,16 @@ in {
           };
 
           frontend = {
-            enabled = lib.mkEnableOption "serving the frontend from the backend. Disable to serve the frontend manually"
-              // { default = true; };
+            enabled =
+              lib.mkEnableOption "serving the frontend from the backend. Disable to serve the frontend manually"
+              // {
+                default = true;
+              };
 
             dir = mkOption {
               type = types.nullOr types.package;
-              default = self.packages.${pkgs.stdenv.hostPlatform.system}.tranquil-frontend;
-              defaultText = lib.literalExpression "self.packages.\${pkgs.stdenv.hostPlatform.system}.tranquil-frontend";
+              default = pkgs.callPackage ./frontend.nix { };
+              defaultText = lib.literalExpression "pkgs.tranquil-frontend";
               description = "Frontend package to be served by the backend";
             };
           };
@@ -137,7 +142,7 @@ in {
   };
 
   config = lib.mkIf cfg.enable (
-    lib.mkMerge [            
+    lib.mkMerge [
       (lib.mkIf cfg.database.createLocally {
         services.postgresql = {
           enable = true;
@@ -159,7 +164,7 @@ in {
         };
       })
 
-      {      
+      {
         users.users.${cfg.user} = {
           isSystemUser = true;
           inherit (cfg) group;
