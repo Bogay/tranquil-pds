@@ -55,22 +55,26 @@ fn write_hint_record<S: StorageIO>(
     io.write_all_at(fd, write_offset.raw(), record)
 }
 
+fn encode_location_fields(record: &mut [u8; HINT_RECORD_SIZE], loc: &BlockLocation) {
+    record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4].copy_from_slice(&loc.file_id.raw().to_le_bytes());
+    record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8]
+        .copy_from_slice(&loc.length.raw().to_le_bytes());
+    record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8]
+        .copy_from_slice(&loc.offset.raw().to_le_bytes());
+}
+
 pub(crate) fn encode_hint_record<S: StorageIO>(
     io: &S,
     fd: FileId,
     write_offset: HintOffset,
     cid_bytes: &[u8; CID_SIZE],
-    file_id: DataFileId,
-    block_offset: BlockOffset,
-    length: BlockLength,
+    loc: &BlockLocation,
 ) -> io::Result<()> {
     let mut record = [0u8; HINT_RECORD_SIZE];
     record[TYPE_OFFSET] = RECORD_TYPE_PUT;
     record[VERSION_OFFSET] = HINT_FORMAT_VERSION;
     record[CID_OFFSET..CID_OFFSET + CID_SIZE].copy_from_slice(cid_bytes);
-    record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4].copy_from_slice(&file_id.raw().to_le_bytes());
-    record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8].copy_from_slice(&length.raw().to_le_bytes());
-    record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8].copy_from_slice(&block_offset.raw().to_le_bytes());
+    encode_location_fields(&mut record, loc);
 
     let checksum = hint_checksum(&record[..HINT_PAYLOAD_SIZE]);
     record[CHECKSUM_OFFSET..].copy_from_slice(&checksum.to_le_bytes());
@@ -85,9 +89,7 @@ pub(crate) fn encode_relocate_record<S: StorageIO>(
     fd: FileId,
     write_offset: HintOffset,
     cid_bytes: &[u8; CID_SIZE],
-    file_id: DataFileId,
-    block_offset: BlockOffset,
-    length: BlockLength,
+    loc: &BlockLocation,
     refcount: u32,
 ) -> io::Result<()> {
     let mut record = [0u8; HINT_RECORD_SIZE];
@@ -96,9 +98,7 @@ pub(crate) fn encode_relocate_record<S: StorageIO>(
     let rc16 = u16::try_from(refcount).unwrap_or(u16::MAX);
     record[REFCOUNT_OFFSET..REFCOUNT_OFFSET + 2].copy_from_slice(&rc16.to_le_bytes());
     record[CID_OFFSET..CID_OFFSET + CID_SIZE].copy_from_slice(cid_bytes);
-    record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4].copy_from_slice(&file_id.raw().to_le_bytes());
-    record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8].copy_from_slice(&length.raw().to_le_bytes());
-    record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8].copy_from_slice(&block_offset.raw().to_le_bytes());
+    encode_location_fields(&mut record, loc);
 
     let checksum = hint_checksum(&record[..HINT_PAYLOAD_SIZE]);
     record[CHECKSUM_OFFSET..].copy_from_slice(&checksum.to_le_bytes());
@@ -323,19 +323,9 @@ impl<'a, S: StorageIO> HintFileWriter<'a, S> {
     pub fn append_hint(
         &mut self,
         cid_bytes: &[u8; CID_SIZE],
-        file_id: DataFileId,
-        offset: BlockOffset,
-        length: BlockLength,
+        loc: &BlockLocation,
     ) -> io::Result<()> {
-        encode_hint_record(
-            self.io,
-            self.fd,
-            self.position,
-            cid_bytes,
-            file_id,
-            offset,
-            length,
-        )?;
+        encode_hint_record(self.io, self.fd, self.position, cid_bytes, loc)?;
         self.position = self.position.advance(HINT_RECORD_SIZE as u64);
         Ok(())
     }
@@ -354,21 +344,10 @@ impl<'a, S: StorageIO> HintFileWriter<'a, S> {
     pub fn append_relocate(
         &mut self,
         cid_bytes: &[u8; CID_SIZE],
-        file_id: DataFileId,
-        offset: BlockOffset,
-        length: BlockLength,
+        loc: &BlockLocation,
         refcount: u32,
     ) -> io::Result<()> {
-        encode_relocate_record(
-            self.io,
-            self.fd,
-            self.position,
-            cid_bytes,
-            file_id,
-            offset,
-            length,
-            refcount,
-        )?;
+        encode_relocate_record(self.io, self.fd, self.position, cid_bytes, loc, refcount)?;
         self.position = self.position.advance(HINT_RECORD_SIZE as u64);
         Ok(())
     }
@@ -862,7 +841,8 @@ mod tests {
         let offset = BlockOffset::new(1024);
         let length = BlockLength::new(256);
 
-        encode_hint_record(&sim, fd, HintOffset::new(0), &cid, file_id, offset, length).unwrap();
+        let loc = BlockLocation { file_id, offset, length };
+        encode_hint_record(&sim, fd, HintOffset::new(0), &cid, &loc).unwrap();
 
         let file_size = sim.file_size(fd).unwrap();
         let record = decode_hint_record(&sim, fd, HintOffset::new(0), file_size)
@@ -920,16 +900,12 @@ mod tests {
         (0u8..5).for_each(|i| {
             let cid = test_cid(i);
             let write_offset = HintOffset::new(i as u64 * HINT_RECORD_SIZE as u64);
-            encode_hint_record(
-                &sim,
-                fd,
-                write_offset,
-                &cid,
-                DataFileId::new(i as u32),
-                BlockOffset::new(i as u64 * 100),
-                BlockLength::new(50 + i as u32),
-            )
-            .unwrap();
+            let loc = BlockLocation {
+                file_id: DataFileId::new(i as u32),
+                offset: BlockOffset::new(i as u64 * 100),
+                length: BlockLength::new(50 + i as u32),
+            };
+            encode_hint_record(&sim, fd, write_offset, &cid, &loc).unwrap();
         });
 
         let file_size = sim.file_size(fd).unwrap();
@@ -971,16 +947,12 @@ mod tests {
     fn detects_corrupted_hint() {
         let (sim, fd) = setup();
         let cid = test_cid(1);
-        encode_hint_record(
-            &sim,
-            fd,
-            HintOffset::new(0),
-            &cid,
-            DataFileId::new(0),
-            BlockOffset::new(0),
-            BlockLength::new(100),
-        )
-        .unwrap();
+        let loc = BlockLocation {
+            file_id: DataFileId::new(0),
+            offset: BlockOffset::new(0),
+            length: BlockLength::new(100),
+        };
+        encode_hint_record(&sim, fd, HintOffset::new(0), &cid, &loc).unwrap();
 
         sim.write_all_at(fd, 10, &[0xFF]).unwrap();
 
@@ -1006,16 +978,12 @@ mod tests {
     fn oversized_length_treated_as_corrupted() {
         let (sim, fd) = setup();
         let cid = test_cid(1);
-        encode_hint_record(
-            &sim,
-            fd,
-            HintOffset::new(0),
-            &cid,
-            DataFileId::new(0),
-            BlockOffset::new(0),
-            BlockLength::new(100),
-        )
-        .unwrap();
+        let loc = BlockLocation {
+            file_id: DataFileId::new(0),
+            offset: BlockOffset::new(0),
+            length: BlockLength::new(100),
+        };
+        encode_hint_record(&sim, fd, HintOffset::new(0), &cid, &loc).unwrap();
 
         let length_offset = FIELD_A_OFFSET as u64 + 4;
         let oversized = (MAX_BLOCK_SIZE + 1).to_le_bytes();
@@ -1040,14 +1008,12 @@ mod tests {
         let mut writer = HintFileWriter::new(&sim, fd);
 
         (0u8..5).for_each(|i| {
-            writer
-                .append_hint(
-                    &test_cid(i),
-                    DataFileId::new(0),
-                    BlockOffset::new(i as u64 * 100),
-                    BlockLength::new(50 + i as u32),
-                )
-                .unwrap();
+            let loc = BlockLocation {
+                file_id: DataFileId::new(0),
+                offset: BlockOffset::new(i as u64 * 100),
+                length: BlockLength::new(50 + i as u32),
+            };
+            writer.append_hint(&test_cid(i), &loc).unwrap();
         });
 
         assert_eq!(
@@ -1074,25 +1040,21 @@ mod tests {
     fn hint_writer_resume_continues_at_position() {
         let (sim, fd) = setup();
         let mut writer = HintFileWriter::new(&sim, fd);
-        writer
-            .append_hint(
-                &test_cid(0),
-                DataFileId::new(0),
-                BlockOffset::new(0),
-                BlockLength::new(100),
-            )
-            .unwrap();
+        let loc0 = BlockLocation {
+            file_id: DataFileId::new(0),
+            offset: BlockOffset::new(0),
+            length: BlockLength::new(100),
+        };
+        writer.append_hint(&test_cid(0), &loc0).unwrap();
 
         let pos = writer.position();
         let mut writer2 = HintFileWriter::resume(&sim, fd, pos);
-        writer2
-            .append_hint(
-                &test_cid(1),
-                DataFileId::new(0),
-                BlockOffset::new(100),
-                BlockLength::new(200),
-            )
-            .unwrap();
+        let loc1 = BlockLocation {
+            file_id: DataFileId::new(0),
+            offset: BlockOffset::new(100),
+            length: BlockLength::new(200),
+        };
+        writer2.append_hint(&test_cid(1), &loc1).unwrap();
 
         let reader = HintFileReader::open(&sim, fd).unwrap();
         let valid_count = reader
@@ -1115,14 +1077,12 @@ mod tests {
     fn hint_reader_stops_on_truncated() {
         let (sim, fd) = setup();
         let mut writer = HintFileWriter::new(&sim, fd);
-        writer
-            .append_hint(
-                &test_cid(0),
-                DataFileId::new(0),
-                BlockOffset::new(0),
-                BlockLength::new(100),
-            )
-            .unwrap();
+        let loc = BlockLocation {
+            file_id: DataFileId::new(0),
+            offset: BlockOffset::new(0),
+            length: BlockLength::new(100),
+        };
+        writer.append_hint(&test_cid(0), &loc).unwrap();
 
         sim.write_all_at(fd, writer.position().raw(), &[0u8; HINT_RECORD_SIZE - 1])
             .unwrap();
@@ -1140,14 +1100,12 @@ mod tests {
         let mut writer = HintFileWriter::new(&sim, fd);
 
         (0u8..3).for_each(|i| {
-            writer
-                .append_hint(
-                    &test_cid(i),
-                    DataFileId::new(0),
-                    BlockOffset::new(i as u64 * 100),
-                    BlockLength::new(50),
-                )
-                .unwrap();
+            let loc = BlockLocation {
+                file_id: DataFileId::new(0),
+                offset: BlockOffset::new(i as u64 * 100),
+                length: BlockLength::new(50),
+            };
+            writer.append_hint(&test_cid(i), &loc).unwrap();
         });
 
         sim.write_all_at(fd, HINT_RECORD_SIZE as u64 + 5, &[0xFF])

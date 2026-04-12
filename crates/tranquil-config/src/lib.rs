@@ -720,6 +720,10 @@ pub struct FirehoseConfig {
     #[config(env = "FIREHOSE_MAX_LAG", default = 5000)]
     pub max_lag: u64,
 
+    /// Maximum concurrent full-repo exports, eg. getRepo without `since`.
+    #[config(env = "MAX_CONCURRENT_REPO_EXPORTS", default = 4)]
+    pub max_concurrent_repo_exports: usize,
+
     /// List of relay / crawler notification URLs.
     #[config(env = "CRAWLERS", parse_env = split_comma_list)]
     pub crawlers: Option<Vec<String>>,

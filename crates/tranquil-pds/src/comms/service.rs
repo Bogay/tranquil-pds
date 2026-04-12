@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use tokio::time::interval;
+
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use tranquil_comms::{
@@ -75,17 +75,28 @@ impl CommsService {
             );
         }
         info!(
-            poll_interval_secs = self.poll_interval.as_secs(),
+            poll_interval_ms = self.poll_interval.as_millis() as u64,
             batch_size = self.batch_size,
             channels = ?self.senders.keys().collect::<Vec<_>>(),
             "Starting comms service"
         );
-        let mut ticker = interval(self.poll_interval);
+        let base = self.poll_interval;
+        let max_backoff = Duration::from_secs(30);
+        let mut current_delay = base;
         loop {
             tokio::select! {
-                _ = ticker.tick() => {
-                    if let Err(e) = self.process_batch().await {
-                        error!(error = %e, "Failed to process comms batch");
+                _ = tokio::time::sleep(current_delay) => {
+                    match self.process_batch().await {
+                        Ok(had_work) => {
+                            current_delay = match had_work {
+                                true => base,
+                                false => max_backoff.min(current_delay.saturating_mul(2)),
+                            };
+                        }
+                        Err(e) => {
+                            error!(error = %e, "Failed to process comms batch");
+                            current_delay = max_backoff.min(current_delay.saturating_mul(2));
+                        }
                     }
                 }
                 _ = shutdown.cancelled() => {
@@ -96,14 +107,14 @@ impl CommsService {
         }
     }
 
-    async fn process_batch(&self) -> Result<(), tranquil_db_traits::DbError> {
+    async fn process_batch(&self) -> Result<bool, tranquil_db_traits::DbError> {
         let items = self.fetch_pending().await?;
         if items.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         debug!(count = items.len(), "Processing comms batch");
         futures::future::join_all(items.into_iter().map(|item| self.process_item(item))).await;
-        Ok(())
+        Ok(true)
     }
 
     async fn fetch_pending(&self) -> Result<Vec<QueuedComms>, tranquil_db_traits::DbError> {

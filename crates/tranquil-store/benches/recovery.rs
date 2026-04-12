@@ -100,9 +100,7 @@ impl<'a> DirectSeeder<'a> {
         }
 
         let loc = self.data_writer.append_block(cid, data).unwrap();
-        self.hint_writer
-            .append_hint(cid, loc.file_id, loc.offset, loc.length)
-            .unwrap();
+        self.hint_writer.append_hint(cid, &loc).unwrap();
         self.blocks_in_file += 1;
 
         if self.blocks_in_file.is_multiple_of(10_000) {

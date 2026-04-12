@@ -1136,7 +1136,7 @@ fn process_batch<S: StorageIO>(
                     }
 
                     let loc = data_writer.append_block(cid_bytes, data)?;
-                    hint_writer.append_hint(cid_bytes, loc.file_id, loc.offset, loc.length)?;
+                    hint_writer.append_hint(cid_bytes, &loc)?;
 
                     block_bytes = block_bytes.saturating_add(data.len() as u64);
                     block_count = block_count.saturating_add(1);

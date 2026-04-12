@@ -142,6 +142,17 @@ pub async fn get_repo(
         return get_repo_since(&state, &did, &head_cid, since).await;
     }
 
+    let _permit = match state.repo_export_semaphore.try_acquire() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Too many concurrent repo exports",
+            )
+                .into_response();
+        }
+    };
+
     let car_bytes = match generate_repo_car_from_user_blocks(
         state.repos.repo.as_ref(),
         &state.block_store,
@@ -213,19 +224,24 @@ async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str
             .into_response();
     }
 
-    let blocks = match state.block_store.get_many(&block_cids).await {
-        Ok(b) => b,
-        Err(e) => {
-            error!("Block store error in get_repo_since: {:?}", e);
-            return ApiError::InternalError(Some("Failed to get blocks".into())).into_response();
-        }
-    };
+    for chunk_start in (0..block_cids.len()).step_by(500) {
+        let chunk_end = (chunk_start + 500).min(block_cids.len());
+        let chunk = &block_cids[chunk_start..chunk_end];
+        let blocks = match state.block_store.get_many(chunk).await {
+            Ok(b) => b,
+            Err(e) => {
+                error!("Block store error in get_repo_since: {:?}", e);
+                return ApiError::InternalError(Some("Failed to get blocks".into()))
+                    .into_response();
+            }
+        };
 
-    blocks
-        .into_iter()
-        .enumerate()
-        .filter_map(|(i, block_opt)| block_opt.map(|block| (block_cids[i], block)))
-        .for_each(|(cid, block)| car_bytes.extend_from_slice(&encode_car_block(&cid, &block)));
+        chunk
+            .iter()
+            .zip(blocks.into_iter())
+            .filter_map(|(cid, block_opt)| block_opt.map(|block| (*cid, block)))
+            .for_each(|(cid, block)| car_bytes.extend_from_slice(&encode_car_block(&cid, &block)));
+    }
 
     (
         StatusCode::OK,

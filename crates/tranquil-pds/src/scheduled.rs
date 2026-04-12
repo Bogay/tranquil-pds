@@ -667,6 +667,8 @@ async fn delete_account_data(
     Ok(())
 }
 
+const CAR_BLOCK_BATCH_SIZE: usize = 500;
+
 pub async fn generate_repo_car(
     block_store: &AnyBlockStore,
     head_cid: &Cid,
@@ -683,21 +685,20 @@ pub async fn generate_repo_car(
         })
         .collect();
 
-    let car_bytes = encode_car_header(head_cid).context("Failed to encode CAR header")?;
+    let mut car_bytes = encode_car_header(head_cid).context("Failed to encode CAR header")?;
 
-    let blocks = block_store
-        .get_many(&block_cids)
-        .await
-        .context("Failed to fetch blocks")?;
+    for chunk in block_cids.chunks(CAR_BLOCK_BATCH_SIZE) {
+        let blocks = block_store
+            .get_many(chunk)
+            .await
+            .context("Failed to fetch blocks")?;
 
-    let car_bytes = block_cids
-        .iter()
-        .zip(blocks.iter())
-        .filter_map(|(cid, block_opt)| block_opt.as_ref().map(|block| (cid, block)))
-        .fold(car_bytes, |mut acc, (cid, block)| {
-            acc.extend(encode_car_block(cid, block));
-            acc
-        });
+        chunk
+            .iter()
+            .zip(blocks.iter())
+            .filter_map(|(cid, block_opt)| block_opt.as_ref().map(|block| (cid, block)))
+            .for_each(|(cid, block)| car_bytes.extend(encode_car_block(cid, block)));
+    }
 
     Ok(car_bytes)
 }

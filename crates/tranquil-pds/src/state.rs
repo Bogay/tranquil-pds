@@ -50,6 +50,7 @@ pub struct AppState {
     pub signal_sender: Option<Arc<tranquil_signal::SignalSlot>>,
     pub signal_store_provider: Option<Arc<dyn tranquil_signal::SignalStoreProvider>>,
     pub eventlog_segments_dir: Option<PathBuf>,
+    pub repo_export_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -394,6 +395,9 @@ impl AppState {
             signal_sender: None,
             signal_store_provider,
             eventlog_segments_dir,
+            repo_export_semaphore: Arc::new(tokio::sync::Semaphore::new(
+                cfg.firehose.max_concurrent_repo_exports,
+            )),
         }
     }
 

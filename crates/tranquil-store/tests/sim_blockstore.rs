@@ -75,7 +75,7 @@ impl SimHarness {
                 let data = vec![seed as u8; data_size];
                 let loc = writer.append_block(&cid, &data).unwrap();
                 hint_writer
-                    .append_hint(&cid, loc.file_id, loc.offset, loc.length)
+                    .append_hint(&cid, &loc)
                     .unwrap();
                 (cid, loc)
             })
@@ -539,7 +539,7 @@ fn sim_aggressive_faults_data_integrity() {
                 let data = vec![i as u8; 64];
                 let loc = writer.append_block(&cid, &data).ok()?;
                 hint_writer
-                    .append_hint(&cid, loc.file_id, loc.offset, loc.length)
+                    .append_hint(&cid, &loc)
                     .ok()?;
                 Some(())
             })?;

@@ -162,13 +162,7 @@ fn stream_compact<S: StorageIO>(
             } => match index.get(&cid_bytes) {
                 Some(e) if e.location.file_id == source_file_id && !e.refcount.is_zero() => {
                     let loc = writer.append_block(&cid_bytes, &data)?;
-                    hint_writer.append_relocate(
-                        &cid_bytes,
-                        loc.file_id,
-                        loc.offset,
-                        loc.length,
-                        e.refcount.raw(),
-                    )?;
+                    hint_writer.append_relocate(&cid_bytes, &loc, e.refcount.raw())?;
                     relocations.push((cid_bytes, loc));
                     live_count = live_count.saturating_add(1);
                 }
@@ -188,13 +182,7 @@ fn stream_compact<S: StorageIO>(
                         }
                         false => {
                             let loc = writer.append_block(&cid_bytes, &data)?;
-                            hint_writer.append_relocate(
-                                &cid_bytes,
-                                loc.file_id,
-                                loc.offset,
-                                loc.length,
-                                e.refcount.raw(),
-                            )?;
+                            hint_writer.append_relocate(&cid_bytes, &loc, e.refcount.raw())?;
                             relocations.push((cid_bytes, loc));
                             live_count = live_count.saturating_add(1);
                         }
