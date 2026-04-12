@@ -378,6 +378,7 @@ impl HashTable {
         &mut self,
         cid: &[u8; CID_SIZE],
         new_location: BlockLocation,
+        refcount: RefCount,
     ) -> Result<bool, CapacityExhausted> {
         if is_empty(cid) {
             return Ok(false);
@@ -394,7 +395,9 @@ impl HashTable {
             let slot_cid = self.slots[idx].cid;
 
             if is_empty(&slot_cid) {
-                self.slots[idx] = Slot::from_location(*cid, new_location);
+                let mut slot = Slot::from_location(*cid, new_location);
+                slot.refcount = refcount;
+                self.slots[idx] = slot;
                 self.count += 1;
                 return Ok(false);
             }
@@ -411,6 +414,7 @@ impl HashTable {
             let slot_dist = self.probe_distance(idx, slot_home);
             if slot_dist < dist {
                 let mut displaced = Slot::from_location(*cid, new_location);
+                displaced.refcount = refcount;
                 std::mem::swap(&mut self.slots[idx], &mut displaced);
                 self.count += 1;
                 self.relocate_displaced(displaced, idx, slot_dist);
@@ -571,7 +575,7 @@ impl HashTable {
         removals: &[CidBytes],
     ) {
         relocations.iter().for_each(|(cid, new_loc)| {
-            if let Err(e) = self.relocate(cid, *new_loc) {
+            if let Err(e) = self.relocate(cid, *new_loc, RefCount::one()) {
                 tracing::error!(?e, "capacity exhausted during compaction relocation");
             }
         });
@@ -1267,18 +1271,20 @@ impl BlockIndex {
 
     pub fn batch_relocate(
         &self,
-        relocations: &[(CidBytes, BlockLocation)],
+        relocations: &[(CidBytes, BlockLocation, u32)],
     ) -> Result<(), BlockIndexError> {
         if relocations.is_empty() {
             return Ok(());
         }
         let mut table = self.table.write();
-        relocations.iter().try_for_each(|(cid, location)| {
-            table
-                .relocate(cid, *location)
-                .map(|_| ())
-                .map_err(|_| BlockIndexError::CapacityExhausted)
-        })
+        relocations
+            .iter()
+            .try_for_each(|(cid, location, refcount)| {
+                table
+                    .relocate(cid, *location, RefCount::new(*refcount))
+                    .map(|_| ())
+                    .map_err(|_| BlockIndexError::CapacityExhausted)
+            })
     }
 
     pub fn batch_remove(&self, cids: &[CidBytes]) {
@@ -1499,15 +1505,18 @@ impl BlockIndex {
                         file_id,
                         offset,
                         length,
+                        refcount,
                     } => {
                         let loc = BlockLocation {
                             file_id,
                             offset,
                             length,
                         };
-                        table.relocate(&cid_bytes, loc).map_err(|_| {
-                            io::Error::other("hash table capacity exhausted during rebuild")
-                        })?;
+                        table
+                            .relocate(&cid_bytes, loc, RefCount::new(refcount))
+                            .map_err(|_| {
+                                io::Error::other("hash table capacity exhausted during rebuild")
+                            })?;
                     }
                     ReadHintRecord::Remove { cid_bytes } => {
                         let _ = table.remove(&cid_bytes);

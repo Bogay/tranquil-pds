@@ -78,6 +78,8 @@ pub(crate) fn encode_hint_record<S: StorageIO>(
     write_hint_record(io, fd, write_offset, &record)
 }
 
+const REFCOUNT_OFFSET: usize = 2;
+
 pub(crate) fn encode_relocate_record<S: StorageIO>(
     io: &S,
     fd: FileId,
@@ -86,10 +88,13 @@ pub(crate) fn encode_relocate_record<S: StorageIO>(
     file_id: DataFileId,
     block_offset: BlockOffset,
     length: BlockLength,
+    refcount: u32,
 ) -> io::Result<()> {
     let mut record = [0u8; HINT_RECORD_SIZE];
     record[TYPE_OFFSET] = RECORD_TYPE_RELOCATE;
     record[VERSION_OFFSET] = HINT_FORMAT_VERSION;
+    let rc16 = u16::try_from(refcount).unwrap_or(u16::MAX);
+    record[REFCOUNT_OFFSET..REFCOUNT_OFFSET + 2].copy_from_slice(&rc16.to_le_bytes());
     record[CID_OFFSET..CID_OFFSET + CID_SIZE].copy_from_slice(cid_bytes);
     record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4].copy_from_slice(&file_id.raw().to_le_bytes());
     record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8].copy_from_slice(&length.raw().to_le_bytes());
@@ -158,6 +163,7 @@ pub enum ReadHintRecord {
         file_id: DataFileId,
         offset: BlockOffset,
         length: BlockLength,
+        refcount: u32,
     },
     Remove {
         cid_bytes: [u8; CID_SIZE],
@@ -255,6 +261,15 @@ pub fn decode_hint_record<S: StorageIO>(
             }))
         }
         RECORD_TYPE_RELOCATE => {
+            let rc16 = u16::from_le_bytes(
+                record[REFCOUNT_OFFSET..REFCOUNT_OFFSET + 2]
+                    .try_into()
+                    .unwrap(),
+            );
+            let refcount = match rc16 {
+                0 => 1,
+                n => u32::from(n),
+            };
             let file_id = DataFileId::new(u32::from_le_bytes(
                 record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4]
                     .try_into()
@@ -278,6 +293,7 @@ pub fn decode_hint_record<S: StorageIO>(
                 file_id,
                 offset: block_offset,
                 length: BlockLength::new(raw_length),
+                refcount,
             }))
         }
         RECORD_TYPE_REMOVE => Ok(Some(ReadHintRecord::Remove { cid_bytes })),
@@ -341,6 +357,7 @@ impl<'a, S: StorageIO> HintFileWriter<'a, S> {
         file_id: DataFileId,
         offset: BlockOffset,
         length: BlockLength,
+        refcount: u32,
     ) -> io::Result<()> {
         encode_relocate_record(
             self.io,
@@ -350,6 +367,7 @@ impl<'a, S: StorageIO> HintFileWriter<'a, S> {
             file_id,
             offset,
             length,
+            refcount,
         )?;
         self.position = self.position.advance(HINT_RECORD_SIZE as u64);
         Ok(())
@@ -575,7 +593,7 @@ pub fn replay_hints_into_block_index<S: StorageIO>(
     let mut replayed: u64 = 0;
     let mut put_buffer: Vec<([u8; CID_SIZE], BlockLocation)> =
         Vec::with_capacity(REPLAY_BATCH_SIZE);
-    let mut relocate_buffer: Vec<([u8; CID_SIZE], BlockLocation)> =
+    let mut relocate_buffer: Vec<([u8; CID_SIZE], BlockLocation, u32)> =
         Vec::with_capacity(REPLAY_BATCH_SIZE);
     let mut remove_buffer: Vec<[u8; CID_SIZE]> = Vec::with_capacity(REPLAY_BATCH_SIZE);
 
@@ -663,13 +681,14 @@ pub fn replay_hints_into_block_index<S: StorageIO>(
                         file_id,
                         offset,
                         length,
+                        refcount,
                     } => {
                         let loc = BlockLocation {
                             file_id,
                             offset,
                             length,
                         };
-                        relocate_buffer.push((cid_bytes, loc));
+                        relocate_buffer.push((cid_bytes, loc, refcount));
 
                         let record_end =
                             offset.advance(BLOCK_RECORD_OVERHEAD as u64 + length.as_u64());
