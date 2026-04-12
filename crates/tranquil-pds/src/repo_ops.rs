@@ -266,35 +266,48 @@ pub async fn finalize_repo_write(
     let storage_for_diff = Arc::new(ctx.tracking_store.clone());
     let original_settled = Mst::load(storage_for_diff.clone(), ctx.prev_data_cid, None);
     let new_settled = Mst::load(storage_for_diff, new_mst_root, None);
-    let (obsolete_cids, new_tree_cids) = tokio::try_join!(
-        async {
-            compute_obsolete_cids(
-                &original_settled,
-                &new_settled,
-                CommitCid::from(ctx.current_root_cid),
-            )
-            .await
-            .map_err(|e| {
-                error!("MST diff failed during finalize_repo_write: {}", e);
-                ApiError::InternalError(Some("MST diff failed".into()))
-            })
-        },
+
+    let (obsolete_result, new_tree_result) = tokio::join!(
+        compute_obsolete_cids(
+            &original_settled,
+            &new_settled,
+            CommitCid::from(ctx.current_root_cid),
+        ),
         async {
             let (nodes, leaves) =
-                tokio::try_join!(new_settled.collect_node_cids(), new_settled.leaves(),).map_err(
-                    |e| {
-                        error!("new tree walk failed: {}", e);
-                        ApiError::InternalError(None)
-                    },
-                )?;
-            Ok::<Vec<Cid>, ApiError>(
+                tokio::try_join!(new_settled.collect_node_cids(), new_settled.leaves(),)?;
+            Ok::<Vec<Cid>, jacquard_repo::error::RepoError>(
                 nodes
                     .into_iter()
                     .chain(leaves.iter().map(|(_, cid)| *cid))
                     .collect(),
             )
         },
-    )?;
+    );
+
+    let new_tree_cids = match new_tree_result {
+        Ok(cids) => cids,
+        Err(e) => {
+            error!(
+                "new tree walk failed: {e}. \
+                 Falling back to written-block CIDs only; \
+                 shared subtree ownership already tracked by prior commits."
+            );
+            block_bytes.keys().copied().collect()
+        }
+    };
+
+    let obsolete_cids = match obsolete_result {
+        Ok(cids) => cids,
+        Err(e) => {
+            error!(
+                "MST diff failed during finalize_repo_write: {e}. \
+                 Proceeding with empty obsolete set; leaked blocks \
+                 will be reclaimed by reachability GC."
+            );
+            vec![ctx.current_root_cid]
+        }
+    };
 
     let result = commit_and_log(
         state,
