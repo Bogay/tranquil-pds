@@ -112,7 +112,7 @@ impl SimHarness {
             HintOffset::new(entries.len() as u64 * HINT_RECORD_SIZE as u64),
         );
         index
-            .write_checkpoint(CommitEpoch::zero(), &positions)
+            .write_checkpoint_with_positions(CommitEpoch::zero(), &positions)
             .unwrap();
     }
 

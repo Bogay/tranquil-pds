@@ -52,6 +52,7 @@ k256 = { workspace = true }
 rand = { workspace = true }
 tikv-jemallocator = "0.6"
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+libc = "0.2"
 
 [[bench]]
 name = "blockstore"

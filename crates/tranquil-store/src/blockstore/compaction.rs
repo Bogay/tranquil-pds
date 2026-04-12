@@ -93,8 +93,7 @@ pub(super) fn compact_on_writer_thread<S: StorageIO>(
             Err(e)
         }
         Ok((new_size, live_count, dead_count)) => {
-            let positions = hint_positions.snapshot();
-            if let Err(e) = index.write_checkpoint(epoch.current(), &positions) {
+            if let Err(e) = index.write_checkpoint(epoch.current(), hint_positions) {
                 tracing::warn!(error = %e, "pre-delete checkpoint failed during compaction");
             }
 

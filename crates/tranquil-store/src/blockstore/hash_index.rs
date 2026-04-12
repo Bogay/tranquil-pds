@@ -5,10 +5,18 @@ use std::path::{Path, PathBuf};
 use parking_lot::RwLock;
 
 use super::data_file::CID_SIZE;
+use super::group_commit::ShardHintPositions;
 use super::types::{
     BlockLength, BlockLocation, BlockOffset, CidBytes, CollectionResult, CommitEpoch, DataFileId,
-    HintOffset, IndexEntry, LivenessInfo, RefCount, WallClockMs, WriteCursor,
+    HintOffset, IndexEntry, LivenessInfo, RefCount, ShardId, WallClockMs, WriteCursor,
 };
+
+pub struct PositionUpdate<'a> {
+    pub hint_positions: &'a ShardHintPositions,
+    pub shard_id: ShardId,
+    pub file_id: DataFileId,
+    pub offset: HintOffset,
+}
 
 const EMPTY_CID: [u8; CID_SIZE] = [0u8; CID_SIZE];
 
@@ -1198,6 +1206,30 @@ impl BlockIndex {
         epoch: CommitEpoch,
         now: WallClockMs,
     ) -> Result<(), BlockIndexError> {
+        self.batch_put_inner(entries, decrements, cursor, epoch, now, None)
+    }
+
+    pub fn batch_put_and_advance_position(
+        &self,
+        entries: &[([u8; CID_SIZE], BlockLocation)],
+        decrements: &[[u8; CID_SIZE]],
+        cursor: WriteCursor,
+        epoch: CommitEpoch,
+        now: WallClockMs,
+        position_update: PositionUpdate<'_>,
+    ) -> Result<(), BlockIndexError> {
+        self.batch_put_inner(entries, decrements, cursor, epoch, now, Some(position_update))
+    }
+
+    fn batch_put_inner(
+        &self,
+        entries: &[([u8; CID_SIZE], BlockLocation)],
+        decrements: &[[u8; CID_SIZE]],
+        cursor: WriteCursor,
+        epoch: CommitEpoch,
+        now: WallClockMs,
+        position_update: Option<PositionUpdate<'_>>,
+    ) -> Result<(), BlockIndexError> {
         let mut table = self.table.write();
 
         entries.iter().try_for_each(|(cid, location)| {
@@ -1217,6 +1249,12 @@ impl BlockIndex {
         });
 
         table.set_write_cursor(cursor);
+
+        if let Some(pos) = position_update {
+            pos.hint_positions
+                .update(pos.shard_id, pos.file_id, pos.offset);
+        }
+
         Ok(())
     }
 
@@ -1418,6 +1456,17 @@ impl BlockIndex {
     }
 
     pub fn write_checkpoint(
+        &self,
+        epoch: CommitEpoch,
+        hint_positions: &ShardHintPositions,
+    ) -> io::Result<()> {
+        let _guard = self.checkpoint_lock.lock();
+        let table = self.table.read();
+        let positions = hint_positions.snapshot();
+        write_checkpoint_ab(&table, &self.index_dir, epoch, &positions)
+    }
+
+    pub fn write_checkpoint_with_positions(
         &self,
         epoch: CommitEpoch,
         positions: &CheckpointPositions,

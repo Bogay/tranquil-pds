@@ -813,8 +813,7 @@ fn maybe_checkpoint(
     if !elapsed && !threshold {
         return;
     }
-    let positions = hint_positions.snapshot();
-    match index.write_checkpoint(epoch.current(), &positions) {
+    match index.write_checkpoint(epoch.current(), hint_positions) {
         Ok(()) => {
             *last_checkpoint = std::time::Instant::now();
             *writes_since_checkpoint = 0;
@@ -831,8 +830,7 @@ fn shutdown_checkpoint(
     epoch: &EpochCounter,
     hint_positions: &ShardHintPositions,
 ) {
-    let positions = hint_positions.snapshot();
-    match index.write_checkpoint(epoch.current(), &positions) {
+    match index.write_checkpoint(epoch.current(), hint_positions) {
         Ok(()) => tracing::debug!("shutdown checkpoint written"),
         Err(e) => tracing::warn!(error = %e, "shutdown checkpoint failed"),
     }
@@ -924,8 +922,6 @@ fn commit_loop<S: StorageIO>(
             if let Ok((ref dedup, _)) = result {
                 writes_since_checkpoint =
                     writes_since_checkpoint.saturating_add(dedup.len() as u64);
-                ctx.hint_positions
-                    .update(ctx.shard_id, state.file_id, state.hint_position);
             }
 
             dispatch_responses(drain.entries, result.map(|(dedup, _proof)| dedup));
@@ -1024,8 +1020,6 @@ fn drain_and_process_remaining<S: StorageIO>(
 
         if let Ok((ref _dedup, ref proof)) = result {
             run_post_sync_hook(post_sync_hook, proof);
-            ctx.hint_positions
-                .update(ctx.shard_id, state.file_id, state.hint_position);
         }
 
         dispatch_responses(entries, result.map(|(dedup, _proof)| dedup));
@@ -1102,6 +1096,7 @@ fn process_batch<S: StorageIO>(
             let location = match dedup.get(cid_bytes) {
                 Some(&loc) => {
                     dedup_hits = dedup_hits.saturating_add(1);
+                    hint_writer.append_hint(cid_bytes, &loc)?;
                     loc
                 }
                 None => {
@@ -1194,7 +1189,19 @@ fn process_batch<S: StorageIO>(
     };
     let t = std::time::Instant::now();
     index
-        .batch_put(&index_entries, &all_decrements, cursor, current_epoch, now)
+        .batch_put_and_advance_position(
+            &index_entries,
+            &all_decrements,
+            cursor,
+            current_epoch,
+            now,
+            super::hash_index::PositionUpdate {
+                hint_positions: &ctx.hint_positions,
+                shard_id: ctx.shard_id,
+                file_id: state.file_id,
+                offset: state.hint_position,
+            },
+        )
         .map_err(CommitError::from)?;
     let index_nanos = t.elapsed().as_nanos() as u64;
 
