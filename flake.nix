@@ -32,7 +32,7 @@
           { lib, pkgs, ... }:
           {
             _file = "${self.outPath}/flake.nix#nixosModules.tranquil-pds";
-            imports = [ (import ./module.nix self) ];
+            imports = [ ./module.nix ];
             config.services.tranquil-pds = {
               package = self.packages.${pkgs.stdenv.hostPlatform.system}.tranquil-pds;
               settings.frontend.package = self.packages.${pkgs.stdenv.hostPlatform.system}.tranquil-frontend;
