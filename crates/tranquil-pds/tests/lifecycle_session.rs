@@ -597,3 +597,155 @@ async fn test_request_account_delete() {
         "Token should not be expired"
     );
 }
+
+async fn create_app_password_session(
+    client: &reqwest::Client,
+    did: &str,
+    main_jwt: &str,
+    name: &str,
+    body: Value,
+) -> (String, Value) {
+    let base = base_url().await;
+    let create_res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAppPassword",
+            base
+        ))
+        .bearer_auth(main_jwt)
+        .json(&body)
+        .send()
+        .await
+        .expect("Failed to create app password");
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let app_pass: Value = create_res.json().await.unwrap();
+    let password = app_pass["password"].as_str().unwrap().to_string();
+    let scopes_response = app_pass.clone();
+    let login_res = client
+        .post(format!("{}/xrpc/com.atproto.server.createSession", base))
+        .json(&json!({ "identifier": did, "password": password }))
+        .send()
+        .await
+        .expect("Failed to login with app password");
+    assert_eq!(login_res.status(), StatusCode::OK, "App password login for '{}' failed", name);
+    let session: Value = login_res.json().await.unwrap();
+    let jwt = session["accessJwt"].as_str().unwrap().to_string();
+    (jwt, scopes_response)
+}
+
+async fn try_chat_service_auth(client: &reqwest::Client, jwt: &str) -> StatusCode {
+    let base = base_url().await;
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.getServiceAuth",
+            base
+        ))
+        .bearer_auth(jwt)
+        .query(&[
+            ("aud", "did:web:api.bsky.app"),
+            ("lxm", "chat.bsky.convo.listConvos"),
+        ])
+        .send()
+        .await
+        .expect("Failed to call getServiceAuth");
+    res.status()
+}
+
+#[tokio::test]
+async fn test_app_password_non_privileged_blocks_chat() {
+    let client = client();
+    let (did, jwt) = setup_new_user("appscope-nonchat").await;
+    let (app_jwt, create_body) = create_app_password_session(
+        &client,
+        &did,
+        &jwt,
+        "non-privileged",
+        json!({ "name": "NoChatApp", "privileged": false }),
+    )
+    .await;
+    assert_eq!(
+        create_body["scopes"].as_str().unwrap(),
+        "transition:generic",
+        "Non-privileged app password should not have chat scope"
+    );
+    let status = try_chat_service_auth(&client, &app_jwt).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "Non-privileged app password must not access chat methods"
+    );
+}
+
+#[tokio::test]
+async fn test_app_password_privileged_allows_chat() {
+    let client = client();
+    let (did, jwt) = setup_new_user("appscope-chat").await;
+    let (app_jwt, create_body) = create_app_password_session(
+        &client,
+        &did,
+        &jwt,
+        "privileged",
+        json!({ "name": "ChatApp", "privileged": true }),
+    )
+    .await;
+    assert_eq!(
+        create_body["scopes"].as_str().unwrap(),
+        "transition:generic transition:chat.bsky",
+        "Privileged app password should have chat scope"
+    );
+    let status = try_chat_service_auth(&client, &app_jwt).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "Privileged app password should access chat methods"
+    );
+}
+
+#[tokio::test]
+async fn test_app_password_no_privileged_field_allows_chat() {
+    let client = client();
+    let (did, jwt) = setup_new_user("appscope-full").await;
+    let (app_jwt, create_body) = create_app_password_session(
+        &client,
+        &did,
+        &jwt,
+        "full-access",
+        json!({ "name": "FullApp" }),
+    )
+    .await;
+    assert_eq!(
+        create_body["scopes"].as_str().unwrap(),
+        "transition:generic transition:chat.bsky",
+        "App password without privileged field should default to full access"
+    );
+    let status = try_chat_service_auth(&client, &app_jwt).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "Full-access app password should access chat methods"
+    );
+}
+
+#[tokio::test]
+async fn test_app_password_explicit_scopes_respected() {
+    let client = client();
+    let (did, jwt) = setup_new_user("appscope-explicit").await;
+    let (app_jwt, create_body) = create_app_password_session(
+        &client,
+        &did,
+        &jwt,
+        "explicit-scopes",
+        json!({ "name": "ScopedApp", "scopes": "transition:generic" }),
+    )
+    .await;
+    assert_eq!(
+        create_body["scopes"].as_str().unwrap(),
+        "transition:generic",
+        "Explicit scopes should be stored as-is"
+    );
+    let status = try_chat_service_auth(&client, &app_jwt).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "App password with only transition:generic should not access chat"
+    );
+}

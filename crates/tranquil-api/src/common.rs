@@ -231,10 +231,19 @@ pub async fn verify_credential(
     app_passwords
         .into_iter()
         .find(|app| bcrypt::verify(password, &app.password_hash).unwrap_or(false))
-        .map(|app| CredentialMatch::AppPassword {
-            name: app.name,
-            scopes: app.scopes,
-            controller_did: app.created_by_controller_did,
+        .map(|app| {
+            let scopes = app.scopes.unwrap_or_else(|| {
+                if app.privilege.is_privileged() {
+                    "transition:generic transition:chat.bsky".to_string()
+                } else {
+                    "transition:generic".to_string()
+                }
+            });
+            CredentialMatch::AppPassword {
+                name: app.name,
+                scopes: Some(scopes),
+                controller_did: app.created_by_controller_did,
+            }
         })
 }
 

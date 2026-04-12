@@ -157,11 +157,19 @@ impl ScopePermissions {
     }
 
     pub fn assert_rpc(&self, aud: &str, lxm: &str) -> Result<(), ScopeError> {
-        if self.has_transition_generic {
-            return Ok(());
+        if lxm.starts_with("chat.bsky.") {
+            if self.has_transition_chat {
+                return Ok(());
+            }
+            if self.has_transition_generic && !self.has_transition_chat {
+                return Err(ScopeError::InsufficientScope {
+                    required: "transition:chat.bsky".to_string(),
+                    message: format!("Chat access requires transition:chat.bsky scope to call {}", lxm),
+                });
+            }
         }
 
-        if lxm.starts_with("chat.bsky.") && self.has_transition_chat {
+        if self.has_transition_generic {
             return Ok(());
         }
 
@@ -345,6 +353,23 @@ mod tests {
         let perms = ScopePermissions::from_scope_string(Some("transition:generic"));
         assert!(perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
         assert!(perms.allows_blob("image/png"));
+    }
+
+    #[test]
+    fn test_transition_generic_without_chat_blocks_chat() {
+        let perms = ScopePermissions::from_scope_string(Some("transition:generic"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", "chat.bsky.convo.listConvos"));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", "chat.bsky.convo.getMessages"));
+    }
+
+    #[test]
+    fn test_transition_generic_with_chat_allows_chat() {
+        let perms =
+            ScopePermissions::from_scope_string(Some("transition:generic transition:chat.bsky"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", "chat.bsky.convo.listConvos"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", "chat.bsky.convo.getMessages"));
     }
 
     #[test]

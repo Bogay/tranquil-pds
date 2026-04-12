@@ -401,7 +401,7 @@ pub async fn create_passkey_account(
                     refresh_expires_at: refresh_expires,
                     login_type: tranquil_db_traits::LoginType::Modern,
                     mfa_verified: false,
-                    scope: Some("transition:generic".to_string()),
+                    scope: Some("transition:generic transition:chat.bsky".to_string()),
                     controller_did: None,
                     app_password_name: None,
                 };

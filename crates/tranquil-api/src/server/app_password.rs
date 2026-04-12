@@ -132,7 +132,14 @@ pub async fn create_app_password(
         };
         (scope_result, Some(controller.clone()))
     } else {
-        (input.scopes.clone(), None)
+        let scopes = match input.scopes {
+            Some(ref s) => s.clone(),
+            None => match input.privileged {
+                Some(false) => "transition:generic".to_string(),
+                _ => "transition:generic transition:chat.bsky".to_string(),
+            },
+        };
+        (Some(scopes), None)
     };
 
     let password = generate_app_password();
