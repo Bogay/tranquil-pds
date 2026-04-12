@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM webauthn_challenges WHERE did = $1 AND challenge_type = 'discoverable'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3155ef4f35698a3fe6aa38d5d976fd51b7f6a0381c81c4907dad61d2f37992bd"
+}

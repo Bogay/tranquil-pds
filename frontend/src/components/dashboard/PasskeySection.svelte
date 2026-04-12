@@ -15,9 +15,10 @@
     session: Session
     hasPassword: boolean
     onPasskeysChanged?: (count: number) => void
+    onReauthRequired: (methods: string[], retryAction: () => Promise<void>) => void
   }
 
-  let { session, hasPassword, onPasskeysChanged }: Props = $props()
+  let { session, hasPassword, onPasskeysChanged, onReauthRequired }: Props = $props()
 
   interface Passkey {
     id: string
@@ -81,6 +82,14 @@
     }
   }
 
+  function handleReauthError(e: unknown, fallback: string, retryAction: () => Promise<void>) {
+    if (e instanceof ApiError && e.error === 'ReauthRequired') {
+      onReauthRequired(e.reauthMethods || ['password'], retryAction)
+    } else {
+      toast.error(e instanceof ApiError ? e.message : fallback)
+    }
+  }
+
   async function handleDeletePasskey(id: string) {
     const passkey = passkeys.find(p => p.id === id)
     if (!confirm($_('security.deletePasskeyConfirm', { values: { name: passkey?.friendlyName || 'this passkey' } }))) return
@@ -89,7 +98,7 @@
       await loadPasskeys()
       toast.success($_('security.passkeyDeleted'))
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : 'Failed to delete passkey')
+      handleReauthError(e, 'Failed to delete passkey', () => handleDeletePasskey(id))
     }
   }
 

@@ -78,6 +78,7 @@ tracing = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true }
 webauthn-rs = { workspace = true }
+webauthn-rs-proto = { workspace = true }
 zip = { workspace = true }
 aws-config = { workspace = true, optional = true }
 aws-sdk-s3 = { workspace = true, optional = true }

@@ -509,6 +509,7 @@
       "passkeyHintNotAvailable": "Ingen nyckel registrerad",
       "passwordPlaceholder": "Lösenord",
       "usePasskey": "Använd nyckel",
+      "passkeyNotAllowed": "Ingen nyckel tillgänglig för denna webbplats",
       "orUseCredentials": "eller",
       "verificationResent": "Verifieringskod skickad"
     },

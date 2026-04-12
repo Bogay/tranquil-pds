@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO webauthn_challenges (id, did, challenge, challenge_type, state_json, expires_at)\n               VALUES ($1, $2, $3, 'discoverable', $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c6e3388fc39983f1787917606ba3194c72322d2d1ec54402c262194791a2b06a"
+}

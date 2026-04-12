@@ -26,7 +26,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 
@@ -126,7 +126,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 urlencoding = "2.1"
 uuid = { version = "1.19", features = ["v4", "v5", "v7", "fast-rng", "serde"] }
-webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys"] }
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys", "conditional-ui"] }
 webauthn-rs-proto = "0.5"
 zip = { version = "7.0", default-features = false, features = ["deflate"] }
 

@@ -144,12 +144,12 @@ pub trait UserRepository: Send + Sync {
 
     async fn get_by_email(&self, email: &str) -> Result<Option<UserForVerification>, DbError>;
 
-    async fn get_login_check_by_handle_or_email(
+    async fn get_login_check_by_identifier(
         &self,
         identifier: &str,
     ) -> Result<Option<UserLoginCheck>, DbError>;
 
-    async fn get_login_info_by_handle_or_email(
+    async fn get_login_info_by_identifier(
         &self,
         identifier: &str,
     ) -> Result<Option<UserLoginInfo>, DbError>;
@@ -357,6 +357,19 @@ pub trait UserRepository: Send + Sync {
         did: &Did,
         challenge_type: WebauthnChallengeType,
     ) -> Result<(), DbError>;
+
+    async fn save_discoverable_challenge(
+        &self,
+        request_key: &str,
+        state_json: &str,
+    ) -> Result<Uuid, DbError>;
+
+    async fn load_discoverable_challenge(
+        &self,
+        request_key: &str,
+    ) -> Result<Option<String>, DbError>;
+
+    async fn delete_discoverable_challenge(&self, request_key: &str) -> Result<(), DbError>;
 
     async fn get_totp_record(&self, did: &Did) -> Result<Option<TotpRecord>, DbError>;
 

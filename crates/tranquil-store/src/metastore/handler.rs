@@ -996,11 +996,11 @@ pub enum UserRequest {
         email: String,
         tx: Tx<Option<UserForVerification>>,
     },
-    GetLoginCheckByHandleOrEmail {
+    GetLoginCheckByIdentifier {
         identifier: String,
         tx: Tx<Option<UserLoginCheck>>,
     },
-    GetLoginInfoByHandleOrEmail {
+    GetLoginInfoByIdentifier {
         identifier: String,
         tx: Tx<Option<UserLoginInfo>>,
     },
@@ -1271,6 +1271,19 @@ pub enum UserRequest {
     DeleteWebauthnChallenge {
         did: Did,
         challenge_type: WebauthnChallengeType,
+        tx: Tx<()>,
+    },
+    SaveDiscoverableChallenge {
+        request_key: String,
+        state_json: String,
+        tx: Tx<Uuid>,
+    },
+    LoadDiscoverableChallenge {
+        request_key: String,
+        tx: Tx<Option<String>>,
+    },
+    DeleteDiscoverableChallenge {
+        request_key: String,
         tx: Tx<()>,
     },
     GetTotpRecord {
@@ -1726,8 +1739,8 @@ impl UserRequest {
             | Self::GetAnyAdminUserId { .. }
             | Self::SearchAccounts { .. }
             | Self::GetByEmail { .. }
-            | Self::GetLoginCheckByHandleOrEmail { .. }
-            | Self::GetLoginInfoByHandleOrEmail { .. }
+            | Self::GetLoginCheckByIdentifier { .. }
+            | Self::GetLoginInfoByIdentifier { .. }
             | Self::CheckEmailVerifiedByIdentifier { .. }
             | Self::StoreTelegramChatId { .. }
             | Self::StoreDiscordUserId { .. }
@@ -1743,7 +1756,10 @@ impl UserRequest {
             | Self::CleanupExpiredHandleReservations { .. }
             | Self::CheckAndConsumeInviteCode { .. }
             | Self::GetPasswordResetInfo { .. }
-            | Self::ExpirePasswordResetCode { .. } => Routing::Global,
+            | Self::ExpirePasswordResetCode { .. }
+            | Self::SaveDiscoverableChallenge { .. }
+            | Self::LoadDiscoverableChallenge { .. }
+            | Self::DeleteDiscoverableChallenge { .. } => Routing::Global,
         }
     }
 }
@@ -5066,15 +5082,15 @@ fn dispatch_user<S: StorageIO + 'static>(state: &HandlerState<S>, req: UserReque
         UserRequest::GetByEmail { email, tx } => {
             let _ = tx.send(user.get_by_email(&email).map_err(metastore_to_db));
         }
-        UserRequest::GetLoginCheckByHandleOrEmail { identifier, tx } => {
+        UserRequest::GetLoginCheckByIdentifier { identifier, tx } => {
             let _ = tx.send(
-                user.get_login_check_by_handle_or_email(&identifier)
+                user.get_login_check_by_identifier(&identifier)
                     .map_err(metastore_to_db),
             );
         }
-        UserRequest::GetLoginInfoByHandleOrEmail { identifier, tx } => {
+        UserRequest::GetLoginInfoByIdentifier { identifier, tx } => {
             let _ = tx.send(
-                user.get_login_info_by_handle_or_email(&identifier)
+                user.get_login_info_by_identifier(&identifier)
                     .map_err(metastore_to_db),
             );
         }
@@ -5431,6 +5447,28 @@ fn dispatch_user<S: StorageIO + 'static>(state: &HandlerState<S>, req: UserReque
         } => {
             let _ = tx.send(
                 user.delete_webauthn_challenge(&did, challenge_type)
+                    .map_err(metastore_to_db),
+            );
+        }
+        UserRequest::SaveDiscoverableChallenge {
+            request_key,
+            state_json,
+            tx,
+        } => {
+            let _ = tx.send(
+                user.save_discoverable_challenge(&request_key, &state_json)
+                    .map_err(metastore_to_db),
+            );
+        }
+        UserRequest::LoadDiscoverableChallenge { request_key, tx } => {
+            let _ = tx.send(
+                user.load_discoverable_challenge(&request_key)
+                    .map_err(metastore_to_db),
+            );
+        }
+        UserRequest::DeleteDiscoverableChallenge { request_key, tx } => {
+            let _ = tx.send(
+                user.delete_discoverable_challenge(&request_key)
                     .map_err(metastore_to_db),
             );
         }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, did, email, password_hash, password_required, two_factor_enabled,\n                   preferred_comms_channel as \"preferred_comms_channel!: CommsChannel\",\n                   deactivated_at, takedown_ref,\n                   email_verified, discord_verified, telegram_verified, signal_verified,\n                   account_type as \"account_type!: AccountType\"\n            FROM users\n            WHERE handle = $1 OR email = $1\n            ",
+  "query": "\n            SELECT id, did, email, password_hash, password_required, two_factor_enabled,\n                   preferred_comms_channel as \"preferred_comms_channel!: CommsChannel\",\n                   deactivated_at, takedown_ref,\n                   email_verified, discord_verified, telegram_verified, signal_verified,\n                   account_type as \"account_type!: AccountType\"\n            FROM users\n            WHERE handle = $1 OR did = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -118,5 +118,5 @@
       false
     ]
   },
-  "hash": "7061e8763ef7d91ff152ed0124f99e1820172fd06916d225ca6c5137a507b8fa"
+  "hash": "060c285c93a05252aab7d474df0186e7b5083fafedc582b8eac9916983e8fc2d"
 }

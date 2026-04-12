@@ -509,6 +509,7 @@
       "passkeyHintNotAvailable": "Ei pääsyavainta",
       "passwordPlaceholder": "Salasana",
       "usePasskey": "Käytä pääsyavainta",
+      "passkeyNotAllowed": "Pääsyavainta ei ole saatavilla tälle sivustolle",
       "orUseCredentials": "tai",
       "verificationResent": "Vahvistuskoodi lähetetty"
     },

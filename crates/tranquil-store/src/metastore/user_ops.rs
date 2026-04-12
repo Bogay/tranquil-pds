@@ -125,15 +125,9 @@ impl UserOps {
     }
 
     fn load_by_identifier(&self, identifier: &str) -> Result<Option<UserValue>, MetastoreError> {
-        match identifier.contains('@') {
-            true => self.load_by_email(identifier).and_then(|opt| match opt {
-                Some(v) => Ok(Some(v)),
-                None => self.load_by_handle(identifier),
-            }),
-            false => self.load_by_handle(identifier).and_then(|opt| match opt {
-                Some(v) => Ok(Some(v)),
-                None => self.load_by_email(identifier),
-            }),
+        match identifier.starts_with("did:") {
+            true => self.load_user_by_did(identifier),
+            false => self.load_by_handle(identifier),
         }
     }
 
@@ -472,7 +466,7 @@ impl UserOps {
             .transpose()
     }
 
-    pub fn get_login_check_by_handle_or_email(
+    pub fn get_login_check_by_identifier(
         &self,
         identifier: &str,
     ) -> Result<Option<UserLoginCheck>, MetastoreError> {
@@ -487,7 +481,7 @@ impl UserOps {
             .transpose()
     }
 
-    pub fn get_login_info_by_handle_or_email(
+    pub fn get_login_info_by_identifier(
         &self,
         identifier: &str,
     ) -> Result<Option<UserLoginInfo>, MetastoreError> {
@@ -1506,6 +1500,57 @@ impl UserOps {
         let user_hash = self.resolve_hash(did.as_str());
         let type_u8 = challenge_type_to_u8(challenge_type);
         let key = webauthn_challenge_key(user_hash, type_u8);
+        self.auth
+            .remove(key.as_slice())
+            .map_err(MetastoreError::Fjall)
+    }
+
+    const DISCOVERABLE_CHALLENGE_TYPE: u8 = 2;
+
+    pub fn save_discoverable_challenge(
+        &self,
+        request_key: &str,
+        state_json: &str,
+    ) -> Result<Uuid, MetastoreError> {
+        let key_hash = UserHash::from_did(request_key);
+        let id = Uuid::new_v4();
+        let now_ms = Utc::now().timestamp_millis();
+
+        let value = WebauthnChallengeValue {
+            id,
+            challenge_type: Self::DISCOVERABLE_CHALLENGE_TYPE,
+            state_json: state_json.to_owned(),
+            created_at_ms: now_ms,
+        };
+
+        let key = webauthn_challenge_key(key_hash, Self::DISCOVERABLE_CHALLENGE_TYPE);
+        self.auth
+            .insert(key.as_slice(), value.serialize_with_ttl())
+            .map_err(MetastoreError::Fjall)?;
+
+        Ok(id)
+    }
+
+    pub fn load_discoverable_challenge(
+        &self,
+        request_key: &str,
+    ) -> Result<Option<String>, MetastoreError> {
+        let key_hash = UserHash::from_did(request_key);
+        let key = webauthn_challenge_key(key_hash, Self::DISCOVERABLE_CHALLENGE_TYPE);
+
+        let val: Option<WebauthnChallengeValue> = point_lookup(
+            &self.auth,
+            key.as_slice(),
+            WebauthnChallengeValue::deserialize,
+            "corrupt webauthn challenge",
+        )?;
+
+        Ok(val.map(|v| v.state_json))
+    }
+
+    pub fn delete_discoverable_challenge(&self, request_key: &str) -> Result<(), MetastoreError> {
+        let key_hash = UserHash::from_did(request_key);
+        let key = webauthn_challenge_key(key_hash, Self::DISCOVERABLE_CHALLENGE_TYPE);
         self.auth
             .remove(key.as_slice())
             .map_err(MetastoreError::Fjall)

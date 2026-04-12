@@ -509,6 +509,7 @@
       "passkeyHintNotAvailable": "未注册通行密钥",
       "passwordPlaceholder": "密码",
       "usePasskey": "使用通行密钥",
+      "passkeyNotAllowed": "此站点没有可用的通行密钥",
       "orUseCredentials": "或",
       "verificationResent": "验证码已发送"
     },

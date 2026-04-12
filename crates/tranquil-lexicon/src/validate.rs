@@ -322,7 +322,9 @@ fn validate_blob_ref(
 
     if let Some(ref accept) = lex_blob.accept {
         let mime_type = obj.get("mimeType").and_then(|v| v.as_str()).unwrap_or("");
-        let matched = accept.iter().any(|pattern| mime_type_matches_accept_pattern(mime_type, pattern));
+        let matched = accept
+            .iter()
+            .any(|pattern| mime_type_matches_accept_pattern(mime_type, pattern));
         if !mime_type.is_empty() && !matched {
             return Err(LexValidationError::field(
                 path,

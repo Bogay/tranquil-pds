@@ -108,7 +108,7 @@ pub async fn authorize_get(
         match state
             .repos
             .user
-            .get_login_check_by_handle_or_email(normalized.as_str())
+            .get_login_check_by_identifier(normalized.as_str())
             .await
         {
             Ok(Some(user)) => {
@@ -401,7 +401,7 @@ pub async fn authorize_post(
     let user = match state
         .repos
         .user
-        .get_login_info_by_handle_or_email(normalized_username.as_str())
+        .get_login_info_by_identifier(normalized_username.as_str())
         .await
     {
         Ok(Some(u)) => u,
@@ -410,7 +410,7 @@ pub async fn authorize_post(
                 &form.password,
                 "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYw1ZzQKZqmK",
             );
-            return show_login_error("Invalid handle/email or password.", json_response);
+            return show_login_error("Invalid identifier or password.", json_response);
         }
         Err(_) => return show_login_error("An error occurred. Please try again.", json_response),
     };
@@ -486,7 +486,7 @@ pub async fn authorize_post(
         None => false,
     };
     if !password_valid {
-        return show_login_error("Invalid handle/email or password.", json_response);
+        return show_login_error("Invalid identifier or password.", json_response);
     }
     let is_verified = user.channel_verification.has_any_verified();
     if !is_verified {

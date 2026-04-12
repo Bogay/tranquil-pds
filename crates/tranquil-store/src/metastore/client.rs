@@ -3487,13 +3487,13 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
         recv(rx).await
     }
 
-    async fn get_login_check_by_handle_or_email(
+    async fn get_login_check_by_identifier(
         &self,
         identifier: &str,
     ) -> Result<Option<UserLoginCheck>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::User(
-            UserRequest::GetLoginCheckByHandleOrEmail {
+            UserRequest::GetLoginCheckByIdentifier {
                 identifier: identifier.to_owned(),
                 tx,
             },
@@ -3501,13 +3501,13 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
         recv(rx).await
     }
 
-    async fn get_login_info_by_handle_or_email(
+    async fn get_login_info_by_identifier(
         &self,
         identifier: &str,
     ) -> Result<Option<UserLoginInfo>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::User(
-            UserRequest::GetLoginInfoByHandleOrEmail {
+            UserRequest::GetLoginInfoByIdentifier {
                 identifier: identifier.to_owned(),
                 tx,
             },
@@ -4227,6 +4227,47 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
             UserRequest::DeleteWebauthnChallenge {
                 did: did.clone(),
                 challenge_type,
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
+    async fn save_discoverable_challenge(
+        &self,
+        request_key: &str,
+        state_json: &str,
+    ) -> Result<Uuid, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::User(
+            UserRequest::SaveDiscoverableChallenge {
+                request_key: request_key.to_owned(),
+                state_json: state_json.to_owned(),
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
+    async fn load_discoverable_challenge(
+        &self,
+        request_key: &str,
+    ) -> Result<Option<String>, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::User(
+            UserRequest::LoadDiscoverableChallenge {
+                request_key: request_key.to_owned(),
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
+    async fn delete_discoverable_challenge(&self, request_key: &str) -> Result<(), DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::User(
+            UserRequest::DeleteDiscoverableChallenge {
+                request_key: request_key.to_owned(),
                 tx,
             },
         ))?;

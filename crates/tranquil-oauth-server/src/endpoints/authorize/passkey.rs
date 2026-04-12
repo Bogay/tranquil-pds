@@ -22,7 +22,7 @@ pub async fn check_user_has_passkeys(
     let user = state
         .repos
         .user
-        .get_login_check_by_handle_or_email(bare_identifier.as_str())
+        .get_login_check_by_identifier(bare_identifier.as_str())
         .await;
 
     let has_passkeys = match user {
@@ -55,7 +55,7 @@ pub async fn check_user_security_status(
     let user = state
         .repos
         .user
-        .get_login_check_by_handle_or_email(normalized_identifier.as_str())
+        .get_login_check_by_identifier(normalized_identifier.as_str())
         .await;
 
     let (has_passkeys, has_totp, has_password, is_delegated, did): (
@@ -99,7 +99,7 @@ pub async fn check_user_security_status(
 #[derive(Debug, Deserialize)]
 pub struct PasskeyStartInput {
     pub request_uri: String,
-    pub identifier: String,
+    pub identifier: Option<String>,
     pub delegated_did: Option<String>,
 }
 
@@ -160,14 +160,91 @@ pub async fn passkey_start(
             .into_response();
     }
 
+    match form.identifier.filter(|s| !s.trim().is_empty()) {
+        Some(identifier) => {
+            passkey_start_named(
+                state,
+                identifier,
+                form.delegated_did,
+                request_data,
+                passkey_start_request_id,
+            )
+            .await
+        }
+        None => passkey_start_discoverable(state, passkey_start_request_id).await,
+    }
+}
+
+async fn passkey_start_discoverable(
+    state: AppState,
+    request_id: RequestId,
+) -> Response {
+    let (rcr, auth_state) = match state.webauthn_config.start_discoverable_authentication() {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to start discoverable passkey authentication");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "Failed to start authentication."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let state_json = match serde_json::to_string(&auth_state) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to serialize authentication state");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(e) = state
+        .repos
+        .user
+        .save_discoverable_challenge(request_id.as_str(), &state_json)
+        .await
+    {
+        tracing::error!(error = %e, "Failed to save discoverable authentication state");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "server_error",
+                "error_description": "An error occurred."
+            })),
+        )
+            .into_response();
+    }
+
+    let options = serde_json::to_value(&rcr).unwrap_or(serde_json::json!({}));
+    Json(PasskeyStartResponse { options }).into_response()
+}
+
+async fn passkey_start_named(
+    state: AppState,
+    identifier: String,
+    delegated_did: Option<String>,
+    request_data: tranquil_pds::oauth::RequestData,
+    passkey_start_request_id: RequestId,
+) -> Response {
     let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
     let normalized_username =
-        NormalizedLoginIdentifier::normalize(&form.identifier, hostname_for_handles);
+        NormalizedLoginIdentifier::normalize(&identifier, hostname_for_handles);
 
     let user = match state
         .repos
         .user
-        .get_login_info_by_handle_or_email(normalized_username.as_str())
+        .get_login_info_by_identifier(normalized_username.as_str())
         .await
     {
         Ok(Some(u)) => u,
@@ -325,7 +402,7 @@ pub async fn passkey_start(
             .into_response();
     }
 
-    let delegation_from_param = match &form.delegated_did {
+    let delegation_from_param = match &delegated_did {
         Some(delegated_did_str) => match delegated_did_str.parse::<tranquil_types::Did>() {
             Ok(delegated_did) if delegated_did != user.did => {
                 match state
@@ -471,85 +548,6 @@ pub async fn passkey_finish(
             .into_response();
     }
 
-    let did_str = match request_data.did {
-        Some(d) => d,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "invalid_request",
-                    "error_description": "No passkey authentication in progress."
-                })),
-            )
-                .into_response();
-        }
-    };
-    let did: tranquil_types::Did = match did_str.parse() {
-        Ok(d) => d,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "invalid_request",
-                    "error_description": "Invalid DID format."
-                })),
-            )
-                .into_response();
-        }
-    };
-
-    let controller_did: Option<tranquil_types::Did> = request_data
-        .controller_did
-        .as_ref()
-        .and_then(|s| s.parse().ok());
-    let passkey_owner_did = controller_did.as_ref().unwrap_or(&did);
-
-    let auth_state_json = match state
-        .repos
-        .user
-        .load_webauthn_challenge(passkey_owner_did, WebauthnChallengeType::Authentication)
-        .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "invalid_request",
-                    "error_description": "No passkey authentication in progress or challenge expired."
-                })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to load authentication state");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "server_error",
-                    "error_description": "An error occurred."
-                })),
-            )
-                .into_response();
-        }
-    };
-
-    let auth_state: webauthn_rs::prelude::SecurityKeyAuthentication =
-        match serde_json::from_str(&auth_state_json) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to deserialize authentication state");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "error": "server_error",
-                        "error_description": "An error occurred."
-                    })),
-                )
-                    .into_response();
-            }
-        };
-
     let credential: webauthn_rs::prelude::PublicKeyCredential =
         match serde_json::from_value(form.credential) {
             Ok(c) => c,
@@ -566,32 +564,34 @@ pub async fn passkey_finish(
             }
         };
 
-    let auth_result = match state
-        .webauthn_config
-        .finish_authentication(&credential, &auth_state)
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, did = %did, "Failed to verify passkey authentication");
-            return (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "error": "access_denied",
-                    "error_description": "Passkey verification failed."
-                })),
+    let (did, auth_result) = match request_data.did.clone() {
+        Some(did) => match passkey_finish_named(&state, did, &request_data, &credential).await {
+            Ok(result) => result,
+            Err(response) => return response,
+        },
+        None => {
+            let result = match passkey_finish_discoverable(
+                &state,
+                &credential,
+                &passkey_finish_request_id,
             )
-                .into_response();
+            .await
+            {
+                Ok(result) => result,
+                Err(response) => return response,
+            };
+            if state
+                .repos
+                .oauth
+                .set_authorization_did(&passkey_finish_request_id, &result.0, None)
+                .await
+                .is_err()
+            {
+                return OAuthError::ServerError("An error occurred.".into()).into_response();
+            }
+            result
         }
     };
-
-    if let Err(e) = state
-        .repos
-        .user
-        .delete_webauthn_challenge(passkey_owner_did, WebauthnChallengeType::Authentication)
-        .await
-    {
-        tracing::warn!(error = %e, "Failed to delete authentication state");
-    }
 
     if auth_result.needs_update() {
         let cred_id_bytes = auth_result.cred_id().as_slice();
@@ -689,6 +689,187 @@ pub async fn passkey_finish(
         "redirect_uri": redirect_url
     }))
     .into_response()
+}
+
+async fn passkey_finish_named(
+    state: &AppState,
+    did: tranquil_types::Did,
+    request_data: &tranquil_pds::oauth::RequestData,
+    credential: &webauthn_rs::prelude::PublicKeyCredential,
+) -> Result<
+    (
+        tranquil_types::Did,
+        webauthn_rs::prelude::AuthenticationResult,
+    ),
+    Response,
+> {
+    let passkey_owner_did = request_data.controller_did.as_ref().unwrap_or(&did);
+
+    let auth_state_json = state
+        .repos
+        .user
+        .load_webauthn_challenge(passkey_owner_did, WebauthnChallengeType::Authentication)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to load authentication state");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
+            ).into_response()
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "No passkey authentication in progress or challenge expired."
+                })),
+            ).into_response()
+        })?;
+
+    let auth_state: webauthn_rs::prelude::SecurityKeyAuthentication =
+        serde_json::from_str(&auth_state_json).map_err(|e| {
+            tracing::error!(error = %e, "Failed to deserialize authentication state");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
+            ).into_response()
+        })?;
+
+    let auth_result = state
+        .webauthn_config
+        .finish_authentication(credential, &auth_state)
+        .map_err(|e| {
+            tracing::warn!(error = %e, did = %did, "Failed to verify passkey authentication");
+            (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "Passkey verification failed."
+                })),
+            )
+                .into_response()
+        })?;
+
+    let _ = state
+        .repos
+        .user
+        .delete_webauthn_challenge(passkey_owner_did, WebauthnChallengeType::Authentication)
+        .await;
+
+    Ok((did, auth_result))
+}
+
+async fn passkey_finish_discoverable(
+    state: &AppState,
+    credential: &webauthn_rs::prelude::PublicKeyCredential,
+    request_id: &RequestId,
+) -> Result<
+    (
+        tranquil_types::Did,
+        webauthn_rs::prelude::AuthenticationResult,
+    ),
+    Response,
+> {
+    let auth_state_json = state
+        .repos
+        .user
+        .load_discoverable_challenge(request_id.as_str())
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to load discoverable authentication state");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
+            ).into_response()
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "No passkey authentication in progress or challenge expired."
+                })),
+            ).into_response()
+        })?;
+
+    let auth_state: webauthn_rs::prelude::DiscoverableAuthentication =
+        serde_json::from_str(&auth_state_json).map_err(|e| {
+            tracing::error!(error = %e, "Failed to deserialize discoverable authentication state");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
+            ).into_response()
+        })?;
+
+    let (_user_uuid, cred_id) = state
+        .webauthn_config
+        .identify_discoverable_authentication(credential)
+        .map_err(|e| {
+            tracing::warn!(error = %e, "Failed to identify discoverable credential");
+            (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "Passkey verification failed."
+                })),
+            )
+                .into_response()
+        })?;
+
+    let stored_passkey = state
+        .repos
+        .user
+        .get_passkey_by_credential_id(cred_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to look up passkey by credential ID");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
+            ).into_response()
+        })?
+        .ok_or_else(|| {
+            tracing::warn!("Discoverable credential not found in database");
+            (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "Passkey not recognized."
+                })),
+            ).into_response()
+        })?;
+
+    let discoverable_key: webauthn_rs::prelude::DiscoverableKey =
+        serde_json::from_slice(&stored_passkey.public_key).map_err(|e| {
+            tracing::error!(error = %e, "Failed to deserialize stored passkey as DiscoverableKey");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
+            ).into_response()
+        })?;
+
+    let auth_result = state
+        .webauthn_config
+        .finish_discoverable_authentication(credential, auth_state, &[discoverable_key])
+        .map_err(|e| {
+            tracing::warn!(error = %e, did = %stored_passkey.did, "Failed to verify discoverable passkey authentication");
+            (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "Passkey verification failed."
+                })),
+            ).into_response()
+        })?;
+
+    let _ = state
+        .repos
+        .user
+        .delete_discoverable_challenge(request_id.as_str())
+        .await;
+
+    Ok((stored_passkey.did, auth_result))
 }
 
 #[derive(Debug, Deserialize)]

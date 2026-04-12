@@ -1102,6 +1102,59 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
+    async fn save_discoverable_challenge(
+        &self,
+        request_key: &str,
+        state_json: &str,
+    ) -> Result<Uuid, DbError> {
+        let id = Uuid::new_v4();
+        let challenge = id.as_bytes().to_vec();
+        let expires_at = chrono::Utc::now() + chrono::Duration::minutes(5);
+        sqlx::query!(
+            r#"INSERT INTO webauthn_challenges (id, did, challenge, challenge_type, state_json, expires_at)
+               VALUES ($1, $2, $3, 'discoverable', $4, $5)"#,
+            id,
+            request_key,
+            challenge,
+            state_json,
+            expires_at,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(id)
+    }
+
+    async fn load_discoverable_challenge(
+        &self,
+        request_key: &str,
+    ) -> Result<Option<String>, DbError> {
+        let row = sqlx::query_scalar!(
+            r#"SELECT state_json FROM webauthn_challenges
+               WHERE did = $1 AND challenge_type = 'discoverable' AND expires_at > NOW()
+               ORDER BY created_at DESC LIMIT 1"#,
+            request_key,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(row)
+    }
+
+    async fn delete_discoverable_challenge(&self, request_key: &str) -> Result<(), DbError> {
+        sqlx::query!(
+            "DELETE FROM webauthn_challenges WHERE did = $1 AND challenge_type = 'discoverable'",
+            request_key,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(())
+    }
+
     async fn get_totp_record(&self, did: &Did) -> Result<Option<TotpRecord>, DbError> {
         let row = sqlx::query!(
             "SELECT secret_encrypted, encryption_version, verified FROM user_totp WHERE did = $1",
@@ -1330,12 +1383,12 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn get_login_check_by_handle_or_email(
+    async fn get_login_check_by_identifier(
         &self,
         identifier: &str,
     ) -> Result<Option<UserLoginCheck>, DbError> {
         sqlx::query!(
-            "SELECT did, password_hash FROM users WHERE handle = $1 OR email = $1",
+            "SELECT did, password_hash FROM users WHERE handle = $1 OR did = $1",
             identifier
         )
         .fetch_optional(&self.pool)
@@ -1349,7 +1402,7 @@ impl UserRepository for PostgresUserRepository {
         })
     }
 
-    async fn get_login_info_by_handle_or_email(
+    async fn get_login_info_by_identifier(
         &self,
         identifier: &str,
     ) -> Result<Option<UserLoginInfo>, DbError> {
@@ -1361,7 +1414,7 @@ impl UserRepository for PostgresUserRepository {
                    email_verified, discord_verified, telegram_verified, signal_verified,
                    account_type as "account_type!: AccountType"
             FROM users
-            WHERE handle = $1 OR email = $1
+            WHERE handle = $1 OR did = $1
             "#,
             identifier
         )
@@ -1524,7 +1577,7 @@ impl UserRepository for PostgresUserRepository {
                 COALESCE((SELECT (value_json)::boolean FROM account_preferences WHERE user_id = u.id AND name = 'email_auth_factor' ORDER BY created_at DESC LIMIT 1), false) as "email_2fa_enabled!"
             FROM users u
             JOIN user_keys k ON u.id = k.user_id
-            WHERE u.handle = $1 OR u.email = $1 OR u.did = $1"#,
+            WHERE u.handle = $1 OR u.did = $1"#,
             identifier
         )
         .fetch_optional(&self.pool)

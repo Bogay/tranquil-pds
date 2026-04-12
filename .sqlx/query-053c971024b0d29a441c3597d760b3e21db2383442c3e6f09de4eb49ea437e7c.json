@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT did, password_hash FROM users WHERE handle = $1 OR email = $1",
+  "query": "SELECT did, password_hash FROM users WHERE handle = $1 OR did = $1",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       true
     ]
   },
-  "hash": "c4621f6a8a1ab78a6355b09fdfc2bf8999d276564e93015792ec07cb05e79038"
+  "hash": "053c971024b0d29a441c3597d760b3e21db2383442c3e6f09de4eb49ea437e7c"
 }

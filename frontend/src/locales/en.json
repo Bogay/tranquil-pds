@@ -522,6 +522,7 @@
       "passkeyHintNotAvailable": "No passkey registered",
       "passwordPlaceholder": "Password",
       "usePasskey": "Use passkey",
+      "passkeyNotAllowed": "No passkey available for this site",
       "orUseCredentials": "or",
       "verificationResent": "Verification code sent"
     },

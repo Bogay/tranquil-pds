@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                u.id, u.did, u.handle, u.password_hash, u.email, u.deactivated_at, u.takedown_ref,\n                u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,\n                u.allow_legacy_login, u.migrated_to_pds,\n                u.preferred_comms_channel as \"preferred_comms_channel: CommsChannel\",\n                k.key_bytes, k.encryption_version,\n                (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled,\n                COALESCE((SELECT (value_json)::boolean FROM account_preferences WHERE user_id = u.id AND name = 'email_auth_factor' ORDER BY created_at DESC LIMIT 1), false) as \"email_2fa_enabled!\"\n            FROM users u\n            JOIN user_keys k ON u.id = k.user_id\n            WHERE u.handle = $1 OR u.email = $1 OR u.did = $1",
+  "query": "SELECT\n                u.id, u.did, u.handle, u.password_hash, u.email, u.deactivated_at, u.takedown_ref,\n                u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,\n                u.allow_legacy_login, u.migrated_to_pds,\n                u.preferred_comms_channel as \"preferred_comms_channel: CommsChannel\",\n                k.key_bytes, k.encryption_version,\n                (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled,\n                COALESCE((SELECT (value_json)::boolean FROM account_preferences WHERE user_id = u.id AND name = 'email_auth_factor' ORDER BY created_at DESC LIMIT 1), false) as \"email_2fa_enabled!\"\n            FROM users u\n            JOIN user_keys k ON u.id = k.user_id\n            WHERE u.handle = $1 OR u.did = $1",
   "describe": {
     "columns": [
       {
@@ -132,5 +132,5 @@
       null
     ]
   },
-  "hash": "a960b981a146a0e422ef53601dfc31e29cf777aa194227c48c6ebc6905ea3249"
+  "hash": "aafc2a7e51200ca1e7071c63c13698bf34ef8b66758ca9ebab4ea706ffb62914"
 }

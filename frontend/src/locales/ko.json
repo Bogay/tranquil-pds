@@ -509,6 +509,7 @@
       "passkeyHintNotAvailable": "패스키 없음",
       "passwordPlaceholder": "비밀번호",
       "usePasskey": "패스키 사용",
+      "passkeyNotAllowed": "이 사이트에 사용 가능한 패스키가 없습니다",
       "orUseCredentials": "또는",
       "verificationResent": "인증 코드 전송됨"
     },

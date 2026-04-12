@@ -1,5 +1,8 @@
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
+use webauthn_rs_proto::{
+    AuthenticatorSelectionCriteria, ResidentKeyRequirement, UserVerificationPolicy,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WebauthnError {
@@ -57,6 +60,15 @@ impl WebAuthnConfig {
                 None,
                 None,
             )
+            .map(|(mut ccr, state)| {
+                let sel = ccr
+                    .public_key
+                    .authenticator_selection
+                    .get_or_insert_with(AuthenticatorSelectionCriteria::default);
+                sel.resident_key = Some(ResidentKeyRequirement::Required);
+                sel.require_resident_key = true;
+                (ccr, state)
+            })
             .map_err(|e| WebauthnError::RegistrationFailed(e.to_string()))
     }
 
@@ -86,6 +98,51 @@ impl WebAuthnConfig {
     ) -> Result<AuthenticationResult, WebauthnError> {
         self.webauthn
             .finish_securitykey_authentication(auth, state)
+            .map_err(|e| WebauthnError::AuthenticationFailed(e.to_string()))
+    }
+
+    pub fn start_discoverable_authentication(
+        &self,
+    ) -> Result<(RequestChallengeResponse, DiscoverableAuthentication), WebauthnError> {
+        let (mut rcr, state) = self
+            .webauthn
+            .start_discoverable_authentication()
+            .map_err(|e| WebauthnError::AuthenticationFailed(e.to_string()))?;
+
+        rcr.mediation = None;
+        rcr.public_key.user_verification = UserVerificationPolicy::Discouraged_DO_NOT_USE;
+
+        let mut state_json = serde_json::to_value(&state)
+            .map_err(|e| WebauthnError::AuthenticationFailed(e.to_string()))?;
+        let ast = state_json
+            .get_mut("ast")
+            .ok_or_else(|| WebauthnError::AuthenticationFailed(
+                "webauthn-rs DiscoverableAuthentication missing 'ast' field, library version incompatible".into(),
+            ))?;
+        ast["policy"] = serde_json::json!("discouraged");
+        let patched: DiscoverableAuthentication = serde_json::from_value(state_json)
+            .map_err(|e| WebauthnError::AuthenticationFailed(e.to_string()))?;
+
+        Ok((rcr, patched))
+    }
+
+    pub fn identify_discoverable_authentication<'a>(
+        &self,
+        credential: &'a PublicKeyCredential,
+    ) -> Result<(Uuid, &'a [u8]), WebauthnError> {
+        self.webauthn
+            .identify_discoverable_authentication(credential)
+            .map_err(|e| WebauthnError::AuthenticationFailed(e.to_string()))
+    }
+
+    pub fn finish_discoverable_authentication(
+        &self,
+        credential: &PublicKeyCredential,
+        state: DiscoverableAuthentication,
+        creds: &[DiscoverableKey],
+    ) -> Result<AuthenticationResult, WebauthnError> {
+        self.webauthn
+            .finish_discoverable_authentication(credential, state, creds)
             .map_err(|e| WebauthnError::AuthenticationFailed(e.to_string()))
     }
 }

@@ -282,6 +282,7 @@
     {session}
     {hasPassword}
     onPasskeysChanged={(count) => passkeyCount = count}
+    onReauthRequired={handleReauthRequired}
   />
 
   <TotpSection

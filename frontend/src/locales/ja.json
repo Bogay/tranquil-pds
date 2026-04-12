@@ -509,6 +509,7 @@
       "passkeyHintNotAvailable": "パスキーなし",
       "passwordPlaceholder": "パスワード",
       "usePasskey": "パスキーを使用",
+      "passkeyNotAllowed": "このサイトで利用可能なパスキーがありません",
       "orUseCredentials": "または",
       "verificationResent": "確認コードを送信しました"
     },

@@ -38,13 +38,8 @@
   let submitting = $state(false)
   let error = $state<string | null>(null)
   let verificationResent = $state(false)
-  let hasPasskeys = $state(false)
-  let hasTotp = $state(false)
-  let hasPassword = $state(true)
   let isDelegated = $state(false)
   let userDid = $state<string | null>(null)
-  let checkingSecurityStatus = $state(false)
-  let securityStatusChecked = $state(false)
   let passkeySupported = $state(false)
   let clientName = $state<string | null>(null)
 
@@ -160,31 +155,27 @@
 
   let checkTimeout: ReturnType<typeof setTimeout> | null = null
 
+  let checkingDelegation = false
+
   $effect(() => {
     if (checkTimeout) {
       clearTimeout(checkTimeout)
     }
-    hasPasskeys = false
-    hasTotp = false
-    securityStatusChecked = false
+    isDelegated = false
     if (username.length >= 3) {
-      checkTimeout = setTimeout(() => checkUserSecurityStatus(), 500)
+      checkTimeout = setTimeout(() => checkDelegationStatus(), 500)
     }
   })
 
-  async function checkUserSecurityStatus() {
-    if (!username || checkingSecurityStatus) return
-    checkingSecurityStatus = true
+  async function checkDelegationStatus() {
+    if (!username || checkingDelegation) return
+    checkingDelegation = true
     try {
       const response = await fetch(`/oauth/security-status?identifier=${encodeURIComponent(username)}`)
       if (response.ok) {
         const data = await response.json()
-        hasPasskeys = passkeySupported && data.hasPasskeys === true
-        hasTotp = data.hasTotp === true
-        hasPassword = data.hasPassword !== false
         isDelegated = data.isDelegated === true
         userDid = data.did || null
-        securityStatusChecked = true
 
         if (isDelegated && data.did) {
           const requestUri = getRequestUri()
@@ -198,19 +189,16 @@
         }
       }
     } catch {
-      hasPasskeys = false
-      hasTotp = false
-      hasPassword = true
       isDelegated = false
     } finally {
-      checkingSecurityStatus = false
+      checkingDelegation = false
     }
   }
 
 
   async function handlePasskeyLogin() {
     const requestUri = getRequestUri()
-    if (!requestUri || !username) {
+    if (!requestUri) {
       error = $_('common.error')
       return
     }
@@ -220,16 +208,18 @@
     verificationResent = false
 
     try {
+      const body: Record<string, string> = { request_uri: requestUri }
+      if (username.trim()) {
+        body.identifier = username
+      }
+
       const startResponse = await fetch('/oauth/passkey/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        body: JSON.stringify({
-          request_uri: requestUri,
-          identifier: username
-        })
+        body: JSON.stringify(body)
       })
 
       if (!startResponse.ok) {
@@ -306,9 +296,9 @@
     } catch (e) {
       console.error('Passkey login error:', e)
       if (e instanceof DOMException && e.name === 'NotAllowedError') {
-        error = $_('common.error')
+        error = $_('oauth.login.passkeyNotAllowed')
       } else {
-        error = `${$_('common.error')}: ${e instanceof Error ? e.message : String(e)}`
+        error = e instanceof Error ? e.message : String(e)
       }
       submitting = false
     }
@@ -439,17 +429,15 @@
       </div>
     {/if}
 
-    {#if passkeySupported && username.length >= 3}
-      <div class="auth-methods" class:single-method={!hasPassword}>
+    {#if passkeySupported}
+      <div class="auth-methods">
         <div class="passkey-method">
           <h3>{$_('oauth.login.signInWithPasskey')}</h3>
           <button
             type="button"
             style="width: 100%"
-            class:passkey-unavailable={!hasPasskeys || checkingSecurityStatus || !securityStatusChecked}
             onclick={handlePasskeyLogin}
-            disabled={submitting || !hasPasskeys || !username || checkingSecurityStatus || !securityStatusChecked}
-            title={checkingSecurityStatus ? $_('oauth.login.passkeyHintChecking') : hasPasskeys ? $_('oauth.login.passkeyHintAvailable') : $_('oauth.login.passkeyHintNotAvailable')}
+            disabled={submitting}
           >
             <svg class="passkey-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M15 7a4 4 0 1 0-8 0 4 4 0 0 0 8 0z" />
@@ -459,80 +447,72 @@
             <span class="passkey-text">
               {#if submitting}
                 {$_('oauth.login.authenticating')}
-              {:else if checkingSecurityStatus || !securityStatusChecked}
-                {$_('oauth.login.checkingPasskey')}
-              {:else if hasPasskeys}
-                {$_('oauth.login.usePasskey')}
               {:else}
-                {$_('oauth.login.passkeyNotSetUp')}
+                {$_('oauth.login.usePasskey')}
               {/if}
             </span>
           </button>
         </div>
 
-        {#if hasPassword}
-          <div class="method-divider">
-            <span>{$_('oauth.login.orUsePassword')}</span>
+        <div class="method-divider">
+          <span>{$_('oauth.login.orUsePassword')}</span>
+        </div>
+
+        <div class="password-method">
+          <h3>{$_('oauth.login.password')}</h3>
+          <div class="field">
+            <input
+              id="password"
+              type="password"
+              bind:value={password}
+              disabled={submitting}
+              required
+              autocomplete="current-password"
+              placeholder={$_('oauth.login.passwordPlaceholder')}
+            />
           </div>
 
-          <div class="password-method">
-            <h3>{$_('oauth.login.password')}</h3>
-            <div class="field">
-              <input
-                id="password"
-                type="password"
-                bind:value={password}
-                disabled={submitting}
-                required
-                autocomplete="current-password"
-                placeholder={$_('oauth.login.passwordPlaceholder')}
-              />
-            </div>
+          <label class="remember-device">
+            <input type="checkbox" bind:checked={rememberDevice} disabled={submitting} />
+            <span>{$_('oauth.login.rememberDevice')}</span>
+          </label>
 
-            <label class="remember-device">
-              <input type="checkbox" bind:checked={rememberDevice} disabled={submitting} />
-              <span>{$_('oauth.login.rememberDevice')}</span>
-            </label>
-
-            <div class="actions">
-              <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
-                {$_('common.cancel')}
-              </button>
-              <button type="submit" disabled={submitting || !username || !password}>
-                {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
-              </button>
-            </div>
+          <div class="actions">
+            <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
+              {$_('common.cancel')}
+            </button>
+            <button type="submit" disabled={submitting || !username || !password}>
+              {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
+            </button>
           </div>
-        {/if}
+        </div>
       </div>
     {:else}
-      {#if hasPassword || !securityStatusChecked}
-        <div>
-          <label for="password">{$_('oauth.login.password')}</label>
-          <input
-            id="password"
-            type="password"
-            bind:value={password}
-            disabled={submitting}
-            required
-            autocomplete="current-password"
-          />
-        </div>
+      <div>
+        <label for="password">{$_('oauth.login.password')}</label>
+        <input
+          id="password"
+          type="password"
+          bind:value={password}
+          disabled={submitting}
+          required
+          autocomplete="current-password"
+        />
+      </div>
 
-        <label class="remember-device">
-          <input type="checkbox" bind:checked={rememberDevice} disabled={submitting} />
-          <span>{$_('oauth.login.rememberDevice')}</span>
-        </label>
+      <label class="remember-device">
+        <input type="checkbox" bind:checked={rememberDevice} disabled={submitting} />
+        <span>{$_('oauth.login.rememberDevice')}</span>
+      </label>
 
-        <div class="actions">
-          <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
-            {$_('common.cancel')}
-          </button>
-          <button type="submit" disabled={submitting || !username || !password}>
-            {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
-          </button>
-        </div>
-      {/if}
+      <div class="actions">
+        <button type="button" class="ghost sm" onclick={handleCancel} disabled={submitting}>
+          {$_('common.cancel')}
+        </button>
+        <button type="submit" disabled={submitting || !username || !password}>
+          {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
+        </button>
+      </div>
     {/if}
   </form>
 

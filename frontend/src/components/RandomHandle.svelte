@@ -1,7 +1,7 @@
 <script lang="ts" module>
   const EXAMPLE_HANDLES = [
     "nel.pet",
-    "lewis.moe",
+    "oyster.cafe",
     "llaama.bsky.social",
     "debugman.wizardry.systems",
     "nonbinary.computer",
