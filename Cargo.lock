@@ -7405,7 +7405,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-api"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -7456,7 +7456,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-auth"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "base32",
@@ -7479,7 +7479,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-cache"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7493,7 +7493,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-comms"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7511,7 +7511,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-config"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "confique",
  "serde",
@@ -7519,7 +7519,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-crypto"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -7535,7 +7535,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-db"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -7552,7 +7552,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-db-traits"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7568,7 +7568,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-infra"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-trait",
  "bytes",
@@ -7579,7 +7579,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-lexicon"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "chrono",
  "hickory-resolver",
@@ -7597,7 +7597,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-oauth"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -7620,7 +7620,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-oauth-server"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -7653,7 +7653,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-pds"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -7745,7 +7745,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-repo"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "bytes",
  "cid",
@@ -7757,7 +7757,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-ripple"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-trait",
  "backon",
@@ -7782,7 +7782,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-scopes"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "axum",
  "futures",
@@ -7798,7 +7798,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-server"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "axum",
  "clap",
@@ -7819,7 +7819,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-signal"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -7842,7 +7842,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-storage"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -7859,7 +7859,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-store"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-trait",
  "bytes",
@@ -7872,6 +7872,7 @@ dependencies = [
  "jacquard-common",
  "jacquard-repo",
  "k256",
+ "libc",
  "lsm-tree",
  "memmap2",
  "multihash",
@@ -7905,7 +7906,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-sync"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -7927,7 +7928,7 @@ dependencies = [
 
 [[package]]
 name = "tranquil-types"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "chrono",
  "cid",

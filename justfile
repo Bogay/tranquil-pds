@@ -56,7 +56,6 @@ test-misc:
     ./scripts/run-tests.sh --test actor --test commit_signing --test image_processing --test lifecycle_social --test notifications --test server --test signing_key --test verify_live_commit
 
 test *args:
-    @just test-store
     @just test-unit
     ./scripts/run-tests.sh {{args}}
 

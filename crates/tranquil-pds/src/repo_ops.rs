@@ -13,7 +13,6 @@ use jacquard_repo::mst::util::compute_cid;
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::OwnedMutexGuard;
@@ -226,30 +225,6 @@ pub async fn begin_repo_write(
     Ok((ctx, mst))
 }
 
-pub async fn compute_obsolete_cids(
-    original_mst: &Mst<TrackingBlockStore>,
-    new_mst: &Mst<TrackingBlockStore>,
-    original_root_cid: CommitCid,
-) -> Result<Vec<Cid>, jacquard_repo::error::RepoError> {
-    let (old_nodes, new_nodes, old_leaves, new_leaves) = tokio::try_join!(
-        original_mst.collect_node_cids(),
-        new_mst.collect_node_cids(),
-        original_mst.leaves(),
-        new_mst.leaves(),
-    )?;
-    let old_nodes_set: BTreeSet<Cid> = old_nodes.into_iter().collect();
-    let new_nodes_set: BTreeSet<Cid> = new_nodes.into_iter().collect();
-    let old_leaf_set: BTreeSet<Cid> = old_leaves.iter().map(|(_, cid)| *cid).collect();
-    let new_leaf_set: BTreeSet<Cid> = new_leaves.iter().map(|(_, cid)| *cid).collect();
-    let removed_nodes = old_nodes_set.difference(&new_nodes_set).copied();
-    let removed_leaves = old_leaf_set.difference(&new_leaf_set).copied();
-    let obsolete: BTreeSet<Cid> = std::iter::once(original_root_cid.into_cid())
-        .chain(removed_nodes)
-        .chain(removed_leaves)
-        .collect();
-    Ok(obsolete.into_iter().collect())
-}
-
 pub async fn finalize_repo_write(
     state: &AppState,
     ctx: RepoWriteContext,
@@ -267,42 +242,22 @@ pub async fn finalize_repo_write(
     let original_settled = Mst::load(storage_for_diff.clone(), ctx.prev_data_cid, None);
     let new_settled = Mst::load(storage_for_diff, new_mst_root, None);
 
-    let (obsolete_result, new_tree_result) = tokio::join!(
-        compute_obsolete_cids(
-            &original_settled,
-            &new_settled,
-            CommitCid::from(ctx.current_root_cid),
-        ),
-        async {
-            let (nodes, leaves) =
-                tokio::try_join!(new_settled.collect_node_cids(), new_settled.leaves(),)?;
-            Ok::<Vec<Cid>, jacquard_repo::error::RepoError>(
-                nodes
-                    .into_iter()
-                    .chain(leaves.iter().map(|(_, cid)| *cid))
-                    .collect(),
-            )
-        },
-    );
+    let new_tree_cids: Vec<Cid> = block_bytes.keys().copied().collect();
 
-    let new_tree_cids = match new_tree_result {
-        Ok(cids) => cids,
-        Err(e) => {
-            error!(
-                "new tree walk failed: {e}. \
-                 Falling back to written-block CIDs only; \
-                 shared subtree ownership already tracked by prior commits."
+    let obsolete_cids = match original_settled.diff(&new_settled).await {
+        Ok(diff) => {
+            let mut obsolete: Vec<Cid> = Vec::with_capacity(
+                1 + diff.removed_mst_blocks.len() + diff.removed_cids.len(),
             );
-            block_bytes.keys().copied().collect()
+            obsolete.push(ctx.current_root_cid);
+            obsolete.extend(diff.removed_mst_blocks);
+            obsolete.extend(diff.removed_cids);
+            obsolete
         }
-    };
-
-    let obsolete_cids = match obsolete_result {
-        Ok(cids) => cids,
         Err(e) => {
             error!(
                 "MST diff failed during finalize_repo_write: {e}. \
-                 Proceeding with empty obsolete set; leaked blocks \
+                 Proceeding with commit CID only; leaked blocks \
                  will be reclaimed by reachability GC."
             );
             vec![ctx.current_root_cid]

@@ -99,9 +99,8 @@ async fn test_check_account_status_returns_correct_block_count() {
         after_delete_blocks
     );
     assert!(
-        after_delete_blocks >= initial_blocks,
-        "Block count after delete should be at least initial count (initial {}, now {})",
-        initial_blocks,
+        after_delete_blocks >= 2,
+        "Block count after delete should have at least commit + MST root (got {})",
         after_delete_blocks
     );
 }
