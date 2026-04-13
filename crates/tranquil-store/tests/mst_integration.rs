@@ -268,12 +268,12 @@ async fn mst_create_update_delete_with_refcounts() {
     assert_eq!(&retrieved_a_v2.unwrap()[..], &record_a_v2);
 
     assert!(
-        store.has(&cid_a_v1).await.unwrap(),
-        "cid_a_v1 should still exist, tombstoned but not GC'd"
+        store.get(&cid_a_v1).await.unwrap().is_some(),
+        "cid_a_v1 data should still exist, tombstoned but not GC'd"
     );
     assert!(
-        store.has(&cid_b).await.unwrap(),
-        "cid_b should still exist, tombstoned but not GC'd"
+        store.get(&cid_b).await.unwrap().is_some(),
+        "cid_b data should still exist, tombstoned but not GC'd"
     );
 
     assert!(
@@ -284,8 +284,8 @@ async fn mst_create_update_delete_with_refcounts() {
     assert_eq!(&retrieved_c[..], &record_c);
 
     assert!(
-        store.has(&cid_shared).await.unwrap(),
-        "shared-content block should still exist, tombstoned but not GC'd"
+        store.get(&cid_shared).await.unwrap().is_some(),
+        "shared-content block data should still exist, tombstoned but not GC'd"
     );
 
     let loaded_mst = Mst::load(storage.clone(), mst_root_v2, None);

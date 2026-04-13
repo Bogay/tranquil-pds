@@ -72,6 +72,10 @@ test-group = "io-heavy-sim"
 filter = "test(/test_scale_/) | test(/full_backup_and_restore/)"
 slow-timeout = { period = "120s", terminate-after = 4 }
 
+[[profile.default.overrides]]
+filter = "binary(compaction_restart) | binary(mst_refcount_integrity) | binary(gc_compaction_restart)"
+slow-timeout = { period = "120s", terminate-after = 4 }
+
 [[profile.ci.overrides]]
 filter = "test(/import_with_verification/) | test(/plc_migration/)"
 test-group = "serial-env-tests"

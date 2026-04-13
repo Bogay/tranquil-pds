@@ -104,6 +104,70 @@ pub fn compact_all_sealed(store: &TranquilBlockStore) {
         });
 }
 
+pub fn tiny_blockstore_config(dir: &std::path::Path) -> BlockStoreConfig {
+    BlockStoreConfig {
+        data_dir: dir.join("data"),
+        index_dir: dir.join("index"),
+        max_file_size: 300,
+        group_commit: GroupCommitConfig {
+            checkpoint_interval_ms: 100,
+            checkpoint_write_threshold: 10,
+            ..GroupCommitConfig::default()
+        },
+        shard_count: 1,
+    }
+}
+
+pub fn compact_by_liveness(store: &TranquilBlockStore) {
+    let liveness = store.compaction_liveness(0).unwrap();
+    liveness
+        .iter()
+        .filter(|(_, info)| info.total_blocks > 0 && info.ratio() < 0.99)
+        .map(|(&fid, _)| fid)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .for_each(|fid| match store.compact_file(fid, 0) {
+            Ok(_) => {}
+            Err(tranquil_store::blockstore::CompactionError::ActiveFileCannotBeCompacted) => {}
+            Err(e) => eprintln!("compaction: {e}"),
+        });
+}
+
+pub fn compact_lowest_liveness(store: &TranquilBlockStore) {
+    let liveness = store.compaction_liveness(0).unwrap();
+    let candidate = liveness
+        .iter()
+        .filter(|(_, info)| info.total_blocks > 0 && info.ratio() < 0.99)
+        .min_by(|(_, a), (_, b)| {
+            a.ratio()
+                .partial_cmp(&b.ratio())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(&fid, _)| fid);
+
+    if let Some(fid) = candidate {
+        match store.compact_file(fid, 0) {
+            Ok(_) => {}
+            Err(tranquil_store::blockstore::CompactionError::ActiveFileCannotBeCompacted) => {}
+            Err(e) => eprintln!("compaction: {e}"),
+        }
+    }
+}
+
+pub fn collect_refcounts(store: &TranquilBlockStore, cids: &[CidBytes]) -> Vec<(u32, u32)> {
+    cids.iter()
+        .map(|cid| {
+            let seed = u32::from_le_bytes([cid[4], cid[5], cid[6], cid[7]]);
+            let rc = store
+                .block_index()
+                .get(cid)
+                .map(|e| e.refcount.raw())
+                .unwrap_or(0);
+            (seed, rc)
+        })
+        .collect()
+}
+
 pub struct TestStores {
     pub blockstore: TranquilBlockStore,
     pub eventlog: Arc<EventLog<RealIO>>,

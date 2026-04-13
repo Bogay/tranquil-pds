@@ -215,6 +215,10 @@ impl HashTable {
         self.get(cid).is_some()
     }
 
+    pub fn contains_live(&self, cid: &[u8; CID_SIZE]) -> bool {
+        self.get(cid).is_some_and(|s| !s.refcount.is_zero())
+    }
+
     pub fn insert(&mut self, new_slot: Slot) -> Result<Option<Slot>, CapacityExhausted> {
         if is_empty(&new_slot.cid) {
             tracing::error!("attempted to insert all-zero CID into hash table");
@@ -1195,7 +1199,7 @@ impl BlockIndex {
     }
 
     pub fn has(&self, cid: &[u8; CID_SIZE]) -> bool {
-        self.table.read().contains(cid)
+        self.table.read().contains_live(cid)
     }
 
     pub fn batch_put(
