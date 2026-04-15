@@ -10,9 +10,9 @@ pub use invariants::{Invariant, InvariantSet, InvariantViolation, invariants_for
 pub use op::{CollectionName, Op, OpStream, RecordKey, Seed, ValueSeed};
 pub use oracle::Oracle;
 pub use runner::{
-    CompactInterval, Gauntlet, GauntletBuildError, GauntletConfig, GauntletReport, IoBackend,
-    MaxFileSize, OpIndex, OpInterval, OpsExecuted, RestartCount, RestartPolicy, RunLimits,
-    ShardCount, StoreConfig, WallMs,
+    Gauntlet, GauntletBuildError, GauntletConfig, GauntletReport, IoBackend, MaxFileSize, OpIndex,
+    OpInterval, OpsExecuted, RestartCount, RestartPolicy, RunLimits, ShardCount, StoreConfig,
+    WallMs,
 };
 pub use scenarios::{Scenario, config_for};
 pub use workload::{

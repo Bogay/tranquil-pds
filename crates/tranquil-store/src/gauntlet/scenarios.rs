@@ -1,8 +1,8 @@
 use super::invariants::InvariantSet;
 use super::op::{CollectionName, Seed};
 use super::runner::{
-    CompactInterval, GauntletConfig, IoBackend, MaxFileSize, OpInterval, RestartPolicy, RunLimits,
-    ShardCount, StoreConfig, WallMs,
+    GauntletConfig, IoBackend, MaxFileSize, OpInterval, RestartPolicy, RunLimits, ShardCount,
+    StoreConfig, WallMs,
 };
 use super::workload::{
     KeySpaceSize, OpCount, OpWeights, SizeDistribution, ValueBytes, WorkloadModel,
@@ -14,6 +14,7 @@ pub enum Scenario {
     SmokePR,
     MstChurn,
     MstRestartChurn,
+    FullStackRestart,
 }
 
 pub fn config_for(scenario: Scenario, seed: Seed) -> GauntletConfig {
@@ -21,6 +22,7 @@ pub fn config_for(scenario: Scenario, seed: Seed) -> GauntletConfig {
         Scenario::SmokePR => smoke_pr(seed),
         Scenario::MstChurn => mst_churn(seed),
         Scenario::MstRestartChurn => mst_restart_churn(seed),
+        Scenario::FullStackRestart => full_stack_restart(seed),
     }
 }
 
@@ -33,14 +35,13 @@ fn default_collections() -> Vec<CollectionName> {
 
 fn tiny_store() -> StoreConfig {
     StoreConfig {
-        max_file_size: MaxFileSize(300),
+        max_file_size: MaxFileSize(4096),
         group_commit: GroupCommitConfig {
             checkpoint_interval_ms: 100,
             checkpoint_write_threshold: 10,
             ..GroupCommitConfig::default()
         },
         shard_count: ShardCount(1),
-        compact_every: CompactInterval(5),
     }
 }
 
@@ -60,7 +61,11 @@ fn smoke_pr(seed: Seed) -> GauntletConfig {
             key_space: KeySpaceSize(200),
         },
         op_count: OpCount(10_000),
-        invariants: InvariantSet::REFCOUNT_CONSERVATION | InvariantSet::REACHABILITY,
+        invariants: InvariantSet::REFCOUNT_CONSERVATION
+            | InvariantSet::REACHABILITY
+            | InvariantSet::ACKED_WRITE_PERSISTENCE
+            | InvariantSet::READ_AFTER_WRITE
+            | InvariantSet::RESTART_IDEMPOTENT,
         limits: RunLimits {
             max_wall_ms: Some(WallMs(60_000)),
         },
@@ -85,7 +90,11 @@ fn mst_churn(seed: Seed) -> GauntletConfig {
             key_space: KeySpaceSize(2_000),
         },
         op_count: OpCount(100_000),
-        invariants: InvariantSet::REFCOUNT_CONSERVATION | InvariantSet::REACHABILITY,
+        invariants: InvariantSet::REFCOUNT_CONSERVATION
+            | InvariantSet::REACHABILITY
+            | InvariantSet::ACKED_WRITE_PERSISTENCE
+            | InvariantSet::READ_AFTER_WRITE
+            | InvariantSet::RESTART_IDEMPOTENT,
         limits: RunLimits {
             max_wall_ms: Some(WallMs(600_000)),
         },
@@ -110,11 +119,48 @@ fn mst_restart_churn(seed: Seed) -> GauntletConfig {
             key_space: KeySpaceSize(2_000),
         },
         op_count: OpCount(100_000),
-        invariants: InvariantSet::REFCOUNT_CONSERVATION | InvariantSet::REACHABILITY,
+        invariants: InvariantSet::REFCOUNT_CONSERVATION
+            | InvariantSet::REACHABILITY
+            | InvariantSet::ACKED_WRITE_PERSISTENCE
+            | InvariantSet::READ_AFTER_WRITE
+            | InvariantSet::RESTART_IDEMPOTENT,
         limits: RunLimits {
             max_wall_ms: Some(WallMs(600_000)),
         },
         restart_policy: RestartPolicy::PoissonByOps(OpInterval(5_000)),
         store: tiny_store(),
+    }
+}
+
+fn full_stack_restart(seed: Seed) -> GauntletConfig {
+    GauntletConfig {
+        seed,
+        io: IoBackend::Real,
+        workload: WorkloadModel {
+            weights: OpWeights {
+                add: 80,
+                delete: 0,
+                compact: 15,
+                checkpoint: 5,
+            },
+            size_distribution: SizeDistribution::Fixed(ValueBytes(80)),
+            collections: default_collections(),
+            key_space: KeySpaceSize(500),
+        },
+        op_count: OpCount(5_000),
+        invariants: InvariantSet::REFCOUNT_CONSERVATION
+            | InvariantSet::REACHABILITY
+            | InvariantSet::ACKED_WRITE_PERSISTENCE
+            | InvariantSet::READ_AFTER_WRITE
+            | InvariantSet::RESTART_IDEMPOTENT,
+        limits: RunLimits {
+            max_wall_ms: Some(WallMs(120_000)),
+        },
+        restart_policy: RestartPolicy::EveryNOps(OpInterval(500)),
+        store: StoreConfig {
+            max_file_size: MaxFileSize(4096),
+            group_commit: GroupCommitConfig::default(),
+            shard_count: ShardCount(1),
+        },
     }
 }

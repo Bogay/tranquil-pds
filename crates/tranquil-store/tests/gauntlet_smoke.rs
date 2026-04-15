@@ -1,9 +1,8 @@
 use tranquil_store::blockstore::GroupCommitConfig;
 use tranquil_store::gauntlet::{
-    CollectionName, CompactInterval, Gauntlet, GauntletConfig, InvariantSet, IoBackend,
-    KeySpaceSize, MaxFileSize, OpCount, OpInterval, OpWeights, RestartPolicy, RunLimits, Scenario,
-    Seed, ShardCount, SizeDistribution, StoreConfig, ValueBytes, WallMs, WorkloadModel, config_for,
-    farm,
+    CollectionName, Gauntlet, GauntletConfig, InvariantSet, IoBackend, KeySpaceSize, MaxFileSize,
+    OpCount, OpInterval, OpWeights, RestartPolicy, RunLimits, Scenario, Seed, ShardCount,
+    SizeDistribution, StoreConfig, ValueBytes, WallMs, WorkloadModel, config_for, farm,
 };
 
 #[test]
@@ -48,7 +47,11 @@ fn fast_sanity_config(seed: Seed) -> GauntletConfig {
             key_space: KeySpaceSize(100),
         },
         op_count: OpCount(200),
-        invariants: InvariantSet::REFCOUNT_CONSERVATION | InvariantSet::REACHABILITY,
+        invariants: InvariantSet::REFCOUNT_CONSERVATION
+            | InvariantSet::REACHABILITY
+            | InvariantSet::ACKED_WRITE_PERSISTENCE
+            | InvariantSet::READ_AFTER_WRITE
+            | InvariantSet::RESTART_IDEMPOTENT,
         limits: RunLimits {
             max_wall_ms: Some(WallMs(30_000)),
         },
@@ -61,7 +64,6 @@ fn fast_sanity_config(seed: Seed) -> GauntletConfig {
                 ..GroupCommitConfig::default()
             },
             shard_count: ShardCount(1),
-            compact_every: CompactInterval(5),
         },
     }
 }
@@ -87,6 +89,25 @@ async fn gauntlet_fast_sanity() {
         report.restarts.0
     );
     assert_eq!(report.ops_executed.0, 200);
+}
+
+#[tokio::test]
+async fn full_stack_restart_port() {
+    let cfg = config_for(Scenario::FullStackRestart, Seed(1));
+    let report = Gauntlet::new(cfg).expect("build gauntlet").run().await;
+    assert!(
+        report.is_clean(),
+        "violations: {:?}",
+        report
+            .violations
+            .iter()
+            .map(|v| format!("{}: {}", v.invariant, v.detail))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        report.restarts.0, 10,
+        "FullStackRestart with EveryNOps(500) over 5000 ops must restart exactly 10 times",
+    );
 }
 
 #[tokio::test]

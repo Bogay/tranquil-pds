@@ -6,9 +6,9 @@ use cid::Cid;
 use jacquard_repo::mst::Mst;
 use jacquard_repo::storage::BlockStore;
 
-use super::invariants::{InvariantSet, InvariantViolation, invariants_for};
+use super::invariants::{InvariantCtx, InvariantSet, InvariantViolation, invariants_for};
 use super::op::{Op, OpStream, Seed, ValueSeed};
-use super::oracle::{Oracle, cid_to_fixed};
+use super::oracle::{CidFormatError, Oracle, hex_short, try_cid_to_fixed};
 use super::workload::{Lcg, OpCount, SizeDistribution, ValueBytes, WorkloadModel};
 use crate::blockstore::{
     BlockStoreConfig, CidBytes, CompactionError, GroupCommitConfig, TranquilBlockStore,
@@ -44,15 +44,11 @@ pub struct MaxFileSize(pub u64);
 #[derive(Debug, Clone, Copy)]
 pub struct ShardCount(pub u8);
 
-#[derive(Debug, Clone, Copy)]
-pub struct CompactInterval(pub u32);
-
 #[derive(Debug, Clone)]
 pub struct StoreConfig {
     pub max_file_size: MaxFileSize,
     pub group_commit: GroupCommitConfig,
     pub shard_count: ShardCount,
-    pub compact_every: CompactInterval,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +104,8 @@ enum OpError {
     CompactFile(String),
     #[error("join: {0}")]
     Join(String),
+    #[error("cid format: {0}")]
+    CidFormat(#[from] CidFormatError),
 }
 
 pub struct Gauntlet {
@@ -148,7 +146,7 @@ impl Gauntlet {
                     restarts: RestartCount(restarts_counter.load(Ordering::Relaxed)),
                     violations: vec![InvariantViolation {
                         invariant: "WallClockBudget",
-                        detail: format!("exceeded max_wall_ms ({} ms)", d.as_millis()),
+                        detail: format!("exceeded max_wall_ms of {} ms", d.as_millis()),
                     }],
                 },
             },
@@ -175,6 +173,12 @@ async fn run_real_inner(
     let mut restart_rng = Lcg::new(Seed(config.seed.0 ^ 0xA5A5_A5A5_A5A5_A5A5));
     let mut halt_ops = false;
 
+    let mid_run_set = config
+        .invariants
+        .without(InvariantSet::RESTART_IDEMPOTENT)
+        .without(InvariantSet::ACKED_WRITE_PERSISTENCE);
+    let post_reopen_set = config.invariants.without(InvariantSet::RESTART_IDEMPOTENT);
+
     for (idx, op) in op_stream.iter().enumerate() {
         if halt_ops {
             break;
@@ -186,7 +190,6 @@ async fn run_real_inner(
                     invariant: "OpExecution",
                     detail: format!("op {idx}: {e}"),
                 });
-                ops_counter.store(idx + 1, Ordering::Relaxed);
                 halt_ops = true;
                 continue;
             }
@@ -209,19 +212,49 @@ async fn run_real_inner(
                 halt_ops = true;
                 continue;
             }
-            violations.extend(check_all(&store, &oracle, config.invariants));
-            if !violations.is_empty() {
+            let before = violations.len();
+            violations.extend(run_invariants(&store, &oracle, root, mid_run_set).await);
+            if violations.len() > before {
                 halt_ops = true;
             }
         }
     }
 
-    match refresh_oracle_graph(&store, &mut oracle, root).await {
-        Ok(()) => violations.extend(check_all(&store, &oracle, config.invariants)),
-        Err(e) => violations.push(InvariantViolation {
-            invariant: "OpExecution",
-            detail: format!("refresh at end: {e}"),
-        }),
+    if !halt_ops {
+        match refresh_oracle_graph(&store, &mut oracle, root).await {
+            Ok(()) => {
+                let before = violations.len();
+                violations.extend(run_invariants(&store, &oracle, root, mid_run_set).await);
+                if violations.len() > before {
+                    halt_ops = true;
+                }
+            }
+            Err(e) => {
+                violations.push(InvariantViolation {
+                    invariant: "OpExecution",
+                    detail: format!("refresh at end: {e}"),
+                });
+                halt_ops = true;
+            }
+        }
+    }
+
+    if config.invariants.contains(InvariantSet::RESTART_IDEMPOTENT) && !halt_ops {
+        let pre_snapshot = snapshot_block_index(&store);
+        drop(store);
+        let reopened = Arc::new(
+            TranquilBlockStore::open(blockstore_config(dir.path(), &config.store))
+                .expect("reopen for RestartIdempotent"),
+        );
+        let post_snapshot = snapshot_block_index(&reopened);
+        if let Some(detail) = diff_snapshots(&pre_snapshot, &post_snapshot) {
+            violations.push(InvariantViolation {
+                invariant: "RestartIdempotent",
+                detail,
+            });
+        } else {
+            violations.extend(run_invariants(&reopened, &oracle, root, post_reopen_set).await);
+        }
     }
 
     GauntletReport {
@@ -232,15 +265,82 @@ async fn run_real_inner(
     }
 }
 
-fn check_all(
-    store: &TranquilBlockStore,
+async fn run_invariants(
+    store: &Arc<TranquilBlockStore>,
     oracle: &Oracle,
+    root: Option<Cid>,
     set: InvariantSet,
 ) -> Vec<InvariantViolation> {
-    invariants_for(set)
+    let ctx = InvariantCtx {
+        store,
+        oracle,
+        root,
+    };
+    let mut out = Vec::new();
+    for inv in invariants_for(set) {
+        if let Err(v) = inv.check(&ctx).await {
+            out.push(v);
+        }
+    }
+    out
+}
+
+fn snapshot_block_index(store: &TranquilBlockStore) -> Vec<(CidBytes, u32)> {
+    let mut v: Vec<(CidBytes, u32)> = store
+        .block_index()
+        .live_entries_snapshot()
         .into_iter()
-        .filter_map(|inv| inv.check(store, oracle).err())
-        .collect()
+        .map(|(c, r)| (c, r.raw()))
+        .collect();
+    v.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    v
+}
+
+const SNAPSHOT_DIFF_ITEMS: usize = 16;
+
+fn diff_snapshots(pre: &[(CidBytes, u32)], post: &[(CidBytes, u32)]) -> Option<String> {
+    if pre == post {
+        return None;
+    }
+    let pre_map: std::collections::HashMap<CidBytes, u32> = pre.iter().copied().collect();
+    let post_map: std::collections::HashMap<CidBytes, u32> = post.iter().copied().collect();
+
+    let only_pre: Vec<String> = pre_map
+        .iter()
+        .filter(|(c, _)| !post_map.contains_key(*c))
+        .map(|(c, r)| format!("lost {} refcount {}", hex_short(c), r))
+        .collect();
+    let only_post: Vec<String> = post_map
+        .iter()
+        .filter(|(c, _)| !pre_map.contains_key(*c))
+        .map(|(c, r)| format!("gained {} refcount {}", hex_short(c), r))
+        .collect();
+    let changed: Vec<String> = pre_map
+        .iter()
+        .filter_map(|(c, pre_r)| match post_map.get(c) {
+            Some(post_r) if post_r != pre_r => {
+                Some(format!("{} refcount {} -> {}", hex_short(c), pre_r, post_r))
+            }
+            _ => None,
+        })
+        .collect();
+
+    let total = only_pre.len() + only_post.len() + changed.len();
+    let mut items: Vec<String> = only_pre
+        .into_iter()
+        .chain(only_post)
+        .chain(changed)
+        .take(SNAPSHOT_DIFF_ITEMS)
+        .collect();
+    if total > items.len() {
+        items.push(format!("+{} more", total - items.len()));
+    }
+    Some(format!(
+        "block index changed across clean reopen: pre={} entries, post={} entries; {}",
+        pre.len(),
+        post.len(),
+        items.join("; "),
+    ))
 }
 
 async fn refresh_oracle_graph(
@@ -250,7 +350,7 @@ async fn refresh_oracle_graph(
 ) -> Result<(), String> {
     match root {
         None => {
-            oracle.set_node_cids(Vec::new());
+            oracle.clear_mst_state();
             Ok(())
         }
         Some(r) => {
@@ -259,8 +359,13 @@ async fn refresh_oracle_graph(
                 .collect_node_cids()
                 .await
                 .map_err(|e| format!("collect_node_cids: {e}"))?;
+            let fixed: Vec<CidBytes> = cids
+                .iter()
+                .map(try_cid_to_fixed)
+                .collect::<Result<_, _>>()
+                .map_err(|e| format!("mst node cid: {e}"))?;
             oracle.set_root(r);
-            oracle.set_node_cids(cids);
+            oracle.set_mst_node_cids(fixed);
             Ok(())
         }
     }
@@ -298,17 +403,14 @@ fn make_record_bytes(value_seed: ValueSeed, dist: SizeDistribution) -> Vec<u8> {
             let ValueBytes(lo) = range.min();
             let ValueBytes(hi) = range.max();
             let span = u64::from(hi.saturating_sub(lo)).max(1);
-            let rng_state = u64::from(raw);
-            (lo as usize) + (rng_state % span) as usize
+            (lo as usize) + (u64::from(raw) % span) as usize
         }
     };
-    serde_ipld_dagcbor::to_vec(&serde_json::json!({
-        "$type": "app.bsky.feed.post",
-        "text": format!("record-{raw}"),
-        "createdAt": "2026-01-01T00:00:00Z",
-        "pad": "x".repeat(target_len.saturating_sub(64)),
-    }))
-    .expect("encode record")
+    let target_len = target_len.max(8);
+    let seed_bytes = raw.to_le_bytes();
+    (0..target_len)
+        .map(|i| seed_bytes[i % 4] ^ (i as u8).wrapping_mul(31))
+        .collect()
 }
 
 async fn apply_op(
@@ -329,27 +431,32 @@ async fn apply_op(
                 .put(&record_bytes)
                 .await
                 .map_err(|e| OpError::PutRecord(e.to_string()))?;
-            let key = format!("{}/{}", collection.0, rkey.0);
-            let loaded = match *root {
-                None => Mst::new(store.clone()),
-                Some(r) => Mst::load(store.clone(), r, None),
-            };
-            let updated = loaded
-                .add(&key, record_cid)
-                .await
-                .map_err(|e| OpError::MstAdd(e.to_string()))?;
-            let new_root = updated
-                .persist()
-                .await
-                .map_err(|e| OpError::MstPersist(e.to_string()))?;
+            let record_cid_bytes = try_cid_to_fixed(&record_cid)?;
 
-            if let Some(old_root) = *root {
-                apply_mst_diff(store, old_root, new_root).await?;
+            let outcome =
+                add_record_inner(store, *root, collection, rkey, record_cid, record_cid_bytes)
+                    .await;
+            match outcome {
+                Ok((new_root, applied)) => {
+                    *root = Some(new_root);
+                    if applied {
+                        oracle.add(collection.clone(), rkey.clone(), record_cid_bytes);
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    if let Err(cleanup_err) =
+                        decrement_obsolete(store, vec![record_cid_bytes]).await
+                    {
+                        tracing::warn!(
+                            op_error = %e,
+                            cleanup_error = %cleanup_err,
+                            "AddRecord cleanup decrement failed; refcount may leak",
+                        );
+                    }
+                    Err(e)
+                }
             }
-
-            *root = Some(new_root);
-            oracle.add(collection.clone(), rkey.clone(), cid_to_fixed(&record_cid));
-            Ok(())
         }
         Op::DeleteRecord { collection, rkey } => {
             let Some(old_root) = *root else { return Ok(()) };
@@ -389,6 +496,55 @@ async fn apply_op(
     }
 }
 
+async fn add_record_inner(
+    store: &Arc<TranquilBlockStore>,
+    root: Option<Cid>,
+    collection: &super::op::CollectionName,
+    rkey: &super::op::RecordKey,
+    record_cid: Cid,
+    record_cid_bytes: CidBytes,
+) -> Result<(Cid, bool), OpError> {
+    let key = format!("{}/{}", collection.0, rkey.0);
+    let loaded = match root {
+        None => Mst::new(store.clone()),
+        Some(r) => Mst::load(store.clone(), r, None),
+    };
+    let updated = loaded
+        .add(&key, record_cid)
+        .await
+        .map_err(|e| OpError::MstAdd(e.to_string()))?;
+    let new_root = updated
+        .persist()
+        .await
+        .map_err(|e| OpError::MstPersist(e.to_string()))?;
+
+    match root {
+        Some(old_root) if old_root == new_root => {
+            decrement_obsolete(store, vec![record_cid_bytes]).await?;
+            Ok((new_root, false))
+        }
+        Some(old_root) => {
+            apply_mst_diff(store, old_root, new_root).await?;
+            Ok((new_root, true))
+        }
+        None => Ok((new_root, true)),
+    }
+}
+
+async fn decrement_obsolete(
+    store: &Arc<TranquilBlockStore>,
+    obsolete: Vec<CidBytes>,
+) -> Result<(), OpError> {
+    let s = store.clone();
+    tokio::task::spawn_blocking(move || {
+        s.apply_commit_blocking(vec![], obsolete)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| OpError::Join(e.to_string()))?
+    .map_err(OpError::ApplyCommit)
+}
+
 async fn apply_mst_diff(
     store: &Arc<TranquilBlockStore>,
     old_root: Cid,
@@ -404,8 +560,8 @@ async fn apply_mst_diff(
         .removed_mst_blocks
         .into_iter()
         .chain(diff.removed_cids.into_iter())
-        .map(|c| cid_to_fixed(&c))
-        .collect();
+        .map(|c| try_cid_to_fixed(&c))
+        .collect::<Result<_, _>>()?;
     let s = store.clone();
     tokio::task::spawn_blocking(move || {
         s.apply_commit_blocking(vec![], obsolete)
@@ -419,10 +575,9 @@ async fn apply_mst_diff(
 const COMPACT_LIVENESS_CEILING: f64 = 0.99;
 
 fn compact_by_liveness(store: &TranquilBlockStore) -> Result<(), OpError> {
-    let liveness = match store.compaction_liveness(0) {
-        Ok(l) => l,
-        Err(_) => return Ok(()),
-    };
+    let liveness = store
+        .compaction_liveness(0)
+        .map_err(|e| OpError::CompactFile(format!("compaction_liveness: {e}")))?;
     let targets: Vec<_> = liveness
         .iter()
         .filter(|(_, info)| info.total_blocks > 0 && info.ratio() < COMPACT_LIVENESS_CEILING)
