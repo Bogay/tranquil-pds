@@ -160,7 +160,7 @@ fn collect_dead_blocks_respects_epoch_gating() {
             .collect();
         assert!(
             all_cids.contains(&cid_a),
-            "cid_a should be collectible (epoch advanced by subsequent commit)"
+            "cid_a should be collectible after subsequent commit advanced the epoch"
         );
     });
 }

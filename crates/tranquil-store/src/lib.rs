@@ -6,6 +6,8 @@ pub mod consistency;
 pub mod eventlog;
 pub mod fsync_order;
 #[cfg(any(test, feature = "test-harness"))]
+pub mod gauntlet;
+#[cfg(any(test, feature = "test-harness"))]
 mod harness;
 mod io;
 pub mod metastore;

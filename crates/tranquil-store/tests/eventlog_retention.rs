@@ -72,7 +72,7 @@ fn run_retention_at_deletes_sealed_segments_past_cutoff() {
     );
     assert!(
         segments_after >= 1,
-        "active segment must remain (got {segments_after})"
+        "active segment must remain, got {segments_after}"
     );
 }
 

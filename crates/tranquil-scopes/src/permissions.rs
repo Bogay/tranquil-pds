@@ -164,7 +164,10 @@ impl ScopePermissions {
             if self.has_transition_generic && !self.has_transition_chat {
                 return Err(ScopeError::InsufficientScope {
                     required: "transition:chat.bsky".to_string(),
-                    message: format!("Chat access requires transition:chat.bsky scope to call {}", lxm),
+                    message: format!(
+                        "Chat access requires transition:chat.bsky scope to call {}",
+                        lxm
+                    ),
                 });
             }
         }

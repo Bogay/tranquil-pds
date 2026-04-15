@@ -15,7 +15,9 @@ fn test_cid(n: u32) -> Cid {
     Cid::new_v1(0x71, mh)
 }
 
-async fn compute_obsolete_full_walk<S: jacquard_repo::storage::BlockStore + Sync + Send + 'static>(
+async fn compute_obsolete_full_walk<
+    S: jacquard_repo::storage::BlockStore + Sync + Send + 'static,
+>(
     old: &Mst<S>,
     new: &Mst<S>,
 ) -> BTreeSet<Cid> {
@@ -34,9 +36,7 @@ async fn compute_obsolete_full_walk<S: jacquard_repo::storage::BlockStore + Sync
         .collect()
 }
 
-fn compute_obsolete_from_diff(
-    diff: &jacquard_repo::mst::diff::MstDiff,
-) -> BTreeSet<Cid> {
+fn compute_obsolete_from_diff(diff: &jacquard_repo::mst::diff::MstDiff) -> BTreeSet<Cid> {
     diff.removed_mst_blocks
         .iter()
         .copied()
@@ -74,12 +74,17 @@ async fn assert_equivalence(
     let diff_obsolete = compute_obsolete_from_diff(&diff);
 
     assert_eq!(
-        full_walk_obsolete, diff_obsolete,
+        full_walk_obsolete,
+        diff_obsolete,
         "MISMATCH in scenario: {scenario}\n  full_walk count: {}\n  diff count: {}\n  in full_walk but not diff: {:?}\n  in diff but not full_walk: {:?}",
         full_walk_obsolete.len(),
         diff_obsolete.len(),
-        full_walk_obsolete.difference(&diff_obsolete).collect::<Vec<_>>(),
-        diff_obsolete.difference(&full_walk_obsolete).collect::<Vec<_>>(),
+        full_walk_obsolete
+            .difference(&diff_obsolete)
+            .collect::<Vec<_>>(),
+        diff_obsolete
+            .difference(&full_walk_obsolete)
+            .collect::<Vec<_>>(),
     );
 }
 
@@ -256,7 +261,12 @@ async fn massive_to_empty() {
 async fn massive_complete_replacement() {
     let old = generate_records("app.bsky.feed.post", 0..1000);
     let new_rec = generate_records("app.bsky.feed.post", 1000..2000);
-    assert_equivalence(&old, &new_rec, "1000 records fully replaced with 1000 different").await;
+    assert_equivalence(
+        &old,
+        &new_rec,
+        "1000 records fully replaced with 1000 different",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -276,7 +286,12 @@ async fn multi_collection_5_collections_500_each() {
     ];
     let old = generate_multi_collection_records(&collections, 500);
     let new_rec = apply_scattered_updates(&old, 4, 30000);
-    assert_equivalence(&old, &new_rec, "5 collections x 500 records - update every 4th").await;
+    assert_equivalence(
+        &old,
+        &new_rec,
+        "5 collections x 500 records - update every 4th",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -294,7 +309,12 @@ async fn multi_collection_wipe_one_collection() {
         .filter(|(key, _)| !key.starts_with("app.bsky.feed.repost"))
         .cloned()
         .collect();
-    assert_equivalence(&old, &new_rec, "4 collections x 400 - wipe repost collection").await;
+    assert_equivalence(
+        &old,
+        &new_rec,
+        "4 collections x 400 - wipe repost collection",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -313,10 +333,7 @@ async fn multi_collection_keep_only_one() {
 
 #[tokio::test]
 async fn multi_collection_add_new_collection() {
-    let old_collections = [
-        "app.bsky.feed.like",
-        "app.bsky.feed.post",
-    ];
+    let old_collections = ["app.bsky.feed.like", "app.bsky.feed.post"];
     let old = generate_multi_collection_records(&old_collections, 500);
     let new_rec = append_records(&old, "app.bsky.graph.follow", 0..500, 40000);
     assert_equivalence(&old, &new_rec, "2 collections x 500 + add 500 follows").await;
@@ -378,7 +395,12 @@ async fn interleaved_keys_disjoint_ranges() {
     let new_rec: Vec<_> = (0..1000u32)
         .map(|i| (make_key("app.bsky.feed.post", i * 2 + 1), i + 10000))
         .collect();
-    assert_equivalence(&old, &new_rec, "1000 even-keyed records replaced by 1000 odd-keyed").await;
+    assert_equivalence(
+        &old,
+        &new_rec,
+        "1000 even-keyed records replaced by 1000 odd-keyed",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -426,7 +448,12 @@ async fn many_collections_few_records_each() {
         })
         .collect();
 
-    assert_equivalence(&old, &new_rec, "50 collections x 20 records - delete every 15th, update every 7th").await;
+    assert_equivalence(
+        &old,
+        &new_rec,
+        "50 collections x 20 records - delete every 15th, update every 7th",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -457,7 +484,12 @@ async fn one_to_massive() {
 async fn delete_head_and_tail() {
     let old = generate_records("app.bsky.feed.post", 0..2000);
     let new_rec: Vec<_> = old[200..1800].to_vec();
-    assert_equivalence(&old, &new_rec, "2000 records - delete first 200 and last 200").await;
+    assert_equivalence(
+        &old,
+        &new_rec,
+        "2000 records - delete first 200 and last 200",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -465,7 +497,12 @@ async fn keep_head_and_tail_only() {
     let old = generate_records("app.bsky.feed.post", 0..2000);
     let mut new_rec: Vec<_> = old[..100].to_vec();
     new_rec.extend_from_slice(&old[1900..]);
-    assert_equivalence(&old, &new_rec, "2000 records - keep only first 100 and last 100").await;
+    assert_equivalence(
+        &old,
+        &new_rec,
+        "2000 records - keep only first 100 and last 100",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -515,7 +552,12 @@ async fn swiss_cheese_deletions() {
         })
         .map(|(_, r)| r.clone())
         .collect();
-    assert_equivalence(&old, &new_rec, "1500 records - delete every 3rd chunk of 50").await;
+    assert_equivalence(
+        &old,
+        &new_rec,
+        "1500 records - delete every 3rd chunk of 50",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -529,9 +571,7 @@ async fn mixed_ops_with_key_density_change() {
         .filter(|(_, val)| val % 4 != 0)
         .cloned()
         .collect();
-    new_rec.extend((0..500u32).map(|i| {
-        (make_key("app.bsky.feed.post", i * 3 + 1), i + 100000)
-    }));
+    new_rec.extend((0..500u32).map(|i| (make_key("app.bsky.feed.post", i * 3 + 1), i + 100000)));
     new_rec.sort_by(|(a, _), (b, _)| a.cmp(b));
 
     assert_equivalence(

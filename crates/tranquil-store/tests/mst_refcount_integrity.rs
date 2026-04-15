@@ -80,8 +80,7 @@ async fn mst_shared_subtrees_survive_incremental_writes_compaction_restart() {
 
                 let obsolete =
                     compute_obsolete_from_diff(&old_settled, &new_settled, prev_commit).await;
-                let obsolete_fixed: Vec<[u8; 36]> =
-                    obsolete.iter().map(|c| cid_to_fixed(c)).collect();
+                let obsolete_fixed: Vec<[u8; 36]> = obsolete.iter().map(cid_to_fixed).collect();
                 let s = store.clone();
                 tokio::task::spawn_blocking(move || {
                     s.apply_commit_blocking(vec![], obsolete_fixed).unwrap();
@@ -115,8 +114,7 @@ async fn mst_shared_subtrees_survive_incremental_writes_compaction_restart() {
 
             let obsolete =
                 compute_obsolete_from_diff(&old_settled, &new_settled, prev_commit).await;
-            let obsolete_fixed: Vec<[u8; 36]> =
-                obsolete.iter().map(|c| cid_to_fixed(c)).collect();
+            let obsolete_fixed: Vec<[u8; 36]> = obsolete.iter().map(cid_to_fixed).collect();
             let s = store.clone();
             tokio::task::spawn_blocking(move || {
                 s.apply_commit_blocking(vec![], obsolete_fixed).unwrap();
@@ -168,9 +166,7 @@ async fn mst_shared_subtrees_survive_incremental_writes_compaction_restart() {
     }
 
     {
-        let store = Arc::new(
-            TranquilBlockStore::open(tiny_blockstore_config(dir.path())).unwrap(),
-        );
+        let store = Arc::new(TranquilBlockStore::open(tiny_blockstore_config(dir.path())).unwrap());
 
         let missing: Vec<String> = final_node_cids
             .iter()

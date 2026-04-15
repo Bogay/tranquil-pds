@@ -552,7 +552,7 @@ fn decode_mmap_event(
             segment = %segment_id,
             offset = raw,
             file_size,
-            "decode offset past file size (corrupt index?)"
+            "decode offset past file size, index likely corrupt"
         );
         return Ok(MmapDecodeResult::Corrupted);
     }

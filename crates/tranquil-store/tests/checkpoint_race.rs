@@ -4,10 +4,10 @@ use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use tranquil_store::PostBlockstoreHook;
 use tranquil_store::blockstore::{
     BlockStoreConfig, BlocksSynced, CidBytes, GroupCommitConfig, TranquilBlockStore,
 };
-use tranquil_store::PostBlockstoreHook;
 
 struct SlowHook;
 
@@ -72,9 +72,7 @@ fn write_phase(base: &std::path::Path, use_hook: bool) -> Vec<CidBytes> {
                     store
                         .put_blocks_blocking(vec![(cid, vec![shard; 60])])
                         .unwrap();
-                    store
-                        .apply_commit_blocking(vec![], vec![cid])
-                        .unwrap();
+                    store.apply_commit_blocking(vec![], vec![cid]).unwrap();
                     targets.push(cid);
                     seq += 1;
                     total_cycles.fetch_add(1, Ordering::Relaxed);
@@ -208,7 +206,9 @@ fn __crash_write_phase() {
         Ok(d) => d,
         Err(_) => return,
     };
-    let use_hook = std::env::var("CRASH_TEST_HOOK").map(|v| v == "1").unwrap_or(false);
+    let use_hook = std::env::var("CRASH_TEST_HOOK")
+        .map(|v| v == "1")
+        .unwrap_or(false);
     let base = std::path::Path::new(&dir);
 
     let rt = tokio::runtime::Runtime::new().unwrap();

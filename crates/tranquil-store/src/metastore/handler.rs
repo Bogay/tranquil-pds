@@ -5964,7 +5964,7 @@ fn handler_loop<S: StorageIO + 'static>(
                         None => "unknown panic payload".to_owned(),
                     },
                 };
-                tracing::error!(thread_index, msg, "metastore handler panic (recovered)");
+                tracing::error!(thread_index, msg, "recovered metastore handler panic");
             }
         }
     });

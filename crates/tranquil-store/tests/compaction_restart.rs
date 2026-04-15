@@ -26,9 +26,14 @@ fn open_full_stack(base_dir: &Path) -> FullStack {
     let blockstore_data = base_dir.join("blockstore").join("data");
     let blockstore_index = base_dir.join("blockstore").join("index");
 
-    [&metastore_dir, &segments_dir, &blockstore_data, &blockstore_index]
-        .iter()
-        .for_each(|d| std::fs::create_dir_all(d).unwrap());
+    [
+        &metastore_dir,
+        &segments_dir,
+        &blockstore_data,
+        &blockstore_index,
+    ]
+    .iter()
+    .for_each(|d| std::fs::create_dir_all(d).unwrap());
 
     let metastore = Metastore::open(&metastore_dir, MetastoreConfig::default()).unwrap();
 
@@ -59,9 +64,7 @@ fn open_full_stack(base_dir: &Path) -> FullStack {
 
     let indexes = metastore.partition(Partition::Indexes).clone();
     let event_ops = metastore.event_ops(Arc::clone(&bridge));
-    let recovered = event_ops
-        .recover_metastore_mutations(&indexes)
-        .unwrap();
+    let recovered = event_ops.recover_metastore_mutations(&indexes).unwrap();
     if recovered > 0 {
         eprintln!("replayed {recovered} metastore mutations from eventlog");
     }
@@ -240,9 +243,7 @@ fn commit_style_decrements() {
 
                 if round > 0 {
                     let prev_mst = test_cid(6000 + round - 1);
-                    store
-                        .apply_commit_blocking(vec![], vec![prev_mst])
-                        .unwrap();
+                    store.apply_commit_blocking(vec![], vec![prev_mst]).unwrap();
                 }
 
                 prev_commit = new_commit;
@@ -408,8 +409,7 @@ fn multiple_restart_cycles_blockstore() {
 
         (0..10u32).for_each(|cycle| {
             {
-                let store =
-                    TranquilBlockStore::open(tiny_blockstore_config(dir.path())).unwrap();
+                let store = TranquilBlockStore::open(tiny_blockstore_config(dir.path())).unwrap();
 
                 (0..50u32).for_each(|round| {
                     let churn = test_cid(9000 + cycle * 100 + round);

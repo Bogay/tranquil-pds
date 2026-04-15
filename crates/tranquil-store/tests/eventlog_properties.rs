@@ -579,7 +579,7 @@ fn index_checkpoint_accelerates_recovery() {
 
     assert!(
         reads_with_index < reads_without_index,
-        "read with index ({reads_with_index} reads) should require fewer reads than without ({reads_without_index} reads)"
+        "indexed read took {reads_with_index} reads but unindexed took only {reads_without_index}"
     );
 }
 
@@ -654,7 +654,7 @@ fn fsync_ordering_blocks_before_events() {
     assert_eq!(
         event_writer.synced_seq(),
         EventSequence::BEFORE_ALL,
-        "crash between blockstore sync and eventlog sync must not persist the event (blocks exist, event does not = orphan, not inconsistency)"
+        "crash between blockstore sync and eventlog sync must leave blocks orphaned rather than persist the event"
     );
 
     drop(event_writer);

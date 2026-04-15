@@ -57,10 +57,8 @@ fn write_hint_record<S: StorageIO>(
 
 fn encode_location_fields(record: &mut [u8; HINT_RECORD_SIZE], loc: &BlockLocation) {
     record[FIELD_A_OFFSET..FIELD_A_OFFSET + 4].copy_from_slice(&loc.file_id.raw().to_le_bytes());
-    record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8]
-        .copy_from_slice(&loc.length.raw().to_le_bytes());
-    record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8]
-        .copy_from_slice(&loc.offset.raw().to_le_bytes());
+    record[FIELD_A_OFFSET + 4..FIELD_A_OFFSET + 8].copy_from_slice(&loc.length.raw().to_le_bytes());
+    record[FIELD_B_OFFSET..FIELD_B_OFFSET + 8].copy_from_slice(&loc.offset.raw().to_le_bytes());
 }
 
 pub(crate) fn encode_hint_record<S: StorageIO>(
@@ -841,7 +839,11 @@ mod tests {
         let offset = BlockOffset::new(1024);
         let length = BlockLength::new(256);
 
-        let loc = BlockLocation { file_id, offset, length };
+        let loc = BlockLocation {
+            file_id,
+            offset,
+            length,
+        };
         encode_hint_record(&sim, fd, HintOffset::new(0), &cid, &loc).unwrap();
 
         let file_size = sim.file_size(fd).unwrap();

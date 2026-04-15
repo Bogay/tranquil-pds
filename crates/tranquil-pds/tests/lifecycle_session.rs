@@ -626,7 +626,12 @@ async fn create_app_password_session(
         .send()
         .await
         .expect("Failed to login with app password");
-    assert_eq!(login_res.status(), StatusCode::OK, "App password login for '{}' failed", name);
+    assert_eq!(
+        login_res.status(),
+        StatusCode::OK,
+        "App password login for '{}' failed",
+        name
+    );
     let session: Value = login_res.json().await.unwrap();
     let jwt = session["accessJwt"].as_str().unwrap().to_string();
     (jwt, scopes_response)
@@ -635,10 +640,7 @@ async fn create_app_password_session(
 async fn try_chat_service_auth(client: &reqwest::Client, jwt: &str) -> StatusCode {
     let base = base_url().await;
     let res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.server.getServiceAuth",
-            base
-        ))
+        .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", base))
         .bearer_auth(jwt)
         .query(&[
             ("aud", "did:web:api.bsky.app"),

@@ -305,7 +305,7 @@ impl<S: StorageIO> EventLogWriter<S> {
 
         match self.build_sidecar_for_segment(old_id) {
             Ok(()) => {}
-            Err(e) => warn!(segment = %old_id, error = %e, "sidecar build failed (non-fatal)"),
+            Err(e) => warn!(segment = %old_id, error = %e, "non-fatal sidecar build failure"),
         }
 
         let (new_id, new_fd) = self.manager.prepare_rotation(old_id)?;

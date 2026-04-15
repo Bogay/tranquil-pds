@@ -1202,6 +1202,15 @@ impl BlockIndex {
         self.table.read().contains_live(cid)
     }
 
+    pub fn live_entries_snapshot(&self) -> Vec<([u8; CID_SIZE], RefCount)> {
+        self.table
+            .read()
+            .iter()
+            .filter(|s| !s.refcount.is_zero())
+            .map(|s| (s.cid, s.refcount))
+            .collect()
+    }
+
     pub fn batch_put(
         &self,
         entries: &[([u8; CID_SIZE], BlockLocation)],
@@ -1222,7 +1231,14 @@ impl BlockIndex {
         now: WallClockMs,
         position_update: PositionUpdate<'_>,
     ) -> Result<(), BlockIndexError> {
-        self.batch_put_inner(entries, decrements, cursor, epoch, now, Some(position_update))
+        self.batch_put_inner(
+            entries,
+            decrements,
+            cursor,
+            epoch,
+            now,
+            Some(position_update),
+        )
     }
 
     fn batch_put_inner(

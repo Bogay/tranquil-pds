@@ -246,9 +246,8 @@ pub async fn finalize_repo_write(
 
     let obsolete_cids = match original_settled.diff(&new_settled).await {
         Ok(diff) => {
-            let mut obsolete: Vec<Cid> = Vec::with_capacity(
-                1 + diff.removed_mst_blocks.len() + diff.removed_cids.len(),
-            );
+            let mut obsolete: Vec<Cid> =
+                Vec::with_capacity(1 + diff.removed_mst_blocks.len() + diff.removed_cids.len());
             obsolete.push(ctx.current_root_cid);
             obsolete.extend(diff.removed_mst_blocks);
             obsolete.extend(diff.removed_cids);

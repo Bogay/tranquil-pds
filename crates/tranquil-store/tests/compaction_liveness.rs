@@ -226,7 +226,7 @@ fn stress_create_delete_restart_cycle_matches_bug_report() {
                     live.insert(seed_a);
                     live.insert(seed_b);
 
-                    if rng.next_u32() % 2 == 0 {
+                    if rng.next_u32().is_multiple_of(2) {
                         let victim: Option<u32> = live.iter().copied().next();
                         if let Some(v) = victim {
                             store

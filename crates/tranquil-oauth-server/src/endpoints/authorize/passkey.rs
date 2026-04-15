@@ -175,10 +175,7 @@ pub async fn passkey_start(
     }
 }
 
-async fn passkey_start_discoverable(
-    state: AppState,
-    request_id: RequestId,
-) -> Response {
+async fn passkey_start_discoverable(state: AppState, request_id: RequestId) -> Response {
     let (rcr, auth_state) = match state.webauthn_config.start_discoverable_authentication() {
         Ok(result) => result,
         Err(e) => {
@@ -570,16 +567,13 @@ pub async fn passkey_finish(
             Err(response) => return response,
         },
         None => {
-            let result = match passkey_finish_discoverable(
-                &state,
-                &credential,
-                &passkey_finish_request_id,
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(response) => return response,
-            };
+            let result =
+                match passkey_finish_discoverable(&state, &credential, &passkey_finish_request_id)
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(response) => return response,
+                };
             if state
                 .repos
                 .oauth
