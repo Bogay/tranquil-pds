@@ -3,6 +3,21 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
   };
 
+  nixConfig = {
+    extra-substituters = [
+      "https://tranquil.cachix.org"
+      "https://nix-community.cachix.org"
+      "https://cache.garnix.io"
+      "https://devenv.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "tranquil.cachix.org-1:PoO+mGL6a6LcJiPakMDHN4E218/ei/7v2sxeDtNkSRg="
+      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+      "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
+      "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw="
+    ];
+  };
+
   outputs =
     {
       self,

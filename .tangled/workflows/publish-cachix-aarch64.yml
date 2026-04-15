@@ -1,0 +1,20 @@
+when:
+  - event: ["push", "manual"]
+    branch: ["main"]
+
+engine: nixery
+
+dependencies:
+  nixpkgs:
+    - nix
+    - cachix
+    - gnugrep
+
+steps:
+  - name: Authenticate
+    command: |
+      cachix authtoken "$CACHIX_AUTH_TOKEN"
+
+  - name: Build and push aarch64
+    command: |
+      nix-store -qR --include-outputs $(nix-store -qd $(nix build .#packages.x86_64-linux.tranquil-pds-aarch64 --accept-flake-config --print-out-paths --no-link)) | grep -v '\.drv$' | cachix push "$CACHIX_CACHE_NAME"

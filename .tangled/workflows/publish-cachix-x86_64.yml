@@ -1,0 +1,26 @@
+when:
+  - event: ["push", "manual"]
+    branch: ["main"]
+
+engine: nixery
+
+dependencies:
+  nixpkgs:
+    - nix
+    - cachix
+    - gnugrep
+
+steps:
+  - name: Authenticate
+    command: |
+      cachix authtoken "$CACHIX_AUTH_TOKEN"
+
+  - name: Build and push x86_64
+    command: |
+      nix-store -qR --include-outputs $(nix-store -qd $(nix build .#packages.x86_64-linux.tranquil-pds --accept-flake-config --print-out-paths --no-link)) | grep -v '\.drv$' | cachix push "$CACHIX_CACHE_NAME"
+      nix-store -qR --include-outputs $(nix-store -qd $(nix build .#packages.x86_64-linux.tranquil-frontend --accept-flake-config --print-out-paths --no-link)) | grep -v '\.drv$' | cachix push "$CACHIX_CACHE_NAME"
+
+  - name: Build and push devShell
+    command: |
+      nix develop --accept-flake-config --profile dev-profile -c true
+      cachix push "$CACHIX_CACHE_NAME" dev-profile
