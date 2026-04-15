@@ -451,6 +451,10 @@ pub struct ServerConfig {
     /// Maximum allowed blob size in bytes (default 10 GiB).
     #[config(env = "MAX_BLOB_SIZE", default = 10_737_418_240u64)]
     pub max_blob_size: u64,
+
+    /// Maximum allowed number of preferences
+    #[config(env = "MAX_PREFERENCES_COUNT", default = 1000)]
+    pub max_preferences_count: usize,
 }
 
 impl ServerConfig {

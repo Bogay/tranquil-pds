@@ -89,6 +89,13 @@
 # Default value: 10737418240
 #max_blob_size = 10737418240
 
+# Maximum allowed number of preferences
+#
+# Can also be specified via environment variable `MAX_PREFERENCES_COUNT`.
+#
+# Default value: 1000
+#max_preferences_count = 1000
+
 [frontend]
 # Whether to enable the built in serving of the frontend.
 #

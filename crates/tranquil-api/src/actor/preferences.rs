@@ -12,7 +12,6 @@ use tranquil_pds::auth::{Auth, NotTakendown, Permissive};
 use tranquil_pds::state::AppState;
 
 const APP_BSKY_NAMESPACE: &str = "app.bsky";
-const MAX_PREFERENCES_COUNT: usize = 100;
 const MAX_PREFERENCE_SIZE: usize = 10_000;
 const PERSONAL_DETAILS_PREF: &str = "app.bsky.actor.defs#personalDetailsPref";
 const DECLARED_AGE_PREF: &str = "app.bsky.actor.defs#declaredAgePref";
@@ -92,6 +91,8 @@ pub async fn put_preferences(
     auth: Auth<NotTakendown>,
     Json(input): Json<PutPreferencesInput>,
 ) -> Response {
+    let max_preferences_count: usize = tranquil_config::get().server.max_preferences_count;
+
     let has_full_access = auth.permissions().has_full_access();
     let user_id: uuid::Uuid = match state.repos.user.get_id_by_did(&auth.did).await {
         Ok(Some(id)) => id,
@@ -99,11 +100,11 @@ pub async fn put_preferences(
             return ApiError::InternalError(Some("User not found".into())).into_response();
         }
     };
-    if input.preferences.len() > MAX_PREFERENCES_COUNT {
+    if input.preferences.len() > max_preferences_count {
         return ApiError::InvalidRequest(format!(
             "Too many preferences: {} exceeds limit of {}",
             input.preferences.len(),
-            MAX_PREFERENCES_COUNT
+            max_preferences_count
         ))
         .into_response();
     }
