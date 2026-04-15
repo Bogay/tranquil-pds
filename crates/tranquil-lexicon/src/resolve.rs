@@ -70,6 +70,8 @@ pub enum ResolveError {
     NegativelyCached { nsid: String, ttl_secs: u64 },
     #[error("network resolution disabled")]
     NetworkDisabled,
+    #[error("leader task for {nsid} aborted before completion")]
+    LeaderAborted { nsid: String },
 }
 
 pub fn nsid_to_authority(nsid: &str) -> Result<String, ResolveError> {

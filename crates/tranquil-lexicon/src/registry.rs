@@ -43,7 +43,7 @@ impl LexiconRegistry {
         self.schemas.get(nsid).cloned().or_else(|| {
             #[cfg(feature = "resolve")]
             {
-                self.dynamic.get(nsid)
+                self.dynamic.get_cached(nsid)
             }
             #[cfg(not(feature = "resolve"))]
             {
