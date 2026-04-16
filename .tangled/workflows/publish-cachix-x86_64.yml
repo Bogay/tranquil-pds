@@ -17,10 +17,12 @@ steps:
 
   - name: Build and push x86_64
     command: |
-      nix-store -qR --include-outputs $(nix-store -qd $(nix build .#packages.x86_64-linux.tranquil-pds --accept-flake-config --print-out-paths --no-link)) | grep -v '\.drv$' | cachix push "$CACHIX_CACHE_NAME"
-      nix-store -qR --include-outputs $(nix-store -qd $(nix build .#packages.x86_64-linux.tranquil-frontend --accept-flake-config --print-out-paths --no-link)) | grep -v '\.drv$' | cachix push "$CACHIX_CACHE_NAME"
+      SUBS="--option extra-substituters https://tranquil.cachix.org --option extra-trusted-public-keys tranquil.cachix.org-1:PoO+mGL6a6LcJiPakMDHN4E218/ei/7v2sxeDtNkSRg="
+      nix-store -qR --include-outputs $(nix-store -qd $(nix build .#packages.x86_64-linux.tranquil-pds $SUBS --print-out-paths --no-link)) | grep -v '\.drv$' | cachix push "$CACHIX_CACHE_NAME"
+      nix-store -qR --include-outputs $(nix-store -qd $(nix build .#packages.x86_64-linux.tranquil-frontend $SUBS --print-out-paths --no-link)) | grep -v '\.drv$' | cachix push "$CACHIX_CACHE_NAME"
 
   - name: Build and push devShell
     command: |
-      nix develop --accept-flake-config --profile dev-profile -c true
+      SUBS="--option extra-substituters https://tranquil.cachix.org --option extra-trusted-public-keys tranquil.cachix.org-1:PoO+mGL6a6LcJiPakMDHN4E218/ei/7v2sxeDtNkSRg="
+      nix develop $SUBS --profile dev-profile -c true
       cachix push "$CACHIX_CACHE_NAME" dev-profile

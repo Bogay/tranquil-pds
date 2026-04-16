@@ -17,4 +17,5 @@ steps:
 
   - name: Build and push aarch64
     command: |
-      nix-store -qR --include-outputs $(nix-store -qd $(nix build .#packages.x86_64-linux.tranquil-pds-aarch64 --accept-flake-config --print-out-paths --no-link)) | grep -v '\.drv$' | cachix push "$CACHIX_CACHE_NAME"
+      SUBS="--option extra-substituters https://tranquil.cachix.org --option extra-trusted-public-keys tranquil.cachix.org-1:PoO+mGL6a6LcJiPakMDHN4E218/ei/7v2sxeDtNkSRg="
+      nix-store -qR --include-outputs $(nix-store -qd $(nix build .#packages.x86_64-linux.tranquil-pds-aarch64 $SUBS --print-out-paths --no-link)) | grep -v '\.drv$' | cachix push "$CACHIX_CACHE_NAME"
