@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use cid::Cid;
 
-use super::op::{CollectionName, RecordKey};
+use super::op::{CollectionName, EventKind, RecordKey};
 use crate::blockstore::CidBytes;
+use crate::eventlog::EventSequence;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[error("unexpected CID encoding: got {actual} bytes, expected 36 for sha256 CIDv1")]
@@ -11,11 +12,23 @@ pub struct CidFormatError {
     pub actual: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventExpectation {
+    pub seq: EventSequence,
+    pub timestamp_us: u64,
+    pub kind: EventKind,
+    pub did_hash: u32,
+}
+
 #[derive(Debug, Default)]
 pub struct Oracle {
     live: HashMap<(CollectionName, RecordKey), CidBytes>,
     current_root: Option<Cid>,
     mst_node_cids: Vec<CidBytes>,
+    synced_events: Vec<EventExpectation>,
+    unsynced_events: Vec<EventExpectation>,
+    last_synced_seq: Option<EventSequence>,
+    last_retention_cutoff_us: Option<u64>,
 }
 
 impl Oracle {
@@ -34,6 +47,10 @@ impl Oracle {
 
     pub fn delete(&mut self, coll: &CollectionName, rkey: &RecordKey) -> Option<CidBytes> {
         self.live.remove(&(coll.clone(), rkey.clone()))
+    }
+
+    pub fn contains_record(&self, coll: &CollectionName, rkey: &RecordKey) -> bool {
+        self.live.contains_key(&(coll.clone(), rkey.clone()))
     }
 
     pub fn set_root(&mut self, root: Cid) {
@@ -70,6 +87,45 @@ impl Oracle {
             .live_records()
             .map(|(c, r, v)| (format!("record {}/{}", c.0, r.0), *v));
         nodes.chain(records).collect()
+    }
+
+    pub fn record_event_append(&mut self, event: EventExpectation) {
+        self.unsynced_events.push(event);
+    }
+
+    pub fn record_event_sync(&mut self, synced_through: EventSequence) {
+        let (promoted, remaining): (Vec<_>, Vec<_>) = self
+            .unsynced_events
+            .drain(..)
+            .partition(|e| e.seq <= synced_through);
+        self.synced_events.extend(promoted);
+        self.unsynced_events = remaining;
+        self.last_synced_seq = Some(synced_through);
+    }
+
+    pub fn record_crash(&mut self) {
+        self.unsynced_events.clear();
+    }
+
+    pub fn record_retention(&mut self, cutoff_us: u64) {
+        self.synced_events.retain(|e| e.timestamp_us >= cutoff_us);
+        self.last_retention_cutoff_us = Some(cutoff_us);
+    }
+
+    pub fn synced_events(&self) -> &[EventExpectation] {
+        &self.synced_events
+    }
+
+    pub fn unsynced_events(&self) -> &[EventExpectation] {
+        &self.unsynced_events
+    }
+
+    pub fn last_synced_seq(&self) -> Option<EventSequence> {
+        self.last_synced_seq
+    }
+
+    pub fn last_retention_cutoff_us(&self) -> Option<u64> {
+        self.last_retention_cutoff_us
     }
 }
 
