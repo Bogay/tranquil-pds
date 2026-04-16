@@ -46,6 +46,8 @@ just test
 just lint
 ```
 
+Nix users can enter a devshell with `nix develop`, or `direnv allow` to auto-enter via the bundled `.envrc`. Pre-built artifacts (including the devshell) are available from our [binary cache](docs/install-nix.md#binary-cache).
+
 ## Production Deployment
 
 ### Quick Deploy (Docker/Podman Compose)
@@ -59,6 +61,7 @@ podman-compose -f docker-compose.prod.yaml up -d
 
 ### Installation Guides
 
+- [Nix](docs/install-nix.md)
 - [Debian](docs/install-debian.md)
 - [Containers](docs/install-containers.md)
 - [Kubernetes](docs/install-kubernetes.md)
@@ -99,4 +102,3 @@ This project is very grateful to [@nonbinary.computer](https://tangled.org/did:p
 ## License
 
 AGPL-3.0-or-later. Documentation is CC BY-SA 4.0. See [LICENSE](LICENSE) for details.
-
