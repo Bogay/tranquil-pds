@@ -26,12 +26,6 @@
 # Can also be specified via environment variable `PDS_USER_HANDLE_DOMAINS`.
 #user_handle_domains =
 
-# List of domains available for user registration.
-# Defaults to the PDS hostname when not set.
-#
-# Can also be specified via environment variable `AVAILABLE_USER_DOMAINS`.
-#available_user_domains =
-
 # Enable PDS-hosted did:web identities.  Hosting did:web requires a
 # long-term commitment to serve DID documents; opt-in only.
 #
@@ -94,6 +88,22 @@
 #
 # Default value: 10737418240
 #max_blob_size = 10737418240
+
+[frontend]
+# Whether to enable the built in serving of the frontend.
+#
+# Can also be specified via environment variable `FRONTEND_ENABLED`.
+#
+# Default value: true
+#enabled = true
+
+# Directory to serve as the frontend. The oauth_client_metadata.json will have any references to
+# the frontend hostname replaced by the configured frontend hostname.
+#
+# Can also be specified via environment variable `FRONTEND_DIR`.
+#
+# Default value: "/var/lib/tranquil-pds/frontend"
+#dir = "/var/lib/tranquil-pds/frontend"
 
 [database]
 # PostgreSQL connection URL.
@@ -210,8 +220,7 @@
 # once this budget is exhausted until in-flight events drain via fsync. Set to
 # 0 to disable backpressure. Default: 1 GiB.
 #
-# Can also be specified via environment variable
-# `TRANQUIL_STORE_EVENTLOG_PENDING_BYTES_BUDGET`.
+# Can also be specified via environment variable `TRANQUIL_STORE_EVENTLOG_PENDING_BYTES_BUDGET`.
 #
 # Default value: 1073741824
 #eventlog_pending_bytes_budget = 1073741824
@@ -219,11 +228,28 @@
 # Maximum size of an individual eventlog payload in bytes. Single events
 # larger than this are rejected at append time. Default: 256 MiB.
 #
-# Can also be specified via environment variable
-# `TRANQUIL_STORE_EVENTLOG_MAX_EVENT_PAYLOAD`.
+# Can also be specified via environment variable `TRANQUIL_STORE_EVENTLOG_MAX_EVENT_PAYLOAD`.
 #
 # Default value: 268435456
 #eventlog_max_event_payload = 268435456
+
+# Maximum size of an individual blockstore data file in bytes. When the
+# active data file reaches this size it is rolled over and becomes
+# eligible for compaction. Default: 256 MiB.
+#
+# Can also be specified via environment variable `TRANQUIL_STORE_MAX_BLOCKSTORE_FILE_SIZE`.
+#
+# Default value: 268435456
+#max_blockstore_file_size = 268435456
+
+# Maximum size of an individual eventlog segment file in bytes. When the
+# active segment reaches this size it is sealed and a new one is created.
+# Safe to change on a running instance. Default: 256 MiB.
+#
+# Can also be specified via environment variable `TRANQUIL_STORE_MAX_EVENTLOG_SEGMENT_SIZE`.
+#
+# Default value: 268435456
+#max_eventlog_segment_size = 268435456
 
 [cache]
 # Cache backend: `ripple` by default, or `valkey`.
@@ -322,6 +348,13 @@
 # Default value: 5000
 #max_lag = 5000
 
+# Maximum concurrent full-repo exports, eg. getRepo without `since`.
+#
+# Can also be specified via environment variable `MAX_CONCURRENT_REPO_EXPORTS`.
+#
+# Default value: 4
+#max_concurrent_repo_exports = 4
+
 # List of relay / crawler notification URLs.
 #
 # Can also be specified via environment variable `CRAWLERS`.
@@ -369,6 +402,8 @@
 # Link a device via the admin API before enabling.
 #
 # Can also be specified via environment variable `SIGNAL_ENABLED`.
+#
+# Default value: false
 #enabled = false
 
 [notifications]
@@ -528,13 +563,58 @@
 # Default value: 3600
 #delete_check_interval_secs = 3600
 
+# Interval in seconds between data file compaction scans (tranquil-store only).
+# Set to 0 to disable.
+#
+# Can also be specified via environment variable `COMPACTION_INTERVAL_SECS`.
+#
+# Default value: 3600
+#compaction_interval_secs = 3600
+
+# Liveness ratio threshold below which a data file is compacted (0.0-1.0).
+#
+# Can also be specified via environment variable `COMPACTION_LIVENESS_THRESHOLD`.
+#
+# Default value: 0.7
+#compaction_liveness_threshold = 0.7
+
+# Grace period in milliseconds before a zero-refcount block can be removed by compaction.
+#
+# Can also be specified via environment variable `COMPACTION_GRACE_PERIOD_MS`.
+#
+# Default value: 600000
+#compaction_grace_period_ms = 600000
+
+# Interval in seconds between reachability walk runs (tranquil-store only).
+# Set to 0 to disable. Default: weekly.
+#
+# Can also be specified via environment variable `REACHABILITY_WALK_INTERVAL_SECS`.
+#
+# Default value: 604800
+#reachability_walk_interval_secs = 604800
+
+# Interval in seconds between continuous archival passes (tranquil-store only).
+# Sealed eventlog segments are copied to the archival destination each tick.
+# Set to 0 to disable. Default: 60 seconds.
+#
+# Can also be specified via environment variable `ARCHIVAL_INTERVAL_SECS`.
+#
+# Default value: 60
+#archival_interval_secs = 60
+
+# Archival destination directory for sealed eventlog segments.
+# If unset, archival is disabled.
+#
+# Can also be specified via environment variable `ARCHIVAL_DEST_DIR`.
+#archival_dest_dir =
+
 # Maximum age of events retained in the eventlog before pruning.
 # Per the atproto firehose spec, the relay backfill window only needs
 # to cover "hours or days".
 #
 # Can also be specified via environment variable `EVENT_RETENTION_MAX_AGE_SECS`.
 #
-# Default value: 604800 (7 days)
+# Default value: 604800
 #event_retention_max_age_secs = 604800
 
 # Interval in seconds between event retention prune passes.

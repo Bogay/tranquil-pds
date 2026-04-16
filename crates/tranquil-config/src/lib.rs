@@ -109,6 +109,9 @@ pub struct TranquilConfig {
     pub storage: StorageConfig,
 
     #[config(nested)]
+    pub tranquil_store: TranquilStoreConfig,
+
+    #[config(nested)]
     pub cache: CacheConfig,
 
     #[config(nested)]
@@ -143,9 +146,6 @@ pub struct TranquilConfig {
 
     #[config(nested)]
     pub scheduled: ScheduledConfig,
-
-    #[config(nested)]
-    pub tranquil_store: TranquilStoreConfig,
 }
 
 impl TranquilConfig {
@@ -656,10 +656,12 @@ pub struct StorageConfig {
     #[config(env = "S3_BUCKET")]
     pub s3_bucket: Option<String>,
 
-    /// Custom S3 endpoint URL (for MinIO, R2, etc.).
+    /// Custom S3 endpoint URL.
     #[config(env = "S3_ENDPOINT")]
     pub s3_endpoint: Option<String>,
 
+    /// Repository backend: `postgres` by default, or `tranquil-store`, our embedded db.
+    /// tranquil-store is EXPERIMENTAL!!!! RISK OF TOTAL DATA LOSS.
     #[config(env = "REPO_BACKEND", default = "postgres")]
     pub repo_backend: String,
 }
@@ -674,7 +676,7 @@ impl StorageConfig {
 
 #[derive(Debug, Config)]
 pub struct CacheConfig {
-    /// Cache backend: `ripple` (default, built-in gossip) or `valkey`.
+    /// Cache backend: `ripple` by default, or `valkey`.
     #[config(env = "CACHE_BACKEND", default = "ripple")]
     pub backend: String,
 
@@ -774,6 +776,8 @@ pub struct TelegramConfig {
 
 #[derive(Debug, Config)]
 pub struct SignalConfig {
+    /// Protocol state is stored in postgres' signal_* tables.
+    /// Link a device via the admin API before enabling.
     #[config(env = "SIGNAL_ENABLED", default = false)]
     pub enabled: bool,
 }
@@ -1124,27 +1128,26 @@ pub struct ScheduledConfig {
 
     /// Maximum age of events retained in the eventlog before pruning.
     /// Per the atproto firehose spec, the relay backfill window only needs
-    /// to cover "hours or days". Default: 7 days.
+    /// to cover "hours or days".
     #[config(env = "EVENT_RETENTION_MAX_AGE_SECS", default = 604800)]
     pub event_retention_max_age_secs: u64,
 
     /// Interval in seconds between event retention prune passes.
-    /// Set to 0 to disable. Default: hourly.
+    /// Set to 0 to disable.
     #[config(env = "EVENT_RETENTION_INTERVAL_SECS", default = 3600)]
     pub event_retention_interval_secs: u64,
 }
 
 #[derive(Debug, Config)]
 pub struct TranquilStoreConfig {
-    /// Directory for tranquil-store data (metastore, eventlog).
+    /// Directory for tranquil-store data: the metastore, eventlog, and blockstore.
     #[config(
         env = "TRANQUIL_STORE_DATA_DIR",
         default = "/var/lib/tranquil-pds/store"
     )]
     pub data_dir: String,
 
-    /// Fjall block cache size in megabytes. Defaults to 20% of system RAM
-    /// when unset.
+    /// Fjall block cache size in megabytes. Defaults to 20% of system RAM when unset.
     #[config(env = "TRANQUIL_STORE_MEMORY_BUDGET_MB")]
     pub memory_budget_mb: Option<u64>,
 
@@ -1152,9 +1155,9 @@ pub struct TranquilStoreConfig {
     #[config(env = "TRANQUIL_STORE_HANDLER_THREADS")]
     pub handler_threads: Option<usize>,
 
-    /// Maximum total bytes of pending (unsynced) eventlog payloads. Appenders
-    /// block once this budget is exhausted until in-flight events drain via
-    /// fsync. Set to 0 to disable backpressure (unbounded). Default: 1 GiB.
+    /// Maximum total bytes of pending (unsynced) eventlog payloads. Appenders block
+    /// once this budget is exhausted until in-flight events drain via fsync. Set to
+    /// 0 to disable backpressure. Default: 1 GiB.
     #[config(
         env = "TRANQUIL_STORE_EVENTLOG_PENDING_BYTES_BUDGET",
         default = 1_073_741_824
