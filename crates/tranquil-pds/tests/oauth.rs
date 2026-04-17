@@ -188,6 +188,37 @@ async fn test_par_and_authorize() {
 }
 
 #[tokio::test]
+async fn test_par_public_client_empty_assertion_fields() {
+    let url = base_url().await;
+    let client = client();
+    let redirect_uri = "https://nels.evil.oauth.pet/callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (_, code_challenge) = generate_pkce();
+    let par_res = client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto"),
+            ("state", "test-state"),
+            ("client_assertion", ""),
+            ("client_assertion_type", ""),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        par_res.status(),
+        StatusCode::CREATED,
+        "PAR with empty assertion fields from a public client should succeed"
+    );
+}
+
+#[tokio::test]
 async fn test_full_oauth_flow() {
     let url = base_url().await;
     let http_client = client();

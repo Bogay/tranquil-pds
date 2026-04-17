@@ -138,13 +138,17 @@ impl TokenRequest {
             }
         };
 
-        let client_auth = match (self.client_assertion, self.client_assertion_type) {
+        let assertion = self.client_assertion.filter(|s| !s.is_empty());
+        let assertion_type = self.client_assertion_type.filter(|s| !s.is_empty());
+        let client_secret = self.client_secret.filter(|s| !s.is_empty());
+
+        let client_auth = match (assertion, assertion_type) {
             (Some(assertion), Some(assertion_type)) => RequestClientAuth::PrivateKeyJwt {
                 client_id: self.client_id,
                 assertion,
                 assertion_type,
             },
-            _ => match self.client_secret {
+            _ => match client_secret {
                 Some(secret) => RequestClientAuth::SecretPost {
                     client_id: self.client_id,
                     client_secret: secret,

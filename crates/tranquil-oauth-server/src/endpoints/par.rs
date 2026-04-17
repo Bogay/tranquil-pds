@@ -138,21 +138,29 @@ pub async fn pushed_authorization_request(
 }
 
 fn determine_client_auth(request: &ParRequest) -> Result<ClientAuth, OAuthError> {
-    if let (Some(assertion), Some(assertion_type)) =
-        (&request.client_assertion, &request.client_assertion_type)
-    {
+    let assertion = request
+        .client_assertion
+        .as_deref()
+        .filter(|s| !s.is_empty());
+    let assertion_type = request
+        .client_assertion_type
+        .as_deref()
+        .filter(|s| !s.is_empty());
+    let secret = request.client_secret.as_deref().filter(|s| !s.is_empty());
+
+    if let (Some(assertion), Some(assertion_type)) = (assertion, assertion_type) {
         if assertion_type != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
             return Err(OAuthError::InvalidRequest(
                 "Unsupported client_assertion_type".to_string(),
             ));
         }
         return Ok(ClientAuth::PrivateKeyJwt {
-            client_assertion: assertion.clone(),
+            client_assertion: assertion.to_string(),
         });
     }
-    if let Some(secret) = &request.client_secret {
+    if let Some(secret) = secret {
         return Ok(ClientAuth::SecretPost {
-            client_secret: secret.clone(),
+            client_secret: secret.to_string(),
         });
     }
     Ok(ClientAuth::None)
