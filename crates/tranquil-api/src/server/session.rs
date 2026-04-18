@@ -163,6 +163,7 @@ pub async fn create_session(
     let email_2fa_enabled = row.email_2fa_enabled;
     let is_legacy_login = has_totp || email_2fa_enabled;
     let twofa_ctx = tranquil_pds::auth::legacy_2fa::Legacy2faContext {
+        is_app_password: app_password_name.is_some(),
         email_2fa_enabled,
         has_totp,
         allow_legacy_login: row.allow_legacy_login,

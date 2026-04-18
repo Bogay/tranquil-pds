@@ -156,6 +156,7 @@ pub enum Legacy2faOutcome {
 }
 
 pub struct Legacy2faContext {
+    pub is_app_password: bool,
     pub email_2fa_enabled: bool,
     pub has_totp: bool,
     pub allow_legacy_login: bool,
@@ -163,7 +164,7 @@ pub struct Legacy2faContext {
 
 impl Legacy2faContext {
     pub fn requires_2fa(&self) -> bool {
-        self.email_2fa_enabled || self.has_totp
+        !self.is_app_password && (self.email_2fa_enabled || self.has_totp)
     }
 
     pub fn is_blocked(&self) -> bool {
@@ -418,8 +419,24 @@ mod tests {
         let cache = MockCache::new();
         let did = Did::new("did:plc:test".to_string()).unwrap();
         let ctx = Legacy2faContext {
+            is_app_password: false,
             email_2fa_enabled: false,
             has_totp: false,
+            allow_legacy_login: true,
+        };
+
+        let outcome = process_legacy_2fa(&cache, &did, &ctx, None).await.unwrap();
+        assert!(matches!(outcome, Legacy2faOutcome::NotRequired));
+    }
+
+    #[tokio::test]
+    async fn test_process_flow_not_required_because_app_password() {
+        let cache = MockCache::new();
+        let did = Did::new("did:plc:test".to_string()).unwrap();
+        let ctx = Legacy2faContext {
+            is_app_password: true,
+            email_2fa_enabled: false,
+            has_totp: true,
             allow_legacy_login: true,
         };
 
@@ -432,6 +449,7 @@ mod tests {
         let cache = MockCache::new();
         let did = Did::new("did:plc:test".to_string()).unwrap();
         let ctx = Legacy2faContext {
+            is_app_password: false,
             email_2fa_enabled: false,
             has_totp: true,
             allow_legacy_login: false,
@@ -446,6 +464,7 @@ mod tests {
         let cache = MockCache::new();
         let did = Did::new("did:plc:test".to_string()).unwrap();
         let ctx = Legacy2faContext {
+            is_app_password: false,
             email_2fa_enabled: false,
             has_totp: true,
             allow_legacy_login: true,
@@ -460,6 +479,7 @@ mod tests {
         let cache = MockCache::new();
         let did = Did::new("did:plc:test2".to_string()).unwrap();
         let ctx = Legacy2faContext {
+            is_app_password: false,
             email_2fa_enabled: true,
             has_totp: false,
             allow_legacy_login: false,
@@ -474,6 +494,7 @@ mod tests {
         let cache = MockCache::new();
         let did = Did::new("did:plc:test".to_string()).unwrap();
         let ctx = Legacy2faContext {
+            is_app_password: false,
             email_2fa_enabled: true,
             has_totp: false,
             allow_legacy_login: false,
