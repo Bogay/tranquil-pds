@@ -1,3 +1,4 @@
+mod cid_util;
 mod compaction;
 mod data_file;
 mod group_commit;
@@ -8,6 +9,7 @@ mod reader;
 mod store;
 mod types;
 
+pub use cid_util::{DAG_CBOR_CODEC, SHA2_256_CODE, hash_to_cid, hash_to_cid_bytes};
 pub use compaction::CompactionError;
 pub use data_file::{
     BLOCK_FORMAT_VERSION, BLOCK_HEADER_SIZE, BLOCK_MAGIC, BLOCK_RECORD_OVERHEAD, CID_SIZE,

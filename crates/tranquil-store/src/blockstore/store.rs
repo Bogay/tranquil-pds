@@ -8,12 +8,11 @@ use cid::Cid;
 use jacquard_repo::error::RepoError;
 use jacquard_repo::repo::CommitData;
 use jacquard_repo::storage::BlockStore;
-use multihash::Multihash;
-use sha2::{Digest, Sha256};
 
 use crate::fsync_order::PostBlockstoreHook;
 use crate::io::{OpenOptions, RealIO, StorageIO};
 
+use super::cid_util::hash_to_cid;
 use super::compaction::CompactionError;
 use super::data_file::{BLOCK_RECORD_OVERHEAD, CID_SIZE, ReadBlockRecord};
 use super::group_commit::{CommitError, CommitRequest, GroupCommitConfig, GroupCommitWriter};
@@ -24,9 +23,6 @@ use super::types::{
     BlockLength, BlockLocation, BlockOffset, CollectionResult, CompactionResult, DataFileId,
     EpochCounter, LivenessInfo, WallClockMs, WriteCursor,
 };
-
-const DAG_CBOR_CODEC: u64 = 0x71;
-const SHA2_256_CODE: u64 = 0x12;
 
 fn cid_to_bytes(cid: &Cid) -> Result<[u8; CID_SIZE], RepoError> {
     let raw = cid.to_bytes();
@@ -39,16 +35,6 @@ fn cid_to_bytes(cid: &Cid) -> Result<[u8; CID_SIZE], RepoError> {
             ),
         ))
     })
-}
-
-fn hash_and_cid(data: &[u8]) -> Result<Cid, RepoError> {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let hash = hasher.finalize();
-    let multihash = Multihash::wrap(SHA2_256_CODE, &hash).map_err(|e| {
-        RepoError::storage(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
-    })?;
-    Ok(Cid::new_v1(DAG_CBOR_CODEC, multihash))
 }
 
 fn block_index_err_to_repo(e: super::hash_index::BlockIndexError) -> RepoError {
@@ -123,13 +109,24 @@ impl Drop for QuiesceGuard {
     }
 }
 
-#[derive(Clone)]
-pub struct TranquilBlockStore {
+pub struct TranquilBlockStore<S: StorageIO + Send + Sync + 'static = RealIO> {
     writer: Arc<WriterHandle>,
-    reader: Arc<BlockStoreReader<RealIO>>,
+    reader: Arc<BlockStoreReader<S>>,
     index: Arc<BlockIndex>,
     epoch: EpochCounter,
     data_dir: PathBuf,
+}
+
+impl<S: StorageIO + Send + Sync + 'static> Clone for TranquilBlockStore<S> {
+    fn clone(&self) -> Self {
+        Self {
+            writer: Arc::clone(&self.writer),
+            reader: Arc::clone(&self.reader),
+            index: Arc::clone(&self.index),
+            epoch: self.epoch.clone(),
+            data_dir: self.data_dir.clone(),
+        }
+    }
 }
 
 struct WriterHandle {
@@ -153,7 +150,7 @@ impl Drop for WriterHandle {
     }
 }
 
-impl TranquilBlockStore {
+impl TranquilBlockStore<RealIO> {
     pub fn open(config: BlockStoreConfig) -> Result<Self, RepoError> {
         Self::open_with_hook(config, None)
     }
@@ -162,6 +159,26 @@ impl TranquilBlockStore {
         config: BlockStoreConfig,
         post_sync_hook: Option<Arc<dyn PostBlockstoreHook>>,
     ) -> Result<Self, RepoError> {
+        Self::open_with_io_hook(config, RealIO::new, post_sync_hook)
+    }
+}
+
+impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
+    pub fn open_with_io<F>(config: BlockStoreConfig, make_io: F) -> Result<Self, RepoError>
+    where
+        F: Fn() -> S + Send + Sync + Clone + 'static,
+    {
+        Self::open_with_io_hook(config, make_io, None)
+    }
+
+    pub fn open_with_io_hook<F>(
+        config: BlockStoreConfig,
+        make_io: F,
+        post_sync_hook: Option<Arc<dyn PostBlockstoreHook>>,
+    ) -> Result<Self, RepoError>
+    where
+        F: Fn() -> S + Send + Sync + Clone + 'static,
+    {
         if config.data_dir == config.index_dir {
             return Err(RepoError::storage(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -173,7 +190,7 @@ impl TranquilBlockStore {
 
         let index = BlockIndex::open(&config.index_dir).map_err(RepoError::storage)?;
 
-        let io = RealIO::new();
+        let io = make_io();
 
         let (replayed, file_cursors) = super::hint::replay_hints_into_block_index(
             &io,
@@ -195,8 +212,13 @@ impl TranquilBlockStore {
         let max_file_size = config.max_file_size;
         let shard_count = config.shard_count;
         let data_dir_for_closure = data_dir.clone();
+        let make_io_for_manager = make_io.clone();
         let make_manager = move || {
-            DataFileManager::new(RealIO::new(), data_dir_for_closure.clone(), max_file_size)
+            DataFileManager::new(
+                make_io_for_manager(),
+                data_dir_for_closure.clone(),
+                max_file_size,
+            )
         };
 
         let checkpoint_epoch = index.loaded_checkpoint_epoch();
@@ -214,7 +236,7 @@ impl TranquilBlockStore {
         let epoch = writer.epoch().clone();
 
         let manager_for_reader = Arc::new(DataFileManager::new(
-            RealIO::new(),
+            make_io(),
             data_dir.clone(),
             max_file_size,
         ));
@@ -234,7 +256,7 @@ impl TranquilBlockStore {
         })
     }
 
-    fn recover_from_file_cursors<S: StorageIO>(
+    fn recover_from_file_cursors(
         io: &S,
         data_dir: &Path,
         index: &BlockIndex,
@@ -256,7 +278,7 @@ impl TranquilBlockStore {
         })
     }
 
-    fn replay_single_file<S: StorageIO>(
+    fn replay_single_file(
         io: &S,
         data_dir: &Path,
         index: &BlockIndex,
@@ -284,7 +306,7 @@ impl TranquilBlockStore {
         result
     }
 
-    fn scan_and_index<S: StorageIO>(
+    fn scan_and_index(
         io: &S,
         index: &BlockIndex,
         fd: crate::io::FileId,
@@ -594,7 +616,7 @@ impl TranquilBlockStore {
     }
 }
 
-impl BlockStore for TranquilBlockStore {
+impl<S: StorageIO + Send + Sync + 'static> BlockStore for TranquilBlockStore<S> {
     async fn get(&self, cid: &Cid) -> Result<Option<Bytes>, RepoError> {
         let cid_bytes = cid_to_bytes(cid)?;
         let reader = Arc::clone(&self.reader);
@@ -605,7 +627,7 @@ impl BlockStore for TranquilBlockStore {
     }
 
     async fn put(&self, data: &[u8]) -> Result<Cid, RepoError> {
-        let cid = hash_and_cid(data)?;
+        let cid = hash_to_cid(data);
         let cid_bytes = cid_to_bytes(&cid)?;
         self.send_put_blocks(vec![(cid_bytes, data.to_vec())])
             .await?;
@@ -666,7 +688,7 @@ impl BlockStore for TranquilBlockStore {
     }
 }
 
-impl TranquilBlockStore {
+impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
     pub async fn decrement_refs(&self, cids: &[Cid]) -> Result<(), RepoError> {
         if cids.is_empty() {
             return Ok(());
