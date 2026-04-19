@@ -53,8 +53,62 @@ impl Scenario {
         }
     }
 
+    pub const fn cli_name(self) -> &'static str {
+        match self {
+            Self::SmokePR => "smoke-pr",
+            Self::MstChurn => "mst-churn",
+            Self::MstRestartChurn => "mst-restart-churn",
+            Self::FullStackRestart => "full-stack-restart",
+            Self::CatastrophicChurn => "catastrophic-churn",
+            Self::HugeValues => "huge-values",
+            Self::TinyBatches => "tiny-batches",
+            Self::GiantBatches => "giant-batches",
+            Self::ManyFiles => "many-files",
+            Self::ModerateFaults => "moderate-faults",
+            Self::AggressiveFaults => "aggressive-faults",
+            Self::TornPages => "torn-pages",
+            Self::Fsyncgate => "fsyncgate",
+            Self::FirehoseFanout => "firehose-fanout",
+            Self::ContendedReaders => "contended-readers",
+            Self::ContendedWriters => "contended-writers",
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::SmokePR => "60s canary, 10k ops, core invariants. Default PR gate.",
+            Self::MstChurn => "100k churn, no restart. Refcount + reachability focus.",
+            Self::MstRestartChurn => "100k churn with Poisson restart bursts every ~5k ops.",
+            Self::FullStackRestart => "5k ops, deterministic restart every 500 ops.",
+            Self::CatastrophicChurn => {
+                "1M ops, phase-2 invariants, Poisson restart. 30 min budget."
+            }
+            Self::HugeValues => "Heavy-tail values up to 16 MiB. 32 MiB file cap.",
+            Self::TinyBatches => "Group-commit batch size 1, tight checkpoints, 4 KiB files.",
+            Self::GiantBatches => "Group-commit batch size 100k, 16 MiB files.",
+            Self::ManyFiles => "256-byte file cap, many segments, delete-heavy.",
+            Self::ModerateFaults => {
+                "Simulated IO with moderate fault config. CrashAtSyscall restarts."
+            }
+            Self::AggressiveFaults => {
+                "Simulated IO with aggressive fault config. CrashAtSyscall restarts."
+            }
+            Self::TornPages => "Torn-page faults only, 20k ops.",
+            Self::Fsyncgate => "Fsync-drop faults only, 10k ops.",
+            Self::FirehoseFanout => {
+                "Eventlog-heavy workload with FSYNC_ORDERING / MONOTONIC_SEQ / TOMBSTONE_BOUND invariants."
+            }
+            Self::ContendedReaders => "60% reads, 64 writer tasks, simulated moderate faults.",
+            Self::ContendedWriters => "Add/delete heavy, 32 writer tasks, simulated moderate faults.",
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|s| s.name() == name)
+    }
+
+    pub fn from_cli_name(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|s| s.cli_name() == name)
     }
 
     pub const ALL: &'static [Scenario] = &[
@@ -75,6 +129,39 @@ impl Scenario {
         Self::ContendedReaders,
         Self::ContendedWriters,
     ];
+}
+
+impl serde::Serialize for Scenario {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.cli_name())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Scenario {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = <std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
+        Self::from_cli_name(&s).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "unknown scenario {s:?}; expected one of {}",
+                Self::ALL
+                    .iter()
+                    .map(|s| s.cli_name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })
+    }
+}
+
+#[cfg(feature = "gauntlet-cli")]
+impl clap::ValueEnum for Scenario {
+    fn value_variants<'a>() -> &'a [Self] {
+        Self::ALL
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.cli_name()).help(self.description()))
+    }
 }
 
 impl std::fmt::Display for Scenario {

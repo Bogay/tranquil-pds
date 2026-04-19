@@ -25,6 +25,21 @@ test-store:
 test-store-sim-nightly:
     SQLX_OFFLINE=true TRANQUIL_SIM_SEEDS=10000 cargo nextest run -p tranquil-store --features tranquil-store/test-harness --profile sim-nightly
 
+gauntlet-pr:
+    SQLX_OFFLINE=true cargo nextest run -p tranquil-store --features tranquil-store/test-harness --profile gauntlet-pr --test gauntlet_smoke
+
+gauntlet-nightly HOURS="6":
+    SQLX_OFFLINE=true GAUNTLET_DURATION_HOURS={{HOURS}} cargo nextest run -p tranquil-store --features tranquil-store/test-harness --profile gauntlet-nightly --test gauntlet_smoke --run-ignored all
+
+gauntlet-farm SCENARIO HOURS="6" DUMP="proptest-regressions":
+    SQLX_OFFLINE=true cargo run --release -p tranquil-store --bin tranquil-gauntlet --features tranquil-store/gauntlet-cli -- farm --scenario {{SCENARIO}} --hours {{HOURS}} --dump-regressions {{DUMP}}
+
+gauntlet-repro SEED SCENARIO="smoke-pr":
+    SQLX_OFFLINE=true cargo run --release -p tranquil-store --bin tranquil-gauntlet --features tranquil-store/gauntlet-cli -- repro --scenario {{SCENARIO}} --seed {{SEED}}
+
+gauntlet-repro-from FILE:
+    SQLX_OFFLINE=true cargo run --release -p tranquil-store --bin tranquil-gauntlet --features tranquil-store/gauntlet-cli -- repro --from {{FILE}}
+
 test-unit:
     SQLX_OFFLINE=true cargo test --test dpop_unit --test validation_edge_cases --test scope_edge_cases
 
