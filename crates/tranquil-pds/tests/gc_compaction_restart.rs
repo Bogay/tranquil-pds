@@ -111,7 +111,7 @@ async fn mst_blocks_survive_full_store_reopen() {
     let max_file_size = store
         .list_data_files()
         .ok()
-        .and_then(|_| Some(4 * 1024 * 1024u64))
+        .map(|_| 4 * 1024 * 1024u64)
         .unwrap_or(4 * 1024 * 1024);
 
     let reopened_missing = tokio::task::spawn_blocking(move || {

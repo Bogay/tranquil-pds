@@ -7,7 +7,9 @@ use tranquil_store::eventlog::{
     SEGMENT_HEADER_SIZE, SegmentId, SegmentManager, SegmentReader, SegmentWriter, TimestampMicros,
     ValidEvent, rebuild_from_segment,
 };
-use tranquil_store::{FaultConfig, OpenOptions, SimulatedIO, StorageIO, sim_seed_range};
+use tranquil_store::{
+    FaultConfig, OpenOptions, Probability, SimulatedIO, StorageIO, sim_seed_range,
+};
 
 fn setup_manager(sim: SimulatedIO, max_segment_size: u64) -> Arc<SegmentManager<SimulatedIO>> {
     Arc::new(SegmentManager::new(sim, PathBuf::from("/segments"), max_segment_size).unwrap())
@@ -540,15 +542,15 @@ fn fault_configs() -> Vec<(&'static str, FaultConfig)> {
         (
             "partial_writes_only",
             FaultConfig {
-                partial_write_probability: 0.15,
+                partial_write_probability: Probability::new(0.15),
                 ..FaultConfig::none()
             },
         ),
         (
             "sync_failures_only",
             FaultConfig {
-                sync_failure_probability: 0.10,
-                dir_sync_failure_probability: 0.05,
+                sync_failure_probability: Probability::new(0.10),
+                dir_sync_failure_probability: Probability::new(0.05),
                 ..FaultConfig::none()
             },
         ),
@@ -556,7 +558,7 @@ fn fault_configs() -> Vec<(&'static str, FaultConfig)> {
         (
             "bit_flips_only",
             FaultConfig {
-                bit_flip_on_read_probability: 0.05,
+                bit_flip_on_read_probability: Probability::new(0.05),
                 ..FaultConfig::none()
             },
         ),

@@ -28,8 +28,8 @@ pub use record::{
 };
 #[cfg(any(test, feature = "test-harness"))]
 pub use sim::{
-    FaultConfig, OpRecord, SimulatedIO, sim_proptest_cases, sim_seed_count, sim_seed_range,
-    sim_single_seed,
+    FaultConfig, LatencyNs, OpRecord, Probability, SimulatedIO, SyncReorderWindow,
+    sim_proptest_cases, sim_seed_count, sim_seed_range, sim_single_seed,
 };
 
 pub(crate) fn wall_clock_ms() -> blockstore::WallClockMs {

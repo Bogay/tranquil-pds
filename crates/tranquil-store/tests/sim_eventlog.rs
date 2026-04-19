@@ -8,7 +8,7 @@ use tranquil_store::eventlog::{
     DidHash, EVENT_RECORD_OVERHEAD, EventLogWriter, EventSequence, EventTypeTag, MAX_EVENT_PAYLOAD,
     SEGMENT_HEADER_SIZE, SegmentId, SegmentManager, SegmentReader, ValidEvent,
 };
-use tranquil_store::{FaultConfig, SimulatedIO, StorageIO, sim_seed_range};
+use tranquil_store::{FaultConfig, Probability, SimulatedIO, StorageIO, sim_seed_range};
 
 use common::Rng;
 
@@ -529,8 +529,8 @@ fn group_sync_crash_after_append_before_sync() {
 fn group_sync_crash_mid_sync_partial_fsync() {
     sim_seed_range().into_par_iter().for_each(|seed| {
         let fault_config = FaultConfig {
-            sync_failure_probability: 0.3,
-            partial_write_probability: 0.1,
+            sync_failure_probability: Probability::new(0.3),
+            partial_write_probability: Probability::new(0.1),
             ..FaultConfig::none()
         };
         let sim = SimulatedIO::new(seed, fault_config);
@@ -682,9 +682,9 @@ fn group_sync_no_double_sync_no_skipped_events() {
 fn group_sync_contention_under_faults() {
     sim_seed_range().into_par_iter().for_each(|seed| {
         let fault_config = FaultConfig {
-            partial_write_probability: 0.05,
-            sync_failure_probability: 0.10,
-            dir_sync_failure_probability: 0.05,
+            partial_write_probability: Probability::new(0.05),
+            sync_failure_probability: Probability::new(0.10),
+            dir_sync_failure_probability: Probability::new(0.05),
             ..FaultConfig::none()
         };
         let sim = SimulatedIO::new(seed, fault_config);
@@ -897,12 +897,11 @@ fn multi_rotation_crash_at_each_phase() {
 #[test]
 fn aggressive_faults_group_sync_recovery() {
     let fault_config = FaultConfig {
-        partial_write_probability: 0.15,
-        sync_failure_probability: 0.10,
-        dir_sync_failure_probability: 0.05,
-        misdirected_write_probability: 0.05,
-        bit_flip_on_read_probability: 0.0,
-        io_error_probability: 0.0,
+        partial_write_probability: Probability::new(0.15),
+        sync_failure_probability: Probability::new(0.10),
+        dir_sync_failure_probability: Probability::new(0.05),
+        misdirected_write_probability: Probability::new(0.05),
+        ..FaultConfig::none()
     };
 
     sim_seed_range().into_par_iter().for_each(|seed| {

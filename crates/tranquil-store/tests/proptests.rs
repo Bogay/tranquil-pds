@@ -2,8 +2,8 @@ use proptest::prelude::*;
 use std::path::Path;
 
 use tranquil_store::{
-    FaultConfig, HEADER_SIZE, OpenOptions, ReadRecord, RecordReader, RecordWriter, SimulatedIO,
-    StorageIO, run_crash_test, run_pristine_comparison, sim_proptest_cases,
+    FaultConfig, HEADER_SIZE, OpenOptions, Probability, ReadRecord, RecordReader, RecordWriter,
+    SimulatedIO, StorageIO, run_crash_test, run_pristine_comparison, sim_proptest_cases,
 };
 
 fn arb_payloads(max_count: usize, max_size: usize) -> BoxedStrategy<Vec<Vec<u8>>> {
@@ -151,7 +151,7 @@ proptest! {
         data in proptest::collection::vec(any::<u8>(), 64..4096),
     ) {
         let config = FaultConfig {
-            partial_write_probability: 0.5,
+            partial_write_probability: Probability::new(0.5),
             ..FaultConfig::none()
         };
         let dir = Path::new("/test");

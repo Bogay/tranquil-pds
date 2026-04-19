@@ -247,12 +247,10 @@ impl DynamicRegistry {
                 self.wait_for_leader(nsid).await;
                 match self.get_cached(nsid) {
                     Some(doc) => Ok(doc),
-                    None if self.is_negative_cached(nsid) => {
-                        Err(ResolveError::NegativelyCached {
-                            nsid: nsid.to_string(),
-                            ttl_secs: NEGATIVE_CACHE_TTL.as_secs(),
-                        })
-                    }
+                    None if self.is_negative_cached(nsid) => Err(ResolveError::NegativelyCached {
+                        nsid: nsid.to_string(),
+                        ttl_secs: NEGATIVE_CACHE_TTL.as_secs(),
+                    }),
                     None => Err(ResolveError::LeaderAborted {
                         nsid: nsid.to_string(),
                     }),
@@ -429,10 +427,7 @@ mod tests {
         let served = result.expect("stale entry must be served when refresh fails");
         assert_eq!(served.id, "pet.nel.flaky");
         assert!(
-            registry
-                .get_entry("pet.nel.flaky")
-                .unwrap()
-                .is_fresh(),
+            registry.get_entry("pet.nel.flaky").unwrap().is_fresh(),
             "failed refresh must bump expiry so subsequent lookups skip the resolver"
         );
         assert!(
@@ -492,12 +487,7 @@ mod tests {
         registry.insert_schema(doc);
         registry.expire_now("pet.nel.refresh");
 
-        assert!(
-            !registry
-                .get_entry("pet.nel.refresh")
-                .unwrap()
-                .is_fresh()
-        );
+        assert!(!registry.get_entry("pet.nel.refresh").unwrap().is_fresh());
 
         let refreshed = registry
             .resolve_and_cache_with("pet.nel.refresh", |n| async move {
@@ -512,10 +502,7 @@ mod tests {
 
         assert_eq!(refreshed.id, "pet.nel.refresh");
         assert!(
-            registry
-                .get_entry("pet.nel.refresh")
-                .unwrap()
-                .is_fresh(),
+            registry.get_entry("pet.nel.refresh").unwrap().is_fresh(),
             "refresh must restore freshness"
         );
     }
@@ -601,9 +588,7 @@ mod tests {
         assert!(registry.is_negative_cached("pet.nel.failHerd"));
     }
 
-    async fn futures_collect<T>(
-        handles: Vec<tokio::task::JoinHandle<T>>,
-    ) -> Vec<T> {
+    async fn futures_collect<T>(handles: Vec<tokio::task::JoinHandle<T>>) -> Vec<T> {
         futures::future::join_all(handles)
             .await
             .into_iter()
