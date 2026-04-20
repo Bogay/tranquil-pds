@@ -61,8 +61,6 @@ impl Drop for InFlightGuard<'_> {
 
 impl DynamicRegistry {
     pub fn new() -> Self {
-        let network_disabled =
-            std::env::var("TRANQUIL_LEXICON_OFFLINE").is_ok_and(|v| v == "1" || v == "true");
         Self {
             store: RwLock::new(SchemaStore {
                 schemas: HashMap::new(),
@@ -70,11 +68,18 @@ impl DynamicRegistry {
             }),
             negative_cache: RwLock::new(HashMap::new()),
             in_flight: RwLock::new(HashMap::new()),
-            network_disabled: AtomicBool::new(network_disabled),
+            network_disabled: AtomicBool::new(false),
         }
     }
 
-    #[allow(dead_code)]
+    pub fn from_env() -> Self {
+        let registry = Self::new();
+        let disabled =
+            std::env::var("TRANQUIL_LEXICON_OFFLINE").is_ok_and(|v| v == "1" || v == "true");
+        registry.set_network_disabled(disabled);
+        registry
+    }
+
     pub fn set_network_disabled(&self, disabled: bool) {
         self.network_disabled.store(disabled, Ordering::Relaxed);
     }

@@ -42,6 +42,8 @@ pub struct GroupCommitOverrides {
     pub checkpoint_interval_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_write_threshold: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_persisted_blocks: Option<bool>,
 }
 
 impl GroupCommitOverrides {
@@ -50,6 +52,7 @@ impl GroupCommitOverrides {
             && self.channel_capacity.is_none()
             && self.checkpoint_interval_ms.is_none()
             && self.checkpoint_write_threshold.is_none()
+            && self.verify_persisted_blocks.is_none()
     }
 }
 
@@ -81,6 +84,9 @@ impl ConfigOverrides {
         }
         if let Some(n) = gc.checkpoint_write_threshold {
             cfg.store.group_commit.checkpoint_write_threshold = n;
+        }
+        if let Some(b) = gc.verify_persisted_blocks {
+            cfg.store.group_commit.verify_persisted_blocks = b;
         }
     }
 }

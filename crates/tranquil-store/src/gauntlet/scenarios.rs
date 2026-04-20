@@ -523,7 +523,10 @@ fn sim_microbench_workload() -> WorkloadModel {
 fn sim_store() -> StoreConfig {
     StoreConfig {
         max_file_size: MaxFileSize(16 * 1024),
-        group_commit: GroupCommitConfig::default(),
+        group_commit: GroupCommitConfig {
+            verify_persisted_blocks: true,
+            ..GroupCommitConfig::default()
+        },
         shard_count: ShardCount(1),
     }
 }

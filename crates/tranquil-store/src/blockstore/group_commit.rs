@@ -11,7 +11,7 @@ use crate::fsync_order::PostBlockstoreHook;
 use super::BlocksSynced;
 use crate::io::{FileId, OpenOptions, StorageIO};
 
-use super::data_file::{CID_SIZE, DataFileWriter};
+use super::data_file::{CID_SIZE, DataFileWriter, ReadBlockRecord, decode_block_record};
 use super::hash_index::{BlockIndex, BlockIndexError, CheckpointPositions};
 use super::hint::{HintFileWriter, hint_file_path};
 use super::manager::DataFileManager;
@@ -106,6 +106,10 @@ pub enum CommitError {
     Io(Arc<io::Error>),
     Index(String),
     ChannelClosed,
+    VerifyFailed {
+        file_id: DataFileId,
+        offset: BlockOffset,
+    },
 }
 
 impl std::fmt::Display for CommitError {
@@ -114,6 +118,11 @@ impl std::fmt::Display for CommitError {
             Self::Io(e) => write!(f, "io: {}", e.as_ref()),
             Self::Index(e) => write!(f, "index: {e}"),
             Self::ChannelClosed => write!(f, "commit channel closed"),
+            Self::VerifyFailed { file_id, offset } => write!(
+                f,
+                "post-sync verify failed at {file_id}:{} (misdirected write or durable corruption)",
+                offset.raw()
+            ),
         }
     }
 }
@@ -122,7 +131,7 @@ impl std::error::Error for CommitError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(e) => Some(e.as_ref()),
-            Self::Index(_) | Self::ChannelClosed => None,
+            Self::Index(_) | Self::ChannelClosed | Self::VerifyFailed { .. } => None,
         }
     }
 }
@@ -181,6 +190,7 @@ pub struct GroupCommitConfig {
     pub channel_capacity: usize,
     pub checkpoint_interval_ms: u64,
     pub checkpoint_write_threshold: u64,
+    pub verify_persisted_blocks: bool,
 }
 
 impl Default for GroupCommitConfig {
@@ -190,6 +200,7 @@ impl Default for GroupCommitConfig {
             channel_capacity: 4096,
             checkpoint_interval_ms: 60_000,
             checkpoint_write_threshold: 100_000,
+            verify_persisted_blocks: false,
         }
     }
 }
@@ -200,6 +211,7 @@ struct ShardContext {
     file_ids: Arc<FileIdAllocator>,
     active_files: Arc<ActiveFileSet>,
     hint_positions: Arc<ShardHintPositions>,
+    verify_persisted_blocks: bool,
 }
 
 struct ActiveState {
@@ -403,6 +415,7 @@ impl GroupCommitWriter {
                     file_ids: Arc::clone(&file_ids),
                     active_files: Arc::clone(&active_files),
                     hint_positions: Arc::clone(&hint_positions),
+                    verify_persisted_blocks: config.verify_persisted_blocks,
                 };
                 SingleShardWriter::spawn(
                     ctx,
@@ -1057,6 +1070,119 @@ struct RotationState {
     hint_fd: FileId,
 }
 
+fn verify_persisted_blocks<S: StorageIO>(
+    manager: &DataFileManager<S>,
+    entries: &[([u8; CID_SIZE], BlockLocation)],
+) -> Result<(), CommitError> {
+    use std::collections::BTreeMap;
+    let by_file: BTreeMap<DataFileId, Vec<(&[u8; CID_SIZE], BlockLocation)>> = entries
+        .iter()
+        .fold(BTreeMap::new(), |mut acc, (cid, loc)| {
+            acc.entry(loc.file_id).or_default().push((cid, *loc));
+            acc
+        });
+
+    by_file.into_iter().try_for_each(|(file_id, locations)| {
+        let path = manager.data_file_path(file_id);
+        let fd = match manager.io().open(&path, OpenOptions::read_only_existing()) {
+            Ok(fd) => fd,
+            Err(_) => return Ok(()),
+        };
+        let file_size = match manager.io().file_size(fd) {
+            Ok(s) => s,
+            Err(_) => {
+                let _ = manager.io().close(fd);
+                return Ok(());
+            }
+        };
+        let result = locations.into_iter().try_for_each(|(expected_cid, loc)| {
+            verify_block_at(manager, fd, file_size, expected_cid, loc)
+        });
+        let _ = manager.io().close(fd);
+        result
+    })
+}
+
+#[derive(Debug)]
+enum VerifyOutcome {
+    NoFaultDetected,
+    Faulted,
+}
+
+fn verify_block_at<S: StorageIO>(
+    manager: &DataFileManager<S>,
+    fd: FileId,
+    file_size: u64,
+    expected_cid: &[u8; CID_SIZE],
+    loc: BlockLocation,
+) -> Result<(), CommitError> {
+    let passed = (0..VERIFY_RETRY_ATTEMPTS).any(|_| {
+        matches!(
+            verify_once(manager, fd, file_size, expected_cid, loc),
+            VerifyOutcome::NoFaultDetected
+        )
+    });
+    match passed {
+        true => Ok(()),
+        false => Err(CommitError::VerifyFailed {
+            file_id: loc.file_id,
+            offset: loc.offset,
+        }),
+    }
+}
+
+fn verify_once<S: StorageIO>(
+    manager: &DataFileManager<S>,
+    fd: FileId,
+    file_size: u64,
+    expected_cid: &[u8; CID_SIZE],
+    loc: BlockLocation,
+) -> VerifyOutcome {
+    match decode_block_record(manager.io(), fd, loc.offset, file_size) {
+        Ok(Some(ReadBlockRecord::Valid { cid_bytes, .. })) if cid_bytes == *expected_cid => {
+            VerifyOutcome::NoFaultDetected
+        }
+        Ok(Some(ReadBlockRecord::Valid { .. })) => {
+            tracing::warn!(
+                file_id = %loc.file_id,
+                offset = loc.offset.raw(),
+                "verify: stored CID mismatch (misdirected write)"
+            );
+            VerifyOutcome::Faulted
+        }
+        Ok(Some(ReadBlockRecord::Corrupted { .. } | ReadBlockRecord::Truncated { .. }))
+        | Ok(None) => {
+            tracing::warn!(
+                file_id = %loc.file_id,
+                offset = loc.offset.raw(),
+                "verify: block undecodable at location"
+            );
+            VerifyOutcome::Faulted
+        }
+        Err(_) => VerifyOutcome::NoFaultDetected,
+    }
+}
+
+const VERIFY_RETRY_ATTEMPTS: u32 = 4;
+
+fn rollback_batch<S: StorageIO>(
+    manager: &DataFileManager<S>,
+    state: &ActiveState,
+    rotations: &[RotationState],
+) {
+    let _ = manager
+        .io()
+        .truncate(state.hint_fd, state.hint_position.raw());
+    let _ = manager.io().sync(state.hint_fd);
+    rotations.iter().for_each(|rot| {
+        manager.rollback_rotation(rot.file_id, rot.fd);
+        let _ = manager.io().close(rot.hint_fd);
+        let _ = manager
+            .io()
+            .delete(&hint_file_path(manager.data_dir(), rot.file_id));
+    });
+}
+
 fn process_batch<S: StorageIO>(
     manager: &DataFileManager<S>,
     index: &BlockIndex,
@@ -1154,13 +1280,7 @@ fn process_batch<S: StorageIO>(
     });
 
     if let Err(e) = write_result {
-        rotations.into_iter().for_each(|rot| {
-            manager.rollback_rotation(rot.file_id, rot.fd);
-            let _ = manager.io().close(rot.hint_fd);
-            let _ = manager
-                .io()
-                .delete(&hint_file_path(manager.data_dir(), rot.file_id));
-        });
+        rollback_batch(manager, state, &rotations);
         return Err(e);
     }
 
@@ -1169,13 +1289,22 @@ fn process_batch<S: StorageIO>(
     let current_epoch = epoch.current();
     let now = crate::wall_clock_ms();
 
+    let rollback_on_err = |e: CommitError| -> CommitError {
+        rollback_batch(manager, state, &rotations);
+        e
+    };
+
     all_decrements
         .iter()
-        .try_for_each(|cid| hint_writer.append_decrement(cid, current_epoch, now))?;
+        .try_for_each(|cid| hint_writer.append_decrement(cid, current_epoch, now))
+        .map_err(|e| rollback_on_err(CommitError::from(e)))?;
 
     let t = std::time::Instant::now();
-    data_writer.sync()?;
-    hint_writer.sync()?;
+    data_writer.sync().map_err(|e| rollback_on_err(e.into()))?;
+    if ctx.verify_persisted_blocks {
+        verify_persisted_blocks(manager, &index_entries).map_err(rollback_on_err)?;
+    }
+    hint_writer.sync().map_err(|e| rollback_on_err(e.into()))?;
     let sync_nanos = t.elapsed().as_nanos() as u64;
 
     if !rotations.is_empty() {

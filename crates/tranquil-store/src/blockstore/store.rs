@@ -20,8 +20,8 @@ use super::hash_index::BlockIndex;
 use super::manager::DataFileManager;
 use super::reader::{BlockStoreReader, ReadError};
 use super::types::{
-    BlockLength, BlockLocation, BlockOffset, CollectionResult, CompactionResult, DataFileId,
-    EpochCounter, LivenessInfo, WallClockMs, WriteCursor,
+    BlockLocation, BlockOffset, CollectionResult, CompactionResult, DataFileId, EpochCounter,
+    LivenessInfo, WallClockMs,
 };
 
 fn cid_to_bytes(cid: &Cid) -> Result<[u8; CID_SIZE], RepoError> {
@@ -37,10 +37,6 @@ fn cid_to_bytes(cid: &Cid) -> Result<[u8; CID_SIZE], RepoError> {
     })
 }
 
-fn block_index_err_to_repo(e: super::hash_index::BlockIndexError) -> RepoError {
-    RepoError::storage(io::Error::other(e.to_string()))
-}
-
 fn commit_error_to_repo(e: CommitError) -> RepoError {
     match e {
         CommitError::Io(io_err) => {
@@ -50,6 +46,13 @@ fn commit_error_to_repo(e: CommitError) -> RepoError {
         CommitError::ChannelClosed => RepoError::storage(io::Error::new(
             io::ErrorKind::BrokenPipe,
             "blockstore commit channel closed",
+        )),
+        CommitError::VerifyFailed { file_id, offset } => RepoError::storage(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "post-sync verify failed at {file_id}:{}",
+                offset.raw()
+            ),
         )),
     }
 }
@@ -299,7 +302,15 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
             Err(e) => return Err(RepoError::storage(e)),
         };
 
-        let result = Self::scan_and_index(io, index, fd, file_id, start_offset);
+        let hint_path = super::hint::hint_file_path(data_dir, file_id);
+        let hint_exists = io
+            .open(&hint_path, OpenOptions::read_only_existing())
+            .map(|fd| {
+                let _ = io.close(fd);
+            })
+            .is_ok();
+
+        let result = Self::scan_and_index(io, index, fd, file_id, start_offset, hint_exists);
 
         let _ = io.close(fd);
 
@@ -312,6 +323,7 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
         fd: crate::io::FileId,
         file_id: DataFileId,
         start_offset: BlockOffset,
+        hint_exists: bool,
     ) -> Result<(), RepoError> {
         let file_size = io.file_size(fd).map_err(RepoError::storage)?;
 
@@ -320,7 +332,7 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
         }
 
         let scan_pos = &mut { start_offset };
-        let (recovered_entries, last_valid_end) = std::iter::from_fn(|| {
+        let (scanned_entries, last_valid_end) = std::iter::from_fn(|| {
             match super::data_file::decode_block_record(io, fd, *scan_pos, file_size) {
                 Err(e) => {
                     tracing::warn!(
@@ -341,9 +353,10 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
                         Ok(n) if n <= super::types::MAX_BLOCK_SIZE => n,
                         _ => return None,
                     };
-                    let length = BlockLength::new(raw_len);
+                    let length = super::types::BlockLength::new(raw_len);
                     let record_size = BLOCK_RECORD_OVERHEAD as u64 + u64::from(raw_len);
-                    *scan_pos = scan_pos.advance(record_size);
+                    let new_end = offset.advance(record_size);
+                    *scan_pos = new_end;
                     Some((
                         cid_bytes,
                         BlockLocation {
@@ -351,6 +364,7 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
                             offset,
                             length,
                         },
+                        new_end,
                     ))
                 }
                 Ok(Some(ReadBlockRecord::Corrupted { .. } | ReadBlockRecord::Truncated { .. })) => {
@@ -360,11 +374,8 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
         })
         .fold(
             (Vec::new(), start_offset),
-            |(mut entries, _), (cid_bytes, location)| {
-                let new_end = location
-                    .offset
-                    .advance(BLOCK_RECORD_OVERHEAD as u64 + location.length.as_u64());
-                entries.push((cid_bytes, location));
+            |(mut entries, _), (cid, loc, new_end)| {
+                entries.push((cid, loc));
                 (entries, new_end)
             },
         );
@@ -374,28 +385,27 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
                 file_id = %file_id,
                 truncating_from = last_valid_end.raw(),
                 file_size,
-                "truncating partial/corrupted tail"
+                scanned_count = scanned_entries.len(),
+                "truncating partial/unacked tail"
             );
             io.truncate(fd, last_valid_end.raw())
                 .map_err(RepoError::storage)?;
             io.sync(fd).map_err(RepoError::storage)?;
         }
 
-        if !recovered_entries.is_empty() {
-            let new_cursor = WriteCursor {
+        if !hint_exists && !scanned_entries.is_empty() {
+            tracing::info!(
+                file_id = %file_id,
+                scanned = scanned_entries.len(),
+                "rebuilding index from data file (no hint file, treating as restored backup)"
+            );
+            let cursor = super::types::WriteCursor {
                 file_id,
                 offset: last_valid_end,
             };
-            let inserted = index
-                .batch_put_if_absent(&recovered_entries, new_cursor)
-                .map_err(block_index_err_to_repo)?;
-            tracing::info!(
-                file_id = %file_id,
-                scanned = recovered_entries.len(),
-                inserted,
-                new_cursor_offset = last_valid_end.raw(),
-                "recovery data file scan"
-            );
+            index
+                .batch_put_if_absent(&scanned_entries, cursor)
+                .map_err(|e| RepoError::storage(io::Error::other(e.to_string())))?;
         }
 
         Ok(())

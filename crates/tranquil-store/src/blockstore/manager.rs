@@ -127,6 +127,7 @@ impl<S: StorageIO> DataFileManager<S> {
     pub fn rollback_rotation(&self, file_id: DataFileId, fd: FileId) {
         let _ = self.io.close(fd);
         self.handles.write().remove(&file_id);
+        let _ = self.io.delete(&self.data_file_path(file_id));
     }
 
     pub fn should_rotate(&self, position: BlockOffset) -> bool {
@@ -216,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn rotation_rollback_cleans_handle() {
+    fn rotation_rollback_cleans_handle_and_deletes_file() {
         let mgr = setup_manager(1024);
         let _fd0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
         let (next_id, next_fd) = mgr.prepare_rotation(DataFileId::new(0)).unwrap();
@@ -225,10 +226,10 @@ mod tests {
         assert_eq!(mgr.open_for_read(next_id).unwrap(), next_fd);
         mgr.rollback_rotation(next_id, next_fd);
 
-        let reopened_fd = mgr.open_for_read(next_id).unwrap();
-        assert_ne!(
-            reopened_fd, next_fd,
-            "rollback should have closed the cached fd"
+        let reopen = mgr.open_for_read(next_id);
+        assert!(
+            reopen.is_err_and(|e| e.kind() == io::ErrorKind::NotFound),
+            "rollback must delete the data file so recovery cannot resurrect uncommitted bytes"
         );
     }
 

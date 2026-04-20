@@ -25,7 +25,7 @@ impl LexiconRegistry {
         Self {
             schemas: HashMap::new(),
             #[cfg(feature = "resolve")]
-            dynamic: crate::dynamic::DynamicRegistry::new(),
+            dynamic: crate::dynamic::DynamicRegistry::from_env(),
         }
     }
 

@@ -127,26 +127,37 @@ impl<S: StorageIO> BlockStoreReader<S> {
         file_size: u64,
         location: BlockLocation,
     ) -> Result<Bytes, ReadError> {
-        match decode_block_record(self.manager.io(), fd, location.offset, file_size)? {
-            Some(ReadBlockRecord::Valid { data, .. })
-                if data.len() == location.length.raw() as usize =>
-            {
-                Ok(Bytes::from(data))
-            }
-            Some(ReadBlockRecord::Valid { .. }) => Err(ReadError::Corrupted {
-                file_id: location.file_id,
-                offset: location.offset,
-            }),
-            Some(ReadBlockRecord::Corrupted { offset } | ReadBlockRecord::Truncated { offset }) => {
-                Err(ReadError::Corrupted {
+        let attempt_once = || -> Result<Bytes, ReadError> {
+            match decode_block_record(self.manager.io(), fd, location.offset, file_size)? {
+                Some(ReadBlockRecord::Valid { data, .. })
+                    if data.len() == location.length.raw() as usize =>
+                {
+                    Ok(Bytes::from(data))
+                }
+                Some(ReadBlockRecord::Valid { .. }) => Err(ReadError::Corrupted {
+                    file_id: location.file_id,
+                    offset: location.offset,
+                }),
+                Some(
+                    ReadBlockRecord::Corrupted { offset } | ReadBlockRecord::Truncated { offset },
+                ) => Err(ReadError::Corrupted {
                     file_id: location.file_id,
                     offset,
-                })
+                }),
+                None => Err(ReadError::Corrupted {
+                    file_id: location.file_id,
+                    offset: location.offset,
+                }),
             }
-            None => Err(ReadError::Corrupted {
-                file_id: location.file_id,
-                offset: location.offset,
-            }),
-        }
+        };
+        (0..READ_RETRY_ATTEMPTS.saturating_sub(1))
+            .find_map(|_| match attempt_once() {
+                Ok(bytes) => Some(Ok(bytes)),
+                Err(ReadError::Corrupted { .. }) => None,
+                Err(e) => Some(Err(e)),
+            })
+            .unwrap_or_else(attempt_once)
     }
 }
+
+const READ_RETRY_ATTEMPTS: u32 = 4;

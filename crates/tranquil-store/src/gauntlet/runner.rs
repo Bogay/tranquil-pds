@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use cid::Cid;
 use jacquard_repo::mst::Mst;
-use jacquard_repo::storage::BlockStore;
 
 use super::invariants::{
     EventLogSnapshot, InvariantCtx, InvariantSet, InvariantViolation, SnapshotEvent, invariants_for,
@@ -16,7 +15,7 @@ use super::oracle::{CidFormatError, EventExpectation, Oracle, hex_short, try_cid
 use super::workload::{Lcg, OpCount, SizeDistribution, ValueBytes, WorkloadModel};
 use crate::blockstore::{
     BlockStoreConfig, CidBytes, CompactionError, GroupCommitConfig, TranquilBlockStore,
-    hash_to_cid_bytes,
+    hash_to_cid, hash_to_cid_bytes,
 };
 use crate::eventlog::{
     DEFAULT_INDEX_INTERVAL, DidHash, EventLogWriter, EventTypeTag, MAX_EVENT_PAYLOAD, SegmentId,
@@ -128,8 +127,6 @@ impl GauntletReport {
 
 #[derive(Debug, thiserror::Error)]
 enum OpError {
-    #[error("put record: {0}")]
-    PutRecord(String),
     #[error("mst add: {0}")]
     MstAdd(String),
     #[error("mst delete: {0}")]
@@ -970,60 +967,32 @@ async fn apply_op<S: StorageIO + Send + Sync + 'static>(
             value_seed,
         } => {
             let record_bytes = make_record_bytes(*value_seed, workload.size_distribution);
-            let record_cid = harness
-                .store
-                .put(&record_bytes)
-                .await
-                .map_err(|e| OpError::PutRecord(e.to_string()))?;
+            let record_cid = hash_to_cid(&record_bytes);
             let record_cid_bytes = try_cid_to_fixed(&record_cid)?;
 
-            let outcome = add_record_inner(
+            let (new_root, applied) = add_record_atomic(
                 &harness.store,
                 *root,
                 collection,
                 rkey,
                 record_cid,
                 record_cid_bytes,
+                record_bytes,
             )
-            .await;
-            match outcome {
-                Ok((new_root, applied)) => {
-                    *root = Some(new_root);
-                    if applied {
-                        oracle.add(collection.clone(), rkey.clone(), record_cid_bytes);
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    if let Err(cleanup_err) =
-                        decrement_obsolete(&harness.store, vec![record_cid_bytes]).await
-                    {
-                        tracing::warn!(
-                            op_error = %e,
-                            cleanup_error = %cleanup_err,
-                            "AddRecord cleanup decrement failed",
-                        );
-                    }
-                    Err(e)
-                }
+            .await?;
+            *root = Some(new_root);
+            if applied {
+                oracle.add(collection.clone(), rkey.clone(), record_cid_bytes);
             }
+            Ok(())
         }
         Op::DeleteRecord { collection, rkey } => {
             let Some(old_root) = *root else { return Ok(()) };
             if !oracle.contains_record(collection, rkey) {
                 return Ok(());
             }
-            let key = format!("{}/{}", collection.0, rkey.0);
-            let loaded = Mst::load(harness.store.clone(), old_root, None);
-            let updated = loaded
-                .delete(&key)
-                .await
-                .map_err(|e| OpError::MstDelete(e.to_string()))?;
-            let new_root = updated
-                .persist()
-                .await
-                .map_err(|e| OpError::MstPersist(e.to_string()))?;
-            apply_mst_diff(&harness.store, old_root, new_root).await?;
+            let new_root =
+                delete_record_atomic(&harness.store, old_root, collection, rkey).await?;
             oracle.delete(collection, rkey);
             *root = Some(new_root);
             Ok(())
@@ -1145,13 +1114,14 @@ fn segment_last_timestamp<S: StorageIO + Send + Sync + 'static>(
     Ok(events.last().map(|e: &ValidEvent| e.timestamp.raw()))
 }
 
-async fn add_record_inner<S: StorageIO + Send + Sync + 'static>(
+async fn add_record_atomic<S: StorageIO + Send + Sync + 'static>(
     store: &Arc<TranquilBlockStore<S>>,
     root: Option<Cid>,
     collection: &super::op::CollectionName,
     rkey: &super::op::RecordKey,
     record_cid: Cid,
     record_cid_bytes: CidBytes,
+    record_bytes: Vec<u8>,
 ) -> Result<(Cid, bool), OpError> {
     let key = format!("{}/{}", collection.0, rkey.0);
     let loaded = match root {
@@ -1162,58 +1132,90 @@ async fn add_record_inner<S: StorageIO + Send + Sync + 'static>(
         .add(&key, record_cid)
         .await
         .map_err(|e| OpError::MstAdd(e.to_string()))?;
+    let diff = loaded
+        .diff(&updated)
+        .await
+        .map_err(|e| OpError::MstDiff(e.to_string()))?;
     let new_root = updated
-        .persist()
+        .get_pointer()
         .await
         .map_err(|e| OpError::MstPersist(e.to_string()))?;
 
-    match root {
-        Some(old_root) if old_root == new_root => {
-            decrement_obsolete(store, vec![record_cid_bytes]).await?;
-            Ok((new_root, false))
-        }
-        Some(old_root) => {
-            apply_mst_diff(store, old_root, new_root).await?;
-            Ok((new_root, true))
-        }
-        None => Ok((new_root, true)),
+    if matches!(root, Some(r) if r == new_root) {
+        return Ok((new_root, false));
     }
+
+    let blocks = diff_blocks_plus_record(diff.new_mst_blocks, record_cid_bytes, record_bytes)?;
+    let obsolete = diff_obsolete(diff.removed_mst_blocks, diff.removed_cids)?;
+    commit_atomic(store, blocks, obsolete).await?;
+    Ok((new_root, true))
 }
 
-async fn decrement_obsolete<S: StorageIO + Send + Sync + 'static>(
+async fn delete_record_atomic<S: StorageIO + Send + Sync + 'static>(
     store: &Arc<TranquilBlockStore<S>>,
+    old_root: Cid,
+    collection: &super::op::CollectionName,
+    rkey: &super::op::RecordKey,
+) -> Result<Cid, OpError> {
+    let key = format!("{}/{}", collection.0, rkey.0);
+    let loaded = Mst::load(store.clone(), old_root, None);
+    let updated = loaded
+        .delete(&key)
+        .await
+        .map_err(|e| OpError::MstDelete(e.to_string()))?;
+    let diff = loaded
+        .diff(&updated)
+        .await
+        .map_err(|e| OpError::MstDiff(e.to_string()))?;
+    let new_root = updated
+        .get_pointer()
+        .await
+        .map_err(|e| OpError::MstPersist(e.to_string()))?;
+    let blocks: Vec<(CidBytes, Vec<u8>)> = diff
+        .new_mst_blocks
+        .into_iter()
+        .map(|(c, b)| Ok::<_, OpError>((try_cid_to_fixed(&c)?, b.to_vec())))
+        .collect::<Result<_, _>>()?;
+    let obsolete = diff_obsolete(diff.removed_mst_blocks, diff.removed_cids)?;
+    commit_atomic(store, blocks, obsolete).await?;
+    Ok(new_root)
+}
+
+fn diff_blocks_plus_record(
+    new_mst_blocks: std::collections::BTreeMap<Cid, bytes::Bytes>,
+    record_cid_bytes: CidBytes,
+    record_bytes: Vec<u8>,
+) -> Result<Vec<(CidBytes, Vec<u8>)>, OpError> {
+    let mut blocks: Vec<(CidBytes, Vec<u8>)> = Vec::with_capacity(new_mst_blocks.len() + 1);
+    blocks.push((record_cid_bytes, record_bytes));
+    new_mst_blocks.into_iter().try_for_each(|(c, b)| {
+        let cb = try_cid_to_fixed(&c)?;
+        blocks.push((cb, b.to_vec()));
+        Ok::<_, OpError>(())
+    })?;
+    Ok(blocks)
+}
+
+fn diff_obsolete(
+    removed_mst_blocks: Vec<Cid>,
+    removed_cids: Vec<Cid>,
+) -> Result<Vec<CidBytes>, OpError> {
+    removed_mst_blocks
+        .into_iter()
+        .chain(removed_cids.into_iter())
+        .map(|c| try_cid_to_fixed(&c))
+        .collect::<Result<_, _>>()
+        .map_err(OpError::from)
+}
+
+async fn commit_atomic<S: StorageIO + Send + Sync + 'static>(
+    store: &Arc<TranquilBlockStore<S>>,
+    blocks: Vec<(CidBytes, Vec<u8>)>,
     obsolete: Vec<CidBytes>,
 ) -> Result<(), OpError> {
     let s = store.clone();
     tokio::task::spawn_blocking(move || {
-        s.apply_commit_blocking(vec![], obsolete)
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| OpError::Join(e.to_string()))?
-    .map_err(OpError::ApplyCommit)
-}
-
-async fn apply_mst_diff<S: StorageIO + Send + Sync + 'static>(
-    store: &Arc<TranquilBlockStore<S>>,
-    old_root: Cid,
-    new_root: Cid,
-) -> Result<(), OpError> {
-    let old_m = Mst::load(store.clone(), old_root, None);
-    let new_m = Mst::load(store.clone(), new_root, None);
-    let diff = old_m
-        .diff(&new_m)
-        .await
-        .map_err(|e| OpError::MstDiff(e.to_string()))?;
-    let obsolete: Vec<CidBytes> = diff
-        .removed_mst_blocks
-        .into_iter()
-        .chain(diff.removed_cids.into_iter())
-        .map(|c| try_cid_to_fixed(&c))
-        .collect::<Result<_, _>>()?;
-    let s = store.clone();
-    tokio::task::spawn_blocking(move || {
-        s.apply_commit_blocking(vec![], obsolete)
+        s.apply_commit_blocking(blocks, obsolete)
             .map_err(|e| e.to_string())
     })
     .await
@@ -1239,6 +1241,7 @@ fn compact_by_liveness<S: StorageIO + Send + Sync + 'static>(
         .try_for_each(|fid| match store.compact_file(fid, 0) {
             Ok(_) => Ok(()),
             Err(CompactionError::ActiveFileCannotBeCompacted) => Ok(()),
+            Err(CompactionError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(OpError::CompactFile(format!("{fid}: {e}"))),
         })
 }
@@ -1255,47 +1258,27 @@ async fn apply_op_concurrent<S: StorageIO + Send + Sync + 'static>(
             value_seed,
         } => {
             let record_bytes = make_record_bytes(*value_seed, workload.size_distribution);
-            let record_cid = shared
-                .store
-                .put(&record_bytes)
-                .await
-                .map_err(|e| OpError::PutRecord(e.to_string()))?;
+            let record_cid = hash_to_cid(&record_bytes);
             let record_cid_bytes = try_cid_to_fixed(&record_cid)?;
 
             let mut state = shared.write.lock().await;
-            let outcome = add_record_inner(
+            let (new_root, applied) = add_record_atomic(
                 &shared.store,
                 state.root,
                 collection,
                 rkey,
                 record_cid,
                 record_cid_bytes,
+                record_bytes,
             )
-            .await;
-            match outcome {
-                Ok((new_root, applied)) => {
-                    state.root = Some(new_root);
-                    if applied {
-                        state
-                            .oracle
-                            .add(collection.clone(), rkey.clone(), record_cid_bytes);
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    drop(state);
-                    if let Err(cleanup) =
-                        decrement_obsolete(&shared.store, vec![record_cid_bytes]).await
-                    {
-                        tracing::warn!(
-                            op_error = %e,
-                            cleanup_error = %cleanup,
-                            "AddRecord concurrent cleanup decrement failed",
-                        );
-                    }
-                    Err(e)
-                }
+            .await?;
+            state.root = Some(new_root);
+            if applied {
+                state
+                    .oracle
+                    .add(collection.clone(), rkey.clone(), record_cid_bytes);
             }
+            Ok(())
         }
         Op::DeleteRecord { collection, rkey } => {
             let mut state = shared.write.lock().await;
@@ -1305,17 +1288,8 @@ async fn apply_op_concurrent<S: StorageIO + Send + Sync + 'static>(
             if !state.oracle.contains_record(collection, rkey) {
                 return Ok(());
             }
-            let key = format!("{}/{}", collection.0, rkey.0);
-            let loaded = Mst::load(shared.store.clone(), old_root, None);
-            let updated = loaded
-                .delete(&key)
-                .await
-                .map_err(|e| OpError::MstDelete(e.to_string()))?;
-            let new_root = updated
-                .persist()
-                .await
-                .map_err(|e| OpError::MstPersist(e.to_string()))?;
-            apply_mst_diff(&shared.store, old_root, new_root).await?;
+            let new_root =
+                delete_record_atomic(&shared.store, old_root, collection, rkey).await?;
             state.oracle.delete(collection, rkey);
             state.root = Some(new_root);
             Ok(())
