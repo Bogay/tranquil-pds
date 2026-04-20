@@ -1054,6 +1054,7 @@ fn drain_and_process_remaining<S: StorageIO>(
 struct RotationState {
     file_id: DataFileId,
     fd: FileId,
+    hint_fd: FileId,
 }
 
 fn process_batch<S: StorageIO>(
@@ -1071,7 +1072,7 @@ fn process_batch<S: StorageIO>(
     let mut all_decrements: Vec<[u8; CID_SIZE]> = Vec::new();
 
     let mut current_hint_fd = state.hint_fd;
-    let mut rotation: Option<RotationState> = None;
+    let mut rotations: Vec<RotationState> = Vec::new();
 
     let mut data_writer =
         DataFileWriter::resume(manager.io(), state.fd, state.file_id, state.position);
@@ -1124,9 +1125,10 @@ fn process_batch<S: StorageIO>(
 
                         current_hint_fd = new_hint_fd;
                         hint_writer = HintFileWriter::new(manager.io(), new_hint_fd);
-                        rotation = Some(RotationState {
+                        rotations.push(RotationState {
                             file_id: next_id,
                             fd: next_fd,
+                            hint_fd: new_hint_fd,
                         });
                     }
 
@@ -1152,9 +1154,13 @@ fn process_batch<S: StorageIO>(
     });
 
     if let Err(e) = write_result {
-        if let Some(rot) = rotation {
+        rotations.into_iter().for_each(|rot| {
             manager.rollback_rotation(rot.file_id, rot.fd);
-        }
+            let _ = manager.io().close(rot.hint_fd);
+            let _ = manager
+                .io()
+                .delete(&hint_file_path(manager.data_dir(), rot.file_id));
+        });
         return Err(e);
     }
 
@@ -1172,9 +1178,21 @@ fn process_batch<S: StorageIO>(
     hint_writer.sync()?;
     let sync_nanos = t.elapsed().as_nanos() as u64;
 
-    if let Some(ref rot) = rotation {
-        manager.commit_rotation(rot.file_id, rot.fd);
-        ctx.active_files.register(ctx.shard_id, rot.file_id);
+    if !rotations.is_empty() {
+        let old_file_id = state.file_id;
+        let old_hint_fd = state.hint_fd;
+        let last_idx = rotations.len() - 1;
+        rotations.iter().enumerate().for_each(|(i, rot)| {
+            if i == last_idx {
+                manager.commit_rotation(rot.file_id, rot.fd);
+                ctx.active_files.register(ctx.shard_id, rot.file_id);
+            } else {
+                let _ = manager.io().close(rot.hint_fd);
+                manager.evict_handle(rot.file_id);
+            }
+        });
+        manager.evict_handle(old_file_id);
+        let _ = manager.io().close(old_hint_fd);
     }
 
     state.file_id = data_writer.file_id();

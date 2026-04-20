@@ -153,7 +153,7 @@ fn stream_compact<S: StorageIO>(
     let mut live_count: u64 = 0;
     let mut dead_count: u64 = 0;
 
-    reader.try_for_each(|r| {
+    let scan_result = reader.try_for_each(|r| {
         let record = r?;
         match record {
             ReadBlockRecord::Valid {
@@ -192,11 +192,16 @@ fn stream_compact<S: StorageIO>(
             ReadBlockRecord::Corrupted { .. } | ReadBlockRecord::Truncated { .. } => {}
         }
         Ok::<_, CompactionError>(())
-    })?;
+    });
 
-    writer.sync()?;
-    hint_writer.sync()?;
-    manager.io().sync_dir(manager.data_dir())?;
+    let finalize_result = scan_result
+        .and_then(|()| writer.sync().map_err(CompactionError::from))
+        .and_then(|()| hint_writer.sync().map_err(CompactionError::from))
+        .and_then(|()| manager.io().sync_dir(manager.data_dir()).map_err(CompactionError::from));
+
+    let _ = manager.io().close(hint_fd);
+
+    finalize_result?;
 
     let new_size = writer.position().raw();
 
