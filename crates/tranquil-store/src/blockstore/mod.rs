@@ -24,7 +24,7 @@ pub use hint::{
     HINT_FILE_EXTENSION, HINT_RECORD_SIZE, HintFileReader, HintFileWriter, HintIndex,
     ReadHintRecord, RebuildError, decode_hint_record, hint_file_path, scan_hints_to_memory,
 };
-pub use manager::{DEFAULT_MAX_FILE_SIZE, DataFileManager};
+pub use manager::{CachedHandle, DEFAULT_MAX_FILE_SIZE, DataFileManager};
 pub use reader::{BlockStoreReader, ReadError};
 pub use store::QuiesceGuard;
 pub use store::{BlockStoreConfig, DEFAULT_SHARD_COUNT, TranquilBlockStore};

@@ -52,7 +52,7 @@ fn synced_events_survive_crash() {
             "seed {seed}: expected all synced events to survive"
         );
 
-        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
@@ -181,7 +181,7 @@ fn partial_event_truncated_on_recovery() {
             mgr.io().sync_dir(Path::new("/segments")).unwrap();
         }
 
-        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         let file_size = mgr.io().file_size(fd).unwrap();
         let partial_bytes = ((seed % 20) + 1) as usize;
         let junk: Vec<u8> = (0..partial_bytes)
@@ -252,7 +252,7 @@ fn cross_segment_recovery() {
         );
 
         sealed_segments[..sealed_count].iter().for_each(|&seg_id| {
-            let fd = mgr.open_for_read(seg_id).unwrap();
+            let fd = mgr.open_for_read(seg_id).unwrap().fd();
             let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
                 .unwrap()
                 .valid_prefix()
@@ -342,7 +342,7 @@ fn large_sealed_segment_index_rebuild_latency() {
     let index_path = mgr.index_path(SegmentId::new(1));
     let _ = mgr.io().delete(&index_path);
 
-    let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
+    let fd = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
 
     let start = std::time::Instant::now();
     let (index, last_seq) = rebuild_from_segment(mgr.io(), fd, 256, MAX_EVENT_PAYLOAD).unwrap();
@@ -417,7 +417,7 @@ fn pristine_comparison_under_faults() {
         }
         pristine_mgr.shutdown();
 
-        let pristine_fd = pristine_mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let pristine_fd = pristine_mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         let pristine_events =
             SegmentReader::open(pristine_mgr.io(), pristine_fd, MAX_EVENT_PAYLOAD)
                 .unwrap()
@@ -465,7 +465,7 @@ fn pristine_comparison_under_faults() {
                     return Ok(None);
                 }
 
-                let fd = faulty_clone.open_for_read(SegmentId::new(1))?;
+                let fd = faulty_clone.open_for_read(SegmentId::new(1))?.fd();
                 let events = SegmentReader::open(faulty_clone.io(), fd, MAX_EVENT_PAYLOAD)?
                     .valid_prefix()?;
                 Ok(Some(events))
@@ -592,7 +592,7 @@ fn pristine_comparison_parameterized_faults() {
             }
             pristine_mgr.shutdown();
 
-            let pristine_fd = pristine_mgr.open_for_read(SegmentId::new(1)).unwrap();
+            let pristine_fd = pristine_mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
             let pristine_events = SegmentReader::open(pristine_mgr.io(), pristine_fd, MAX_EVENT_PAYLOAD)
                 .unwrap()
                 .valid_prefix()
@@ -637,7 +637,7 @@ fn pristine_comparison_parameterized_faults() {
                     return Ok(None);
                 }
 
-                let fd = faulty_clone.open_for_read(SegmentId::new(1))?;
+                let fd = faulty_clone.open_for_read(SegmentId::new(1))?.fd();
                 let events = SegmentReader::open(faulty_clone.io(), fd, MAX_EVENT_PAYLOAD)?
                     .valid_prefix()?;
                 Ok(Some(events))

@@ -66,9 +66,9 @@ impl<S: StorageIO> EventLogWriter<S> {
         index_interval: usize,
         max_payload: u32,
     ) -> io::Result<Self> {
-        let fd = manager.open_for_append(segment_id)?;
-        manager.io().truncate(fd, 0)?;
-        let writer = SegmentWriter::new(manager.io(), fd, segment_id, next_seq, max_payload)?;
+        let handle = manager.open_for_append(segment_id)?;
+        manager.io().truncate(handle.fd(), 0)?;
+        let writer = SegmentWriter::new(manager.io(), handle.fd(), segment_id, next_seq, max_payload)?;
         writer.sync(manager.io())?;
         manager.io().sync_dir(manager.segments_dir())?;
 
@@ -93,7 +93,8 @@ impl<S: StorageIO> EventLogWriter<S> {
         index_interval: usize,
         max_payload: u32,
     ) -> io::Result<Self> {
-        let fd = manager.open_for_append(active_id)?;
+        let handle = manager.open_for_append(active_id)?;
+        let fd = handle.fd();
 
         let (index, last_seq_in_active) = match rebuild_from_segment(
             manager.io(),
@@ -308,11 +309,11 @@ impl<S: StorageIO> EventLogWriter<S> {
             Err(e) => warn!(segment = %old_id, error = %e, "non-fatal sidecar build failure"),
         }
 
-        let (new_id, new_fd) = self.manager.prepare_rotation(old_id)?;
+        let (new_id, new_handle) = self.manager.prepare_rotation(old_id)?;
 
         match SegmentWriter::new::<S>(
             self.manager.io(),
-            new_fd,
+            new_handle.fd(),
             new_id,
             self.next_seq,
             self.max_payload,
@@ -322,11 +323,12 @@ impl<S: StorageIO> EventLogWriter<S> {
                 self.active_index = SegmentIndex::new();
                 self.event_count_in_segment = 0;
                 self.last_event_offset = None;
-                self.manager.commit_rotation(new_id, new_fd);
+                self.manager.commit_rotation(new_id, &new_handle);
                 Ok(Some(old_id))
             }
             Err(e) => {
-                self.manager.rollback_rotation(new_id, new_fd);
+                drop(new_handle);
+                self.manager.rollback_rotation(new_id);
                 Err(e)
             }
         }
@@ -361,8 +363,8 @@ impl<S: StorageIO> EventLogWriter<S> {
     }
 
     fn build_sidecar_for_segment(&self, segment_id: SegmentId) -> io::Result<()> {
-        let fd = self.manager.open_for_read(segment_id)?;
-        let sidecar = build_sidecar_from_segment(self.manager.io(), fd, self.max_payload)?;
+        let handle = self.manager.open_for_read(segment_id)?;
+        let sidecar = build_sidecar_from_segment(self.manager.io(), handle.fd(), self.max_payload)?;
         let path = self.manager.sidecar_path(segment_id);
         sidecar.save(self.manager.io(), &path)
     }
@@ -397,9 +399,9 @@ fn find_last_seq_from_segments<S: StorageIO>(
             Ok(Some(idx)) => Ok(idx.last_seq()),
             Err(e) if e.kind() != io::ErrorKind::InvalidData => Err(e),
             _ => {
-                let fd = manager.open_for_read(seg_id)?;
+                let handle = manager.open_for_read(seg_id)?;
                 let (_, last_seq) =
-                    rebuild_from_segment(manager.io(), fd, DEFAULT_INDEX_INTERVAL, max_payload)?;
+                    rebuild_from_segment(manager.io(), handle.fd(), DEFAULT_INDEX_INTERVAL, max_payload)?;
                 Ok(last_seq)
             }
         }
@@ -551,7 +553,7 @@ mod tests {
         assert_eq!(writer.synced_seq(), EventSequence::new(5));
         assert_eq!(writer.active_segment_id(), SegmentId::new(1));
 
-        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
@@ -796,7 +798,7 @@ mod tests {
                 .unwrap();
         assert_eq!(writer.next_seq, EventSequence::new(3));
 
-        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
@@ -1003,7 +1005,7 @@ mod tests {
         assert_eq!(seq, EventSequence::new(4));
         writer.sync().unwrap();
 
-        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()

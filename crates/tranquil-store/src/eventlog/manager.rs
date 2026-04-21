@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::RwLock;
 
@@ -25,17 +26,38 @@ pub fn parse_segment_id(path: &Path) -> Option<SegmentId> {
     (ext == SEGMENT_FILE_EXTENSION).then(|| stem.parse::<u32>().ok().map(SegmentId::new))?
 }
 
-struct CachedSegmentHandle {
+pub struct CachedSegmentHandle<S: StorageIO> {
     fd: FileId,
-    sealed: bool,
+    io: Arc<S>,
+    sealed: AtomicBool,
     writable: bool,
 }
 
+impl<S: StorageIO> CachedSegmentHandle<S> {
+    pub fn fd(&self) -> FileId {
+        self.fd
+    }
+
+    pub fn is_sealed(&self) -> bool {
+        self.sealed.load(Ordering::Acquire)
+    }
+
+    pub fn is_writable(&self) -> bool {
+        self.writable
+    }
+}
+
+impl<S: StorageIO> Drop for CachedSegmentHandle<S> {
+    fn drop(&mut self) {
+        let _ = self.io.close(self.fd);
+    }
+}
+
 pub struct SegmentManager<S: StorageIO> {
-    io: S,
+    io: Arc<S>,
     segments_dir: PathBuf,
     max_segment_size: u64,
-    handles: RwLock<HashMap<SegmentId, CachedSegmentHandle>>,
+    handles: RwLock<HashMap<SegmentId, Arc<CachedSegmentHandle<S>>>>,
     retention_epoch: AtomicU64,
 }
 
@@ -51,7 +73,7 @@ impl<S: StorageIO> SegmentManager<S> {
         );
         io.mkdir(&segments_dir)?;
         Ok(Self {
-            io,
+            io: Arc::new(io),
             segments_dir,
             max_segment_size,
             handles: RwLock::new(HashMap::new()),
@@ -60,7 +82,7 @@ impl<S: StorageIO> SegmentManager<S> {
     }
 
     pub fn io(&self) -> &S {
-        &self.io
+        self.io.as_ref()
     }
 
     pub fn segments_dir(&self) -> &Path {
@@ -92,52 +114,51 @@ impl<S: StorageIO> SegmentManager<S> {
         Ok(ids)
     }
 
-    pub fn open_for_read(&self, id: SegmentId) -> io::Result<FileId> {
+    pub fn open_for_read(&self, id: SegmentId) -> io::Result<Arc<CachedSegmentHandle<S>>> {
         if let Some(entry) = self.handles.read().get(&id) {
-            return Ok(entry.fd);
+            return Ok(Arc::clone(entry));
         }
         let path = self.segment_path(id);
         let fd = self.io.open(&path, OpenOptions::read_only_existing())?;
         let mut cache = self.handles.write();
-        match cache.get(&id) {
+        match cache.get(&id).cloned() {
             Some(entry) => {
                 let _ = self.io.close(fd);
-                Ok(entry.fd)
+                Ok(entry)
             }
             None => {
-                cache.insert(
-                    id,
-                    CachedSegmentHandle {
-                        fd,
-                        sealed: false,
-                        writable: false,
-                    },
-                );
-                Ok(fd)
+                let handle = Arc::new(CachedSegmentHandle {
+                    fd,
+                    io: Arc::clone(&self.io),
+                    sealed: AtomicBool::new(false),
+                    writable: false,
+                });
+                cache.insert(id, Arc::clone(&handle));
+                Ok(handle)
             }
         }
     }
 
-    pub fn open_for_append(&self, id: SegmentId) -> io::Result<FileId> {
+    pub fn open_for_append(&self, id: SegmentId) -> io::Result<Arc<CachedSegmentHandle<S>>> {
         {
             let cache = self.handles.read();
             if let Some(entry) = cache.get(&id) {
-                if entry.sealed {
+                if entry.is_sealed() {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         format!("cannot append to sealed segment {id}"),
                     ));
                 }
                 if entry.writable {
-                    return Ok(entry.fd);
+                    return Ok(Arc::clone(entry));
                 }
             }
         }
         let path = self.segment_path(id);
         let fd = self.io.open(&path, OpenOptions::read_write())?;
         let mut cache = self.handles.write();
-        match cache.get(&id) {
-            Some(entry) if entry.sealed => {
+        match cache.get(&id).cloned() {
+            Some(entry) if entry.is_sealed() => {
                 let _ = self.io.close(fd);
                 Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -146,31 +167,17 @@ impl<S: StorageIO> SegmentManager<S> {
             }
             Some(entry) if entry.writable => {
                 let _ = self.io.close(fd);
-                Ok(entry.fd)
+                Ok(entry)
             }
-            Some(entry) => {
-                let old_fd = entry.fd;
-                cache.insert(
-                    id,
-                    CachedSegmentHandle {
-                        fd,
-                        sealed: false,
-                        writable: true,
-                    },
-                );
-                let _ = self.io.close(old_fd);
-                Ok(fd)
-            }
-            None => {
-                cache.insert(
-                    id,
-                    CachedSegmentHandle {
-                        fd,
-                        sealed: false,
-                        writable: true,
-                    },
-                );
-                Ok(fd)
+            _ => {
+                let handle = Arc::new(CachedSegmentHandle {
+                    fd,
+                    io: Arc::clone(&self.io),
+                    sealed: AtomicBool::new(false),
+                    writable: true,
+                });
+                cache.insert(id, Arc::clone(&handle));
+                Ok(handle)
             }
         }
     }
@@ -179,37 +186,39 @@ impl<S: StorageIO> SegmentManager<S> {
         position.raw() >= self.max_segment_size
     }
 
-    pub fn prepare_rotation(&self, current_id: SegmentId) -> io::Result<(SegmentId, FileId)> {
+    pub fn prepare_rotation(
+        &self,
+        current_id: SegmentId,
+    ) -> io::Result<(SegmentId, Arc<CachedSegmentHandle<S>>)> {
         let next = current_id.next();
         let path = self.segment_path(next);
         let fd = self.io.open(&path, OpenOptions::read_write())?;
         self.io.truncate(fd, 0)?;
         self.io.sync_dir(&self.segments_dir)?;
-        Ok((next, fd))
+        let handle = Arc::new(CachedSegmentHandle {
+            fd,
+            io: Arc::clone(&self.io),
+            sealed: AtomicBool::new(false),
+            writable: true,
+        });
+        Ok((next, handle))
     }
 
-    pub fn commit_rotation(&self, new_id: SegmentId, fd: FileId) {
-        self.handles.write().insert(
-            new_id,
-            CachedSegmentHandle {
-                fd,
-                sealed: false,
-                writable: true,
-            },
-        );
+    pub fn commit_rotation(&self, new_id: SegmentId, handle: &Arc<CachedSegmentHandle<S>>) {
+        self.handles.write().insert(new_id, Arc::clone(handle));
     }
 
     pub fn seal_segment(&self, id: SegmentId, index: &SegmentIndex) -> io::Result<()> {
         let path = self.index_path(id);
-        index.save(&self.io, &path)?;
-        let mut cache = self.handles.write();
-        let entry = cache.get_mut(&id).ok_or_else(|| {
+        index.save(self.io.as_ref(), &path)?;
+        let cache = self.handles.read();
+        let entry = cache.get(&id).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("seal_segment: segment {id} not in handle cache"),
             )
         })?;
-        entry.sealed = true;
+        entry.sealed.store(true, Ordering::Release);
         Ok(())
     }
 
@@ -217,22 +226,16 @@ impl<S: StorageIO> SegmentManager<S> {
         self.handles
             .read()
             .get(&id)
-            .is_some_and(|entry| entry.sealed)
+            .is_some_and(|entry| entry.is_sealed())
     }
 
-    pub fn rollback_rotation(&self, new_id: SegmentId, fd: FileId) {
-        let _ = self.io.close(fd);
+    pub fn rollback_rotation(&self, new_id: SegmentId) {
         self.handles.write().remove(&new_id);
         let _ = self.io.delete(&self.segment_path(new_id));
     }
 
     pub fn delete_segment(&self, id: SegmentId) -> io::Result<()> {
-        {
-            let mut cache = self.handles.write();
-            if let Some(entry) = cache.remove(&id) {
-                let _ = self.io.close(entry.fd);
-            }
-        }
+        self.handles.write().remove(&id);
         [self.index_path(id), self.sidecar_path(id)]
             .iter()
             .try_for_each(|path| match self.io.delete(path) {
@@ -255,15 +258,7 @@ impl<S: StorageIO> SegmentManager<S> {
     }
 
     pub fn shutdown(&self) {
-        self.handles.write().drain().for_each(|(_, handle)| {
-            let _ = self.io.close(handle.fd);
-        });
-    }
-}
-
-impl<S: StorageIO> Drop for SegmentManager<S> {
-    fn drop(&mut self) {
-        self.shutdown();
+        self.handles.write().clear();
     }
 }
 
@@ -329,7 +324,7 @@ mod tests {
     #[test]
     fn open_for_append_creates_file() {
         let mgr = setup_manager(1024);
-        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         assert_eq!(mgr.io().file_size(fd).unwrap(), 0);
     }
 
@@ -342,24 +337,24 @@ mod tests {
     #[test]
     fn handle_cache_returns_same_fd() {
         let mgr = setup_manager(1024);
-        let fd1 = mgr.open_for_append(SegmentId::new(1)).unwrap();
-        let fd2 = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let fd1 = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
+        let fd2 = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         assert_eq!(fd1, fd2);
     }
 
     #[test]
     fn open_for_read_uses_cache_from_append() {
         let mgr = setup_manager(1024);
-        let fd_write = mgr.open_for_append(SegmentId::new(1)).unwrap();
-        let fd_read = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let fd_write = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
+        let fd_read = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         assert_eq!(fd_write, fd_read);
     }
 
     #[test]
     fn list_segments_finds_segment_files() {
         let mgr = setup_manager(1024);
-        mgr.open_for_append(SegmentId::new(1)).unwrap();
-        mgr.open_for_append(SegmentId::new(3)).unwrap();
+        mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
+        mgr.open_for_append(SegmentId::new(3)).unwrap().fd();
 
         let segments = mgr.list_segments().unwrap();
         assert_eq!(segments, vec![SegmentId::new(1), SegmentId::new(3)]);
@@ -368,7 +363,7 @@ mod tests {
     #[test]
     fn list_segments_ignores_non_segment_files() {
         let mgr = setup_manager(1024);
-        mgr.open_for_append(SegmentId::new(1)).unwrap();
+        mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         mgr.io()
             .open(Path::new("/segments/notes.txt"), OpenOptions::read_write())
             .unwrap();
@@ -380,7 +375,7 @@ mod tests {
     #[test]
     fn list_segments_ignores_index_files() {
         let mgr = setup_manager(1024);
-        mgr.open_for_append(SegmentId::new(1)).unwrap();
+        mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         mgr.io()
             .open(
                 Path::new("/segments/00000001.tqi"),
@@ -395,9 +390,9 @@ mod tests {
     #[test]
     fn list_segments_sorted_ascending() {
         let mgr = setup_manager(1024);
-        mgr.open_for_append(SegmentId::new(5)).unwrap();
-        mgr.open_for_append(SegmentId::new(1)).unwrap();
-        mgr.open_for_append(SegmentId::new(3)).unwrap();
+        mgr.open_for_append(SegmentId::new(5)).unwrap().fd();
+        mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
+        mgr.open_for_append(SegmentId::new(3)).unwrap().fd();
 
         let segments = mgr.list_segments().unwrap();
         assert_eq!(
@@ -418,23 +413,30 @@ mod tests {
     #[test]
     fn rotation_lifecycle_prepare_commit() {
         let mgr = setup_manager(1024);
-        let _fd0 = mgr.open_for_append(SegmentId::new(1)).unwrap();
-        let (next_id, next_fd) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
+        let _h0 = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
+        let (next_id, next_handle) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
         assert_eq!(next_id, SegmentId::new(2));
-        assert_eq!(mgr.io().file_size(next_fd).unwrap(), 0);
-        mgr.commit_rotation(next_id, next_fd);
-        assert_eq!(mgr.open_for_read(next_id).unwrap(), next_fd);
+        assert_eq!(mgr.io().file_size(next_handle.fd()).unwrap(), 0);
+        mgr.commit_rotation(next_id, &next_handle);
+        assert_eq!(
+            mgr.open_for_read(next_id).unwrap().fd(),
+            next_handle.fd()
+        );
     }
 
     #[test]
     fn rotation_rollback_cleans_up() {
         let mgr = setup_manager(1024);
-        let _fd0 = mgr.open_for_append(SegmentId::new(1)).unwrap();
-        let (next_id, next_fd) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
-        mgr.commit_rotation(next_id, next_fd);
+        let _h0 = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
+        let (next_id, next_handle) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
+        mgr.commit_rotation(next_id, &next_handle);
 
-        assert_eq!(mgr.open_for_read(next_id).unwrap(), next_fd);
-        mgr.rollback_rotation(next_id, next_fd);
+        assert_eq!(
+            mgr.open_for_read(next_id).unwrap().fd(),
+            next_handle.fd()
+        );
+        drop(next_handle);
+        mgr.rollback_rotation(next_id);
 
         let segments = mgr.list_segments().unwrap();
         assert_eq!(segments, vec![SegmentId::new(1)]);
@@ -443,7 +445,7 @@ mod tests {
     #[test]
     fn seal_segment_persists_index_and_marks_sealed() {
         let mgr = setup_manager(64 * 1024);
-        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         let mut writer = SegmentWriter::new(
             mgr.io(),
             fd,
@@ -476,7 +478,7 @@ mod tests {
     #[test]
     fn delete_segment_removes_files_and_handle() {
         let mgr = setup_manager(64 * 1024);
-        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         let mut writer = SegmentWriter::new(
             mgr.io(),
             fd,
@@ -507,9 +509,9 @@ mod tests {
         let mgr = setup_manager(1024);
         assert_eq!(mgr.oldest_segment().unwrap(), None);
 
-        mgr.open_for_append(SegmentId::new(3)).unwrap();
-        mgr.open_for_append(SegmentId::new(1)).unwrap();
-        mgr.open_for_append(SegmentId::new(5)).unwrap();
+        mgr.open_for_append(SegmentId::new(3)).unwrap().fd();
+        mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
+        mgr.open_for_append(SegmentId::new(5)).unwrap().fd();
 
         assert_eq!(mgr.oldest_segment().unwrap(), Some(SegmentId::new(1)));
     }
@@ -524,7 +526,7 @@ mod tests {
     fn rotate_and_write_across_segments() {
         let mgr = setup_manager(1024);
 
-        let fd1 = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let fd1 = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         let mut writer1 = SegmentWriter::new(
             mgr.io(),
             fd1,
@@ -538,8 +540,9 @@ mod tests {
             .unwrap();
         writer1.sync(mgr.io()).unwrap();
 
-        let (id2, fd2) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
-        mgr.commit_rotation(id2, fd2);
+        let (id2, handle2) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
+        let fd2 = handle2.fd();
+        mgr.commit_rotation(id2, &handle2);
 
         let mut writer2 =
             SegmentWriter::new(mgr.io(), fd2, id2, EventSequence::new(2), MAX_EVENT_PAYLOAD)
@@ -549,7 +552,7 @@ mod tests {
             .unwrap();
         writer2.sync(mgr.io()).unwrap();
 
-        let fd1_read = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let fd1_read = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         let events1 = crate::eventlog::SegmentReader::open(mgr.io(), fd1_read, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
@@ -557,7 +560,7 @@ mod tests {
         assert_eq!(events1.len(), 1);
         assert_eq!(events1[0].payload, b"first segment");
 
-        let fd2_read = mgr.open_for_read(id2).unwrap();
+        let fd2_read = mgr.open_for_read(id2).unwrap().fd();
         let events2 = crate::eventlog::SegmentReader::open(mgr.io(), fd2_read, MAX_EVENT_PAYLOAD)
             .unwrap()
             .valid_prefix()
@@ -569,7 +572,7 @@ mod tests {
     #[test]
     fn seal_then_append_errors() {
         let mgr = setup_manager(64 * 1024);
-        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         SegmentWriter::new(
             mgr.io(),
             fd,
@@ -596,9 +599,9 @@ mod tests {
     #[test]
     fn multiple_deletions_increment_epoch() {
         let mgr = setup_manager(1024);
-        mgr.open_for_append(SegmentId::new(1)).unwrap();
-        mgr.open_for_append(SegmentId::new(2)).unwrap();
-        mgr.open_for_append(SegmentId::new(3)).unwrap();
+        mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
+        mgr.open_for_append(SegmentId::new(2)).unwrap().fd();
+        mgr.open_for_append(SegmentId::new(3)).unwrap().fd();
 
         assert_eq!(mgr.retention_epoch(), 0);
         mgr.delete_segment(SegmentId::new(1)).unwrap();
@@ -610,7 +613,7 @@ mod tests {
     #[test]
     fn open_for_read_does_not_infer_sealed_from_index_file() {
         let mgr = setup_manager(64 * 1024);
-        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let fd = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         let mut writer = SegmentWriter::new(
             mgr.io(),
             fd,
@@ -630,26 +633,26 @@ mod tests {
 
         mgr.handles.write().remove(&SegmentId::new(1));
 
-        let _read_fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let _read_fd = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         assert!(!mgr.is_sealed(SegmentId::new(1)));
     }
 
     #[test]
     fn open_for_read_unsealed_allows_append() {
         let mgr = setup_manager(1024);
-        let _fd = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let _fd = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
 
         mgr.handles.write().remove(&SegmentId::new(1));
 
-        let _read_fd = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let _read_fd = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         assert!(!mgr.is_sealed(SegmentId::new(1)));
     }
 
     #[test]
     fn shutdown_clears_handles() {
         let mgr = setup_manager(1024);
-        mgr.open_for_append(SegmentId::new(1)).unwrap();
-        mgr.open_for_append(SegmentId::new(2)).unwrap();
+        mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
+        mgr.open_for_append(SegmentId::new(2)).unwrap().fd();
 
         mgr.shutdown();
         assert!(mgr.handles.read().is_empty());
@@ -665,7 +668,7 @@ mod tests {
     #[test]
     fn prepare_rotation_truncates_stale_file() {
         let mgr = setup_manager(1024);
-        let _fd0 = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let _fd0 = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
 
         let stale_path = mgr.segment_path(SegmentId::new(2));
         let stale_fd = mgr
@@ -677,23 +680,23 @@ mod tests {
         assert_eq!(mgr.io().file_size(stale_fd).unwrap(), 4096);
         mgr.io().close(stale_fd).unwrap();
 
-        let (next_id, next_fd) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
+        let (next_id, next_handle) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
         assert_eq!(next_id, SegmentId::new(2));
-        assert_eq!(mgr.io().file_size(next_fd).unwrap(), 0);
+        assert_eq!(mgr.io().file_size(next_handle.fd()).unwrap(), 0);
     }
 
     #[test]
     fn open_for_append_upgrades_read_only_handle() {
         let mgr = setup_manager(1024);
-        let fd_append = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let fd_append = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
 
         mgr.handles.write().remove(&SegmentId::new(1));
 
-        let fd_read = mgr.open_for_read(SegmentId::new(1)).unwrap();
+        let fd_read = mgr.open_for_read(SegmentId::new(1)).unwrap().fd();
         assert_ne!(fd_read, fd_append);
         assert!(!mgr.handles.read().get(&SegmentId::new(1)).unwrap().writable);
 
-        let fd_upgraded = mgr.open_for_append(SegmentId::new(1)).unwrap();
+        let fd_upgraded = mgr.open_for_append(SegmentId::new(1)).unwrap().fd();
         assert_ne!(fd_upgraded, fd_read);
         assert!(mgr.handles.read().get(&SegmentId::new(1)).unwrap().writable);
     }

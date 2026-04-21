@@ -553,7 +553,8 @@ fn initialize_active_state<S: StorageIO>(
 
     match cursor {
         Some(wc) => {
-            let fd = manager.open_for_append(wc.file_id)?;
+            let handle = manager.open_for_append(wc.file_id)?;
+            let fd = handle.fd();
             let file_size = manager.io().file_size(fd)?;
 
             if file_size < wc.offset.raw() {
@@ -588,7 +589,8 @@ fn initialize_active_state<S: StorageIO>(
         None => {
             let file_id = file_ids.allocate();
 
-            let fd = manager.open_for_append(file_id)?;
+            let handle = manager.open_for_append(file_id)?;
+            let fd = handle.fd();
             let writer = DataFileWriter::new(manager.io(), fd, file_id)?;
             writer.sync()?;
             let position = writer.position();
@@ -1074,9 +1076,9 @@ fn drain_and_process_remaining<S: StorageIO>(
     shutdown_checkpoint(index, epoch, &ctx.hint_positions);
 }
 
-struct RotationState {
+struct RotationState<S: StorageIO> {
     file_id: DataFileId,
-    fd: FileId,
+    handle: Arc<super::manager::CachedHandle<S>>,
     hint_fd: FileId,
 }
 
@@ -1178,7 +1180,7 @@ const VERIFY_RETRY_ATTEMPTS: u32 = 4;
 fn rollback_batch<S: StorageIO>(
     manager: &DataFileManager<S>,
     state: &ActiveState,
-    rotations: &[RotationState],
+    rotations: &[RotationState<S>],
 ) {
     let _ = manager.io().truncate(state.fd, state.position.raw());
     let _ = manager.io().sync(state.fd);
@@ -1187,7 +1189,7 @@ fn rollback_batch<S: StorageIO>(
         .truncate(state.hint_fd, state.hint_position.raw());
     let _ = manager.io().sync(state.hint_fd);
     rotations.iter().for_each(|rot| {
-        manager.rollback_rotation(rot.file_id, rot.fd);
+        manager.rollback_rotation(rot.file_id);
         let _ = manager.io().close(rot.hint_fd);
         let _ = manager
             .io()
@@ -1210,7 +1212,7 @@ fn process_batch<S: StorageIO>(
     let mut all_decrements: Vec<[u8; CID_SIZE]> = Vec::new();
 
     let mut current_hint_fd = state.hint_fd;
-    let mut rotations: Vec<RotationState> = Vec::new();
+    let mut rotations: Vec<RotationState<S>> = Vec::new();
 
     let mut data_writer =
         DataFileWriter::resume(manager.io(), state.fd, state.file_id, state.position);
@@ -1222,12 +1224,14 @@ fn process_batch<S: StorageIO>(
         hint_writer.sync().map_err(CommitError::from)?;
 
         let next_id = ctx.file_ids.allocate();
-        let next_fd = manager.open_for_append(next_id)?;
+        let next_handle = manager.open_for_append(next_id)?;
+        let next_fd = next_handle.fd();
 
         tracing::info!(
             from = %data_writer.file_id(),
             to = %next_id,
-            "data file rotation (batch boundary)"
+            trigger = "batch_boundary",
+            "data file rotation"
         );
 
         data_writer = DataFileWriter::new(manager.io(), next_fd, next_id)?;
@@ -1243,7 +1247,7 @@ fn process_batch<S: StorageIO>(
         hint_writer = HintFileWriter::new(manager.io(), new_hint_fd);
         rotations.push(RotationState {
             file_id: next_id,
-            fd: next_fd,
+            handle: next_handle,
             hint_fd: new_hint_fd,
         });
     }
@@ -1348,7 +1352,7 @@ fn process_batch<S: StorageIO>(
         let last_idx = rotations.len() - 1;
         rotations.iter().enumerate().for_each(|(i, rot)| {
             if i == last_idx {
-                manager.commit_rotation(rot.file_id, rot.fd);
+                manager.commit_rotation(rot.file_id, &rot.handle);
                 ctx.active_files.register(ctx.shard_id, rot.file_id);
             } else {
                 let _ = manager.io().close(rot.hint_fd);

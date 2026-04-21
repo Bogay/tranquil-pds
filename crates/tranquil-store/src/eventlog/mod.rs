@@ -411,8 +411,8 @@ impl<S: StorageIO + 'static> EventLog<S> {
     pub fn disk_usage(&self) -> io::Result<u64> {
         let segments = self.manager.list_segments()?;
         segments.iter().try_fold(0u64, |acc, &id| {
-            let fd = self.manager.open_for_read(id)?;
-            let size = self.manager.io().file_size(fd)?;
+            let handle = self.manager.open_for_read(id)?;
+            let size = self.manager.io().file_size(handle.fd())?;
             Ok(acc.saturating_add(size))
         })
     }

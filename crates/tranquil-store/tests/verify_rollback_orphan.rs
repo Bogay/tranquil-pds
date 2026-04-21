@@ -55,16 +55,18 @@ fn rollback_rotation_does_not_leave_orphan_data_file() {
         {
             let io: Arc<RealIO> = Arc::new(RealIO::new());
             let manager = DataFileManager::new(Arc::clone(&io), data_dir.clone(), 4096);
-            let (next_id, next_fd) = manager.prepare_rotation(DataFileId::new(0)).unwrap();
-            manager.commit_rotation(next_id, next_fd);
+            let (next_id, next_handle) = manager.prepare_rotation(DataFileId::new(0)).unwrap();
+            manager.commit_rotation(next_id, &next_handle);
 
-            let mut writer = DataFileWriter::new(&*io, next_fd, next_id).unwrap();
+            let mut writer = DataFileWriter::new(&*io, next_handle.fd(), next_id).unwrap();
             let _ = writer.append_block(&orphan_cid, &vec![0xAB; 256]).unwrap();
             writer.sync().unwrap();
             io.sync_dir(&data_dir).unwrap();
 
             let _ = io.delete(&hint_file_path(&data_dir, next_id));
-            manager.rollback_rotation(next_id, next_fd);
+            drop(writer);
+            drop(next_handle);
+            manager.rollback_rotation(next_id);
         }
 
         let store = TranquilBlockStore::open(config).unwrap();

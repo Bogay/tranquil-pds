@@ -68,8 +68,8 @@ pub(super) fn compact_on_writer_thread<S: StorageIO>(
         return Err(CompactionError::ActiveFileCannotBeCompacted);
     }
 
-    let source_fd = manager.open_for_read(source_file_id)?;
-    let source_size = manager.io().file_size(source_fd)?;
+    let source_handle = manager.open_for_read(source_file_id)?;
+    let source_size = manager.io().file_size(source_handle.fd())?;
 
     let new_file_id = file_ids.allocate();
 
@@ -77,7 +77,7 @@ pub(super) fn compact_on_writer_thread<S: StorageIO>(
         manager,
         index,
         source_file_id,
-        source_fd,
+        source_handle.fd(),
         new_file_id,
         current_epoch,
         grace_period_ms,
@@ -148,8 +148,8 @@ fn stream_compact<S: StorageIO>(
     let mut reader = DataFileReader::open(manager.io(), source_fd)?;
     let now = crate::wall_clock_ms();
 
-    let new_fd = manager.open_for_append(new_file_id)?;
-    let mut writer = DataFileWriter::new(manager.io(), new_fd, new_file_id)?;
+    let new_handle = manager.open_for_append(new_file_id)?;
+    let mut writer = DataFileWriter::new(manager.io(), new_handle.fd(), new_file_id)?;
 
     let hint_path = hint_file_path(manager.data_dir(), new_file_id);
     let hint_fd = manager.io().open(&hint_path, OpenOptions::read_write())?;

@@ -145,10 +145,10 @@ impl<S: StorageIO> EventLogReader<S> {
     }
 
     fn rebuild_index(&self, segment_id: SegmentId) -> io::Result<SegmentIndex> {
-        let fd = self.manager.open_for_read(segment_id)?;
+        let handle = self.manager.open_for_read(segment_id)?;
         let (idx, _) = rebuild_from_segment(
             self.manager.io(),
-            fd,
+            handle.fd(),
             DEFAULT_INDEX_INTERVAL,
             self.max_payload,
         )?;
@@ -243,8 +243,8 @@ impl<S: StorageIO> EventLogReader<S> {
             return Ok(Arc::clone(m));
         }
 
-        let fd = self.manager.open_for_read(segment_id)?;
-        let mapped = self.manager.io().mmap_file(fd)?;
+        let handle = self.manager.open_for_read(segment_id)?;
+        let mapped = self.manager.io().mmap_file(handle.fd())?;
         let arc = Arc::new(mapped);
         self.mmaps.write().insert(segment_id, Arc::clone(&arc));
         Ok(arc)
@@ -269,10 +269,10 @@ impl<S: StorageIO> EventLogReader<S> {
                 predicate,
             )
         } else {
-            let fd = self.manager.open_for_read(segment_id)?;
-            let file_size = self.manager.io().file_size(fd)?;
+            let handle = self.manager.open_for_read(segment_id)?;
+            let file_size = self.manager.io().file_size(handle.fd())?;
             self.scan_direct(
-                fd,
+                handle.fd(),
                 file_size,
                 start_offset,
                 start_seq,
@@ -513,8 +513,8 @@ impl<S: StorageIO> EventLogReader<S> {
     }
 
     fn rebuild_sidecar(&self, segment_id: SegmentId) -> io::Result<SidecarIndex> {
-        let fd = self.manager.open_for_read(segment_id)?;
-        let sidecar = build_sidecar_from_segment(self.manager.io(), fd, self.max_payload)?;
+        let handle = self.manager.open_for_read(segment_id)?;
+        let sidecar = build_sidecar_from_segment(self.manager.io(), handle.fd(), self.max_payload)?;
         let _ = sidecar.save(self.manager.io(), &self.manager.sidecar_path(segment_id));
         Ok(sidecar)
     }

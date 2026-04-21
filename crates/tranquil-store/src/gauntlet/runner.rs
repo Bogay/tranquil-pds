@@ -595,7 +595,7 @@ fn eventlog_snapshot<S: StorageIO + Send + Sync + 'static>(
     let mut segment_last_ts: Vec<(SegmentId, u64)> = Vec::new();
     segments.iter().for_each(|&id| {
         let per_segment: Vec<ValidEvent> = match s.manager.open_for_read(id) {
-            Ok(fd) => match SegmentReader::open(s.manager.io(), fd, MAX_EVENT_PAYLOAD) {
+            Ok(handle) => match SegmentReader::open(s.manager.io(), handle.fd(), MAX_EVENT_PAYLOAD) {
                 Ok(reader) => reader.valid_prefix().unwrap_or_default(),
                 Err(_) => Vec::new(),
             },
@@ -1108,8 +1108,8 @@ fn segment_last_timestamp<S: StorageIO + Send + Sync + 'static>(
     manager: &SegmentManager<S>,
     id: SegmentId,
 ) -> std::io::Result<Option<u64>> {
-    let fd = manager.open_for_read(id)?;
-    let reader = SegmentReader::open(manager.io(), fd, MAX_EVENT_PAYLOAD)?;
+    let handle = manager.open_for_read(id)?;
+    let reader = SegmentReader::open(manager.io(), handle.fd(), MAX_EVENT_PAYLOAD)?;
     let events = reader.valid_prefix()?;
     Ok(events.last().map(|e: &ValidEvent| e.timestamp.raw()))
 }

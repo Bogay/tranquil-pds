@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use parking_lot::RwLock;
 
@@ -13,22 +14,39 @@ pub const DEFAULT_MAX_FILE_SIZE: u64 = 256 * 1024 * 1024;
 
 pub(crate) const DATA_FILE_EXTENSION: &str = "tqb";
 
-struct CachedHandle {
+pub struct CachedHandle<S: StorageIO> {
     fd: FileId,
+    io: Arc<S>,
     writable: bool,
 }
 
+impl<S: StorageIO> CachedHandle<S> {
+    pub fn fd(&self) -> FileId {
+        self.fd
+    }
+
+    pub fn is_writable(&self) -> bool {
+        self.writable
+    }
+}
+
+impl<S: StorageIO> Drop for CachedHandle<S> {
+    fn drop(&mut self) {
+        let _ = self.io.close(self.fd);
+    }
+}
+
 pub struct DataFileManager<S: StorageIO> {
-    io: S,
+    io: Arc<S>,
     data_dir: PathBuf,
     max_file_size: u64,
-    handles: RwLock<HashMap<DataFileId, CachedHandle>>,
+    handles: RwLock<HashMap<DataFileId, Arc<CachedHandle<S>>>>,
 }
 
 impl<S: StorageIO> DataFileManager<S> {
     pub fn new(io: S, data_dir: PathBuf, max_file_size: u64) -> Self {
         Self {
-            io,
+            io: Arc::new(io),
             data_dir,
             max_file_size,
             handles: RwLock::new(HashMap::new()),
@@ -40,7 +58,7 @@ impl<S: StorageIO> DataFileManager<S> {
     }
 
     pub fn io(&self) -> &S {
-        &self.io
+        self.io.as_ref()
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -56,76 +74,79 @@ impl<S: StorageIO> DataFileManager<S> {
             .join(format!("{file_id}.{DATA_FILE_EXTENSION}"))
     }
 
-    pub fn open_for_append(&self, file_id: DataFileId) -> io::Result<FileId> {
+    pub fn open_for_append(&self, file_id: DataFileId) -> io::Result<Arc<CachedHandle<S>>> {
         {
             let cache = self.handles.read();
             if let Some(entry) = cache.get(&file_id)
                 && entry.writable
             {
-                return Ok(entry.fd);
+                return Ok(Arc::clone(entry));
             }
         }
         let path = self.data_file_path(file_id);
         let fd = self.io.open(&path, OpenOptions::read_write())?;
         let mut cache = self.handles.write();
-        match cache.get(&file_id) {
+        match cache.get(&file_id).cloned() {
             Some(entry) if entry.writable => {
                 let _ = self.io.close(fd);
-                Ok(entry.fd)
+                Ok(entry)
             }
-            Some(entry) => {
-                let old_fd = entry.fd;
-                cache.insert(file_id, CachedHandle { fd, writable: true });
-                let _ = self.io.close(old_fd);
-                Ok(fd)
-            }
-            None => {
-                cache.insert(file_id, CachedHandle { fd, writable: true });
-                Ok(fd)
+            _ => {
+                let handle = Arc::new(CachedHandle {
+                    fd,
+                    io: Arc::clone(&self.io),
+                    writable: true,
+                });
+                cache.insert(file_id, Arc::clone(&handle));
+                Ok(handle)
             }
         }
     }
 
-    pub fn open_for_read(&self, file_id: DataFileId) -> io::Result<FileId> {
+    pub fn open_for_read(&self, file_id: DataFileId) -> io::Result<Arc<CachedHandle<S>>> {
         if let Some(entry) = self.handles.read().get(&file_id) {
-            return Ok(entry.fd);
+            return Ok(Arc::clone(entry));
         }
         let path = self.data_file_path(file_id);
         let fd = self.io.open(&path, OpenOptions::read_only_existing())?;
         let mut cache = self.handles.write();
-        match cache.get(&file_id) {
+        match cache.get(&file_id).cloned() {
             Some(entry) => {
                 let _ = self.io.close(fd);
-                Ok(entry.fd)
+                Ok(entry)
             }
             None => {
-                cache.insert(
-                    file_id,
-                    CachedHandle {
-                        fd,
-                        writable: false,
-                    },
-                );
-                Ok(fd)
+                let handle = Arc::new(CachedHandle {
+                    fd,
+                    io: Arc::clone(&self.io),
+                    writable: false,
+                });
+                cache.insert(file_id, Arc::clone(&handle));
+                Ok(handle)
             }
         }
     }
 
-    pub fn prepare_rotation(&self, current: DataFileId) -> io::Result<(DataFileId, FileId)> {
+    pub fn prepare_rotation(
+        &self,
+        current: DataFileId,
+    ) -> io::Result<(DataFileId, Arc<CachedHandle<S>>)> {
         let next = current.next();
         let path = self.data_file_path(next);
         let fd = self.io.open(&path, OpenOptions::read_write())?;
-        Ok((next, fd))
+        let handle = Arc::new(CachedHandle {
+            fd,
+            io: Arc::clone(&self.io),
+            writable: true,
+        });
+        Ok((next, handle))
     }
 
-    pub fn commit_rotation(&self, file_id: DataFileId, fd: FileId) {
-        self.handles
-            .write()
-            .insert(file_id, CachedHandle { fd, writable: true });
+    pub fn commit_rotation(&self, file_id: DataFileId, handle: &Arc<CachedHandle<S>>) {
+        self.handles.write().insert(file_id, Arc::clone(handle));
     }
 
-    pub fn rollback_rotation(&self, file_id: DataFileId, fd: FileId) {
-        let _ = self.io.close(fd);
+    pub fn rollback_rotation(&self, file_id: DataFileId) {
         self.handles.write().remove(&file_id);
         let _ = self.io.delete(&self.data_file_path(file_id));
     }
@@ -135,28 +156,17 @@ impl<S: StorageIO> DataFileManager<S> {
     }
 
     pub fn list_files(&self) -> io::Result<Vec<DataFileId>> {
-        list_files_by_extension(&self.io, &self.data_dir, DATA_FILE_EXTENSION)
+        list_files_by_extension(&*self.io, &self.data_dir, DATA_FILE_EXTENSION)
     }
 
     pub fn evict_handle(&self, file_id: DataFileId) {
-        let removed = self.handles.write().remove(&file_id);
-        if let Some(entry) = removed {
-            let _ = self.io.close(entry.fd);
-        }
+        self.handles.write().remove(&file_id);
     }
 
     pub fn delete_data_file(&self, file_id: DataFileId) -> io::Result<()> {
         self.evict_handle(file_id);
         let path = self.data_file_path(file_id);
         self.io.delete(&path)
-    }
-}
-
-impl<S: StorageIO> Drop for DataFileManager<S> {
-    fn drop(&mut self) {
-        self.handles.write().drain().for_each(|(_, entry)| {
-            let _ = self.io.close(entry.fd);
-        });
     }
 }
 
@@ -178,8 +188,8 @@ mod tests {
     #[test]
     fn open_for_append_creates_file() {
         let mgr = setup_manager(1024);
-        let fd = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        assert_eq!(mgr.io().file_size(fd).unwrap(), 0);
+        let handle = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        assert_eq!(mgr.io().file_size(handle.fd()).unwrap(), 0);
     }
 
     #[test]
@@ -191,45 +201,52 @@ mod tests {
     #[test]
     fn handle_cache_returns_same_fd() {
         let mgr = setup_manager(1024);
-        let fd1 = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        let fd2 = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        assert_eq!(fd1, fd2);
+        let h1 = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        let h2 = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        assert_eq!(h1.fd(), h2.fd());
     }
 
     #[test]
     fn open_for_read_uses_cache_from_append() {
         let mgr = setup_manager(1024);
-        let fd_write = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        let fd_read = mgr.open_for_read(DataFileId::new(0)).unwrap();
-        assert_eq!(fd_write, fd_read);
+        let h_write = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        let h_read = mgr.open_for_read(DataFileId::new(0)).unwrap();
+        assert_eq!(h_write.fd(), h_read.fd());
     }
 
     #[test]
     fn rotation_lifecycle_prepare_commit() {
         let mgr = setup_manager(1024);
-        let _fd0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        let (next_id, next_fd) = mgr.prepare_rotation(DataFileId::new(0)).unwrap();
+        let _h0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        let (next_id, next_handle) = mgr.prepare_rotation(DataFileId::new(0)).unwrap();
         assert_eq!(next_id, DataFileId::new(1));
-        assert_eq!(mgr.io().file_size(next_fd).unwrap(), 0);
+        assert_eq!(mgr.io().file_size(next_handle.fd()).unwrap(), 0);
         mgr.io().sync_dir(mgr.data_dir()).unwrap();
-        mgr.commit_rotation(next_id, next_fd);
-        assert_eq!(mgr.open_for_read(next_id).unwrap(), next_fd);
+        mgr.commit_rotation(next_id, &next_handle);
+        assert_eq!(
+            mgr.open_for_read(next_id).unwrap().fd(),
+            next_handle.fd()
+        );
     }
 
     #[test]
     fn rotation_rollback_cleans_handle_and_deletes_file() {
         let mgr = setup_manager(1024);
-        let _fd0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        let (next_id, next_fd) = mgr.prepare_rotation(DataFileId::new(0)).unwrap();
-        mgr.commit_rotation(next_id, next_fd);
+        let _h0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        let (next_id, next_handle) = mgr.prepare_rotation(DataFileId::new(0)).unwrap();
+        mgr.commit_rotation(next_id, &next_handle);
 
-        assert_eq!(mgr.open_for_read(next_id).unwrap(), next_fd);
-        mgr.rollback_rotation(next_id, next_fd);
+        assert_eq!(
+            mgr.open_for_read(next_id).unwrap().fd(),
+            next_handle.fd()
+        );
+        drop(next_handle);
+        mgr.rollback_rotation(next_id);
 
         let reopen = mgr.open_for_read(next_id);
         assert!(
             reopen.is_err_and(|e| e.kind() == io::ErrorKind::NotFound),
-            "rollback must delete the data file so recovery cannot resurrect uncommitted bytes"
+            "rollback_rotation must delete the data file so recovery cannot resurrect uncommitted bytes"
         );
     }
 
@@ -245,8 +262,8 @@ mod tests {
     #[test]
     fn list_files_finds_data_files() {
         let mgr = setup_manager(1024);
-        let _fd0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        let _fd3 = mgr.open_for_append(DataFileId::new(3)).unwrap();
+        let _h0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        let _h3 = mgr.open_for_append(DataFileId::new(3)).unwrap();
 
         let files = mgr.list_files().unwrap();
         assert_eq!(files, vec![DataFileId::new(0), DataFileId::new(3)]);
@@ -255,7 +272,7 @@ mod tests {
     #[test]
     fn list_files_ignores_non_data_files() {
         let mgr = setup_manager(1024);
-        let _fd0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        let _h0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
         mgr.io()
             .open(Path::new("/data/notes.txt"), OpenOptions::read_write())
             .unwrap();
@@ -280,32 +297,32 @@ mod tests {
     #[test]
     fn rotate_and_write_across_files() {
         let mgr = setup_manager(1024);
-        let fd0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        let mut writer0 = DataFileWriter::new(mgr.io(), fd0, DataFileId::new(0)).unwrap();
+        let h0 = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        let mut writer0 = DataFileWriter::new(mgr.io(), h0.fd(), DataFileId::new(0)).unwrap();
         let _ = writer0
             .append_block(&test_cid(1), b"first file data")
             .unwrap();
         writer0.sync().unwrap();
 
-        let (id1, fd1) = mgr.prepare_rotation(DataFileId::new(0)).unwrap();
+        let (id1, h1) = mgr.prepare_rotation(DataFileId::new(0)).unwrap();
         mgr.io().sync_dir(mgr.data_dir()).unwrap();
-        mgr.commit_rotation(id1, fd1);
-        let mut writer1 = DataFileWriter::new(mgr.io(), fd1, id1).unwrap();
+        mgr.commit_rotation(id1, &h1);
+        let mut writer1 = DataFileWriter::new(mgr.io(), h1.fd(), id1).unwrap();
         let _ = writer1
             .append_block(&test_cid(2), b"second file data")
             .unwrap();
         writer1.sync().unwrap();
 
-        let fd0_read = mgr.open_for_read(DataFileId::new(0)).unwrap();
-        let blocks0 = DataFileReader::open(mgr.io(), fd0_read)
+        let h0_read = mgr.open_for_read(DataFileId::new(0)).unwrap();
+        let blocks0 = DataFileReader::open(mgr.io(), h0_read.fd())
             .unwrap()
             .valid_blocks()
             .unwrap();
         assert_eq!(blocks0.len(), 1);
         assert_eq!(blocks0[0].2, b"first file data");
 
-        let fd1_read = mgr.open_for_read(id1).unwrap();
-        let blocks1 = DataFileReader::open(mgr.io(), fd1_read)
+        let h1_read = mgr.open_for_read(id1).unwrap();
+        let blocks1 = DataFileReader::open(mgr.io(), h1_read.fd())
             .unwrap()
             .valid_blocks()
             .unwrap();
@@ -316,11 +333,11 @@ mod tests {
     #[test]
     fn read_cache_hit_from_writable_entry() {
         let mgr = setup_manager(1024);
-        let fd_write = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        DataFileWriter::new(mgr.io(), fd_write, DataFileId::new(0)).unwrap();
+        let h_write = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        DataFileWriter::new(mgr.io(), h_write.fd(), DataFileId::new(0)).unwrap();
 
-        let fd_read = mgr.open_for_read(DataFileId::new(0)).unwrap();
-        assert_eq!(fd_write, fd_read);
+        let h_read = mgr.open_for_read(DataFileId::new(0)).unwrap();
+        assert_eq!(h_write.fd(), h_read.fd());
     }
 
     #[test]
@@ -339,15 +356,15 @@ mod tests {
         mgr.io().sync_dir(mgr.data_dir()).unwrap();
         mgr.io().close(raw_fd).unwrap();
 
-        let fd_read = mgr.open_for_read(DataFileId::new(0)).unwrap();
-        let _reader = DataFileReader::open(mgr.io(), fd_read).unwrap();
+        let h_read = mgr.open_for_read(DataFileId::new(0)).unwrap();
+        let _reader = DataFileReader::open(mgr.io(), h_read.fd()).unwrap();
 
-        let fd_append = mgr.open_for_append(DataFileId::new(0)).unwrap();
-        assert_ne!(fd_read, fd_append);
+        let h_append = mgr.open_for_append(DataFileId::new(0)).unwrap();
+        assert_ne!(h_read.fd(), h_append.fd());
 
         let mut writer = DataFileWriter::resume(
             mgr.io(),
-            fd_append,
+            h_append.fd(),
             DataFileId::new(0),
             BlockOffset::new(BLOCK_HEADER_SIZE as u64),
         );
@@ -356,7 +373,7 @@ mod tests {
             .unwrap();
         writer.sync().unwrap();
 
-        let blocks = DataFileReader::open(mgr.io(), fd_append)
+        let blocks = DataFileReader::open(mgr.io(), h_append.fd())
             .unwrap()
             .valid_blocks()
             .unwrap();

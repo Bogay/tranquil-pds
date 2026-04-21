@@ -611,9 +611,9 @@ fn fsync_ordering_blocks_before_events() {
         SegmentManager::new(Arc::clone(&sim), PathBuf::from("/segments"), 64 * 1024).unwrap(),
     );
 
-    let block_fd = block_mgr.open_for_append(DataFileId::new(0)).unwrap();
+    let block_handle = block_mgr.open_for_append(DataFileId::new(0)).unwrap();
     let mut block_writer =
-        DataFileWriter::new(block_mgr.io(), block_fd, DataFileId::new(0)).unwrap();
+        DataFileWriter::new(block_mgr.io(), block_handle.fd(), DataFileId::new(0)).unwrap();
     let cid = test_cid(1);
     let _ = block_writer.append_block(&cid, &[0xAA; 128]).unwrap();
     block_writer.sync().unwrap();

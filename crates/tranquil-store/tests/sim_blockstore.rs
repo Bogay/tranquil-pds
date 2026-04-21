@@ -35,7 +35,8 @@ impl SimHarness {
             Arc::clone(&self.sim),
             self.data_dir.to_path_buf(),
         );
-        let fd = manager.open_for_append(file_id).unwrap();
+        let handle = manager.open_for_append(file_id).unwrap();
+        let fd = handle.fd();
         let file_size = self.sim.file_size(fd).unwrap();
         match file_size {
             0 => {
@@ -504,9 +505,10 @@ fn sim_aggressive_faults_data_integrity() {
         let manager =
             DataFileManager::with_default_max_size(Arc::clone(&sim), data_dir.to_path_buf());
 
-        let Ok(fd) = manager.open_for_append(file_id) else {
+        let Ok(handle) = manager.open_for_append(file_id) else {
             return;
         };
+        let fd = handle.fd();
 
         let writer_result = DataFileWriter::new(&*sim, fd, file_id);
         let Ok(writer) = writer_result else { return };
@@ -515,7 +517,8 @@ fn sim_aggressive_faults_data_integrity() {
             return;
         };
         let start_pos = writer.position();
-        let _ = sim.close(fd);
+        drop(writer);
+        drop(handle);
 
         let mut rng = Rng::new(seed);
         let block_count = (rng.range_u32(15) + 5) as u16;

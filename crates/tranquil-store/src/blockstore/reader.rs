@@ -104,11 +104,11 @@ impl<S: StorageIO> BlockStoreReader<S> {
         });
 
         by_file.into_iter().try_for_each(|(file_id, mut entries)| {
-            let fd = self.manager.open_for_read(file_id)?;
-            let file_size = self.manager.io().file_size(fd)?;
+            let handle = self.manager.open_for_read(file_id)?;
+            let file_size = self.manager.io().file_size(handle.fd())?;
             entries.sort_by_key(|(_, loc)| loc.offset);
             entries.into_iter().try_for_each(|(orig_idx, loc)| {
-                let data = self.decode_and_validate(fd, file_size, loc)?;
+                let data = self.decode_and_validate(handle.fd(), file_size, loc)?;
                 results[orig_idx] = Some(data);
                 Ok::<_, ReadError>(())
             })
@@ -116,9 +116,9 @@ impl<S: StorageIO> BlockStoreReader<S> {
     }
 
     fn read_block_at(&self, location: BlockLocation) -> Result<Bytes, ReadError> {
-        let fd = self.manager.open_for_read(location.file_id)?;
-        let file_size = self.manager.io().file_size(fd)?;
-        self.decode_and_validate(fd, file_size, location)
+        let handle = self.manager.open_for_read(location.file_id)?;
+        let file_size = self.manager.io().file_size(handle.fd())?;
+        self.decode_and_validate(handle.fd(), file_size, location)
     }
 
     fn decode_and_validate(
