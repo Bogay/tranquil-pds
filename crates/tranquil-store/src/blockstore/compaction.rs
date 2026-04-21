@@ -102,6 +102,13 @@ pub(super) fn compact_on_writer_thread<S: StorageIO>(
                 .io()
                 .delete(&hint_file_path(manager.data_dir(), source_file_id))
                 .ok();
+            if live_count == 0 {
+                manager.delete_data_file(new_file_id).ok();
+                manager
+                    .io()
+                    .delete(&hint_file_path(manager.data_dir(), new_file_id))
+                    .ok();
+            }
             manager.io().sync_dir(manager.data_dir())?;
 
             let reclaimed_bytes = source_size.saturating_sub(new_size);

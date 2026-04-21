@@ -393,11 +393,12 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
             io.sync(fd).map_err(RepoError::storage)?;
         }
 
-        if !hint_exists && !scanned_entries.is_empty() {
+        if !scanned_entries.is_empty() {
             tracing::info!(
                 file_id = %file_id,
                 scanned = scanned_entries.len(),
-                "rebuilding index from data file (no hint file, treating as restored backup)"
+                hint_exists,
+                "reindexing blocks past hint coverage"
             );
             let cursor = super::types::WriteCursor {
                 file_id,

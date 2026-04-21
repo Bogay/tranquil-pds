@@ -37,10 +37,11 @@ uuid = { workspace = true }
 tempfile = { version = "3", optional = true }
 clap = { workspace = true, optional = true }
 toml = { version = "0.8", optional = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"], optional = true }
 
 [features]
 test-harness = ["dep:tempfile"]
-gauntlet-cli = ["test-harness", "dep:clap", "dep:toml"]
+gauntlet-cli = ["test-harness", "dep:clap", "dep:toml", "dep:tracing-subscriber"]
 
 [[bin]]
 name = "tranquil-gauntlet"

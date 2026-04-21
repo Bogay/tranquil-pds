@@ -704,6 +704,7 @@ impl HashTable {
 const CHECKPOINT_MAGIC: [u8; 8] = *b"TQCKPT01";
 const CHECKPOINT_VERSION_V1: u32 = 1;
 const CHECKPOINT_VERSION_V2: u32 = 2;
+const CHECKPOINT_VERSION_V3: u32 = 3;
 const CHECKPOINT_HEADER_SIZE: usize = 128;
 const TRAILER_MAGIC: u64 = 0xDEAD_BEEF_CAFE_F00D;
 const SLOT_SIZE: usize = std::mem::size_of::<Slot>();
@@ -733,6 +734,7 @@ const H_CHECKPOINT_EPOCH: usize = 56;
 const H_HINT_FILE_ID: usize = 64;
 const H_HINT_OFFSET: usize = 72;
 const H_HEADER_CHECKSUM: usize = 80;
+const H_GENERATION: usize = 88;
 
 fn header_checksum(buf: &[u8; CHECKPOINT_HEADER_SIZE]) -> u64 {
     xxhash_rust::xxh3::xxh3_64(&buf[..H_HEADER_CHECKSUM])
@@ -745,10 +747,11 @@ fn serialize_header(
     cursor_offset: u64,
     checkpoint_epoch: u64,
     shard_count: u16,
+    generation: u64,
 ) -> [u8; CHECKPOINT_HEADER_SIZE] {
     let mut buf = [0u8; CHECKPOINT_HEADER_SIZE];
     buf[H_MAGIC..H_MAGIC + 8].copy_from_slice(&CHECKPOINT_MAGIC);
-    buf[H_VERSION..H_VERSION + 4].copy_from_slice(&CHECKPOINT_VERSION_V2.to_le_bytes());
+    buf[H_VERSION..H_VERSION + 4].copy_from_slice(&CHECKPOINT_VERSION_V3.to_le_bytes());
     buf[H_SHARD_COUNT..H_SHARD_COUNT + 2].copy_from_slice(&shard_count.to_le_bytes());
     buf[H_SLOT_COUNT..H_SLOT_COUNT + 8].copy_from_slice(&slot_count.to_le_bytes());
     buf[H_ENTRY_COUNT..H_ENTRY_COUNT + 8].copy_from_slice(&entry_count.to_le_bytes());
@@ -756,6 +759,7 @@ fn serialize_header(
     buf[H_CURSOR_OFFSET..H_CURSOR_OFFSET + 8].copy_from_slice(&cursor_offset.to_le_bytes());
     buf[H_CHECKPOINT_EPOCH..H_CHECKPOINT_EPOCH + 8]
         .copy_from_slice(&checkpoint_epoch.to_le_bytes());
+    buf[H_GENERATION..H_GENERATION + 8].copy_from_slice(&generation.to_le_bytes());
     let checksum = header_checksum(&buf);
     buf[H_HEADER_CHECKSUM..H_HEADER_CHECKSUM + 8].copy_from_slice(&checksum.to_le_bytes());
     buf
@@ -796,6 +800,7 @@ pub fn write_checkpoint(
     table: &HashTable,
     path: &Path,
     epoch: CommitEpoch,
+    generation: u64,
     positions: &CheckpointPositions,
 ) -> io::Result<()> {
     use std::io::Write;
@@ -817,6 +822,7 @@ pub fn write_checkpoint(
         cursor_offset,
         epoch.raw(),
         shard_count,
+        generation,
     );
 
     let slot_bytes = slots_as_bytes(&table.slots);
@@ -844,7 +850,7 @@ pub fn write_checkpoint(
     Ok(())
 }
 
-fn parse_checkpoint_header(data: &[u8]) -> io::Result<(usize, usize, u32, u64, u64, u16)> {
+fn parse_checkpoint_header(data: &[u8]) -> io::Result<(usize, usize, u32, u64, u64, u16, u64)> {
     if data.len() < CHECKPOINT_HEADER_SIZE + 16 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -863,7 +869,10 @@ fn parse_checkpoint_header(data: &[u8]) -> io::Result<(usize, usize, u32, u64, u
     }
 
     let version = u32::from_le_bytes(hdr[H_VERSION..H_VERSION + 4].try_into().unwrap());
-    if version != CHECKPOINT_VERSION_V1 && version != CHECKPOINT_VERSION_V2 {
+    if version != CHECKPOINT_VERSION_V1
+        && version != CHECKPOINT_VERSION_V2
+        && version != CHECKPOINT_VERSION_V3
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("checkpoint version {version} unsupported"),
@@ -921,8 +930,15 @@ fn parse_checkpoint_header(data: &[u8]) -> io::Result<(usize, usize, u32, u64, u
     );
 
     let shard_count = match version {
-        CHECKPOINT_VERSION_V2 => {
+        CHECKPOINT_VERSION_V2 | CHECKPOINT_VERSION_V3 => {
             u16::from_le_bytes(hdr[H_SHARD_COUNT..H_SHARD_COUNT + 2].try_into().unwrap())
+        }
+        _ => 0,
+    };
+
+    let generation = match version {
+        CHECKPOINT_VERSION_V3 => {
+            u64::from_le_bytes(hdr[H_GENERATION..H_GENERATION + 8].try_into().unwrap())
         }
         _ => 0,
     };
@@ -934,6 +950,7 @@ fn parse_checkpoint_header(data: &[u8]) -> io::Result<(usize, usize, u32, u64, u
         cursor_offset,
         checkpoint_epoch,
         shard_count,
+        generation,
     ))
 }
 
@@ -948,11 +965,20 @@ fn deserialize_shard_positions(data: &[u8], count: usize) -> Vec<(DataFileId, Hi
         .collect()
 }
 
-pub fn read_checkpoint(path: &Path) -> io::Result<(HashTable, CommitEpoch, CheckpointPositions)> {
+pub fn read_checkpoint(
+    path: &Path,
+) -> io::Result<(HashTable, CommitEpoch, CheckpointPositions, u64)> {
     let data = std::fs::read(path)?;
 
-    let (slot_count, entry_count, cursor_file_id, cursor_offset, checkpoint_epoch, shard_count) =
-        parse_checkpoint_header(&data)?;
+    let (
+        slot_count,
+        entry_count,
+        cursor_file_id,
+        cursor_offset,
+        checkpoint_epoch,
+        shard_count,
+        generation,
+    ) = parse_checkpoint_header(&data)?;
 
     let hdr: &[u8; CHECKPOINT_HEADER_SIZE] = data[..CHECKPOINT_HEADER_SIZE].try_into().unwrap();
     let version = u32::from_le_bytes(hdr[H_VERSION..H_VERSION + 4].try_into().unwrap());
@@ -972,7 +998,7 @@ pub fn read_checkpoint(path: &Path) -> io::Result<(HashTable, CommitEpoch, Check
     let shard_pos_region = &data[shard_pos_start..shard_pos_start + shard_pos_size];
 
     let data_checksum = match version {
-        CHECKPOINT_VERSION_V2 => {
+        CHECKPOINT_VERSION_V2 | CHECKPOINT_VERSION_V3 => {
             let mut hasher = xxhash_rust::xxh3::Xxh3::new();
             hasher.update(slot_region);
             hasher.update(shard_pos_region);
@@ -1035,7 +1061,7 @@ pub fn read_checkpoint(path: &Path) -> io::Result<(HashTable, CommitEpoch, Check
     let epoch = CommitEpoch::new(checkpoint_epoch);
 
     let positions = match version {
-        CHECKPOINT_VERSION_V2 if shard_count > 0 => CheckpointPositions(
+        CHECKPOINT_VERSION_V2 | CHECKPOINT_VERSION_V3 if shard_count > 0 => CheckpointPositions(
             deserialize_shard_positions(shard_pos_region, shard_count as usize),
         ),
         _ => {
@@ -1047,12 +1073,12 @@ pub fn read_checkpoint(path: &Path) -> io::Result<(HashTable, CommitEpoch, Check
         }
     };
 
-    Ok((table, epoch, positions))
+    Ok((table, epoch, positions, generation))
 }
 
 pub fn load_best_checkpoint(
     index_dir: &Path,
-) -> Option<(HashTable, CommitEpoch, CheckpointPositions)> {
+) -> Option<(HashTable, CommitEpoch, CheckpointPositions, u64)> {
     let path_a = index_dir.join("checkpoint_a.tqc");
     let path_b = index_dir.join("checkpoint_b.tqc");
 
@@ -1060,7 +1086,7 @@ pub fn load_best_checkpoint(
     let result_b = read_checkpoint(&path_b).ok();
 
     match (result_a, result_b) {
-        (Some(a), Some(b)) => match a.1.raw() >= b.1.raw() {
+        (Some(a), Some(b)) => match (a.3, a.1.raw()) >= (b.3, b.1.raw()) {
             true => Some(a),
             false => Some(b),
         },
@@ -1070,7 +1096,7 @@ pub fn load_best_checkpoint(
     }
 }
 
-fn read_checkpoint_epoch(path: &Path) -> Option<u64> {
+fn read_checkpoint_meta(path: &Path) -> Option<(u64, u64)> {
     let mut file = std::fs::File::open(path).ok()?;
     let mut buf = [0u8; CHECKPOINT_HEADER_SIZE];
     std::io::Read::read_exact(&mut file, &mut buf).ok()?;
@@ -1081,7 +1107,10 @@ fn read_checkpoint_epoch(path: &Path) -> Option<u64> {
     }
 
     let version = u32::from_le_bytes(buf[H_VERSION..H_VERSION + 4].try_into().ok()?);
-    if version != CHECKPOINT_VERSION_V1 && version != CHECKPOINT_VERSION_V2 {
+    if version != CHECKPOINT_VERSION_V1
+        && version != CHECKPOINT_VERSION_V2
+        && version != CHECKPOINT_VERSION_V3
+    {
         return None;
     }
 
@@ -1094,33 +1123,41 @@ fn read_checkpoint_epoch(path: &Path) -> Option<u64> {
         return None;
     }
 
-    Some(u64::from_le_bytes(
+    let epoch = u64::from_le_bytes(
         buf[H_CHECKPOINT_EPOCH..H_CHECKPOINT_EPOCH + 8]
             .try_into()
             .ok()?,
-    ))
+    );
+    let generation = match version {
+        CHECKPOINT_VERSION_V3 => {
+            u64::from_le_bytes(buf[H_GENERATION..H_GENERATION + 8].try_into().ok()?)
+        }
+        _ => 0,
+    };
+    Some((epoch, generation))
 }
 
 pub fn write_checkpoint_ab(
     table: &HashTable,
     index_dir: &Path,
     epoch: CommitEpoch,
+    generation: u64,
     positions: &CheckpointPositions,
 ) -> io::Result<()> {
     let path_a = index_dir.join("checkpoint_a.tqc");
     let path_b = index_dir.join("checkpoint_b.tqc");
 
-    let epoch_a = read_checkpoint_epoch(&path_a);
-    let epoch_b = read_checkpoint_epoch(&path_b);
+    let meta_a = read_checkpoint_meta(&path_a);
+    let meta_b = read_checkpoint_meta(&path_b);
 
-    let target_path = match (epoch_a, epoch_b) {
-        (Some(a), Some(b)) if a >= b => path_b,
+    let target_path = match (meta_a, meta_b) {
+        (Some(a), Some(b)) if (a.1, a.0) >= (b.1, b.0) => path_b,
         (Some(_), Some(_)) => path_a,
         (Some(_), None) => path_b,
         (None, _) => path_a,
     };
 
-    write_checkpoint(table, &target_path, epoch, positions)
+    write_checkpoint(table, &target_path, epoch, generation, positions)
 }
 
 #[derive(Debug)]
@@ -1146,6 +1183,7 @@ pub struct BlockIndex {
     checkpoint_lock: parking_lot::Mutex<()>,
     loaded_checkpoint_positions: Option<CheckpointPositions>,
     loaded_checkpoint_epoch: Option<CommitEpoch>,
+    next_generation: std::sync::atomic::AtomicU64,
 }
 
 impl BlockIndex {
@@ -1156,33 +1194,36 @@ impl BlockIndex {
             checkpoint_lock: parking_lot::Mutex::new(()),
             loaded_checkpoint_positions: None,
             loaded_checkpoint_epoch: None,
+            next_generation: std::sync::atomic::AtomicU64::new(1),
         }
     }
 
     pub fn open(index_dir: &Path) -> io::Result<Self> {
         std::fs::create_dir_all(index_dir)?;
-        let (table, checkpoint_positions, checkpoint_epoch) = match load_best_checkpoint(index_dir)
-        {
-            Some((table, epoch, positions)) => {
-                tracing::info!(
-                    blocks = table.len(),
-                    epoch = epoch.raw(),
-                    shard_positions = positions.0.len(),
-                    "loaded block index from checkpoint"
-                );
-                (table, Some(positions), Some(epoch))
-            }
-            None => {
-                tracing::info!("no valid checkpoint found, starting with empty index");
-                (HashTable::with_capacity(64), None, None)
-            }
-        };
+        let (table, checkpoint_positions, checkpoint_epoch, loaded_generation) =
+            match load_best_checkpoint(index_dir) {
+                Some((table, epoch, positions, gen_value)) => {
+                    tracing::info!(
+                        blocks = table.len(),
+                        epoch = epoch.raw(),
+                        shard_positions = positions.0.len(),
+                        generation = gen_value,
+                        "loaded block index from checkpoint"
+                    );
+                    (table, Some(positions), Some(epoch), gen_value)
+                }
+                None => {
+                    tracing::info!("no valid checkpoint found, starting with empty index");
+                    (HashTable::with_capacity(64), None, None, 0)
+                }
+            };
         Ok(Self {
             table: RwLock::new(table),
             index_dir: index_dir.to_path_buf(),
             checkpoint_lock: parking_lot::Mutex::new(()),
             loaded_checkpoint_positions: checkpoint_positions,
             loaded_checkpoint_epoch: checkpoint_epoch,
+            next_generation: std::sync::atomic::AtomicU64::new(loaded_generation + 1),
         })
     }
 
@@ -1481,9 +1522,12 @@ impl BlockIndex {
         hint_positions: &ShardHintPositions,
     ) -> io::Result<()> {
         let _guard = self.checkpoint_lock.lock();
+        let generation = self
+            .next_generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let table = self.table.read();
         let positions = hint_positions.snapshot();
-        write_checkpoint_ab(&table, &self.index_dir, epoch, &positions)
+        write_checkpoint_ab(&table, &self.index_dir, epoch, generation, &positions)
     }
 
     pub fn write_checkpoint_with_positions(
@@ -1492,8 +1536,11 @@ impl BlockIndex {
         positions: &CheckpointPositions,
     ) -> io::Result<()> {
         let _guard = self.checkpoint_lock.lock();
+        let generation = self
+            .next_generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let table = self.table.read();
-        write_checkpoint_ab(&table, &self.index_dir, epoch, positions)
+        write_checkpoint_ab(&table, &self.index_dir, epoch, generation, positions)
     }
 
     pub fn index_dir(&self) -> &Path {
@@ -2045,8 +2092,8 @@ mod tests {
         let epoch = CommitEpoch::new(42);
         let positions = CheckpointPositions::single(DataFileId::new(5), HintOffset::new(12345));
 
-        write_checkpoint(&table, &path, epoch, &positions).unwrap();
-        let (restored, restored_epoch, restored_pos) = read_checkpoint(&path).unwrap();
+        write_checkpoint(&table, &path, epoch, 7, &positions).unwrap();
+        let (restored, restored_epoch, restored_pos, _gen) = read_checkpoint(&path).unwrap();
 
         assert_eq!(restored.len(), 10);
         assert_eq!(restored_epoch.raw(), 42);
@@ -2078,14 +2125,14 @@ mod tests {
         table
             .insert_or_increment(&test_cid(1), test_loc(0, 0, 10))
             .unwrap();
-        write_checkpoint_ab(&table, dir.path(), CommitEpoch::new(1), &pos).unwrap();
+        write_checkpoint_ab(&table, dir.path(), CommitEpoch::new(1), 1, &pos).unwrap();
 
         table
             .insert_or_increment(&test_cid(2), test_loc(0, 100, 10))
             .unwrap();
-        write_checkpoint_ab(&table, dir.path(), CommitEpoch::new(2), &pos).unwrap();
+        write_checkpoint_ab(&table, dir.path(), CommitEpoch::new(2), 2, &pos).unwrap();
 
-        let (best, epoch, _) = load_best_checkpoint(dir.path()).unwrap();
+        let (best, epoch, _, _) = load_best_checkpoint(dir.path()).unwrap();
         assert_eq!(epoch.raw(), 2);
         assert_eq!(best.len(), 2);
     }
@@ -2099,16 +2146,16 @@ mod tests {
         table
             .insert_or_increment(&test_cid(1), test_loc(0, 0, 10))
             .unwrap();
-        write_checkpoint_ab(&table, dir.path(), CommitEpoch::new(1), &pos).unwrap();
+        write_checkpoint_ab(&table, dir.path(), CommitEpoch::new(1), 1, &pos).unwrap();
 
         table
             .insert_or_increment(&test_cid(2), test_loc(0, 100, 10))
             .unwrap();
-        write_checkpoint_ab(&table, dir.path(), CommitEpoch::new(2), &pos).unwrap();
+        write_checkpoint_ab(&table, dir.path(), CommitEpoch::new(2), 2, &pos).unwrap();
 
         std::fs::write(dir.path().join("checkpoint_b.tqc"), b"corrupt").unwrap();
 
-        let (best, epoch, _) = load_best_checkpoint(dir.path()).unwrap();
+        let (best, epoch, _, _) = load_best_checkpoint(dir.path()).unwrap();
         assert_eq!(epoch.raw(), 1);
         assert_eq!(best.len(), 1);
     }

@@ -563,6 +563,16 @@ fn initialize_active_state<S: StorageIO>(
                 )));
             }
 
+            let header_end = super::data_file::BLOCK_HEADER_SIZE as u64;
+            let position = match file_size < header_end {
+                true => {
+                    let writer = DataFileWriter::new(manager.io(), fd, wc.file_id)?;
+                    writer.sync()?;
+                    writer.position()
+                }
+                false => BlockOffset::new(file_size),
+            };
+
             let hint_path = hint_file_path(data_dir, wc.file_id);
             let hint_fd = manager.io().open(&hint_path, OpenOptions::read_write())?;
             let hint_size = manager.io().file_size(hint_fd)?;
@@ -570,7 +580,7 @@ fn initialize_active_state<S: StorageIO>(
             Ok(ActiveState {
                 file_id: wc.file_id,
                 fd,
-                position: BlockOffset::new(file_size),
+                position,
                 hint_fd,
                 hint_position: HintOffset::new(hint_size),
             })
@@ -1170,6 +1180,8 @@ fn rollback_batch<S: StorageIO>(
     state: &ActiveState,
     rotations: &[RotationState],
 ) {
+    let _ = manager.io().truncate(state.fd, state.position.raw());
+    let _ = manager.io().sync(state.fd);
     let _ = manager
         .io()
         .truncate(state.hint_fd, state.hint_position.raw());
@@ -1226,46 +1238,55 @@ fn process_batch<S: StorageIO>(
                     hint_writer.append_hint(cid_bytes, &loc)?;
                     loc
                 }
-                None => {
-                    if manager.should_rotate(data_writer.position()) {
-                        data_writer.sync()?;
-                        hint_writer.sync()?;
-
-                        let next_id = ctx.file_ids.allocate();
-                        let next_fd = manager.open_for_append(next_id)?;
-
-                        tracing::info!(
-                            from = %data_writer.file_id(),
-                            to = %next_id,
-                            "data file rotation"
-                        );
-
-                        data_writer = DataFileWriter::new(manager.io(), next_fd, next_id)?;
-
-                        let new_hint_path = hint_file_path(manager.data_dir(), next_id);
-                        let new_hint_fd = manager
-                            .io()
-                            .open(&new_hint_path, OpenOptions::read_write())?;
-
-                        manager.io().sync_dir(manager.data_dir())?;
-
-                        current_hint_fd = new_hint_fd;
-                        hint_writer = HintFileWriter::new(manager.io(), new_hint_fd);
-                        rotations.push(RotationState {
-                            file_id: next_id,
-                            fd: next_fd,
-                            hint_fd: new_hint_fd,
-                        });
+                None => match index.get(cid_bytes) {
+                    Some(existing) => {
+                        dedup_hits = dedup_hits.saturating_add(1);
+                        let loc = existing.location;
+                        hint_writer.append_hint(cid_bytes, &loc)?;
+                        dedup.insert(*cid_bytes, loc);
+                        loc
                     }
+                    None => {
+                        if manager.should_rotate(data_writer.position()) {
+                            data_writer.sync()?;
+                            hint_writer.sync()?;
 
-                    let loc = data_writer.append_block(cid_bytes, data)?;
-                    hint_writer.append_hint(cid_bytes, &loc)?;
+                            let next_id = ctx.file_ids.allocate();
+                            let next_fd = manager.open_for_append(next_id)?;
 
-                    block_bytes = block_bytes.saturating_add(data.len() as u64);
-                    block_count = block_count.saturating_add(1);
-                    dedup.insert(*cid_bytes, loc);
-                    loc
-                }
+                            tracing::info!(
+                                from = %data_writer.file_id(),
+                                to = %next_id,
+                                "data file rotation"
+                            );
+
+                            data_writer = DataFileWriter::new(manager.io(), next_fd, next_id)?;
+
+                            let new_hint_path = hint_file_path(manager.data_dir(), next_id);
+                            let new_hint_fd = manager
+                                .io()
+                                .open(&new_hint_path, OpenOptions::read_write())?;
+
+                            manager.io().sync_dir(manager.data_dir())?;
+
+                            current_hint_fd = new_hint_fd;
+                            hint_writer = HintFileWriter::new(manager.io(), new_hint_fd);
+                            rotations.push(RotationState {
+                                file_id: next_id,
+                                fd: next_fd,
+                                hint_fd: new_hint_fd,
+                            });
+                        }
+
+                        let loc = data_writer.append_block(cid_bytes, data)?;
+                        hint_writer.append_hint(cid_bytes, &loc)?;
+
+                        block_bytes = block_bytes.saturating_add(data.len() as u64);
+                        block_count = block_count.saturating_add(1);
+                        dedup.insert(*cid_bytes, loc);
+                        loc
+                    }
+                },
             };
 
             index_entries.push((*cid_bytes, location));

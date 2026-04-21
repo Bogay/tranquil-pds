@@ -7,7 +7,9 @@ use cid::Cid;
 use jacquard_repo::mst::Mst;
 
 use super::oracle::{Oracle, hex_short, try_cid_to_fixed};
-use crate::blockstore::{CidBytes, CompactionError, TranquilBlockStore, hash_to_cid_bytes};
+use crate::blockstore::{
+    BLOCK_HEADER_SIZE, CidBytes, CompactionError, TranquilBlockStore, hash_to_cid_bytes,
+};
 use crate::eventlog::{EventSequence, SegmentId};
 use crate::io::{RealIO, StorageIO};
 
@@ -388,10 +390,18 @@ impl<S: StorageIO + Send + Sync + 'static> Invariant<S> for NoOrphanFiles {
         let result = tokio::task::spawn_blocking(move || {
             let disk = store_c.list_data_files().map_err(|e| e.to_string())?;
             let liveness = store_c.compaction_liveness(0).map_err(|e| e.to_string())?;
+            let header = BLOCK_HEADER_SIZE as u64;
             let orphans: Vec<String> = disk
                 .iter()
                 .filter(|fid| !liveness.contains_key(fid))
-                .map(|fid| format!("{fid}"))
+                .filter_map(|fid| {
+                    let path = store_c.data_file_path(*fid);
+                    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    match size > header {
+                        true => Some(format!("{fid} ({size} B)")),
+                        false => None,
+                    }
+                })
                 .collect();
             Ok::<_, String>(orphans)
         })
@@ -479,6 +489,7 @@ impl<S: StorageIO + Send + Sync + 'static> Invariant<S> for ManifestEqualsRealit
         tokio::task::spawn_blocking(move || {
             let listed = store.list_data_files().map_err(|e| e.to_string())?;
             let liveness = store.compaction_liveness(0).map_err(|e| e.to_string())?;
+            let header = BLOCK_HEADER_SIZE as u64;
 
             let mut violations: Vec<String> = Vec::new();
             listed.iter().for_each(|fid| {
@@ -487,21 +498,23 @@ impl<S: StorageIO + Send + Sync + 'static> Invariant<S> for ManifestEqualsRealit
                     Err(e) => violations.push(format!("{fid}: metadata {e}")),
                     Ok(meta) => {
                         let on_disk = meta.len();
+                        let content = on_disk.saturating_sub(header);
                         match liveness.get(fid) {
-                            None => violations.push(format!(
+                            None if on_disk > header => violations.push(format!(
                                 "{fid}: listed on disk at {on_disk} B but not in index liveness"
                             )),
-                            Some(info) if on_disk < info.total_bytes => {
+                            None => {}
+                            Some(info) if content < info.total_bytes => {
                                 violations.push(format!(
-                                    "{fid}: on-disk {on_disk} B < index total_bytes {}",
+                                    "{fid}: on-disk {on_disk} B (content {content}) < index total_bytes {}",
                                     info.total_bytes
                                 ));
                             }
-                            Some(info) if on_disk > info.total_bytes => {
+                            Some(info) if content > info.total_bytes => {
                                 violations.push(format!(
-                                    "{fid}: on-disk {on_disk} B > index total_bytes {}, {} B unaccounted",
+                                    "{fid}: on-disk {on_disk} B (content {content}) > index total_bytes {}, {} B unaccounted",
                                     info.total_bytes,
-                                    on_disk - info.total_bytes
+                                    content - info.total_bytes
                                 ));
                             }
                             Some(_) => {}
