@@ -1217,6 +1217,37 @@ fn process_batch<S: StorageIO>(
     let mut hint_writer =
         HintFileWriter::resume(manager.io(), current_hint_fd, state.hint_position);
 
+    if manager.should_rotate(data_writer.position()) {
+        data_writer.sync().map_err(CommitError::from)?;
+        hint_writer.sync().map_err(CommitError::from)?;
+
+        let next_id = ctx.file_ids.allocate();
+        let next_fd = manager.open_for_append(next_id)?;
+
+        tracing::info!(
+            from = %data_writer.file_id(),
+            to = %next_id,
+            "data file rotation (batch boundary)"
+        );
+
+        data_writer = DataFileWriter::new(manager.io(), next_fd, next_id)?;
+
+        let new_hint_path = hint_file_path(manager.data_dir(), next_id);
+        let new_hint_fd = manager
+            .io()
+            .open(&new_hint_path, OpenOptions::read_write())?;
+
+        manager.io().sync_dir(manager.data_dir())?;
+
+        current_hint_fd = new_hint_fd;
+        hint_writer = HintFileWriter::new(manager.io(), new_hint_fd);
+        rotations.push(RotationState {
+            file_id: next_id,
+            fd: next_fd,
+            hint_fd: new_hint_fd,
+        });
+    }
+
     let mut block_bytes: u64 = 0;
     let mut block_count: u64 = 0;
     let mut dedup_hits: u64 = 0;
@@ -1247,37 +1278,6 @@ fn process_batch<S: StorageIO>(
                         loc
                     }
                     None => {
-                        if manager.should_rotate(data_writer.position()) {
-                            data_writer.sync()?;
-                            hint_writer.sync()?;
-
-                            let next_id = ctx.file_ids.allocate();
-                            let next_fd = manager.open_for_append(next_id)?;
-
-                            tracing::info!(
-                                from = %data_writer.file_id(),
-                                to = %next_id,
-                                "data file rotation"
-                            );
-
-                            data_writer = DataFileWriter::new(manager.io(), next_fd, next_id)?;
-
-                            let new_hint_path = hint_file_path(manager.data_dir(), next_id);
-                            let new_hint_fd = manager
-                                .io()
-                                .open(&new_hint_path, OpenOptions::read_write())?;
-
-                            manager.io().sync_dir(manager.data_dir())?;
-
-                            current_hint_fd = new_hint_fd;
-                            hint_writer = HintFileWriter::new(manager.io(), new_hint_fd);
-                            rotations.push(RotationState {
-                                file_id: next_id,
-                                fd: next_fd,
-                                hint_fd: new_hint_fd,
-                            });
-                        }
-
                         let loc = data_writer.append_block(cid_bytes, data)?;
                         hint_writer.append_hint(cid_bytes, &loc)?;
 
@@ -1325,6 +1325,20 @@ fn process_batch<S: StorageIO>(
     if ctx.verify_persisted_blocks {
         verify_persisted_blocks(manager, &index_entries).map_err(rollback_on_err)?;
     }
+    let batch_record_count = u32::try_from(
+        block_count
+            .saturating_add(dedup_hits)
+            .saturating_add(all_decrements.len() as u64),
+    )
+    .unwrap_or(u32::MAX);
+    hint_writer
+        .append_commit_marker(
+            current_epoch.raw(),
+            batch_record_count,
+            data_writer.file_id(),
+            data_writer.position(),
+        )
+        .map_err(|e| rollback_on_err(CommitError::from(e)))?;
     hint_writer.sync().map_err(|e| rollback_on_err(e.into()))?;
     let sync_nanos = t.elapsed().as_nanos() as u64;
 

@@ -22,6 +22,7 @@ const RECORD_TYPE_PUT: u8 = 0x01;
 const RECORD_TYPE_DECREMENT: u8 = 0x02;
 const RECORD_TYPE_RELOCATE: u8 = 0x03;
 const RECORD_TYPE_REMOVE: u8 = 0x04;
+const RECORD_TYPE_COMMIT_MARKER: u8 = 0x05;
 
 const HINT_FORMAT_VERSION: u8 = 1;
 
@@ -142,6 +143,36 @@ pub(crate) fn encode_decrement_record<S: StorageIO>(
     write_hint_record(io, fd, write_offset, &record)
 }
 
+const MARKER_DATA_OFFSET_POS: usize = CID_OFFSET;
+const MARKER_DATA_FILE_ID_POS: usize = CID_OFFSET + 8;
+const MARKER_RECORD_COUNT_POS: usize = FIELD_B_OFFSET;
+
+pub(crate) fn encode_commit_marker_record<S: StorageIO>(
+    io: &S,
+    fd: FileId,
+    write_offset: HintOffset,
+    batch_seq: u64,
+    record_count: u32,
+    data_file_id: DataFileId,
+    data_offset: BlockOffset,
+) -> io::Result<()> {
+    let mut record = [0u8; HINT_RECORD_SIZE];
+    record[TYPE_OFFSET] = RECORD_TYPE_COMMIT_MARKER;
+    record[VERSION_OFFSET] = HINT_FORMAT_VERSION;
+    record[MARKER_DATA_OFFSET_POS..MARKER_DATA_OFFSET_POS + 8]
+        .copy_from_slice(&data_offset.raw().to_le_bytes());
+    record[MARKER_DATA_FILE_ID_POS..MARKER_DATA_FILE_ID_POS + 4]
+        .copy_from_slice(&data_file_id.raw().to_le_bytes());
+    record[FIELD_A_OFFSET..FIELD_A_OFFSET + 8].copy_from_slice(&batch_seq.to_le_bytes());
+    record[MARKER_RECORD_COUNT_POS..MARKER_RECORD_COUNT_POS + 4]
+        .copy_from_slice(&record_count.to_le_bytes());
+
+    let checksum = hint_checksum(&record[..HINT_PAYLOAD_SIZE]);
+    record[CHECKSUM_OFFSET..].copy_from_slice(&checksum.to_le_bytes());
+
+    write_hint_record(io, fd, write_offset, &record)
+}
+
 #[must_use]
 #[derive(Debug)]
 pub enum ReadHintRecord {
@@ -165,6 +196,12 @@ pub enum ReadHintRecord {
     },
     Remove {
         cid_bytes: [u8; CID_SIZE],
+    },
+    CommitMarker {
+        batch_seq: u64,
+        record_count: u32,
+        data_file_id: DataFileId,
+        data_offset: BlockOffset,
     },
     UnknownVersion {
         version: u8,
@@ -295,6 +332,34 @@ pub fn decode_hint_record<S: StorageIO>(
             }))
         }
         RECORD_TYPE_REMOVE => Ok(Some(ReadHintRecord::Remove { cid_bytes })),
+        RECORD_TYPE_COMMIT_MARKER => {
+            let data_offset = BlockOffset::new(u64::from_le_bytes(
+                record[MARKER_DATA_OFFSET_POS..MARKER_DATA_OFFSET_POS + 8]
+                    .try_into()
+                    .unwrap(),
+            ));
+            let data_file_id = DataFileId::new(u32::from_le_bytes(
+                record[MARKER_DATA_FILE_ID_POS..MARKER_DATA_FILE_ID_POS + 4]
+                    .try_into()
+                    .unwrap(),
+            ));
+            let batch_seq = u64::from_le_bytes(
+                record[FIELD_A_OFFSET..FIELD_A_OFFSET + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let record_count = u32::from_le_bytes(
+                record[MARKER_RECORD_COUNT_POS..MARKER_RECORD_COUNT_POS + 4]
+                    .try_into()
+                    .unwrap(),
+            );
+            Ok(Some(ReadHintRecord::CommitMarker {
+                batch_seq,
+                record_count,
+                data_file_id,
+                data_offset,
+            }))
+        }
         other => Ok(Some(ReadHintRecord::UnknownType { record_type: other })),
     }
 }
@@ -352,6 +417,26 @@ impl<'a, S: StorageIO> HintFileWriter<'a, S> {
 
     pub fn append_remove(&mut self, cid_bytes: &[u8; CID_SIZE]) -> io::Result<()> {
         encode_remove_record(self.io, self.fd, self.position, cid_bytes)?;
+        self.position = self.position.advance(HINT_RECORD_SIZE as u64);
+        Ok(())
+    }
+
+    pub fn append_commit_marker(
+        &mut self,
+        batch_seq: u64,
+        record_count: u32,
+        data_file_id: DataFileId,
+        data_offset: BlockOffset,
+    ) -> io::Result<()> {
+        encode_commit_marker_record(
+            self.io,
+            self.fd,
+            self.position,
+            batch_seq,
+            record_count,
+            data_file_id,
+            data_offset,
+        )?;
         self.position = self.position.advance(HINT_RECORD_SIZE as u64);
         Ok(())
     }
@@ -416,12 +501,13 @@ impl<S: StorageIO> Iterator for HintFileReader<'_, S> {
                     | ReadHintRecord::Decrement { .. }
                     | ReadHintRecord::Relocate { .. }
                     | ReadHintRecord::Remove { .. }
-                    | ReadHintRecord::UnknownType { .. } => {
+                    | ReadHintRecord::CommitMarker { .. }
+                    | ReadHintRecord::UnknownType { .. }
+                    | ReadHintRecord::UnknownVersion { .. }
+                    | ReadHintRecord::Corrupted => {
                         self.position = self.position.advance(HINT_RECORD_SIZE as u64);
                     }
-                    ReadHintRecord::UnknownVersion { .. }
-                    | ReadHintRecord::Corrupted
-                    | ReadHintRecord::Truncated => {
+                    ReadHintRecord::Truncated => {
                         self.position = HintOffset::new(self.file_size);
                     }
                 }
@@ -529,6 +615,7 @@ fn scan_single_hint_file<S: StorageIO>(
                 ReadHintRecord::Decrement { .. }
                 | ReadHintRecord::Relocate { .. }
                 | ReadHintRecord::Remove { .. }
+                | ReadHintRecord::CommitMarker { .. }
                 | ReadHintRecord::UnknownVersion { .. }
                 | ReadHintRecord::UnknownType { .. }
                 | ReadHintRecord::Corrupted
@@ -542,7 +629,95 @@ fn scan_single_hint_file<S: StorageIO>(
     entries
 }
 
-const REPLAY_BATCH_SIZE: usize = 10_000;
+#[derive(Default)]
+struct PendingBatch {
+    puts: Vec<([u8; CID_SIZE], BlockLocation)>,
+    relocates: Vec<([u8; CID_SIZE], BlockLocation, u32)>,
+    removes: Vec<[u8; CID_SIZE]>,
+    decrements: Vec<([u8; CID_SIZE], CommitEpoch, WallClockMs)>,
+    file_cursors: HashMap<DataFileId, BlockOffset>,
+    max_cursor: Option<WriteCursor>,
+    record_count: u32,
+    boundary_lost: bool,
+}
+
+impl PendingBatch {
+    fn reset(&mut self) {
+        self.puts.clear();
+        self.relocates.clear();
+        self.removes.clear();
+        self.decrements.clear();
+        self.file_cursors.clear();
+        self.max_cursor = None;
+        self.record_count = 0;
+        self.boundary_lost = false;
+    }
+
+    fn note_record(&mut self) {
+        self.record_count = self.record_count.saturating_add(1);
+    }
+
+    fn track_cursor(&mut self, file_id: DataFileId, end: BlockOffset) {
+        let candidate = WriteCursor {
+            file_id,
+            offset: end,
+        };
+        self.max_cursor = Some(match self.max_cursor {
+            Some(c) => std::cmp::max_by_key(c, candidate, |w| (w.file_id, w.offset)),
+            None => candidate,
+        });
+        self.file_cursors
+            .entry(file_id)
+            .and_modify(|existing| {
+                if end > *existing {
+                    *existing = end;
+                }
+            })
+            .or_insert(end);
+    }
+}
+
+fn commit_pending_batch(
+    pending: &mut PendingBatch,
+    index: &super::hash_index::BlockIndex,
+    file_cursors: &mut HashMap<DataFileId, BlockOffset>,
+    max_cursor: &mut Option<WriteCursor>,
+    replayed: &mut u64,
+) -> Result<(), RebuildError> {
+    if !pending.puts.is_empty() {
+        index.batch_insert_buffered(&pending.puts)?;
+    }
+    if !pending.relocates.is_empty() {
+        index.batch_relocate(&pending.relocates)?;
+    }
+    if !pending.removes.is_empty() {
+        index.batch_remove(&pending.removes);
+    }
+    pending
+        .decrements
+        .iter()
+        .try_for_each(|(cid, epoch, ts)| index.batch_decrement(&[*cid], *epoch, *ts))?;
+
+    pending.file_cursors.iter().for_each(|(fid, end)| {
+        file_cursors
+            .entry(*fid)
+            .and_modify(|existing| {
+                if *end > *existing {
+                    *existing = *end;
+                }
+            })
+            .or_insert(*end);
+    });
+    if let Some(c) = pending.max_cursor {
+        *max_cursor = Some(match *max_cursor {
+            Some(m) => std::cmp::max_by_key(m, c, |w| (w.file_id, w.offset)),
+            None => c,
+        });
+    }
+    *replayed = replayed.saturating_add(u64::from(pending.record_count));
+    pending.reset();
+    Ok(())
+}
 
 pub fn replay_hints_into_block_index<S: StorageIO>(
     io: &S,
@@ -568,11 +743,7 @@ pub fn replay_hints_into_block_index<S: StorageIO>(
     let mut max_cursor: Option<WriteCursor> = None;
     let mut file_cursors: HashMap<DataFileId, BlockOffset> = HashMap::new();
     let mut replayed: u64 = 0;
-    let mut put_buffer: Vec<([u8; CID_SIZE], BlockLocation)> =
-        Vec::with_capacity(REPLAY_BATCH_SIZE);
-    let mut relocate_buffer: Vec<([u8; CID_SIZE], BlockLocation, u32)> =
-        Vec::with_capacity(REPLAY_BATCH_SIZE);
-    let mut remove_buffer: Vec<[u8; CID_SIZE]> = Vec::with_capacity(REPLAY_BATCH_SIZE);
+    let mut pending = PendingBatch::default();
 
     hint_files
         .iter()
@@ -604,54 +775,19 @@ pub fn replay_hints_into_block_index<S: StorageIO>(
                             offset,
                             length,
                         };
-                        put_buffer.push((cid_bytes, loc));
-
                         let record_end =
                             offset.advance(BLOCK_RECORD_OVERHEAD as u64 + length.as_u64());
-                        let candidate = WriteCursor {
-                            file_id,
-                            offset: record_end,
-                        };
-                        max_cursor = Some(match max_cursor {
-                            Some(c) => {
-                                std::cmp::max_by_key(c, candidate, |w| (w.file_id, w.offset))
-                            }
-                            None => candidate,
-                        });
-                        file_cursors
-                            .entry(file_id)
-                            .and_modify(|existing| {
-                                if record_end > *existing {
-                                    *existing = record_end;
-                                }
-                            })
-                            .or_insert(record_end);
-
-                        replayed = replayed.saturating_add(1);
-                        if put_buffer.len() >= REPLAY_BATCH_SIZE {
-                            index.batch_insert_buffered(&put_buffer)?;
-                            put_buffer.clear();
-                        }
+                        pending.puts.push((cid_bytes, loc));
+                        pending.track_cursor(file_id, record_end);
+                        pending.note_record();
                     }
                     ReadHintRecord::Decrement {
                         cid_bytes,
                         epoch,
                         timestamp,
                     } => {
-                        if !put_buffer.is_empty() {
-                            index.batch_insert_buffered(&put_buffer)?;
-                            put_buffer.clear();
-                        }
-                        if !relocate_buffer.is_empty() {
-                            index.batch_relocate(&relocate_buffer)?;
-                            relocate_buffer.clear();
-                        }
-                        if !remove_buffer.is_empty() {
-                            index.batch_remove(&remove_buffer);
-                            remove_buffer.clear();
-                        }
-                        index.batch_decrement(&[cid_bytes], epoch, timestamp)?;
-                        replayed = replayed.saturating_add(1);
+                        pending.decrements.push((cid_bytes, epoch, timestamp));
+                        pending.note_record();
                     }
                     ReadHintRecord::Relocate {
                         cid_bytes,
@@ -665,74 +801,70 @@ pub fn replay_hints_into_block_index<S: StorageIO>(
                             offset,
                             length,
                         };
-                        relocate_buffer.push((cid_bytes, loc, refcount));
-
                         let record_end =
                             offset.advance(BLOCK_RECORD_OVERHEAD as u64 + length.as_u64());
-                        file_cursors
-                            .entry(file_id)
-                            .and_modify(|existing| {
-                                if record_end > *existing {
-                                    *existing = record_end;
-                                }
-                            })
-                            .or_insert(record_end);
-
-                        replayed = replayed.saturating_add(1);
-                        if relocate_buffer.len() >= REPLAY_BATCH_SIZE {
-                            if !put_buffer.is_empty() {
-                                index.batch_insert_buffered(&put_buffer)?;
-                                put_buffer.clear();
-                            }
-                            index.batch_relocate(&relocate_buffer)?;
-                            relocate_buffer.clear();
-                        }
+                        pending.relocates.push((cid_bytes, loc, refcount));
+                        pending.track_cursor(file_id, record_end);
+                        pending.note_record();
                     }
                     ReadHintRecord::Remove { cid_bytes } => {
-                        remove_buffer.push(cid_bytes);
-                        replayed = replayed.saturating_add(1);
-                        if remove_buffer.len() >= REPLAY_BATCH_SIZE {
-                            if !put_buffer.is_empty() {
-                                index.batch_insert_buffered(&put_buffer)?;
-                                put_buffer.clear();
+                        pending.removes.push(cid_bytes);
+                        pending.note_record();
+                    }
+                    ReadHintRecord::CommitMarker {
+                        batch_seq,
+                        record_count,
+                        data_file_id,
+                        data_offset,
+                    } => {
+                        let accepts =
+                            !pending.boundary_lost && pending.record_count == record_count;
+                        match accepts {
+                            true => {
+                                pending.track_cursor(data_file_id, data_offset);
+                                commit_pending_batch(
+                                    &mut pending,
+                                    index,
+                                    &mut file_cursors,
+                                    &mut max_cursor,
+                                    &mut replayed,
+                                )?;
                             }
-                            if !relocate_buffer.is_empty() {
-                                index.batch_relocate(&relocate_buffer)?;
-                                relocate_buffer.clear();
+                            false => {
+                                tracing::warn!(
+                                    file_id = %fid,
+                                    batch_seq,
+                                    expected_count = record_count,
+                                    observed_count = pending.record_count,
+                                    boundary_lost = pending.boundary_lost,
+                                    "rolling back torn hint batch"
+                                );
+                                pending.reset();
                             }
-                            index.batch_remove(&remove_buffer);
-                            remove_buffer.clear();
                         }
                     }
-                    ReadHintRecord::Corrupted => {
-                        tracing::warn!(
-                            file_id = %fid,
-                            "corrupted hint record during replay, skipping"
-                        );
+                    ReadHintRecord::Corrupted
+                    | ReadHintRecord::UnknownVersion { .. }
+                    | ReadHintRecord::UnknownType { .. } => {
+                        pending.boundary_lost = true;
                     }
-                    ReadHintRecord::UnknownVersion { .. }
-                    | ReadHintRecord::UnknownType { .. }
-                    | ReadHintRecord::Truncated => {}
+                    ReadHintRecord::Truncated => {}
                 }
                 Ok::<_, RebuildError>(())
             })?;
 
-            if !put_buffer.is_empty() {
-                index.batch_insert_buffered(&put_buffer)?;
-                put_buffer.clear();
-            }
-            if !relocate_buffer.is_empty() {
-                index.batch_relocate(&relocate_buffer)?;
-                relocate_buffer.clear();
-            }
-            if !remove_buffer.is_empty() {
-                index.batch_remove(&remove_buffer);
-                remove_buffer.clear();
-            }
-
             let _ = io.close(fd);
             Ok(())
         })?;
+
+    if pending.record_count > 0 || pending.boundary_lost {
+        tracing::warn!(
+            record_count = pending.record_count,
+            boundary_lost = pending.boundary_lost,
+            "discarding unterminated hint batch at replay end"
+        );
+        pending.reset();
+    }
 
     if let Some(cursor) = max_cursor {
         index.set_write_cursor(cursor)?;
@@ -1097,7 +1229,7 @@ mod tests {
     }
 
     #[test]
-    fn hint_reader_stops_on_corrupted() {
+    fn hint_reader_reports_corrupted_and_continues() {
         let (sim, fd) = setup();
         let mut writer = HintFileWriter::new(&sim, fd);
 
@@ -1115,9 +1247,48 @@ mod tests {
 
         let reader = HintFileReader::open(&sim, fd).unwrap();
         let records: Vec<_> = reader.map(|r| r.unwrap()).collect();
-        assert_eq!(records.len(), 2);
+        assert_eq!(records.len(), 3);
         assert!(matches!(records[0], ReadHintRecord::Put { .. }));
         assert!(matches!(records[1], ReadHintRecord::Corrupted));
+        assert!(matches!(records[2], ReadHintRecord::Put { .. }));
+    }
+
+    #[test]
+    fn commit_marker_round_trip() {
+        let (sim, fd) = setup();
+        let data_file_id = DataFileId::new(7);
+        let data_offset = BlockOffset::new(9_876);
+
+        encode_commit_marker_record(
+            &sim,
+            fd,
+            HintOffset::new(0),
+            42,
+            128,
+            data_file_id,
+            data_offset,
+        )
+        .unwrap();
+
+        let file_size = sim.file_size(fd).unwrap();
+        let record = decode_hint_record(&sim, fd, HintOffset::new(0), file_size)
+            .unwrap()
+            .unwrap();
+
+        match record {
+            ReadHintRecord::CommitMarker {
+                batch_seq,
+                record_count,
+                data_file_id: fid,
+                data_offset: off,
+            } => {
+                assert_eq!(batch_seq, 42);
+                assert_eq!(record_count, 128);
+                assert_eq!(fid, data_file_id);
+                assert_eq!(off, data_offset);
+            }
+            other => panic!("expected CommitMarker, got {other:?}"),
+        }
     }
 
     #[test]

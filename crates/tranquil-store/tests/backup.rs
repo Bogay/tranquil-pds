@@ -484,7 +484,9 @@ fn incremental_backup_and_restore() {
 fn incremental_is_smaller_than_full() {
     with_runtime(|| {
         let store = open_test_store_with_max_file_size(2048);
-        seed_blocks(&store, 0..100);
+        (0u16..100).step_by(10).for_each(|start| {
+            seed_blocks(&store, start..start + 10);
+        });
         seed_events(&store, 50);
         store.metastore.persist().unwrap();
 

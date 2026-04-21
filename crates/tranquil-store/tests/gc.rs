@@ -227,6 +227,10 @@ fn compact_data_file_crash_safe_old_file_survives() {
                 .collect();
             store.put_blocks_blocking(padding).unwrap();
 
+            store
+                .put_blocks_blocking(vec![(test_cid(220), vec![220u8; 64])])
+                .unwrap();
+
             let files = store.list_data_files().unwrap();
             let first_file = files[0];
 

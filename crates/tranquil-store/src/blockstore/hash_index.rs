@@ -1637,7 +1637,8 @@ impl BlockIndex {
                     ReadHintRecord::Remove { cid_bytes } => {
                         let _ = table.remove(&cid_bytes);
                     }
-                    ReadHintRecord::UnknownVersion { .. }
+                    ReadHintRecord::CommitMarker { .. }
+                    | ReadHintRecord::UnknownVersion { .. }
                     | ReadHintRecord::UnknownType { .. }
                     | ReadHintRecord::Corrupted
                     | ReadHintRecord::Truncated => {}
