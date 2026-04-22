@@ -76,7 +76,7 @@ pub async fn link_signal_device(
         let result = tokio::select! {
             biased;
             _ = shutdown.cancelled() => {
-                tracing::info!("Signal linking aborted due to server shutdown");
+                tracing::info!("server shutting down, aborting signal linking");
                 return;
             }
             r = link_result.completion => r,
@@ -84,10 +84,10 @@ pub async fn link_signal_device(
         match result {
             Ok(Ok(client)) => {
                 if slot_for_task.complete_link(generation, client).await {
-                    tracing::info!("Signal device linked successfully");
+                    tracing::info!("signal device linked");
                 } else {
                     tracing::warn!(
-                        "Signal link completed but generation mismatch or already linked; discarding"
+                        "discarding completed signal link, generation mismatch or already linked"
                     );
                 }
             }

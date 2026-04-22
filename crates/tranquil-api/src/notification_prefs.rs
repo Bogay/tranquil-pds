@@ -282,7 +282,7 @@ async fn process_messaging_channel_update(
                 "Invalid Telegram username. Must be 5-32 characters, alphanumeric or underscore".into(),
             ),
             CommsChannel::Signal => ApiError::InvalidRequest(
-                "Invalid Signal username. Must be 3-32 characters followed by .XX (e.g. username.01)".into(),
+                "Invalid Signal username. Must be a 3-32 character nickname, a dot, then a 2-20 digit discriminator".into(),
             ),
             CommsChannel::Email => ApiError::InvalidEmail,
         });

@@ -126,7 +126,7 @@ impl GauntletReport {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum OpError {
+pub(super) enum OpError {
     #[error("mst add: {0}")]
     MstAdd(String),
     #[error("mst delete: {0}")]
@@ -249,7 +249,7 @@ impl Gauntlet {
     }
 }
 
-fn segments_subdir(root: &Path) -> PathBuf {
+pub(super) fn segments_subdir(root: &Path) -> PathBuf {
     root.join("segments")
 }
 
@@ -373,7 +373,7 @@ async fn run_inner_simulated(
     }
 }
 
-fn open_eventlog<S: StorageIO + Send + Sync + 'static>(
+pub(super) fn open_eventlog<S: StorageIO + Send + Sync + 'static>(
     io: S,
     segments_dir: PathBuf,
     max_segment_size: u64,
@@ -586,7 +586,7 @@ where
     }
 }
 
-fn eventlog_snapshot<S: StorageIO + Send + Sync + 'static>(
+pub(super) fn eventlog_snapshot<S: StorageIO + Send + Sync + 'static>(
     state: Option<&EventLogState<S>>,
 ) -> Option<EventLogSnapshot> {
     let s = state?;
@@ -746,7 +746,7 @@ async fn run_quick_check<S: StorageIO + Send + Sync + 'static>(
     }
 }
 
-async fn run_invariants<S: StorageIO + Send + Sync + 'static>(
+pub(super) async fn run_invariants<S: StorageIO + Send + Sync + 'static>(
     store: &Arc<TranquilBlockStore<S>>,
     oracle: &Oracle,
     root: Option<Cid>,
@@ -828,7 +828,7 @@ fn diff_snapshots(pre: &[(CidBytes, u32)], post: &[(CidBytes, u32)]) -> Option<S
     ))
 }
 
-async fn refresh_oracle_graph<S: StorageIO + Send + Sync + 'static>(
+pub(super) async fn refresh_oracle_graph<S: StorageIO + Send + Sync + 'static>(
     store: &Arc<TranquilBlockStore<S>>,
     oracle: &mut Oracle,
     root: Option<Cid>,
@@ -889,7 +889,7 @@ fn should_restart(policy: RestartPolicy, idx: OpIndex, rng: &mut Lcg) -> Restart
     }
 }
 
-fn blockstore_config(dir: &std::path::Path, s: &StoreConfig) -> BlockStoreConfig {
+pub(super) fn blockstore_config(dir: &std::path::Path, s: &StoreConfig) -> BlockStoreConfig {
     BlockStoreConfig {
         data_dir: dir.join("data"),
         index_dir: dir.join("index"),
@@ -954,7 +954,7 @@ fn did_hash_for_seed(seed: DidSeed) -> DidHash {
     DidHash::from_did(&format!("did:plc:gauntlet{:08x}", seed.0))
 }
 
-async fn apply_op<S: StorageIO + Send + Sync + 'static>(
+pub(super) async fn apply_op<S: StorageIO + Send + Sync + 'static>(
     harness: &mut Harness<S>,
     root: &mut Option<Cid>,
     oracle: &mut Oracle,
@@ -1202,7 +1202,7 @@ fn diff_obsolete(
 ) -> Result<Vec<CidBytes>, OpError> {
     removed_mst_blocks
         .into_iter()
-        .chain(removed_cids.into_iter())
+        .chain(removed_cids)
         .map(|c| try_cid_to_fixed(&c))
         .collect::<Result<_, _>>()
         .map_err(OpError::from)

@@ -33,15 +33,11 @@ impl SignalUsername {
     pub fn parse(username: &str) -> Result<Self, InvalidSignalUsername> {
         let reject = || Err(InvalidSignalUsername(username.to_string()));
 
-        if username.len() < 6 || username.len() > 35 {
-            return reject();
-        }
-
         let Some((base, discriminator)) = username.rsplit_once('.') else {
             return reject();
         };
 
-        if base.len() < 3 || base.len() > 32 {
+        if !matches!(base.len(), 3..=32) {
             return reject();
         }
 
@@ -53,7 +49,7 @@ impl SignalUsername {
             return reject();
         }
 
-        if discriminator.len() != 2 || !discriminator.chars().all(|c| c.is_ascii_digit()) {
+        if !is_valid_discriminator(discriminator) {
             return reject();
         }
 
@@ -63,6 +59,19 @@ impl SignalUsername {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+fn is_valid_discriminator(s: &str) -> bool {
+    if !s.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    if !matches!(s.len(), 2..=20) {
+        return false;
+    }
+    if s.len() > 2 && s.starts_with('0') {
+        return false;
+    }
+    s.parse::<u64>().is_ok_and(|n| n != 0)
 }
 
 impl fmt::Display for SignalUsername {
@@ -115,7 +124,7 @@ impl fmt::Display for MessageTooLong {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "message body too long: {} bytes (max {})",
+            "message body is {} bytes, max {}",
             self.len, self.max
         )
     }
@@ -368,13 +377,13 @@ impl SignalClient {
             let req = tokio::select! {
                 biased;
                 _ = shutdown.cancelled() => {
-                    tracing::info!("signal worker shutting down (cancellation)");
+                    tracing::info!("signal worker cancelled, shutting down");
                     break;
                 }
                 msg = rx.recv() => match msg {
                     Some(r) => r,
                     None => {
-                        tracing::info!("signal worker shutting down (channel closed)");
+                        tracing::info!("signal worker channel closed, shutting down");
                         break;
                     }
                 },

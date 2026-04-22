@@ -299,7 +299,7 @@ impl DiscordSender {
             "type": 1,
             "options": [{
                 "name": "handle",
-                "description": "Your PDS handle (e.g. alice.example.com)",
+                "description": "Your PDS handle",
                 "type": 3,
                 "required": false
             }]

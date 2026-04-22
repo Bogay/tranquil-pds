@@ -203,7 +203,7 @@ fn concurrent_reader_survives_evict_handle() {
     let write_handle = manager.open_for_append(file_id).unwrap();
     {
         let mut writer = DataFileWriter::new(&*sim, write_handle.fd(), file_id).unwrap();
-        let _ = writer.append_block(&test_cid(1), &vec![0x11; 128]).unwrap();
+        let _ = writer.append_block(&test_cid(1), &[0x11; 128]).unwrap();
         writer.sync().unwrap();
     }
     drop(write_handle);

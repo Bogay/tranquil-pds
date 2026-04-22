@@ -1117,7 +1117,7 @@ impl ContentsStore for PgSignalStore {
             Some(r) => match <[u8; 32]>::try_from(r.key.as_slice()) {
                 Ok(arr) => Some(ProfileKey { bytes: arr }),
                 Err(_) => {
-                    warn!(%uuid, len = r.key.len(), "corrupted profile key (expected 32 bytes)");
+                    warn!(%uuid, len = r.key.len(), "corrupted profile key, expected 32 bytes");
                     None
                 }
             },

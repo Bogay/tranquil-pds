@@ -394,7 +394,7 @@ impl TranquilConfig {
 
 #[derive(Debug, Config)]
 pub struct ServerConfig {
-    /// Public hostname of the PDS (e.g. `pds.example.com`).
+    /// Public hostname of the PDS, such as `pds.example.com`.
     #[config(env = "PDS_HOSTNAME")]
     pub hostname: String,
 
@@ -463,8 +463,7 @@ impl ServerConfig {
         format!("https://{}", self.hostname)
     }
 
-    /// Hostname without port suffix (e.g. `pds.example.com` from
-    /// `pds.example.com:443`).
+    /// Hostname without port suffix. Returns `pds.example.com` from `pds.example.com:443`.
     pub fn hostname_without_port(&self) -> &str {
         self.hostname.split(':').next().unwrap_or(&self.hostname)
     }

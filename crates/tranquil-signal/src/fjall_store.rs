@@ -1050,7 +1050,7 @@ impl ContentsStore for FjallSignalStore {
             .and_then(|v| match <[u8; 32]>::try_from(v.as_ref()) {
                 Ok(arr) => Some(ProfileKey { bytes: arr }),
                 Err(_) => {
-                    warn!(%uuid, len = v.len(), "corrupted profile key (expected 32 bytes)");
+                    warn!(%uuid, len = v.len(), "corrupted profile key, expected 32 bytes");
                     None
                 }
             }))

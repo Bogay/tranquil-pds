@@ -88,12 +88,17 @@ fn test_signal_username_validation() {
     assert!(is_valid_signal_username("bob_smith.99"));
     assert!(is_valid_signal_username("user123.42"));
     assert!(is_valid_signal_username("lu1.01"));
-    assert!(is_valid_signal_username("abc.00"));
     assert!(is_valid_signal_username("a_very_long_username_here.55"));
+    assert!(is_valid_signal_username("alice.123"));
+    assert!(is_valid_signal_username("alice.999999999"));
+    assert!(is_valid_signal_username("alice.18446744073709551615"));
 
     assert!(!is_valid_signal_username("alice"));
     assert!(!is_valid_signal_username("alice.1"));
     assert!(!is_valid_signal_username("alice.001"));
+    assert!(!is_valid_signal_username("abc.00"));
+    assert!(!is_valid_signal_username("alice.0"));
+    assert!(!is_valid_signal_username("alice.999999999999999999999"));
     assert!(!is_valid_signal_username(".01"));
     assert!(!is_valid_signal_username("ab.01"));
     assert!(!is_valid_signal_username(""));

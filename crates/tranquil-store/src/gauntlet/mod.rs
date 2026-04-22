@@ -1,5 +1,7 @@
 pub mod farm;
 pub mod invariants;
+pub mod leak;
+pub mod metrics;
 pub mod op;
 pub mod oracle;
 pub mod overrides;
@@ -7,11 +9,14 @@ pub mod regression;
 pub mod runner;
 pub mod scenarios;
 pub mod shrink;
+pub mod soak;
 pub mod workload;
 
 pub use invariants::{
     EventLogSnapshot, Invariant, InvariantSet, InvariantViolation, SnapshotEvent, invariants_for,
 };
+pub use leak::{LeakGateBuildError, LeakGateConfig, LeakViolation, evaluate as evaluate_leak_gate};
+pub use metrics::{MetricName, MetricsSample, sample_harness};
 pub use op::{
     CollectionName, DidSeed, EventKind, Op, OpStream, PayloadSeed, RecordKey, RetentionSecs, Seed,
     ValueSeed,
@@ -26,6 +31,10 @@ pub use runner::{
 };
 pub use scenarios::{Scenario, UnknownScenario, config_for};
 pub use shrink::{ShrinkOutcome, shrink_failure};
+pub use soak::{
+    DEFAULT_CHUNK_OPS, DEFAULT_SAMPLE_INTERVAL_MS, InvariantViolationRecord, SoakConfig, SoakError,
+    SoakEvent, SoakReport, run_soak,
+};
 pub use workload::{
     ByteRange, DidSpaceSize, KeySpaceSize, OpCount, OpWeights, RetentionMaxSecs, SizeDistribution,
     ValueBytes, WorkloadModel,

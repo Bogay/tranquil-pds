@@ -166,9 +166,8 @@ mod tests {
     #[test]
     fn flat_metrics_no_violation() {
         let cfg = LeakGateConfig::short_for_tests();
-        let series: Vec<MetricsSample> = (0..20)
-            .map(|i| sample(60_000 + i * 60_000, GIB))
-            .collect();
+        let series: Vec<MetricsSample> =
+            (0..20).map(|i| sample(60_000 + i * 60_000, GIB)).collect();
         assert!(evaluate(&series, cfg).is_empty());
     }
 
@@ -221,9 +220,8 @@ mod tests {
     #[test]
     fn missing_metric_samples_skipped() {
         let cfg = LeakGateConfig::short_for_tests();
-        let mut series: Vec<MetricsSample> = (0..10)
-            .map(|i| sample(60_000 + i * 60_000, GIB))
-            .collect();
+        let mut series: Vec<MetricsSample> =
+            (0..10).map(|i| sample(60_000 + i * 60_000, GIB)).collect();
         series[3].rss_bytes = None;
         series[7].rss_bytes = None;
         assert!(evaluate(&series, cfg).is_empty());

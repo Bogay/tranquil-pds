@@ -517,8 +517,8 @@ fn sim_aggressive_faults_data_integrity() {
             return;
         };
         let start_pos = writer.position();
-        drop(writer);
-        drop(handle);
+        let _ = writer;
+        let _ = handle;
 
         let mut rng = Rng::new(seed);
         let block_count = (rng.range_u32(15) + 5) as u16;

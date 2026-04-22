@@ -1,5 +1,5 @@
 [server]
-# Public hostname of the PDS (e.g. `pds.example.com`).
+# Public hostname of the PDS, such as `pds.example.com`.
 #
 # Can also be specified via environment variable `PDS_HOSTNAME`.
 #

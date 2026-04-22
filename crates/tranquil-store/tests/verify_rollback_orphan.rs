@@ -64,8 +64,8 @@ fn rollback_rotation_does_not_leave_orphan_data_file() {
             io.sync_dir(&data_dir).unwrap();
 
             let _ = io.delete(&hint_file_path(&data_dir, next_id));
-            drop(writer);
-            drop(next_handle);
+            let _ = writer;
+            let _ = next_handle;
             manager.rollback_rotation(next_id);
         }
 

@@ -97,10 +97,10 @@ impl RegressionRecord {
             f.sync_all()?;
         }
         std::fs::rename(&tmp, &path)?;
-        if let Some(parent) = path.parent() {
-            if let Ok(dir) = std::fs::File::open(parent) {
-                let _ = dir.sync_all();
-            }
+        if let Some(parent) = path.parent()
+            && let Ok(dir) = std::fs::File::open(parent)
+        {
+            let _ = dir.sync_all();
         }
         Ok(path)
     }
