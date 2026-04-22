@@ -37,8 +37,17 @@ gauntlet-farm SCENARIO HOURS="6" DUMP="proptest-regressions":
 gauntlet-repro SEED SCENARIO="smoke-pr":
     SQLX_OFFLINE=true cargo run --release -p tranquil-store --bin tranquil-gauntlet --features tranquil-store/gauntlet-cli -- repro --scenario {{SCENARIO}} --seed {{SEED}}
 
+gauntlet-repro-config CONFIG SEED:
+    SQLX_OFFLINE=true cargo run --release -p tranquil-store --bin tranquil-gauntlet --features tranquil-store/gauntlet-cli -- repro --config {{CONFIG}} --seed {{SEED}}
+
 gauntlet-repro-from FILE:
     SQLX_OFFLINE=true cargo run --release -p tranquil-store --bin tranquil-gauntlet --features tranquil-store/gauntlet-cli -- repro --from {{FILE}}
+
+gauntlet-sweep CONFIG SEEDS="8" DUMP="proptest-regressions":
+    SQLX_OFFLINE=true cargo run --release -p tranquil-store --bin tranquil-gauntlet --features tranquil-store/gauntlet-cli -- sweep --config {{CONFIG}} --seeds {{SEEDS}} --dump-regressions {{DUMP}}
+
+gauntlet-soak HOURS="24" OUTPUT="":
+    SQLX_OFFLINE=true GAUNTLET_SOAK_HOURS={{HOURS}} GAUNTLET_SOAK_OUTPUT={{OUTPUT}} cargo nextest run -p tranquil-store --features tranquil-store/test-harness --profile gauntlet-soak --test gauntlet_soak --run-ignored all -- soak_long_leak_gate
 
 test-unit:
     SQLX_OFFLINE=true cargo test --test dpop_unit --test validation_edge_cases --test scope_edge_cases

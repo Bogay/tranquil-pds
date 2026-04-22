@@ -68,7 +68,8 @@ impl<S: StorageIO> EventLogWriter<S> {
     ) -> io::Result<Self> {
         let handle = manager.open_for_append(segment_id)?;
         manager.io().truncate(handle.fd(), 0)?;
-        let writer = SegmentWriter::new(manager.io(), handle.fd(), segment_id, next_seq, max_payload)?;
+        let writer =
+            SegmentWriter::new(manager.io(), handle.fd(), segment_id, next_seq, max_payload)?;
         writer.sync(manager.io())?;
         manager.io().sync_dir(manager.segments_dir())?;
 
@@ -400,8 +401,12 @@ fn find_last_seq_from_segments<S: StorageIO>(
             Err(e) if e.kind() != io::ErrorKind::InvalidData => Err(e),
             _ => {
                 let handle = manager.open_for_read(seg_id)?;
-                let (_, last_seq) =
-                    rebuild_from_segment(manager.io(), handle.fd(), DEFAULT_INDEX_INTERVAL, max_payload)?;
+                let (_, last_seq) = rebuild_from_segment(
+                    manager.io(),
+                    handle.fd(),
+                    DEFAULT_INDEX_INTERVAL,
+                    max_payload,
+                )?;
                 Ok(last_seq)
             }
         }

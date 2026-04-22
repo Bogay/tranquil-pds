@@ -3,8 +3,8 @@ mod common;
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tranquil_store::blockstore::{
     BlockStoreConfig, DataFileId, DataFileManager, DataFileWriter, GroupCommitConfig,
@@ -59,7 +59,10 @@ impl FailingIO {
 impl StorageIO for FailingIO {
     fn open(&self, path: &Path, opts: OpenOptions) -> io::Result<FileId> {
         let fd = self.inner.open(path, opts)?;
-        self.fd_to_path.lock().unwrap().insert(fd, path.to_path_buf());
+        self.fd_to_path
+            .lock()
+            .unwrap()
+            .insert(fd, path.to_path_buf());
         Ok(fd)
     }
 

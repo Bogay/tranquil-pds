@@ -657,15 +657,13 @@ fn sim_multi_file_rotation_crash_recovery() {
             };
 
             let block_count = ((seed % 25) + 10) as u32;
-            let all_cids: Vec<CidBytes> =
-                (0..block_count).map(test_cid).collect();
+            let all_cids: Vec<CidBytes> = (0..block_count).map(test_cid).collect();
 
             {
                 let store = TranquilBlockStore::open(config.clone()).unwrap();
-                (0..block_count).try_for_each(|i| {
-                    store.put_blocks_blocking(vec![(test_cid(i), block_data(i))])
-                })
-                .unwrap();
+                (0..block_count)
+                    .try_for_each(|i| store.put_blocks_blocking(vec![(test_cid(i), block_data(i))]))
+                    .unwrap();
 
                 let files = store.list_data_files().unwrap();
                 assert!(

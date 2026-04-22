@@ -15,6 +15,7 @@ use tranquil_store::gauntlet::{
 };
 
 const MAX_HOURS: f64 = 1.0e6;
+const DEFAULT_SWEEP_RUN_CAP: u64 = 10_000;
 
 /// Deterministic storage-engine gauntlet: scenario fuzzing, shrinking, regression replay.
 ///
@@ -70,6 +71,41 @@ enum Cmd {
         /// Max shrink attempts per failing seed.
         #[arg(long, default_value_t = DEFAULT_MAX_SHRINK_ITERATIONS, conflicts_with = "no_shrink")]
         shrink_budget: usize,
+    },
+    /// Fan out a scenario across the cartesian product of declared axes.
+    ///
+    /// Reads a Toml config with [axes] lists (writer_concurrency, key_space, value_bytes,
+    /// fault_density_scale, fault_density_uniform, restart_every_n_ops, commit_batch_size,
+    /// max_file_size). For each combination, runs --seeds seeds and emits one NDjson record
+    /// per (combo, seed).
+    Sweep {
+        /// Toml config declaring scenario & axes.
+        #[arg(long)]
+        config: PathBuf,
+
+        /// First seed in the batch range. Default 0.
+        #[arg(long)]
+        seed_start: Option<u64>,
+
+        /// Seeds per axis combination. Default 8. Must be > 0.
+        #[arg(long)]
+        seeds: Option<u64>,
+
+        /// Directory to dump regression Json on failure.
+        #[arg(long)]
+        dump_regressions: Option<PathBuf>,
+
+        /// Skip shrinking when dumping regressions.
+        #[arg(long)]
+        no_shrink: bool,
+
+        /// Max shrink attempts per failing seed.
+        #[arg(long, default_value_t = DEFAULT_MAX_SHRINK_ITERATIONS, conflicts_with = "no_shrink")]
+        shrink_budget: usize,
+
+        /// Hard cap on total (combinations x seeds). Default 10_000. Set 0 to disable.
+        #[arg(long, default_value_t = DEFAULT_SWEEP_RUN_CAP)]
+        max_runs: u64,
     },
     /// Replay a single seed or a saved regression file.
     ///
@@ -131,6 +167,134 @@ fn load_config_file(path: &Path) -> Result<ConfigFile, String> {
     toml::from_str(&raw).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SweepConfigFile {
+    scenario: Scenario,
+    #[serde(default)]
+    seed_start: Option<u64>,
+    #[serde(default)]
+    seeds: Option<u64>,
+    #[serde(default)]
+    dump_regressions: Option<PathBuf>,
+    #[serde(default)]
+    base_overrides: ConfigOverrides,
+    #[serde(default)]
+    axes: SweepAxes,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SweepAxes {
+    #[serde(default)]
+    writer_concurrency: Vec<usize>,
+    #[serde(default)]
+    key_space: Vec<u32>,
+    #[serde(default)]
+    value_bytes: Vec<u32>,
+    #[serde(default)]
+    fault_density_scale: Vec<f64>,
+    #[serde(default)]
+    fault_density_uniform: Vec<f64>,
+    #[serde(default)]
+    restart_every_n_ops: Vec<usize>,
+    #[serde(default)]
+    commit_batch_size: Vec<usize>,
+    #[serde(default)]
+    max_file_size: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SweepAxisValues {
+    writer_concurrency: Option<usize>,
+    key_space: Option<u32>,
+    value_bytes: Option<u32>,
+    fault_density_scale: Option<f64>,
+    fault_density_uniform: Option<f64>,
+    restart_every_n_ops: Option<usize>,
+    commit_batch_size: Option<usize>,
+    max_file_size: Option<u64>,
+}
+
+impl SweepAxisValues {
+    fn apply_to(self, o: &mut ConfigOverrides) {
+        if let Some(v) = self.writer_concurrency {
+            o.writer_concurrency = Some(v);
+        }
+        if let Some(v) = self.key_space {
+            o.key_space = Some(v);
+        }
+        if let Some(v) = self.value_bytes {
+            o.value_bytes = Some(v);
+        }
+        if let Some(v) = self.fault_density_scale {
+            o.fault_density_scale = Some(v);
+        }
+        if let Some(v) = self.fault_density_uniform {
+            o.fault_density_uniform = Some(v);
+        }
+        if let Some(v) = self.restart_every_n_ops {
+            o.restart_every_n_ops = Some(v);
+        }
+        if let Some(v) = self.commit_batch_size {
+            o.store.group_commit.max_batch_size = Some(v);
+        }
+        if let Some(v) = self.max_file_size {
+            o.store.max_file_size = Some(v);
+        }
+    }
+}
+
+impl SweepAxes {
+    fn axis_values(&self) -> Vec<SweepAxisValues> {
+        expand(&self.writer_concurrency)
+            .into_iter()
+            .flat_map(|wc| {
+                expand(&self.key_space).into_iter().flat_map(move |ks| {
+                    expand(&self.value_bytes).into_iter().flat_map(move |vb| {
+                        expand(&self.fault_density_scale)
+                            .into_iter()
+                            .flat_map(move |fds| {
+                                expand(&self.fault_density_uniform).into_iter().flat_map(
+                                    move |fdu| {
+                                        expand(&self.restart_every_n_ops).into_iter().flat_map(
+                                            move |rc| {
+                                                expand(&self.commit_batch_size)
+                                                    .into_iter()
+                                                    .flat_map(move |cb| {
+                                                        expand(&self.max_file_size).into_iter().map(
+                                                            move |mfs| SweepAxisValues {
+                                                                writer_concurrency: wc,
+                                                                key_space: ks,
+                                                                value_bytes: vb,
+                                                                fault_density_scale: fds,
+                                                                fault_density_uniform: fdu,
+                                                                restart_every_n_ops: rc,
+                                                                commit_batch_size: cb,
+                                                                max_file_size: mfs,
+                                                            },
+                                                        )
+                                                    })
+                                            },
+                                        )
+                                    },
+                                )
+                            })
+                    })
+                })
+            })
+            .collect()
+    }
+}
+
+fn expand<T: Copy>(values: &[T]) -> Vec<Option<T>> {
+    if values.is_empty() {
+        vec![None]
+    } else {
+        values.iter().copied().map(Some).collect()
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct NdjsonResult {
     scenario: &'static str,
@@ -142,6 +306,8 @@ struct NdjsonResult {
     violations: Vec<NdjsonViolation>,
     wall_ms: u64,
     ops_in_stream: usize,
+    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
+    overrides: serde_json::Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -180,7 +346,20 @@ fn emit_summary(summary: &NdjsonSummary) {
     }
 }
 
-fn emit(scenario: Scenario, report: &GauntletReport, elapsed: Duration) -> io::Result<()> {
+fn overrides_json(overrides: &ConfigOverrides) -> serde_json::Value {
+    match serde_json::to_value(overrides) {
+        Ok(v) if v.as_object().map(|m| m.is_empty()).unwrap_or(true) => serde_json::Value::Null,
+        Ok(v) => v,
+        Err(_) => serde_json::Value::Null,
+    }
+}
+
+fn emit(
+    scenario: Scenario,
+    report: &GauntletReport,
+    elapsed: Duration,
+    overrides: &ConfigOverrides,
+) -> io::Result<()> {
     let result = NdjsonResult {
         scenario: scenario.cli_name(),
         seed: report.seed.0,
@@ -198,6 +377,7 @@ fn emit(scenario: Scenario, report: &GauntletReport, elapsed: Duration) -> io::R
             .collect(),
         wall_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
         ops_in_stream: report.ops.len(),
+        overrides: overrides_json(overrides),
     };
     let line = serde_json::to_string(&result).map_err(io::Error::other)?;
     let stdout = io::stdout();
@@ -206,8 +386,13 @@ fn emit(scenario: Scenario, report: &GauntletReport, elapsed: Duration) -> io::R
     w.flush()
 }
 
-fn emit_or_log(scenario: Scenario, report: &GauntletReport, elapsed: Duration) {
-    if let Err(e) = emit(scenario, report, elapsed)
+fn emit_or_log(
+    scenario: Scenario,
+    report: &GauntletReport,
+    elapsed: Duration,
+    overrides: &ConfigOverrides,
+) {
+    if let Err(e) = emit(scenario, report, elapsed, overrides)
         && e.kind() != io::ErrorKind::BrokenPipe
     {
         eprintln!("ndjson emit failed: {e}");
@@ -353,9 +538,7 @@ fn install_interrupt(rt: &Runtime) -> Arc<AtomicBool> {
             return;
         }
         f.store(true, Ordering::Relaxed);
-        eprintln!(
-            "interrupt received, stopping after current batch; press Ctrl-C again to abort"
-        );
+        eprintln!("interrupt received, stopping after current batch; press Ctrl-C again to abort");
         if tokio::signal::ctrl_c().await.is_ok() {
             eprintln!("second interrupt, aborting");
             std::process::exit(130);
@@ -437,6 +620,216 @@ fn main() -> ExitCode {
             };
             run_repro(plan, &rt)
         }
+        Cmd::Sweep {
+            config,
+            seed_start,
+            seeds,
+            dump_regressions,
+            no_shrink,
+            shrink_budget,
+            max_runs,
+        } => {
+            let plan = match resolve_sweep(
+                config,
+                seed_start,
+                seeds,
+                dump_regressions,
+                !no_shrink,
+                shrink_budget,
+                max_runs,
+            ) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{e}");
+                    return ExitCode::from(2);
+                }
+            };
+            let rt = match build_runtime() {
+                Ok(rt) => rt,
+                Err(code) => return code,
+            };
+            let interrupt = install_interrupt(&rt);
+            run_sweep(plan, &rt, interrupt)
+        }
+    }
+}
+
+struct SweepPlan {
+    scenario: Scenario,
+    seed_start: u64,
+    seeds: u64,
+    dump_regressions: Option<PathBuf>,
+    shrink: bool,
+    shrink_budget: usize,
+    base_overrides: ConfigOverrides,
+    axes: Vec<SweepAxisValues>,
+}
+
+fn resolve_sweep(
+    config: PathBuf,
+    seed_start: Option<u64>,
+    seeds: Option<u64>,
+    dump_regressions: Option<PathBuf>,
+    shrink: bool,
+    shrink_budget: usize,
+    max_runs: u64,
+) -> Result<SweepPlan, String> {
+    let raw =
+        std::fs::read_to_string(&config).map_err(|e| format!("read {}: {e}", config.display()))?;
+    let file: SweepConfigFile =
+        toml::from_str(&raw).map_err(|e| format!("parse {}: {e}", config.display()))?;
+    let seed_start = seed_start.or(file.seed_start).unwrap_or(0);
+    let seeds = seeds.or(file.seeds).unwrap_or(8);
+    if seeds == 0 {
+        return Err("--seeds must be greater than zero".to_string());
+    }
+    if shrink && shrink_budget == 0 {
+        return Err("--shrink-budget must be greater than zero".to_string());
+    }
+    let dump_regressions = dump_regressions.or(file.dump_regressions.clone());
+    let axes = file.axes.axis_values();
+    if axes.is_empty() {
+        return Err("sweep produced no combinations".to_string());
+    }
+    if max_runs > 0 {
+        let combos = axes.len() as u64;
+        let total = combos.saturating_mul(seeds);
+        if total > max_runs {
+            return Err(format!(
+                "sweep would run {total} cases (combinations={combos} x seeds={seeds}), exceeds --max-runs {max_runs}; raise --max-runs or shrink axes"
+            ));
+        }
+    }
+    Ok(SweepPlan {
+        scenario: file.scenario,
+        seed_start,
+        seeds,
+        dump_regressions,
+        shrink,
+        shrink_budget,
+        base_overrides: file.base_overrides,
+        axes,
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct NdjsonSweepSummary {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    scenario: &'static str,
+    combinations: u64,
+    seeds_per_combination: u64,
+    total_seeds: u64,
+    clean: u64,
+    failed: u64,
+    wall_ms: u64,
+    interrupted: bool,
+}
+
+fn emit_sweep_summary(summary: &NdjsonSweepSummary) {
+    let line = match serde_json::to_string(summary) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("sweep summary serialize failed: {e}");
+            return;
+        }
+    };
+    let stdout = io::stdout();
+    let mut w = stdout.lock();
+    if let Err(e) = writeln!(w, "{line}").and_then(|()| w.flush())
+        && e.kind() != io::ErrorKind::BrokenPipe
+    {
+        eprintln!("sweep summary emit failed: {e}");
+    }
+}
+
+fn run_sweep(plan: SweepPlan, rt: &Runtime, interrupt: Arc<AtomicBool>) -> ExitCode {
+    let SweepPlan {
+        scenario,
+        seed_start,
+        seeds,
+        dump_regressions,
+        shrink,
+        shrink_budget,
+        base_overrides,
+        axes,
+    } = plan;
+    let run_start = Instant::now();
+    let mut any_failed = false;
+    let mut total_seeds: u64 = 0;
+    let mut total_clean: u64 = 0;
+    let mut total_failed: u64 = 0;
+    let combos = axes.len() as u64;
+    eprintln!(
+        "sweep {}: {} combinations x {} seeds = {} runs",
+        scenario.cli_name(),
+        combos,
+        seeds,
+        combos.saturating_mul(seeds),
+    );
+    let end = match seed_start.checked_add(seeds) {
+        Some(e) => e,
+        None => {
+            eprintln!("seed range overflowed u64: seed_start={seed_start} seeds={seeds}");
+            return ExitCode::from(2);
+        }
+    };
+    for (combo_idx, axis_values) in axes.iter().enumerate() {
+        if interrupt.load(Ordering::Relaxed) {
+            break;
+        }
+        let mut overrides = base_overrides.clone();
+        axis_values.apply_to(&mut overrides);
+        let combo_start = Instant::now();
+        let overrides_for_farm = overrides.clone();
+        let reports = farm::run_many_timed(
+            move |s| {
+                let mut cfg = config_for(scenario, s);
+                overrides_for_farm.apply_to(&mut cfg);
+                cfg
+            },
+            (seed_start..end).map(Seed),
+        );
+        let combo_wall = combo_start.elapsed();
+        let combo_failed = reports.iter().filter(|(r, _)| !r.is_clean()).count();
+        let combo_clean = reports.len().saturating_sub(combo_failed);
+        reports.iter().for_each(|(r, elapsed)| {
+            if !r.is_clean() {
+                any_failed = true;
+                if let Some(root) = &dump_regressions {
+                    dump_regression(scenario, r, root, &overrides, shrink, shrink_budget, rt);
+                }
+            }
+            emit_or_log(scenario, r, *elapsed, &overrides);
+        });
+        total_seeds += reports.len() as u64;
+        total_clean += combo_clean as u64;
+        total_failed += combo_failed as u64;
+        eprintln!(
+            "combo {}/{}: {} clean, {} failed, {:.1}s",
+            combo_idx + 1,
+            combos,
+            combo_clean,
+            combo_failed,
+            combo_wall.as_secs_f64(),
+        );
+    }
+    let wall_ms = u64::try_from(run_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    emit_sweep_summary(&NdjsonSweepSummary {
+        kind: "sweep_summary",
+        scenario: scenario.cli_name(),
+        combinations: combos,
+        seeds_per_combination: seeds,
+        total_seeds,
+        clean: total_clean,
+        failed: total_failed,
+        wall_ms,
+        interrupted: interrupt.load(Ordering::Relaxed),
+    });
+    if any_failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -489,10 +882,7 @@ fn run_farm(plan: FarmPlan, rt: &Runtime, interrupt: Arc<AtomicBool>) -> ExitCod
         let batch_wall = batch_start.elapsed();
         let batch_failed = reports.iter().filter(|(r, _)| !r.is_clean()).count();
         let batch_clean = reports.len().saturating_sub(batch_failed);
-        let batch_ops: u64 = reports
-            .iter()
-            .map(|(r, _)| r.ops_executed.0 as u64)
-            .sum();
+        let batch_ops: u64 = reports.iter().map(|(r, _)| r.ops_executed.0 as u64).sum();
         reports.iter().for_each(|(r, elapsed)| {
             if !r.is_clean() {
                 any_failed = true;
@@ -500,7 +890,7 @@ fn run_farm(plan: FarmPlan, rt: &Runtime, interrupt: Arc<AtomicBool>) -> ExitCod
                     dump_regression(scenario, r, root, &overrides, shrink, shrink_budget, rt);
                 }
             }
-            emit_or_log(scenario, r, *elapsed);
+            emit_or_log(scenario, r, *elapsed, &overrides);
         });
         total_seeds += reports.len() as u64;
         total_clean += batch_clean as u64;
@@ -624,7 +1014,7 @@ fn run_repro(plan: ReproPlan, rt: &Runtime) -> ExitCode {
                     rt,
                 );
             }
-            emit_or_log(scenario, &report, elapsed);
+            emit_or_log(scenario, &report, elapsed, &overrides);
             if report.is_clean() {
                 ExitCode::SUCCESS
             } else {
@@ -696,7 +1086,7 @@ fn run_repro_from_record(
             rt,
         );
     }
-    emit_or_log(scenario, &report, elapsed);
+    emit_or_log(scenario, &report, elapsed, &overrides);
     if report.is_clean() {
         ExitCode::SUCCESS
     } else {

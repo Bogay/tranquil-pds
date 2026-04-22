@@ -1087,9 +1087,8 @@ fn verify_persisted_blocks<S: StorageIO>(
     entries: &[([u8; CID_SIZE], BlockLocation)],
 ) -> Result<(), CommitError> {
     use std::collections::BTreeMap;
-    let by_file: BTreeMap<DataFileId, Vec<(&[u8; CID_SIZE], BlockLocation)>> = entries
-        .iter()
-        .fold(BTreeMap::new(), |mut acc, (cid, loc)| {
+    let by_file: BTreeMap<DataFileId, Vec<(&[u8; CID_SIZE], BlockLocation)>> =
+        entries.iter().fold(BTreeMap::new(), |mut acc, (cid, loc)| {
             acc.entry(loc.file_id).or_default().push((cid, *loc));
             acc
         });

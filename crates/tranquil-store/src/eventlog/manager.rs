@@ -418,10 +418,7 @@ mod tests {
         assert_eq!(next_id, SegmentId::new(2));
         assert_eq!(mgr.io().file_size(next_handle.fd()).unwrap(), 0);
         mgr.commit_rotation(next_id, &next_handle);
-        assert_eq!(
-            mgr.open_for_read(next_id).unwrap().fd(),
-            next_handle.fd()
-        );
+        assert_eq!(mgr.open_for_read(next_id).unwrap().fd(), next_handle.fd());
     }
 
     #[test]
@@ -431,10 +428,7 @@ mod tests {
         let (next_id, next_handle) = mgr.prepare_rotation(SegmentId::new(1)).unwrap();
         mgr.commit_rotation(next_id, &next_handle);
 
-        assert_eq!(
-            mgr.open_for_read(next_id).unwrap().fd(),
-            next_handle.fd()
-        );
+        assert_eq!(mgr.open_for_read(next_id).unwrap().fd(), next_handle.fd());
         drop(next_handle);
         mgr.rollback_rotation(next_id);
 

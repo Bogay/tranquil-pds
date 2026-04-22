@@ -99,7 +99,9 @@ impl Scenario {
                 "Eventlog-heavy workload with FSYNC_ORDERING / MONOTONIC_SEQ / TOMBSTONE_BOUND invariants."
             }
             Self::ContendedReaders => "60% reads, 64 writer tasks, simulated moderate faults.",
-            Self::ContendedWriters => "Add/delete heavy, 32 writer tasks, simulated moderate faults.",
+            Self::ContendedWriters => {
+                "Add/delete heavy, 32 writer tasks, simulated moderate faults."
+            }
         }
     }
 

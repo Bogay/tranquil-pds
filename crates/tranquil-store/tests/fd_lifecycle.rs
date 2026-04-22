@@ -40,7 +40,9 @@ fn config_for(dir: &Path, max_file_size: u64) -> BlockStoreConfig {
 
 fn tiny_block(seed: u64) -> Vec<u8> {
     let bytes = seed.to_le_bytes();
-    (0..64).map(|i| bytes[i % 8] ^ (i as u8).wrapping_mul(31)).collect()
+    (0..64)
+        .map(|i| bytes[i % 8] ^ (i as u8).wrapping_mul(31))
+        .collect()
 }
 
 #[tokio::test]

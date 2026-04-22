@@ -10,15 +10,18 @@ fn concurrent_reader_survives_evict_on_segment_delete() {
     let sim: Arc<SimulatedIO> = Arc::new(SimulatedIO::pristine(0x1eed7a11));
     let segments_dir = PathBuf::from("/segments");
 
-    let manager = Arc::new(
-        SegmentManager::new(Arc::clone(&sim), segments_dir.clone(), 1 << 20).unwrap(),
-    );
+    let manager =
+        Arc::new(SegmentManager::new(Arc::clone(&sim), segments_dir.clone(), 1 << 20).unwrap());
 
     let seg_id = SegmentId::new(1);
 
     let write_handle = manager.open_for_append(seg_id).unwrap();
-    sim.write_at(write_handle.fd(), 0, b"arbitrary seed bytes for the segment")
-        .unwrap();
+    sim.write_at(
+        write_handle.fd(),
+        0,
+        b"arbitrary seed bytes for the segment",
+    )
+    .unwrap();
     sim.sync(write_handle.fd()).unwrap();
     sim.sync_dir(&segments_dir).unwrap();
     drop(write_handle);

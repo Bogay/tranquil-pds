@@ -595,7 +595,8 @@ fn eventlog_snapshot<S: StorageIO + Send + Sync + 'static>(
     let mut segment_last_ts: Vec<(SegmentId, u64)> = Vec::new();
     segments.iter().for_each(|&id| {
         let per_segment: Vec<ValidEvent> = match s.manager.open_for_read(id) {
-            Ok(handle) => match SegmentReader::open(s.manager.io(), handle.fd(), MAX_EVENT_PAYLOAD) {
+            Ok(handle) => match SegmentReader::open(s.manager.io(), handle.fd(), MAX_EVENT_PAYLOAD)
+            {
                 Ok(reader) => reader.valid_prefix().unwrap_or_default(),
                 Err(_) => Vec::new(),
             },
@@ -991,8 +992,7 @@ async fn apply_op<S: StorageIO + Send + Sync + 'static>(
             if !oracle.contains_record(collection, rkey) {
                 return Ok(());
             }
-            let new_root =
-                delete_record_atomic(&harness.store, old_root, collection, rkey).await?;
+            let new_root = delete_record_atomic(&harness.store, old_root, collection, rkey).await?;
             oracle.delete(collection, rkey);
             *root = Some(new_root);
             Ok(())
@@ -1288,8 +1288,7 @@ async fn apply_op_concurrent<S: StorageIO + Send + Sync + 'static>(
             if !state.oracle.contains_record(collection, rkey) {
                 return Ok(());
             }
-            let new_root =
-                delete_record_atomic(&shared.store, old_root, collection, rkey).await?;
+            let new_root = delete_record_atomic(&shared.store, old_root, collection, rkey).await?;
             state.oracle.delete(collection, rkey);
             state.root = Some(new_root);
             Ok(())

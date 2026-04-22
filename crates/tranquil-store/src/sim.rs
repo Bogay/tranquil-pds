@@ -129,6 +129,44 @@ impl FaultConfig {
             || self.delayed_io_error_probability.is_nonzero()
             || self.sync_reorder_window.0 > 0
     }
+
+    pub fn scale_probabilities(self, factor: f64) -> Self {
+        let scale = |p: Probability| Probability::new((p.raw() * factor).clamp(0.0, 1.0));
+        Self {
+            partial_write_probability: scale(self.partial_write_probability),
+            bit_flip_on_read_probability: scale(self.bit_flip_on_read_probability),
+            sync_failure_probability: scale(self.sync_failure_probability),
+            dir_sync_failure_probability: scale(self.dir_sync_failure_probability),
+            misdirected_write_probability: scale(self.misdirected_write_probability),
+            io_error_probability: scale(self.io_error_probability),
+            torn_page_probability: scale(self.torn_page_probability),
+            misdirected_read_probability: scale(self.misdirected_read_probability),
+            delayed_io_error_probability: scale(self.delayed_io_error_probability),
+            sync_reorder_window: self.sync_reorder_window,
+            latency_distribution_ns: self.latency_distribution_ns,
+        }
+    }
+
+    pub fn uniform_density(density: f64) -> Self {
+        assert!(
+            density.is_finite() && (0.0..=1.0).contains(&density),
+            "fault density out of range: {density}"
+        );
+        let p = Probability::new(density);
+        Self {
+            partial_write_probability: p,
+            bit_flip_on_read_probability: p,
+            sync_failure_probability: p,
+            dir_sync_failure_probability: p,
+            misdirected_write_probability: p,
+            io_error_probability: p,
+            torn_page_probability: p,
+            misdirected_read_probability: p,
+            delayed_io_error_probability: p,
+            sync_reorder_window: SyncReorderWindow(0),
+            latency_distribution_ns: LatencyNs(0),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

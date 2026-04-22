@@ -39,7 +39,8 @@ fn read_all_events(mgr: &SegmentManager<SimulatedIO>, seed: u64) -> Vec<ValidEve
         .flat_map(|&seg_id| {
             let fd = mgr
                 .open_for_read(seg_id)
-                .unwrap_or_else(|e| panic!("seed {seed}: open_for_read({seg_id}) failed: {e}")).fd();
+                .unwrap_or_else(|e| panic!("seed {seed}: open_for_read({seg_id}) failed: {e}"))
+                .fd();
             SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
                 .unwrap_or_else(|e| {
                     panic!(
@@ -256,7 +257,8 @@ fn segment_deletion_does_not_corrupt_neighbors() {
 
         let seg2_fd = mgr
             .open_for_read(SegmentId::new(2))
-            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(2) failed: {e}")).fd();
+            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(2) failed: {e}"))
+            .fd();
         let seg2_events = SegmentReader::open(mgr.io(), seg2_fd, MAX_EVENT_PAYLOAD)
             .unwrap_or_else(|e| {
                 panic!("seed {seed}: SegmentReader::open(2, MAX_EVENT_PAYLOAD) failed: {e}")
@@ -271,7 +273,8 @@ fn segment_deletion_does_not_corrupt_neighbors() {
 
         let seg3_fd = mgr
             .open_for_read(SegmentId::new(3))
-            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(3) failed: {e}")).fd();
+            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(3) failed: {e}"))
+            .fd();
         let seg3_events = SegmentReader::open(mgr.io(), seg3_fd, MAX_EVENT_PAYLOAD)
             .unwrap_or_else(|e| {
                 panic!("seed {seed}: SegmentReader::open(3, MAX_EVENT_PAYLOAD) failed: {e}")
@@ -388,7 +391,8 @@ fn fsync_ordering_unsynced_events_never_durable() {
 
         let fd = mgr
             .open_for_read(SegmentId::new(1))
-            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(1) failed: {e}")).fd();
+            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(1) failed: {e}"))
+            .fd();
         let recovered = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap_or_else(|e| {
                 panic!("seed {seed}: SegmentReader::open(1, MAX_EVENT_PAYLOAD) failed: {e}")
@@ -458,7 +462,8 @@ fn fsync_ordering_proof_sync_before_blockstore_ack() {
 
         let fd = mgr
             .open_for_read(SegmentId::new(1))
-            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(1) failed: {e}")).fd();
+            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(1) failed: {e}"))
+            .fd();
         let recovered = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap_or_else(|e| {
                 panic!("seed {seed}: SegmentReader::open(1, MAX_EVENT_PAYLOAD) failed: {e}")
@@ -579,7 +584,8 @@ fn group_sync_crash_mid_sync_partial_fsync() {
 
         let fd = mgr
             .open_for_read(SegmentId::new(1))
-            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(1) failed: {e}")).fd();
+            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(1) failed: {e}"))
+            .fd();
         let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap_or_else(|e| {
                 panic!("seed {seed}: SegmentReader::open(1, MAX_EVENT_PAYLOAD) failed: {e}")
@@ -652,7 +658,8 @@ fn group_sync_no_double_sync_no_skipped_events() {
 
         let fd = mgr
             .open_for_read(SegmentId::new(1))
-            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(1) failed: {e}")).fd();
+            .unwrap_or_else(|e| panic!("seed {seed}: open_for_read(1) failed: {e}"))
+            .fd();
         let events = SegmentReader::open(mgr.io(), fd, MAX_EVENT_PAYLOAD)
             .unwrap_or_else(|e| {
                 panic!("seed {seed}: SegmentReader::open(1, MAX_EVENT_PAYLOAD) failed: {e}")
@@ -938,7 +945,8 @@ fn aggressive_faults_group_sync_recovery() {
 
         let pristine_fd = pristine_mgr
             .open_for_read(SegmentId::new(1))
-            .unwrap_or_else(|e| panic!("seed {seed}: pristine open_for_read(1) failed: {e}")).fd();
+            .unwrap_or_else(|e| panic!("seed {seed}: pristine open_for_read(1) failed: {e}"))
+            .fd();
         let pristine_events = SegmentReader::open(
             pristine_mgr.io(),
             pristine_fd,

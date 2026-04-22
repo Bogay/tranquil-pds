@@ -49,10 +49,7 @@ fn commit_error_to_repo(e: CommitError) -> RepoError {
         )),
         CommitError::VerifyFailed { file_id, offset } => RepoError::storage(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "post-sync verify failed at {file_id}:{}",
-                offset.raw()
-            ),
+            format!("post-sync verify failed at {file_id}:{}", offset.raw()),
         )),
     }
 }

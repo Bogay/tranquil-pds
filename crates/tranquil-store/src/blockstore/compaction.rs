@@ -201,10 +201,8 @@ fn stream_compact<S: StorageIO>(
         Ok::<_, CompactionError>(())
     });
 
-    let record_count = u32::try_from(
-        (live_count as u128).saturating_add(dead_count as u128),
-    )
-    .unwrap_or(u32::MAX);
+    let record_count =
+        u32::try_from((live_count as u128).saturating_add(dead_count as u128)).unwrap_or(u32::MAX);
     let writer_position = writer.position();
     let finalize_result = scan_result
         .and_then(|()| writer.sync().map_err(CompactionError::from))
@@ -219,7 +217,12 @@ fn stream_compact<S: StorageIO>(
                 .map_err(CompactionError::from)
         })
         .and_then(|()| hint_writer.sync().map_err(CompactionError::from))
-        .and_then(|()| manager.io().sync_dir(manager.data_dir()).map_err(CompactionError::from));
+        .and_then(|()| {
+            manager
+                .io()
+                .sync_dir(manager.data_dir())
+                .map_err(CompactionError::from)
+        });
 
     let _ = manager.io().close(hint_fd);
 
