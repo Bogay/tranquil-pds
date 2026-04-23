@@ -49,6 +49,45 @@ gauntlet-sweep CONFIG SEEDS="8" DUMP="proptest-regressions":
 gauntlet-soak HOURS="24" OUTPUT="":
     SQLX_OFFLINE=true GAUNTLET_SOAK_HOURS={{HOURS}} GAUNTLET_SOAK_OUTPUT={{OUTPUT}} cargo nextest run -p tranquil-store --features tranquil-store/test-harness --profile gauntlet-soak --test gauntlet_soak --run-ignored all -- soak_long_leak_gate
 
+gauntlet-soak-heapprof HOURS="24" OUTPUT="" PREFIX="jeprof.gauntlet":
+    SQLX_OFFLINE=true \
+    GAUNTLET_SOAK_HOURS={{HOURS}} \
+    GAUNTLET_SOAK_OUTPUT={{OUTPUT}} \
+    MALLOC_CONF="prof:true,prof_active:true,prof_final:true,lg_prof_sample:19,prof_prefix:{{PREFIX}}" \
+    cargo nextest run -p tranquil-store \
+        --features tranquil-store/test-harness,tranquil-store/gauntlet-jemalloc-prof \
+        --profile gauntlet-soak --test gauntlet_soak --run-ignored all -- soak_long_leak_gate
+
+gauntlet-flaky SEED="1":
+    SQLX_OFFLINE=true cargo nextest run -p tranquil-store --features tranquil-store/test-harness --test gauntlet_flaky --run-ignored all
+
+fuzz-target TARGET SECONDS="60" SANITIZER="address":
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer {{SANITIZER}} {{TARGET}} -- -max_total_time={{SECONDS}}
+
+fuzz-pr SECONDS="60":
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address decode_block_record -- -max_total_time={{SECONDS}}
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address decode_hint_record -- -max_total_time={{SECONDS}}
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address segment_scan -- -max_total_time={{SECONDS}}
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address metastore_key_codec -- -max_total_time={{SECONDS}}
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address gauntlet_micro -- -max_total_time={{SECONDS}}
+
+fuzz-nightly SECONDS="21600":
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address decode_block_record -- -max_total_time={{SECONDS}}
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address decode_hint_record -- -max_total_time={{SECONDS}}
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address segment_scan -- -max_total_time={{SECONDS}}
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address metastore_key_codec -- -max_total_time={{SECONDS}}
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer address gauntlet_micro -- -max_total_time={{SECONDS}}
+
+fuzz-ubsan TARGET SECONDS="60":
+    cd crates/tranquil-store/fuzz && cargo +nightly fuzz run --sanitizer undefined {{TARGET}} -- -max_total_time={{SECONDS}}
+
+test-store-asan:
+    SQLX_OFFLINE=true \
+        ASAN_OPTIONS="halt_on_error=1:abort_on_error=1:detect_leaks=1" \
+        RUSTFLAGS="-Zsanitizer=address" \
+        RUSTDOCFLAGS="-Zsanitizer=address" \
+        cargo +nightly nextest run -p tranquil-store --features tranquil-store/test-harness --target x86_64-unknown-linux-gnu
+
 test-unit:
     SQLX_OFFLINE=true cargo test --test dpop_unit --test validation_edge_cases --test scope_edge_cases
 

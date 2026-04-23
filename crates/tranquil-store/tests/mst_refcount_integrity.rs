@@ -41,8 +41,8 @@ async fn compute_obsolete_from_diff<S: BlockStore + Sync + Send + 'static>(
 ) -> Vec<Cid> {
     let diff = old_mst.diff(new_mst).await.unwrap();
     std::iter::once(old_commit_cid)
-        .chain(diff.removed_mst_blocks.into_iter())
-        .chain(diff.removed_cids.into_iter())
+        .chain(diff.removed_mst_blocks)
+        .chain(diff.removed_cids)
         .collect()
 }
 

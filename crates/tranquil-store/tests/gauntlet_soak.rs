@@ -5,6 +5,10 @@ use tranquil_store::gauntlet::{
     LeakGateConfig, Scenario, Seed, SoakConfig, SoakReport, config_for, run_soak,
 };
 
+#[cfg(feature = "gauntlet-jemalloc-prof")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 fn soak_hours() -> Option<f64> {
     std::env::var("GAUNTLET_SOAK_HOURS")
         .ok()

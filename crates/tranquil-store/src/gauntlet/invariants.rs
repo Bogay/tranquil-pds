@@ -351,7 +351,7 @@ fn snapshot<S: StorageIO + Send + Sync + 'static>(
         .into_iter()
         .map(|(c, r)| (c, r.raw()))
         .collect();
-    v.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    v.sort_unstable_by_key(|a| a.0);
     v
 }
 

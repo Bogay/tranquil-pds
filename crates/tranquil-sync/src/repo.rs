@@ -238,7 +238,7 @@ async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str
 
         chunk
             .iter()
-            .zip(blocks.into_iter())
+            .zip(blocks)
             .filter_map(|(cid, block_opt)| block_opt.map(|block| (*cid, block)))
             .for_each(|(cid, block)| car_bytes.extend_from_slice(&encode_car_block(&cid, &block)));
     }

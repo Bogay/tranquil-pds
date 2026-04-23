@@ -1,3 +1,4 @@
+use super::flaky::FlakyConfig;
 use super::invariants::InvariantSet;
 use super::op::{CollectionName, Seed};
 use super::runner::{
@@ -29,6 +30,7 @@ pub enum Scenario {
     FirehoseFanout,
     ContendedReaders,
     ContendedWriters,
+    FlakyDevice,
 }
 
 impl Scenario {
@@ -50,6 +52,7 @@ impl Scenario {
             Self::FirehoseFanout => "FirehoseFanout",
             Self::ContendedReaders => "ContendedReaders",
             Self::ContendedWriters => "ContendedWriters",
+            Self::FlakyDevice => "FlakyDevice",
         }
     }
 
@@ -71,6 +74,7 @@ impl Scenario {
             Self::FirehoseFanout => "firehose-fanout",
             Self::ContendedReaders => "contended-readers",
             Self::ContendedWriters => "contended-writers",
+            Self::FlakyDevice => "flaky-device",
         }
     }
 
@@ -102,6 +106,9 @@ impl Scenario {
             Self::ContendedWriters => {
                 "Add/delete heavy, 32 writer tasks, simulated moderate faults."
             }
+            Self::FlakyDevice => {
+                "Real IO on ext4 atop dm-flakey. Requires root with dm-flakey available, skips otherwise."
+            }
         }
     }
 
@@ -130,6 +137,7 @@ impl Scenario {
         Self::FirehoseFanout,
         Self::ContendedReaders,
         Self::ContendedWriters,
+        Self::FlakyDevice,
     ];
 }
 
@@ -202,6 +210,7 @@ pub fn config_for(scenario: Scenario, seed: Seed) -> GauntletConfig {
         Scenario::FirehoseFanout => firehose_fanout(seed),
         Scenario::ContendedReaders => contended_readers(seed),
         Scenario::ContendedWriters => contended_writers(seed),
+        Scenario::FlakyDevice => flaky_device(seed),
     }
 }
 
@@ -679,6 +688,37 @@ fn contended_readers(seed: Seed) -> GauntletConfig {
         store: sim_store(),
         eventlog: None,
         writer_concurrency: WriterConcurrency(64),
+    }
+}
+
+fn flaky_device(seed: Seed) -> GauntletConfig {
+    GauntletConfig {
+        seed,
+        io: IoBackend::RealWithFlaky {
+            flaky: FlakyConfig::default_stress(),
+        },
+        workload: block_workload(
+            block_weights(80, 5, 10, 5),
+            SizeDistribution::Fixed(ValueBytes(128)),
+            KeySpaceSize(500),
+        ),
+        op_count: OpCount(20_000),
+        invariants: InvariantSet::REFCOUNT_CONSERVATION
+            | InvariantSet::REACHABILITY
+            | InvariantSet::ACKED_WRITE_PERSISTENCE
+            | InvariantSet::READ_AFTER_WRITE
+            | InvariantSet::RESTART_IDEMPOTENT
+            | InvariantSet::NO_ORPHAN_FILES
+            | InvariantSet::MANIFEST_EQUALS_REALITY
+            | InvariantSet::BYTE_BUDGET
+            | InvariantSet::CHECKSUM_COVERAGE,
+        limits: RunLimits {
+            max_wall_ms: Some(WallMs(30 * 60_000)),
+        },
+        restart_policy: RestartPolicy::EveryNOps(OpInterval(1_000)),
+        store: tiny_store(),
+        eventlog: None,
+        writer_concurrency: WriterConcurrency(1),
     }
 }
 

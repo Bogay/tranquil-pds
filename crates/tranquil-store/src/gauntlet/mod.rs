@@ -1,4 +1,5 @@
 pub mod farm;
+pub mod flaky;
 pub mod invariants;
 pub mod leak;
 pub mod metrics;
@@ -12,6 +13,9 @@ pub mod shrink;
 pub mod soak;
 pub mod workload;
 
+pub use flaky::{
+    BackingMegabytes, DownIntervalSecs, FlakyConfig, FlakyError, FlakyMount, UpIntervalSecs,
+};
 pub use invariants::{
     EventLogSnapshot, Invariant, InvariantSet, InvariantViolation, SnapshotEvent, invariants_for,
 };

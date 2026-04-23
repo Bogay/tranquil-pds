@@ -7,6 +7,7 @@ use std::time::Duration;
 use cid::Cid;
 use jacquard_repo::mst::Mst;
 
+use super::flaky::{FlakyConfig, FlakyMount};
 use super::invariants::{
     EventLogSnapshot, InvariantCtx, InvariantSet, InvariantViolation, SnapshotEvent, invariants_for,
 };
@@ -27,6 +28,7 @@ use crate::sim::{FaultConfig, SimulatedIO};
 #[derive(Debug, Clone, Copy)]
 pub enum IoBackend {
     Real,
+    RealWithFlaky { flaky: FlakyConfig },
     Simulated { fault: FaultConfig },
 }
 
@@ -218,6 +220,14 @@ impl Gauntlet {
                     op_errors_counter.clone(),
                     restarts_counter.clone(),
                 )),
+                IoBackend::RealWithFlaky { flaky } => Box::pin(run_inner_real_with_flaky(
+                    self.config,
+                    flaky,
+                    ops,
+                    ops_counter.clone(),
+                    op_errors_counter.clone(),
+                    restarts_counter.clone(),
+                )),
                 IoBackend::Simulated { fault } => Box::pin(run_inner_simulated(
                     self.config,
                     fault,
@@ -261,9 +271,97 @@ async fn run_inner_real(
     restarts_counter: Arc<AtomicUsize>,
 ) -> GauntletReport {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let cfg = blockstore_config(dir.path(), &config.store);
+    let root = dir.path().to_path_buf();
+    let report = run_inner_real_on_root(
+        config,
+        root,
+        ops,
+        ops_counter,
+        op_errors_counter,
+        restarts_counter,
+        false,
+        Duration::ZERO,
+    )
+    .await;
+    drop(dir);
+    report
+}
+
+async fn run_inner_real_with_flaky(
+    config: GauntletConfig,
+    flaky_cfg: FlakyConfig,
+    ops: OpStream,
+    ops_counter: Arc<AtomicUsize>,
+    op_errors_counter: Arc<AtomicUsize>,
+    restarts_counter: Arc<AtomicUsize>,
+) -> GauntletReport {
+    let mount = match FlakyMount::try_new(&flaky_cfg) {
+        Ok(m) => m,
+        Err(e) => {
+            let invariant = if e.is_env_absent() {
+                "FlakyEnvironment"
+            } else {
+                "FlakyOperational"
+            };
+            return GauntletReport {
+                seed: config.seed,
+                ops_executed: OpsExecuted(0),
+                op_errors: OpErrorCount(0),
+                restarts: RestartCount(0),
+                violations: vec![InvariantViolation {
+                    invariant,
+                    detail: format!("flaky mount: {e}"),
+                }],
+                ops: OpStream::empty(),
+            };
+        }
+    };
+    let root = mount.path().join("store");
+    if let Err(e) = std::fs::create_dir_all(&root) {
+        return GauntletReport {
+            seed: config.seed,
+            ops_executed: OpsExecuted(0),
+            op_errors: OpErrorCount(0),
+            restarts: RestartCount(0),
+            violations: vec![InvariantViolation {
+                invariant: "FlakyOperational",
+                detail: format!("create_dir_all {}: {e}", root.display()),
+            }],
+            ops: OpStream::empty(),
+        };
+    }
+    let down_ms = u64::from(flaky_cfg.down_interval.0.get())
+        .saturating_mul(1_000)
+        .saturating_add(500);
+    let report = run_inner_real_on_root(
+        config,
+        root,
+        ops,
+        ops_counter,
+        op_errors_counter,
+        restarts_counter,
+        true,
+        Duration::from_millis(down_ms),
+    )
+    .await;
+    drop(mount);
+    report
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_inner_real_on_root(
+    config: GauntletConfig,
+    root: PathBuf,
+    ops: OpStream,
+    ops_counter: Arc<AtomicUsize>,
+    op_errors_counter: Arc<AtomicUsize>,
+    restarts_counter: Arc<AtomicUsize>,
+    tolerate_op_errors: bool,
+    reopen_backoff: Duration,
+) -> GauntletReport {
+    let cfg = blockstore_config(&root, &config.store);
     let eventlog_cfg = config.eventlog;
-    let segments_dir = segments_subdir(dir.path());
+    let segments_dir = segments_subdir(&root);
     let open = {
         let segments_dir = segments_dir.clone();
         move || -> Result<Harness<RealIO>, String> {
@@ -289,7 +387,8 @@ async fn run_inner_real(
             restarts_counter,
             open,
             || {},
-            false,
+            tolerate_op_errors,
+            reopen_backoff,
         )
         .await
     } else {
@@ -301,7 +400,8 @@ async fn run_inner_real(
             restarts_counter,
             open,
             || {},
-            false,
+            tolerate_op_errors,
+            reopen_backoff,
         )
         .await
     }
@@ -356,6 +456,7 @@ async fn run_inner_simulated(
             open,
             crash,
             tolerate_errors,
+            Duration::ZERO,
         )
         .await
     } else {
@@ -368,6 +469,7 @@ async fn run_inner_simulated(
             open,
             crash,
             tolerate_errors,
+            Duration::ZERO,
         )
         .await
     }
@@ -406,6 +508,7 @@ async fn run_inner_generic<S, Open, Crash>(
     mut open: Open,
     mut crash: Crash,
     tolerate_op_errors: bool,
+    reopen_backoff: Duration,
 ) -> GauntletReport
 where
     S: StorageIO + Send + Sync + 'static,
@@ -474,7 +577,7 @@ where
             oracle.record_crash();
         }
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors) {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
             Ok(reopened) => {
                 harness = Some(reopened);
                 let n = restarts_counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -510,7 +613,7 @@ where
         crash();
         oracle.record_crash();
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors) {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
             Ok(reopened) => harness = Some(reopened),
             Err(detail) => {
                 violations.push(InvariantViolation {
@@ -551,7 +654,7 @@ where
     {
         let pre_snapshot = snapshot_block_index(&live.store);
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors) {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
             Ok(reopened) => {
                 let post_snapshot = snapshot_block_index(&reopened.store);
                 if let Some(detail) = diff_snapshots(&pre_snapshot, &post_snapshot) {
@@ -636,10 +739,11 @@ fn shutdown_harness<S: StorageIO + Send + Sync + 'static>(harness: &mut Option<H
 
 const MAX_REOPEN_ATTEMPTS: usize = 5;
 
-fn reopen_with_recovery<S, Open, Crash>(
+async fn reopen_with_recovery<S, Open, Crash>(
     open: &mut Open,
     crash: &mut Crash,
     tolerate: bool,
+    backoff: Duration,
 ) -> Result<Harness<S>, String>
 where
     S: StorageIO + Send + Sync + 'static,
@@ -647,19 +751,22 @@ where
     Crash: FnMut(),
 {
     let mut errors: Vec<String> = Vec::new();
-    (0..MAX_REOPEN_ATTEMPTS)
-        .find_map(|attempt| match open() {
-            Ok(h) => Some(Ok(h)),
+    for attempt in 0..MAX_REOPEN_ATTEMPTS {
+        if attempt > 0 && !backoff.is_zero() {
+            tokio::time::sleep(backoff).await;
+        }
+        match open() {
+            Ok(h) => return Ok(h),
             Err(e) => {
                 errors.push(format!("attempt {attempt}: {e}"));
                 if !tolerate {
-                    return Some(Err(errors.join(" | ")));
+                    return Err(errors.join(" | "));
                 }
                 crash();
-                None
             }
-        })
-        .unwrap_or_else(|| Err(errors.join(" | ")))
+        }
+    }
+    Err(errors.join(" | "))
 }
 
 const QUICK_SAMPLE_SIZE: usize = 32;
@@ -777,7 +884,7 @@ fn snapshot_block_index<S: StorageIO + Send + Sync + 'static>(
         .into_iter()
         .map(|(c, r)| (c, r.raw()))
         .collect();
-    v.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    v.sort_unstable_by_key(|a| a.0);
     v
 }
 
@@ -1450,6 +1557,7 @@ async fn run_inner_generic_concurrent<S, Open, Crash>(
     mut open: Open,
     mut crash: Crash,
     tolerate_op_errors: bool,
+    reopen_backoff: Duration,
 ) -> GauntletReport
 where
     S: StorageIO + Send + Sync + 'static,
@@ -1568,7 +1676,7 @@ where
                     oracle.record_crash();
                 }
                 shutdown_harness(&mut harness);
-                match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors) {
+                match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
                     Ok(reopened) => {
                         harness = Some(reopened);
                         let n = restarts_counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1605,7 +1713,7 @@ where
         crash();
         oracle.record_crash();
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors) {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
             Ok(reopened) => harness = Some(reopened),
             Err(detail) => {
                 violations.push(InvariantViolation {
@@ -1647,7 +1755,7 @@ where
     {
         let pre_snapshot = snapshot_block_index(&live.store);
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors) {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
             Ok(reopened) => {
                 let post_snapshot = snapshot_block_index(&reopened.store);
                 if let Some(detail) = diff_snapshots(&pre_snapshot, &post_snapshot) {

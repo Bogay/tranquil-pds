@@ -38,10 +38,12 @@ tempfile = { version = "3", optional = true }
 clap = { workspace = true, optional = true }
 toml = { version = "0.8", optional = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"], optional = true }
+libc = "0.2"
 
 [features]
 test-harness = ["dep:tempfile"]
 gauntlet-cli = ["test-harness", "dep:clap", "dep:toml", "dep:tracing-subscriber"]
+gauntlet-jemalloc-prof = []
 
 [[bin]]
 name = "tranquil-gauntlet"
@@ -60,9 +62,8 @@ tranquil-db = { workspace = true }
 sqlx = { workspace = true }
 k256 = { workspace = true }
 rand = { workspace = true }
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { version = "0.6", features = ["profiling", "unprefixed_malloc_on_supported_platforms"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-libc = "0.2"
 
 [[bench]]
 name = "blockstore"
