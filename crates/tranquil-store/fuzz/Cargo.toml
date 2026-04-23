@@ -1,0 +1,52 @@
+[package]
+name = "tranquil-store-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+tranquil-store = { path = "..", features = ["test-harness"] }
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "time", "macros", "sync"] }
+
+[[bin]]
+name = "decode_block_record"
+path = "fuzz_targets/decode_block_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_hint_record"
+path = "fuzz_targets/decode_hint_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "segment_scan"
+path = "fuzz_targets/segment_scan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "metastore_key_codec"
+path = "fuzz_targets/metastore_key_codec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gauntlet_micro"
+path = "fuzz_targets/gauntlet_micro.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
