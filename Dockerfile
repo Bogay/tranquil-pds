@@ -50,7 +50,6 @@ RUN apk add --no-cache msmtp ca-certificates \
     && ln -sf /usr/bin/msmtp /usr/sbin/sendmail
 COPY --from=builder /tmp/tranquil-pds /usr/local/bin/tranquil-pds
 COPY --from=frontend /app/dist /var/lib/tranquil-pds/frontend
-COPY migrations /app/migrations
 WORKDIR /app
 ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=3000

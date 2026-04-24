@@ -10,7 +10,8 @@ services:
       DATABASE_URL: postgres://postgres:postgres@db:5432/pds
     volumes:
       - ./config.toml:/etc/tranquil-pds/config.toml:ro
-      - blob_data:/var/lib/tranquil/blobs
+      - blob_data:/var/lib/tranquil-pds/blobs
+      - store_data:/var/lib/tranquil-pds/store
     depends_on:
       - db
 
@@ -51,4 +52,5 @@ services:
 volumes:
   postgres_data:
   blob_data:
+  store_data:
   prometheus_data:

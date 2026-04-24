@@ -47,7 +47,7 @@ For production setups with proper service management, continue to either the Deb
 
 ## Standalone containers (no compose)
 
-If you already have postgres running on the host (eg. from the [Debian install guide](install-debian.md)), you can run just the app containers.
+If you already have postgres running on the host, you can run just the app containers.
 
 Build the images:
 ```sh
@@ -60,7 +60,7 @@ Run the backend with host networking (so it can access postgres on localhost) an
 podman run -d --name tranquil-pds \
   --network=host \
   -v /etc/tranquil-pds/config.toml:/etc/tranquil-pds/config.toml:ro,Z \
-  -v /var/lib/tranquil:/var/lib/tranquil:Z \
+  -v /var/lib/tranquil-pds:/var/lib/tranquil-pds:Z \
   tranquil-pds:latest
 ```
 
@@ -91,7 +91,7 @@ location / {
 }
 ```
 
-See the [Debian install guide](install-debian.md) for the full nginx config with all API routes.
+See the Debian with systemd quadlets section below for the full nginx config with all API routes.
 
 ---
 
@@ -110,7 +110,7 @@ apt install -y podman
 
 ```bash
 mkdir -p /etc/containers/systemd
-mkdir -p /srv/tranquil-pds/{postgres,blobs,certs,acme,config}
+mkdir -p /srv/tranquil-pds/{postgres,blobs,store,certs,acme,config}
 ```
 
 ## Create a configuration file

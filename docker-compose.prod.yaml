@@ -9,7 +9,9 @@ services:
       SERVER_HOST: "0.0.0.0"
     volumes:
       - ./config.toml:/etc/tranquil-pds/config.toml:ro
-      - blob_data:/var/lib/tranquil/blobs
+      # In memory of @olaren.dev's blobs when lewis forgot to update /tranquil to /tranquil-pds :(
+      - blob_data:/var/lib/tranquil-pds/blobs
+      - store_data:/var/lib/tranquil-pds/store
     depends_on:
       db:
         condition: service_healthy
@@ -94,5 +96,6 @@ services:
 volumes:
   postgres_data:
   blob_data:
+  store_data:
   prometheus_data:
   acme_challenge:

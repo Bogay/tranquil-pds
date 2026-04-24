@@ -83,8 +83,9 @@ pub fn ensure_test_defaults() {
 ///
 /// Precedence (highest to lowest):
 /// 1. Environment variables
-/// 2. TOML config file (if provided)
-/// 3. Built-in defaults
+/// 2. Toml config file passed as `config_path`, if provided
+/// 3. `/etc/tranquil-pds/config.toml` - hardcoded fallback, silently skipped if absent
+/// 4. Built-in defaults
 pub fn load(config_path: Option<&PathBuf>) -> Result<TranquilConfig, confique::Error> {
     let mut builder = TranquilConfig::builder().env();
     if let Some(path) = config_path {

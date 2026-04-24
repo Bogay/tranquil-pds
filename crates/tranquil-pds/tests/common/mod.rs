@@ -191,16 +191,12 @@ async fn setup_with_external_infra() -> String {
 async fn setup_with_testcontainers() -> String {
     let temp_dir = std::env::temp_dir().join(format!("tranquil-pds-test-{}", uuid::Uuid::new_v4()));
     let blob_path = temp_dir.join("blobs");
-    let backup_path = temp_dir.join("backups");
     std::fs::create_dir_all(&blob_path).expect("Failed to create blob temp directory");
-    std::fs::create_dir_all(&backup_path).expect("Failed to create backup temp directory");
     TEST_TEMP_DIR.set(temp_dir).ok();
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
         std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
-        std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
-        std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
         std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
@@ -242,8 +238,6 @@ async fn setup_with_testcontainers() -> String {
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "s3");
-        std::env::set_var("BACKUP_STORAGE_BACKEND", "s3");
-        std::env::set_var("BACKUP_S3_BUCKET", "test-backups");
         std::env::set_var("S3_BUCKET", "test-bucket");
         std::env::set_var("AWS_ACCESS_KEY_ID", "minioadmin");
         std::env::set_var("AWS_SECRET_ACCESS_KEY", "minioadmin");
@@ -333,8 +327,6 @@ unsafe fn configure_external_storage_env() {
         if std::env::var("S3_ENDPOINT").is_ok() {
             let s3_endpoint = std::env::var("S3_ENDPOINT").unwrap();
             std::env::set_var("BLOB_STORAGE_BACKEND", "s3");
-            std::env::set_var("BACKUP_STORAGE_BACKEND", "s3");
-            std::env::set_var("BACKUP_S3_BUCKET", "test-backups");
             std::env::set_var(
                 "S3_BUCKET",
                 std::env::var("S3_BUCKET").unwrap_or_else(|_| "test-bucket".to_string()),
@@ -356,14 +348,10 @@ unsafe fn configure_external_storage_env() {
             let process_dir =
                 std::env::temp_dir().join(format!("tranquil-pds-test-{}", std::process::id()));
             let blob_path = process_dir.join("blobs");
-            let backup_path = process_dir.join("backups");
             std::fs::create_dir_all(&blob_path).expect("Failed to create blob directory");
-            std::fs::create_dir_all(&backup_path).expect("Failed to create backup directory");
             TEST_TEMP_DIR.set(process_dir).ok();
             std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
             std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
-            std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
-            std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
         }
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
@@ -622,18 +610,14 @@ async fn setup_store_backend() -> String {
     let temp_dir =
         std::env::temp_dir().join(format!("tranquil-pds-store-{}", uuid::Uuid::new_v4()));
     let blob_path = temp_dir.join("blobs");
-    let backup_path = temp_dir.join("backups");
     let store_path = temp_dir.join("store");
     std::fs::create_dir_all(&blob_path).expect("failed to create blob temp directory");
-    std::fs::create_dir_all(&backup_path).expect("failed to create backup temp directory");
     std::fs::create_dir_all(&store_path).expect("failed to create store temp directory");
     TEST_TEMP_DIR.set(temp_dir).ok();
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
         std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
-        std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
-        std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
         std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
@@ -790,18 +774,14 @@ async fn setup_cluster_store_backend() -> Option<sqlx::PgPool> {
         uuid::Uuid::new_v4()
     ));
     let blob_path = temp_dir.join("blobs");
-    let backup_path = temp_dir.join("backups");
     let store_path = temp_dir.join("store");
     std::fs::create_dir_all(&blob_path).expect("failed to create blob temp directory");
-    std::fs::create_dir_all(&backup_path).expect("failed to create backup temp directory");
     std::fs::create_dir_all(&store_path).expect("failed to create store temp directory");
     TEST_TEMP_DIR.set(temp_dir).ok();
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
         std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
-        std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
-        std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
         std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
@@ -847,16 +827,12 @@ async fn setup_cluster_testcontainers() -> Option<sqlx::PgPool> {
     let temp_dir =
         std::env::temp_dir().join(format!("tranquil-pds-cluster-{}", uuid::Uuid::new_v4()));
     let blob_path = temp_dir.join("blobs");
-    let backup_path = temp_dir.join("backups");
     std::fs::create_dir_all(&blob_path).expect("Failed to create blob temp directory");
-    std::fs::create_dir_all(&backup_path).expect("Failed to create backup temp directory");
     TEST_TEMP_DIR.set(temp_dir).ok();
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
         std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
-        std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
-        std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
         std::env::set_var("PLC_DIRECTORY_URL", &plc_url);

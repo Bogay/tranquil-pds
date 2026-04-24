@@ -8,7 +8,6 @@ const HANDLE_DOMAIN: &str = "handles.test";
 
 fn set_handle_domain() {
     unsafe {
-        std::env::set_var("AVAILABLE_USER_DOMAINS", HANDLE_DOMAIN);
         std::env::set_var("PDS_USER_HANDLE_DOMAINS", HANDLE_DOMAIN);
     }
 }

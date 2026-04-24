@@ -62,7 +62,6 @@ podman-compose -f docker-compose.prod.yaml up -d
 ### Installation Guides
 
 - [Nix](docs/install-nix.md)
-- [Debian](docs/install-debian.md)
 - [Containers](docs/install-containers.md)
 - [Kubernetes](docs/install-kubernetes.md)
 

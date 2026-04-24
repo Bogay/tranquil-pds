@@ -5,11 +5,11 @@ After=tranquil-pds-db.service
 ContainerName=tranquil-pds-app
 Image=localhost/tranquil-pds:latest
 Pod=tranquil-pds.pod
-EnvironmentFile=/srv/tranquil-pds/config/tranquil-pds.env
 Environment=SERVER_HOST=0.0.0.0
 Environment=SERVER_PORT=3000
-Volume=/srv/tranquil-pds/blobs:/var/lib/tranquil/blobs:Z
-Volume=/srv/tranquil-pds/backups:/var/lib/tranquil/backups:Z
+Volume=/srv/tranquil-pds/config/config.toml:/etc/tranquil-pds/config.toml:ro,Z
+Volume=/srv/tranquil-pds/blobs:/var/lib/tranquil-pds/blobs:Z
+Volume=/srv/tranquil-pds/store:/var/lib/tranquil-pds/store:Z
 HealthCmd=wget -q --spider http://localhost:3000/xrpc/_health
 HealthInterval=30s
 HealthTimeout=10s
