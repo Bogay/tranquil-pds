@@ -287,8 +287,6 @@ pub fn is_valid_discord_username(username: &str) -> bool {
         && username
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.')
-        && !username.starts_with('.')
-        && !username.ends_with('.')
         && !username.contains("..")
 }
 
@@ -493,8 +491,6 @@ mod tests {
         assert!(!is_valid_discord_username("Alice"));
         assert!(!is_valid_discord_username("ALICE"));
         assert!(!is_valid_discord_username("user-name"));
-        assert!(!is_valid_discord_username(".username"));
-        assert!(!is_valid_discord_username("username."));
         assert!(!is_valid_discord_username("user..name"));
         assert!(!is_valid_discord_username("user name"));
         assert!(!is_valid_discord_username(
