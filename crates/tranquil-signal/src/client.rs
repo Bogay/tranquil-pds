@@ -122,11 +122,7 @@ pub struct MessageTooLong {
 
 impl fmt::Display for MessageTooLong {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "message body is {} bytes, max {}",
-            self.len, self.max
-        )
+        write!(f, "message body is {} bytes, max {}", self.len, self.max)
     }
 }
 

@@ -65,6 +65,9 @@ pub fn ensure_test_defaults() {
             if env::var("ENABLE_PDS_HOSTED_DID_WEB").is_err() {
                 env::set_var("ENABLE_PDS_HOSTED_DID_WEB", "true");
             }
+            if env::var("TRANQUIL_LEXICON_OFFLINE").is_err() {
+                env::set_var("TRANQUIL_LEXICON_OFFLINE", "1");
+            }
         }
         TranquilConfig::builder()
             .env()

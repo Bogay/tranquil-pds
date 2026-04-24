@@ -577,7 +577,8 @@ where
             oracle.record_crash();
         }
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await
+        {
             Ok(reopened) => {
                 harness = Some(reopened);
                 let n = restarts_counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -613,7 +614,8 @@ where
         crash();
         oracle.record_crash();
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await
+        {
             Ok(reopened) => harness = Some(reopened),
             Err(detail) => {
                 violations.push(InvariantViolation {
@@ -654,7 +656,8 @@ where
     {
         let pre_snapshot = snapshot_block_index(&live.store);
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await
+        {
             Ok(reopened) => {
                 let post_snapshot = snapshot_block_index(&reopened.store);
                 if let Some(detail) = diff_snapshots(&pre_snapshot, &post_snapshot) {
@@ -1676,7 +1679,14 @@ where
                     oracle.record_crash();
                 }
                 shutdown_harness(&mut harness);
-                match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
+                match reopen_with_recovery(
+                    &mut open,
+                    &mut crash,
+                    tolerate_op_errors,
+                    reopen_backoff,
+                )
+                .await
+                {
                     Ok(reopened) => {
                         harness = Some(reopened);
                         let n = restarts_counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1713,7 +1723,8 @@ where
         crash();
         oracle.record_crash();
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await
+        {
             Ok(reopened) => harness = Some(reopened),
             Err(detail) => {
                 violations.push(InvariantViolation {
@@ -1755,7 +1766,8 @@ where
     {
         let pre_snapshot = snapshot_block_index(&live.store);
         shutdown_harness(&mut harness);
-        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await {
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await
+        {
             Ok(reopened) => {
                 let post_snapshot = snapshot_block_index(&reopened.store);
                 if let Some(detail) = diff_snapshots(&pre_snapshot, &post_snapshot) {

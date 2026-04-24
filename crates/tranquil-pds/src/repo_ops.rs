@@ -6,17 +6,19 @@ use crate::types::{Did, Handle, Nsid, Rkey};
 use backon::{ExponentialBuilder, Retryable};
 use bytes::Bytes;
 use cid::Cid;
+use jacquard_common::smol_str::SmolStr;
 use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::commit::Commit;
-use jacquard_repo::mst::Mst;
 use jacquard_repo::mst::util::compute_cid;
+use jacquard_repo::mst::{Mst, VerifiedWriteOp};
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::OwnedMutexGuard;
-use tracing::error;
+use tracing::{error, warn};
 use tranquil_db_traits::SequenceNumber;
 use uuid::Uuid;
 
@@ -236,13 +238,89 @@ pub async fn finalize_repo_write(
         ApiError::InternalError(None)
     })?;
 
-    let block_bytes = ctx.tracking_store.take_written_blocks();
+    let written_bytes = ctx.tracking_store.take_written_blocks();
+    let new_tree_cids: Vec<Cid> = written_bytes.keys().copied().collect();
 
-    let storage_for_diff = Arc::new(ctx.tracking_store.clone());
-    let original_settled = Mst::load(storage_for_diff.clone(), ctx.prev_data_cid, None);
-    let new_settled = Mst::load(storage_for_diff, new_mst_root, None);
+    let storage_for_proof = Arc::new(ctx.tracking_store.clone());
+    let original_settled = Mst::load(storage_for_proof.clone(), ctx.prev_data_cid, None);
+    let new_settled = Mst::load(storage_for_proof.clone(), new_mst_root, None);
 
-    let new_tree_cids: Vec<Cid> = block_bytes.keys().copied().collect();
+    let mut inverse_trace = new_settled.clone();
+    let mut non_invertible: Vec<String> = Vec::new();
+    let mut invert_errors: Vec<String> = Vec::new();
+    for op in params.ops.iter() {
+        let (collection, rkey) = match op {
+            RecordOp::Create {
+                collection, rkey, ..
+            }
+            | RecordOp::Update {
+                collection, rkey, ..
+            }
+            | RecordOp::Delete {
+                collection, rkey, ..
+            } => (collection, rkey),
+        };
+        let key = SmolStr::new(format!("{}/{}", collection, rkey));
+        let verified = match op {
+            RecordOp::Create { cid, .. } => VerifiedWriteOp::Create {
+                key,
+                cid: *cid.as_cid(),
+            },
+            RecordOp::Update { cid, prev, .. } => VerifiedWriteOp::Update {
+                key,
+                cid: *cid.as_cid(),
+                prev: *prev.as_cid(),
+            },
+            RecordOp::Delete { prev, .. } => VerifiedWriteOp::Delete {
+                key,
+                prev: *prev.as_cid(),
+            },
+        };
+        match inverse_trace.invert_op(verified.clone()).await {
+            Ok(true) => {}
+            Ok(false) => non_invertible.push(format!("{:?}", verified)),
+            Err(e) => invert_errors.push(format!("{:?} -> {:?}", verified, e)),
+        }
+    }
+    if !non_invertible.is_empty() {
+        warn!(
+            user_id = %params.user_id,
+            count = non_invertible.len(),
+            ops = ?non_invertible,
+            "firehose proof walk: ops not invertible on new MST, consumer will reject frame"
+        );
+    }
+    if !invert_errors.is_empty() {
+        warn!(
+            user_id = %params.user_id,
+            count = invert_errors.len(),
+            failures = ?invert_errors,
+            "firehose proof walk: invert_op errored, cover blocks may be incomplete"
+        );
+    }
+
+    let read_cid_set: HashSet<Cid> = ctx.tracking_store.get_read_cids().into_iter().collect();
+    let missing_read_cids: Vec<Cid> = read_cid_set
+        .iter()
+        .copied()
+        .filter(|cid| !written_bytes.contains_key(cid))
+        .collect();
+    let mut relevant: BTreeMap<Cid, Bytes> = BTreeMap::new();
+    if !missing_read_cids.is_empty() {
+        let fetched = ctx
+            .tracking_store
+            .get_many(&missing_read_cids)
+            .await
+            .map_err(|e| {
+                error!("fetch cover read bytes: {e}");
+                ApiError::InternalError(None)
+            })?;
+        for (cid, maybe) in missing_read_cids.into_iter().zip(fetched) {
+            if let Some(bytes) = maybe {
+                relevant.insert(cid, bytes);
+            }
+        }
+    }
 
     let obsolete_cids = match original_settled.diff(&new_settled).await {
         Ok(diff) => {
@@ -262,6 +340,9 @@ pub async fn finalize_repo_write(
             vec![ctx.current_root_cid]
         }
     };
+
+    let mut block_bytes = written_bytes;
+    block_bytes.extend(relevant);
 
     let result = commit_and_log(
         state,
