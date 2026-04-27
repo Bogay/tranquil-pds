@@ -48,6 +48,63 @@ pub fn get_subscriber_count() -> usize {
     SUBSCRIBER_COUNT.load(Ordering::SeqCst)
 }
 
+async fn recover_lagged_events(
+    socket: &mut WebSocket,
+    state: &AppState,
+    last_seen: &mut SequenceNumber,
+) -> Result<(), ()> {
+    if !last_seen.is_valid() {
+        *last_seen = state.repos.repo.get_max_seq().await.map_err(|e| {
+            error!("Lag recovery failed to read head sequence: {:?}", e);
+        })?;
+        return Ok(());
+    }
+    loop {
+        let events = match state
+            .repos
+            .repo
+            .get_events_since_cursor(*last_seen, BACKFILL_BATCH_SIZE)
+            .await
+        {
+            Ok(e) => e,
+            Err(e) => {
+                error!("Lag recovery DB query failed: {:?}", e);
+                return Err(());
+            }
+        };
+        if events.is_empty() {
+            return Ok(());
+        }
+        let batch_len = events.len();
+        let prefetched = match prefetch_blocks_for_events(state, &events).await {
+            Ok(b) => b,
+            Err(e) => {
+                error!("Lag recovery prefetch failed: {:?}", e);
+                return Err(());
+            }
+        };
+        for event in events {
+            *last_seen = event.seq;
+            let bytes =
+                match format_event_with_prefetched_blocks(state, event, &prefetched).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        warn!("Lag recovery format failed: {}", e);
+                        return Err(());
+                    }
+                };
+            if let Err(e) = socket.send(Message::Binary(bytes.into())).await {
+                warn!("Lag recovery send failed: {}", e);
+                return Err(());
+            }
+            tranquil_pds::metrics::record_firehose_event();
+        }
+        if batch_len < BACKFILL_BATCH_SIZE as usize {
+            return Ok(());
+        }
+    }
+}
+
 async fn handle_socket(mut socket: WebSocket, state: AppState, params: SubscribeReposParams) {
     let count = SUBSCRIBER_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
     tranquil_pds::metrics::set_firehose_subscribers(count);
@@ -208,7 +265,6 @@ async fn handle_socket_inner(
             }
         }
     }
-    let max_lag_before_disconnect: u64 = tranquil_config::get().firehose.max_lag;
     loop {
         tokio::select! {
             result = rx.recv() => match result {
@@ -224,10 +280,9 @@ async fn handle_socket_inner(
                     tranquil_pds::metrics::record_firehose_event();
                 }
                 Err(RecvError::Lagged(skipped)) => {
-                    warn!(skipped = skipped, "Firehose subscriber lagged behind");
-                    if skipped > max_lag_before_disconnect {
-                        warn!(skipped = skipped, max_lag = max_lag_before_disconnect,
-                            "Disconnecting slow firehose consumer");
+                    warn!(skipped, last_seen = last_seen.as_i64(),
+                        "Firehose subscriber lagged, recovering missed events from DB");
+                    if let Err(()) = recover_lagged_events(socket, state, &mut last_seen).await {
                         break;
                     }
                 }

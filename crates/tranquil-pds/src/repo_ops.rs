@@ -14,7 +14,7 @@ use jacquard_repo::mst::{Mst, VerifiedWriteOp};
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::OwnedMutexGuard;
@@ -40,6 +40,7 @@ pub enum CommitError {
     MstOperationFailed(String),
     RecordSerializationFailed(String),
     InvalidCid(String),
+    RecordAlreadyExists(String),
 }
 
 impl std::fmt::Display for CommitError {
@@ -65,6 +66,7 @@ impl std::fmt::Display for CommitError {
                 write!(f, "Failed to serialize record: {}", e)
             }
             Self::InvalidCid(e) => write!(f, "Invalid CID: {}", e),
+            Self::RecordAlreadyExists(key) => write!(f, "Record already exists at {}", key),
         }
     }
 }
@@ -79,6 +81,9 @@ impl From<CommitError> for ApiError {
             }
             CommitError::RepoNotFound => ApiError::RepoNotFound(None),
             CommitError::UserNotFound => ApiError::RepoNotFound(Some("User not found".into())),
+            CommitError::RecordAlreadyExists(key) => {
+                ApiError::InvalidRequest(format!("Record already exists at {key}"))
+            }
             other => {
                 error!("Commit failed: {}", other);
                 ApiError::InternalError(Some("Failed to commit changes".into()))
@@ -162,7 +167,6 @@ pub struct FinalizeParams<'a> {
     pub controller_did: Option<&'a Did>,
     pub delegation_detail: Option<serde_json::Value>,
     pub ops: Vec<RecordOp>,
-    pub modified_keys: &'a [String],
     pub blob_cids: &'a [String],
     pub backlinks_to_add: Vec<Backlink>,
     pub backlinks_to_remove: Vec<AtUri>,
@@ -248,18 +252,8 @@ pub async fn finalize_repo_write(
     let mut inverse_trace = new_settled.clone();
     let mut non_invertible: Vec<String> = Vec::new();
     let mut invert_errors: Vec<String> = Vec::new();
-    for op in params.ops.iter() {
-        let (collection, rkey) = match op {
-            RecordOp::Create {
-                collection, rkey, ..
-            }
-            | RecordOp::Update {
-                collection, rkey, ..
-            }
-            | RecordOp::Delete {
-                collection, rkey, ..
-            } => (collection, rkey),
-        };
+    for op in params.ops.iter().rev() {
+        let (collection, rkey) = op.collection_rkey();
         let key = SmolStr::new(format!("{}/{}", collection, rkey));
         let verified = match op {
             RecordOp::Create { cid, .. } => VerifiedWriteOp::Create {
@@ -427,6 +421,22 @@ pub enum RecordOp {
     },
 }
 
+impl RecordOp {
+    pub fn collection_rkey(&self) -> (&Nsid, &Rkey) {
+        match self {
+            Self::Create {
+                collection, rkey, ..
+            }
+            | Self::Update {
+                collection, rkey, ..
+            }
+            | Self::Delete {
+                collection, rkey, ..
+            } => (collection, rkey),
+        }
+    }
+}
+
 pub struct CommitResult {
     pub commit_cid: Cid,
     pub rev: String,
@@ -457,8 +467,6 @@ pub async fn commit_and_log(
         RecordUpsert, RepoEventType,
     };
 
-    let backlinks_to_add = params.backlinks_to_add;
-    let backlinks_to_remove = params.backlinks_to_remove;
     let CommitParams {
         did,
         user_id,
@@ -471,7 +479,8 @@ pub async fn commit_and_log(
         new_tree_cids,
         blobs,
         obsolete_cids,
-        ..
+        backlinks_to_add,
+        backlinks_to_remove,
     } = params;
     debug_assert_eq!(
         current_root_cid.is_some(),
@@ -517,39 +526,65 @@ pub async fn commit_and_log(
 
     let obsolete_bytes: Vec<Vec<u8>> = obsolete_cids.iter().map(|c| c.to_bytes()).collect();
 
-    let (record_upserts, record_deletes): (Vec<RecordUpsert>, Vec<RecordDelete>) = ops.iter().fold(
-        (Vec::new(), Vec::new()),
-        |(mut upserts, mut deletes), op| {
-            match op {
-                RecordOp::Create {
-                    collection,
-                    rkey,
-                    cid,
-                }
-                | RecordOp::Update {
-                    collection,
-                    rkey,
-                    cid,
-                    ..
-                } => {
-                    upserts.push(RecordUpsert {
-                        collection: collection.clone(),
-                        rkey: rkey.clone(),
-                        cid: crate::types::CidLink::from(cid.as_cid()),
-                    });
-                }
-                RecordOp::Delete {
-                    collection, rkey, ..
-                } => {
-                    deletes.push(RecordDelete {
-                        collection: collection.clone(),
-                        rkey: rkey.clone(),
-                    });
-                }
+    let final_ops: HashMap<(&Nsid, &Rkey), &RecordOp> = ops
+        .iter()
+        .map(|op| (op.collection_rkey(), op))
+        .collect();
+
+    let final_record_uris: HashSet<AtUri> = final_ops
+        .iter()
+        .filter(|(_, op)| !matches!(op, RecordOp::Delete { .. }))
+        .map(|((c, r), _)| AtUri::from_parts(did, c, r))
+        .collect();
+
+    let record_upserts: Vec<RecordUpsert> = final_ops
+        .values()
+        .filter_map(|op| match op {
+            RecordOp::Create {
+                collection,
+                rkey,
+                cid,
             }
-            (upserts, deletes)
-        },
-    );
+            | RecordOp::Update {
+                collection,
+                rkey,
+                cid,
+                ..
+            } => Some(RecordUpsert {
+                collection: collection.clone(),
+                rkey: rkey.clone(),
+                cid: crate::types::CidLink::from(cid.as_cid()),
+            }),
+            RecordOp::Delete { .. } => None,
+        })
+        .collect();
+
+    let record_deletes: Vec<RecordDelete> = final_ops
+        .values()
+        .filter_map(|op| match op {
+            RecordOp::Delete {
+                collection, rkey, ..
+            } => Some(RecordDelete {
+                collection: collection.clone(),
+                rkey: rkey.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
+
+    let backlinks_to_add: Vec<Backlink> = backlinks_to_add
+        .into_iter()
+        .filter(|b| final_record_uris.contains(&b.uri))
+        .map(|b| ((b.uri.clone(), b.path), b))
+        .collect::<HashMap<_, _>>()
+        .into_values()
+        .collect();
+
+    let backlinks_to_remove: Vec<AtUri> = backlinks_to_remove
+        .into_iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
 
     let ops_json: Vec<serde_json::Value> = ops
         .iter()
@@ -684,6 +719,16 @@ pub async fn create_record_internal(
         .await
         .map_err(to_commit_err)?;
 
+    let key = format!("{}/{}", collection, rkey);
+    if mst
+        .get(&key)
+        .await
+        .map_err(|e| CommitError::MstOperationFailed(e.to_string()))?
+        .is_some()
+    {
+        return Err(CommitError::RecordAlreadyExists(key));
+    }
+
     let record_ipld = crate::util::json_to_ipld(record);
     let mut record_bytes = Vec::new();
     serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld)
@@ -693,8 +738,6 @@ pub async fn create_record_internal(
         .put(&record_bytes)
         .await
         .map_err(|e| CommitError::BlockStoreFailed(e.to_string()))?;
-
-    let key = format!("{}/{}", collection, rkey);
     let new_mst = mst
         .add(&key, record_cid)
         .await
@@ -705,7 +748,6 @@ pub async fn create_record_internal(
         rkey: rkey.clone(),
         cid: RecordCid::from(record_cid),
     };
-    let modified_keys = [key];
     let blob_cids = extract_blob_cids(record);
     let record_uri = AtUri::from_parts(did.as_str(), collection.as_str(), rkey.as_str());
     let backlinks = extract_backlinks(&record_uri, record);
@@ -720,7 +762,6 @@ pub async fn create_record_internal(
             controller_did: None,
             delegation_detail: None,
             ops: vec![op],
-            modified_keys: &modified_keys,
             blob_cids: &blob_cids,
             backlinks_to_add: backlinks,
             backlinks_to_remove: vec![],

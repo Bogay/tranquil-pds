@@ -74,7 +74,6 @@ pub async fn delete_record(
         prev: RecordCid::from(prev_record_cid),
     };
 
-    let modified_keys = [key];
     let deleted_uri = AtUri::from_parts(&did, &input.collection, &input.rkey);
 
     let commit_result = finalize_repo_write(
@@ -93,7 +92,6 @@ pub async fn delete_record(
                 })
             }),
             ops: vec![op],
-            modified_keys: &modified_keys,
             blob_cids: &[],
             backlinks_to_add: vec![],
             backlinks_to_remove: vec![deleted_uri],

@@ -27,7 +27,6 @@ struct WriteAccumulator {
     mst: Mst<TrackingBlockStore>,
     results: Vec<WriteResult>,
     ops: Vec<RecordOp>,
-    modified_keys: Vec<String>,
     all_blob_cids: Vec<String>,
     backlinks_to_add: Vec<Backlink>,
     backlinks_to_remove: Vec<AtUri>,
@@ -44,7 +43,6 @@ async fn process_single_write(
         mst,
         mut results,
         mut ops,
-        mut modified_keys,
         mut all_blob_cids,
         mut backlinks_to_add,
         mut backlinks_to_remove,
@@ -69,8 +67,19 @@ async fn process_single_write(
                     .await?,
                 )
             };
-            all_blob_cids.extend(extract_blob_cids(value));
             let rkey = rkey.clone().unwrap_or_else(Rkey::generate);
+            let key = format!("{}/{}", collection, rkey);
+            if mst
+                .get(&key)
+                .await
+                .map_err(|e| ApiError::InternalError(Some(format!("Failed to read MST: {e}"))))?
+                .is_some()
+            {
+                return Err(ApiError::InvalidRequest(format!(
+                    "Record already exists at {key}"
+                )));
+            }
+            all_blob_cids.extend(extract_blob_cids(value));
             let record_ipld = tranquil_pds::util::json_to_ipld(value);
             let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
                 .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
@@ -78,8 +87,6 @@ async fn process_single_write(
                 .put(&record_bytes)
                 .await
                 .map_err(|_| ApiError::InternalError(Some("Failed to store record".into())))?;
-            let key = format!("{}/{}", collection, rkey);
-            modified_keys.push(key.clone());
             let new_mst = mst
                 .add(&key, record_cid)
                 .await
@@ -100,7 +107,6 @@ async fn process_single_write(
                 mst: new_mst,
                 results,
                 ops,
-                modified_keys,
                 all_blob_cids,
                 backlinks_to_add,
                 backlinks_to_remove,
@@ -124,16 +130,7 @@ async fn process_single_write(
                     .await?,
                 )
             };
-            all_blob_cids.extend(extract_blob_cids(value));
-            let record_ipld = tranquil_pds::util::json_to_ipld(value);
-            let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
-                .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
-            let record_cid = tracking_store
-                .put(&record_bytes)
-                .await
-                .map_err(|_| ApiError::InternalError(Some("Failed to store record".into())))?;
             let key = format!("{}/{}", collection, rkey);
-            modified_keys.push(key.clone());
             let prev_record_cid = mst
                 .get(&key)
                 .await
@@ -143,6 +140,14 @@ async fn process_single_write(
                 .ok_or_else(|| {
                     ApiError::InvalidRequest("Update target record does not exist".into())
                 })?;
+            all_blob_cids.extend(extract_blob_cids(value));
+            let record_ipld = tranquil_pds::util::json_to_ipld(value);
+            let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
+                .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
+            let record_cid = tracking_store
+                .put(&record_bytes)
+                .await
+                .map_err(|_| ApiError::InternalError(Some("Failed to store record".into())))?;
             let new_mst = mst
                 .update(&key, record_cid)
                 .await
@@ -165,7 +170,6 @@ async fn process_single_write(
                 mst: new_mst,
                 results,
                 ops,
-                modified_keys,
                 all_blob_cids,
                 backlinks_to_add,
                 backlinks_to_remove,
@@ -173,7 +177,6 @@ async fn process_single_write(
         }
         WriteOp::Delete { collection, rkey } => {
             let key = format!("{}/{}", collection, rkey);
-            modified_keys.push(key.clone());
             let prev_record_cid = mst
                 .get(&key)
                 .await
@@ -198,7 +201,6 @@ async fn process_single_write(
                 mst: new_mst,
                 results,
                 ops,
-                modified_keys,
                 all_blob_cids,
                 backlinks_to_add,
                 backlinks_to_remove,
@@ -219,7 +221,6 @@ async fn process_writes(
         mst: initial_mst,
         results: Vec::new(),
         ops: Vec::new(),
-        modified_keys: Vec::new(),
         all_blob_cids: Vec::new(),
         backlinks_to_add: Vec::new(),
         backlinks_to_remove: Vec::new(),
@@ -351,7 +352,6 @@ pub async fn apply_writes(
         mst: final_mst,
         results,
         ops,
-        modified_keys,
         all_blob_cids,
         backlinks_to_add,
         backlinks_to_remove,
@@ -407,7 +407,6 @@ pub async fn apply_writes(
             controller_did: controller_did.as_ref(),
             delegation_detail: write_summary,
             ops,
-            modified_keys: &modified_keys,
             blob_cids: &all_blob_cids,
             backlinks_to_add,
             backlinks_to_remove,

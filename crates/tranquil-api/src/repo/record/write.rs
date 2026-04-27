@@ -179,6 +179,18 @@ pub async fn create_record(
         }
     }
 
+    let key = format!("{}/{}", input.collection, rkey);
+    if mst
+        .get(&key)
+        .await
+        .map_err(|e| ApiError::InternalError(Some(format!("Failed to read MST: {e}"))))?
+        .is_some()
+    {
+        return Err(ApiError::InvalidRequest(format!(
+            "Record already exists at {key}"
+        )));
+    }
+
     let record_ipld = tranquil_pds::util::json_to_ipld(&input.record);
     let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
         .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
@@ -187,8 +199,6 @@ pub async fn create_record(
         .put(&record_bytes)
         .await
         .map_err(|_| ApiError::InternalError(Some("Failed to save record block".into())))?;
-
-    let key = format!("{}/{}", input.collection, rkey);
     mst = mst
         .add(&key, record_cid)
         .await
@@ -200,20 +210,6 @@ pub async fn create_record(
         cid: tranquil_pds::cid_types::RecordCid::from(record_cid),
     });
 
-    let modified_keys: Vec<String> = ops
-        .iter()
-        .map(|op| match op {
-            RecordOp::Create {
-                collection, rkey, ..
-            }
-            | RecordOp::Update {
-                collection, rkey, ..
-            }
-            | RecordOp::Delete {
-                collection, rkey, ..
-            } => format!("{}/{}", collection, rkey),
-        })
-        .collect();
     let blob_cids = extract_blob_cids(&input.record);
 
     let created_uri = AtUri::from_parts(&did, &input.collection, &rkey);
@@ -235,7 +231,6 @@ pub async fn create_record(
                 })
             }),
             ops,
-            modified_keys: &modified_keys,
             blob_cids: &blob_cids,
             backlinks_to_add,
             backlinks_to_remove: conflict_uris_to_cleanup,
@@ -367,7 +362,6 @@ pub async fn put_record(
         }
     };
 
-    let modified_keys = [key];
     let blob_cids = extract_blob_cids(&input.record);
     let backlinks_to_add = extract_backlinks(&record_uri, &input.record);
 
@@ -387,7 +381,6 @@ pub async fn put_record(
                 })
             }),
             ops: vec![op],
-            modified_keys: &modified_keys,
             blob_cids: &blob_cids,
             backlinks_to_add,
             backlinks_to_remove,

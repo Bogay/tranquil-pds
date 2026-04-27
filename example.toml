@@ -348,13 +348,6 @@
 # Default value: 72
 #backfill_hours = 72
 
-# Maximum number of lagged events before disconnecting a slow consumer.
-#
-# Can also be specified via environment variable `FIREHOSE_MAX_LAG`.
-#
-# Default value: 5000
-#max_lag = 5000
-
 # Maximum concurrent full-repo exports, eg. getRepo without `since`.
 #
 # Can also be specified via environment variable `MAX_CONCURRENT_REPO_EXPORTS`.

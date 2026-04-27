@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BacklinkPath {
     Subject,
     SubjectUri,
