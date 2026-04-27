@@ -124,7 +124,7 @@ async fn verify_inductive_inverse(event: &SequencedEvent) -> Result<(Cid, Cid), 
     let new_data_cid = new_commit_data_cid(&storage, &commit_cid).await?;
 
     let mut mst = Mst::load(storage.clone(), new_data_cid, None);
-    for op_value in ops_json(event)? {
+    for op_value in ops_json(event)?.iter().rev() {
         let verified = parse_op_to_verified(op_value)?;
         let inverted = mst
             .invert_op(verified.clone())
@@ -544,6 +544,63 @@ async fn inductive_inverse_verifies_every_commit() {
         }
     }
     report_failures(non_genesis.len(), &failures, "any inverse");
+}
+
+#[tokio::test]
+async fn inductive_inverse_handles_same_rkey_in_batch() {
+    let client = client();
+    let (token, did) = create_account_and_login(&client).await;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let rkey = rkey_for("dup", 0);
+    create_record(&client, &token, &did, COLLECTION, &rkey).await;
+
+    let writes = vec![
+        json!({
+            "$type": "com.atproto.repo.applyWrites#update",
+            "collection": COLLECTION,
+            "rkey": rkey,
+            "value": {
+                "$type": COLLECTION,
+                "text": "v1",
+                "createdAt": now,
+            }
+        }),
+        json!({
+            "$type": "com.atproto.repo.applyWrites#update",
+            "collection": COLLECTION,
+            "rkey": rkey,
+            "value": {
+                "$type": COLLECTION,
+                "text": "v2",
+                "createdAt": now,
+            }
+        }),
+    ];
+    apply_writes_batch(&client, &token, &did, writes).await;
+
+    let our = our_commit_events(&did).await;
+    let dup_event = our
+        .iter()
+        .find(|e| {
+            ops_json(e)
+                .map(|arr| {
+                    arr.iter()
+                        .filter(|op| op["action"].as_str() == Some("update"))
+                        .count()
+                        == 2
+                })
+                .unwrap_or(false)
+        })
+        .expect("commit event with two same-rkey updates");
+
+    let (exp, got) = verify_inductive_inverse(dup_event)
+        .await
+        .expect("inverse verify should succeed for same-rkey batch");
+    assert_eq!(
+        exp, got,
+        "inverse root mismatch for same-rkey batch: exp={exp} got={got}"
+    );
 }
 
 #[tokio::test]
