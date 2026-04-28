@@ -85,6 +85,10 @@
     try {
       await api.revokeAppPassword(session.accessJwt, name)
       appPasswords = appPasswords.filter(p => p.name !== name)
+      if (name == newPasswordName) {
+        // unset new password if it was just created and is now revoked
+        newPassword = null
+      }
       toast.success($_('appPasswords.deleted'))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : $_('appPasswords.deleteFailed'))
