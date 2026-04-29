@@ -27,7 +27,7 @@ pub use hint::{
 pub use manager::{CachedHandle, DEFAULT_MAX_FILE_SIZE, DataFileManager};
 pub use reader::{BlockStoreReader, ReadError};
 pub use store::QuiesceGuard;
-pub use store::{BlockStoreConfig, DEFAULT_SHARD_COUNT, TranquilBlockStore};
+pub use store::{BlockStoreConfig, DEFAULT_SHARD_COUNT, OpenRetryPolicy, TranquilBlockStore};
 pub use types::{
     BlockLength, BlockLocation, BlockOffset, BlockstoreSnapshot, CidBytes, CollectionResult,
     CommitEpoch, CompactionResult, DataFileId, EpochCounter, HintOffset, IndexEntry, LivenessInfo,

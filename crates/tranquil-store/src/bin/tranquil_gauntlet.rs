@@ -64,6 +64,16 @@ enum Cmd {
         #[arg(long)]
         config: Option<PathBuf>,
 
+        /// Tempdir parent for `IoBackend::Real` seeds only - ignored for
+        /// flaky-mount and simulated backends. Repeatable; each rayon worker
+        /// thread is pinned to one root so concurrent seeds on different
+        /// threads land on different mounts. Default `/tmp`. Also reads
+        /// colon-separated paths from `GAUNTLET_SCRATCH_ROOTS`. Set
+        /// `RAYON_NUM_THREADS=N` to cap workers; for full distribution pass
+        /// one root per worker.
+        #[arg(long)]
+        scratch_root: Vec<PathBuf>,
+
         /// Skip shrinking when dumping regressions.
         #[arg(long)]
         no_shrink: bool,
@@ -94,6 +104,13 @@ enum Cmd {
         /// Directory to dump regression Json on failure.
         #[arg(long)]
         dump_regressions: Option<PathBuf>,
+
+        /// Same as `farm --scratch-root`: tempdir parent for
+        /// `IoBackend::Real` seeds only, pinned per worker thread. Ignored
+        /// for flaky-mount and simulated backends. Repeatable; reads
+        /// colon-separated paths from `GAUNTLET_SCRATCH_ROOTS`.
+        #[arg(long)]
+        scratch_root: Vec<PathBuf>,
 
         /// Skip shrinking when dumping regressions.
         #[arg(long)]
@@ -159,6 +176,8 @@ struct ConfigFile {
     #[serde(default)]
     dump_regressions: Option<PathBuf>,
     #[serde(default)]
+    scratch_roots: Vec<PathBuf>,
+    #[serde(default)]
     overrides: ConfigOverrides,
 }
 
@@ -177,6 +196,8 @@ struct SweepConfigFile {
     seeds: Option<u64>,
     #[serde(default)]
     dump_regressions: Option<PathBuf>,
+    #[serde(default)]
+    scratch_roots: Vec<PathBuf>,
     #[serde(default)]
     base_overrides: ConfigOverrides,
     #[serde(default)]
@@ -405,6 +426,7 @@ struct FarmPlan {
     seeds: u64,
     hours: Option<f64>,
     dump_regressions: Option<PathBuf>,
+    scratch_roots: Vec<PathBuf>,
     overrides: ConfigOverrides,
     shrink: bool,
     shrink_budget: usize,
@@ -418,6 +440,7 @@ fn resolve_farm(
     hours: Option<f64>,
     dump_regressions: Option<PathBuf>,
     config: Option<PathBuf>,
+    scratch_root: Vec<PathBuf>,
     shrink: bool,
     shrink_budget: usize,
 ) -> Result<FarmPlan, String> {
@@ -443,6 +466,11 @@ fn resolve_farm(
     }
     let dump_regressions =
         dump_regressions.or_else(|| file.as_ref().and_then(|f| f.dump_regressions.clone()));
+    let file_scratch_roots = file
+        .as_ref()
+        .map(|f| f.scratch_roots.clone())
+        .unwrap_or_default();
+    let scratch_roots = resolve_scratch_roots(scratch_root, file_scratch_roots)?;
     let overrides = file.map(|f| f.overrides).unwrap_or_default();
     Ok(FarmPlan {
         scenario,
@@ -450,10 +478,48 @@ fn resolve_farm(
         seeds,
         hours,
         dump_regressions,
+        scratch_roots,
         overrides,
         shrink,
         shrink_budget,
     })
+}
+
+const SCRATCH_ROOTS_ENV: &str = "GAUNTLET_SCRATCH_ROOTS";
+
+fn resolve_scratch_roots(
+    cli: Vec<PathBuf>,
+    config_file: Vec<PathBuf>,
+) -> Result<Vec<PathBuf>, String> {
+    let env_roots: Vec<PathBuf> = std::env::var(SCRATCH_ROOTS_ENV)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.split(':').map(PathBuf::from).collect())
+        .unwrap_or_default();
+    let candidate: Vec<PathBuf> = if !cli.is_empty() {
+        cli
+    } else if !config_file.is_empty() {
+        config_file
+    } else {
+        env_roots
+    };
+    candidate
+        .into_iter()
+        .map(|p| validate_scratch_root(&p).map(|_| p))
+        .collect()
+}
+
+fn validate_scratch_root(path: &Path) -> Result<(), String> {
+    match path.metadata() {
+        Ok(m) if m.is_dir() => {}
+        Ok(_) => return Err(format!("scratch root not a directory: {}", path.display())),
+        Err(e) => return Err(format!("scratch root {}: {e}", path.display())),
+    }
+    tempfile::Builder::new()
+        .prefix(".tranquil-gauntlet-probe-")
+        .tempfile_in(path)
+        .map(|_| ())
+        .map_err(|e| format!("scratch root {} not writable: {e}", path.display()))
 }
 
 fn validate_hours(h: f64) -> Result<(), String> {
@@ -564,6 +630,7 @@ fn main() -> ExitCode {
             hours,
             dump_regressions,
             config,
+            scratch_root,
             no_shrink,
             shrink_budget,
         } => {
@@ -574,6 +641,7 @@ fn main() -> ExitCode {
                 hours,
                 dump_regressions,
                 config,
+                scratch_root,
                 !no_shrink,
                 shrink_budget,
             ) {
@@ -625,6 +693,7 @@ fn main() -> ExitCode {
             seed_start,
             seeds,
             dump_regressions,
+            scratch_root,
             no_shrink,
             shrink_budget,
             max_runs,
@@ -634,6 +703,7 @@ fn main() -> ExitCode {
                 seed_start,
                 seeds,
                 dump_regressions,
+                scratch_root,
                 !no_shrink,
                 shrink_budget,
                 max_runs,
@@ -659,17 +729,20 @@ struct SweepPlan {
     seed_start: u64,
     seeds: u64,
     dump_regressions: Option<PathBuf>,
+    scratch_roots: Vec<PathBuf>,
     shrink: bool,
     shrink_budget: usize,
     base_overrides: ConfigOverrides,
     axes: Vec<SweepAxisValues>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_sweep(
     config: PathBuf,
     seed_start: Option<u64>,
     seeds: Option<u64>,
     dump_regressions: Option<PathBuf>,
+    scratch_root: Vec<PathBuf>,
     shrink: bool,
     shrink_budget: usize,
     max_runs: u64,
@@ -687,6 +760,7 @@ fn resolve_sweep(
         return Err("--shrink-budget must be greater than zero".to_string());
     }
     let dump_regressions = dump_regressions.or(file.dump_regressions.clone());
+    let scratch_roots = resolve_scratch_roots(scratch_root, file.scratch_roots.clone())?;
     let axes = file.axes.axis_values();
     if axes.is_empty() {
         return Err("sweep produced no combinations".to_string());
@@ -705,6 +779,7 @@ fn resolve_sweep(
         seed_start,
         seeds,
         dump_regressions,
+        scratch_roots,
         shrink,
         shrink_budget,
         base_overrides: file.base_overrides,
@@ -749,6 +824,7 @@ fn run_sweep(plan: SweepPlan, rt: &Runtime, interrupt: Arc<AtomicBool>) -> ExitC
         seed_start,
         seeds,
         dump_regressions,
+        scratch_roots,
         shrink,
         shrink_budget,
         base_overrides,
@@ -782,12 +858,13 @@ fn run_sweep(plan: SweepPlan, rt: &Runtime, interrupt: Arc<AtomicBool>) -> ExitC
         axis_values.apply_to(&mut overrides);
         let combo_start = Instant::now();
         let overrides_for_farm = overrides.clone();
-        let reports = farm::run_many_timed(
+        let reports = farm::run_many_timed_with_scratch_roots(
             move |s| {
                 let mut cfg = config_for(scenario, s);
                 overrides_for_farm.apply_to(&mut cfg);
                 cfg
             },
+            &scratch_roots,
             (seed_start..end).map(Seed),
         );
         let combo_wall = combo_start.elapsed();
@@ -840,6 +917,7 @@ fn run_farm(plan: FarmPlan, rt: &Runtime, interrupt: Arc<AtomicBool>) -> ExitCod
         seeds,
         hours,
         dump_regressions,
+        scratch_roots,
         overrides,
         shrink,
         shrink_budget,
@@ -871,12 +949,13 @@ fn run_farm(plan: FarmPlan, rt: &Runtime, interrupt: Arc<AtomicBool>) -> ExitCod
         };
         let overrides_ref = &overrides;
         let batch_start = Instant::now();
-        let reports = farm::run_many_timed(
+        let reports = farm::run_many_timed_with_scratch_roots(
             |s| {
                 let mut cfg = config_for(scenario, s);
                 overrides_ref.apply_to(&mut cfg);
                 cfg
             },
+            &scratch_roots,
             (next_seed..end).map(Seed),
         );
         let batch_wall = batch_start.elapsed();

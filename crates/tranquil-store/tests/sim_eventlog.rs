@@ -1025,7 +1025,10 @@ fn aggressive_faults_group_sync_recovery() {
 
 #[test]
 fn sync_synced_seq_must_match_durable_valid_prefix() {
-    sim_seed_range().into_par_iter().for_each(|seed| {
+    let asserted = std::sync::atomic::AtomicU64::new(0);
+    let range = sim_seed_range();
+    let total = range.end - range.start;
+    range.into_par_iter().for_each(|seed| {
         let fault_config = FaultConfig {
             partial_write_probability: Probability::new(0.05),
             torn_page_probability: Probability::new(0.01),
@@ -1037,8 +1040,9 @@ fn sync_synced_seq_must_match_durable_valid_prefix() {
         let sim = SimulatedIO::new(seed, fault_config);
         let mgr = setup_manager(sim, 64 * 1024);
 
-        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD)
-            .unwrap_or_else(|e| panic!("seed {seed}: open writer failed: {e}"));
+        let Ok(mut writer) = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD) else {
+            return;
+        };
 
         let event_count = 10u64;
         (1..=event_count).for_each(|i| {
@@ -1067,13 +1071,21 @@ fn sync_synced_seq_must_match_durable_valid_prefix() {
 
         let durable_max = valid.last().map(|e| e.seq.raw()).unwrap_or(0);
 
+        asserted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         assert!(
             synced_through <= durable_max,
-            "seed {seed}: sync acked seq {synced_through} but durable valid prefix only reaches {durable_max} \
-             (events written: {event_count}, valid_prefix.len()={})",
+            "seed {seed}: sync acked seq {synced_through} but durable valid prefix only reaches {durable_max}, events written: {event_count}, valid_prefix.len()={}",
             valid.len()
         );
     });
+
+    let asserted = asserted.load(std::sync::atomic::Ordering::Relaxed);
+    if total >= 50 {
+        assert!(
+            asserted * 2 >= total,
+            "fewer than half of {total} seeds reached the durability assertion: {asserted}"
+        );
+    }
 }
 
 #[test]

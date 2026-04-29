@@ -523,13 +523,16 @@ fn wire_tranquil_store(
     let metastore =
         Metastore::open(&metastore_dir, metastore_config).expect("failed to open metastore");
 
-    let blockstore = TranquilBlockStore::open(BlockStoreConfig {
-        data_dir: blockstore_data_dir,
-        index_dir: blockstore_index_dir,
-        max_file_size: store_cfg.max_blockstore_file_size,
-        group_commit: Default::default(),
-        shard_count: tranquil_store::blockstore::DEFAULT_SHARD_COUNT,
-    })
+    let blockstore = TranquilBlockStore::open_with_retry(
+        BlockStoreConfig {
+            data_dir: blockstore_data_dir,
+            index_dir: blockstore_index_dir,
+            max_file_size: store_cfg.max_blockstore_file_size,
+            group_commit: Default::default(),
+            shard_count: tranquil_store::blockstore::DEFAULT_SHARD_COUNT,
+        },
+        tranquil_store::blockstore::OpenRetryPolicy::default(),
+    )
     .expect("failed to open blockstore");
 
     let event_log = EventLog::open(

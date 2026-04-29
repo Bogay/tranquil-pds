@@ -692,12 +692,18 @@ impl StorageIO for SimulatedIO {
             return Err(io::Error::other("simulated EIO on sync"));
         }
 
-        let sync_succeeded = !state.should_fault(seed, fault.sync_failure_probability);
-        let poison_after = sync_succeeded
-            && state.should_fault(seed, fault.delayed_io_error_probability);
+        if state.should_fault(seed, fault.sync_failure_probability) {
+            state.op_log.push(OpRecord::Sync {
+                fd: id,
+                succeeded: false,
+            });
+            return Err(io::Error::other("simulated dropped fsync"));
+        }
+
+        let poison_after = state.should_fault(seed, fault.delayed_io_error_probability);
         let reorder_window = fault.sync_reorder_window.0 as usize;
 
-        let evicted = if sync_succeeded && reorder_window > 0 {
+        let evicted = if reorder_window > 0 {
             let snapshot = state.storage.get(&sid).unwrap().buffered.clone();
             state.pending_syncs.push_back(PendingSync {
                 storage_id: sid,
@@ -723,7 +729,7 @@ impl StorageIO for SimulatedIO {
 
         let storage = state.storage.get_mut(&sid).unwrap();
 
-        if sync_succeeded && reorder_window == 0 {
+        if reorder_window == 0 {
             storage.durable = storage.buffered.clone();
         }
         if poison_after {
@@ -732,7 +738,7 @@ impl StorageIO for SimulatedIO {
 
         state.op_log.push(OpRecord::Sync {
             fd: id,
-            succeeded: sync_succeeded,
+            succeeded: true,
         });
         Ok(())
     }

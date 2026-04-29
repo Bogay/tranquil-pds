@@ -1196,4 +1196,62 @@ mod tests {
 
         assert!(writer.rotate_if_needed().unwrap().is_none());
     }
+
+    #[test]
+    fn sync_must_not_certify_durability_when_io_sync_silently_drops() {
+        use crate::sim::{FaultConfig, Probability};
+
+        let sim = Arc::new(SimulatedIO::new(
+            0,
+            FaultConfig {
+                sync_failure_probability: Probability::new(1.0),
+                ..FaultConfig::none()
+            },
+        ));
+        sim.set_pristine_mode(true);
+
+        let mgr = Arc::new(
+            SegmentManager::new(Arc::clone(&sim), PathBuf::from("/segments"), 64 * 1024).unwrap(),
+        );
+
+        let mut writer =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
+
+        sim.set_pristine_mode(false);
+
+        writer
+            .append(
+                DidHash::from_did("did:plc:bug2"),
+                EventTypeTag::COMMIT,
+                b"bug2-payload".to_vec(),
+            )
+            .unwrap();
+
+        assert!(
+            writer.sync().is_err(),
+            "sync must surface dropped fsync as an error"
+        );
+        let claimed_synced = writer.synced_seq();
+        assert_eq!(
+            claimed_synced.raw(),
+            0,
+            "synced_seq must not advance past a failed sync"
+        );
+        drop(writer);
+
+        mgr.shutdown();
+        sim.crash();
+        sim.set_pristine_mode(true);
+
+        let reopened =
+            EventLogWriter::open(Arc::clone(&mgr), DEFAULT_INDEX_INTERVAL, MAX_EVENT_PAYLOAD)
+                .unwrap();
+        let actually_durable = reopened.current_seq();
+
+        assert!(
+            actually_durable >= claimed_synced,
+            "writer claimed sync through {claimed_synced} but post-crash recovery only reaches {actually_durable}"
+        );
+    }
 }

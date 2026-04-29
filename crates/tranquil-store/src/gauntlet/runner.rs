@@ -178,6 +178,7 @@ pub struct SharedState<S: StorageIO + Send + Sync + 'static> {
 
 pub struct Gauntlet {
     config: GauntletConfig,
+    scratch_root: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -185,7 +186,15 @@ pub enum GauntletBuildError {}
 
 impl Gauntlet {
     pub fn new(config: GauntletConfig) -> Result<Self, GauntletBuildError> {
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            scratch_root: None,
+        })
+    }
+
+    pub fn with_scratch_root(mut self, root: PathBuf) -> Self {
+        self.scratch_root = Some(root);
+        self
     }
 
     pub fn generate_ops(&self) -> OpStream {
@@ -211,6 +220,7 @@ impl Gauntlet {
         let ops_counter = Arc::new(AtomicUsize::new(0));
         let op_errors_counter = Arc::new(AtomicUsize::new(0));
         let restarts_counter = Arc::new(AtomicUsize::new(0));
+        let scratch_root = self.scratch_root;
         let fut: std::pin::Pin<Box<dyn std::future::Future<Output = GauntletReport> + Send>> =
             match self.config.io {
                 IoBackend::Real => Box::pin(run_inner_real(
@@ -219,6 +229,7 @@ impl Gauntlet {
                     ops_counter.clone(),
                     op_errors_counter.clone(),
                     restarts_counter.clone(),
+                    scratch_root,
                 )),
                 IoBackend::RealWithFlaky { flaky } => Box::pin(run_inner_real_with_flaky(
                     self.config,
@@ -269,8 +280,12 @@ async fn run_inner_real(
     ops_counter: Arc<AtomicUsize>,
     op_errors_counter: Arc<AtomicUsize>,
     restarts_counter: Arc<AtomicUsize>,
+    scratch_root: Option<PathBuf>,
 ) -> GauntletReport {
-    let dir = tempfile::TempDir::new().expect("tempdir");
+    let dir = match scratch_root.as_deref() {
+        Some(parent) => tempfile::TempDir::new_in(parent).expect("tempdir in scratch root"),
+        None => tempfile::TempDir::new().expect("tempdir"),
+    };
     let root = dir.path().to_path_buf();
     let report = run_inner_real_on_root(
         config,
@@ -519,22 +534,24 @@ where
     let mut oracle = Oracle::new();
     let mut violations: Vec<InvariantViolation> = Vec::new();
 
-    let mut harness: Option<Harness<S>> = match open(0) {
-        Ok(h) => Some(h),
-        Err(e) => {
-            return GauntletReport {
-                seed: config.seed,
-                ops_executed: OpsExecuted(0),
-                op_errors: OpErrorCount(op_errors_counter.load(Ordering::Relaxed)),
-                restarts: RestartCount(0),
-                violations: vec![InvariantViolation {
-                    invariant: "OpenStore",
-                    detail: format!("initial open: {e}"),
-                }],
-                ops: OpStream::empty(),
-            };
-        }
-    };
+    let mut harness: Option<Harness<S>> =
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await
+        {
+            Ok(h) => Some(h),
+            Err(e) => {
+                return GauntletReport {
+                    seed: config.seed,
+                    ops_executed: OpsExecuted(0),
+                    op_errors: OpErrorCount(op_errors_counter.load(Ordering::Relaxed)),
+                    restarts: RestartCount(0),
+                    violations: vec![InvariantViolation {
+                        invariant: "OpenStore",
+                        detail: format!("initial open: {e}"),
+                    }],
+                    ops: OpStream::empty(),
+                };
+            }
+        };
     let mut root: Option<Cid> = None;
     let mut restart_rng = Lcg::new(Seed(config.seed.0 ^ 0xA5A5_A5A5_A5A5_A5A5));
     let mut sample_rng = Lcg::new(Seed(config.seed.0 ^ 0x5A5A_5A5A_5A5A_5A5A));
@@ -1582,22 +1599,24 @@ where
     let mut sample_rng = Lcg::new(Seed(config.seed.0 ^ 0x5A5A_5A5A_5A5A_5A5A));
     let chunks = compute_chunks(config.restart_policy, total_ops, &mut restart_rng);
 
-    let mut harness: Option<Harness<S>> = match open(0) {
-        Ok(h) => Some(h),
-        Err(e) => {
-            return GauntletReport {
-                seed: config.seed,
-                ops_executed: OpsExecuted(0),
-                op_errors: OpErrorCount(op_errors_counter.load(Ordering::Relaxed)),
-                restarts: RestartCount(0),
-                violations: vec![InvariantViolation {
-                    invariant: "OpenStore",
-                    detail: format!("initial open: {e}"),
-                }],
-                ops: OpStream::empty(),
-            };
-        }
-    };
+    let mut harness: Option<Harness<S>> =
+        match reopen_with_recovery(&mut open, &mut crash, tolerate_op_errors, reopen_backoff).await
+        {
+            Ok(h) => Some(h),
+            Err(e) => {
+                return GauntletReport {
+                    seed: config.seed,
+                    ops_executed: OpsExecuted(0),
+                    op_errors: OpErrorCount(op_errors_counter.load(Ordering::Relaxed)),
+                    restarts: RestartCount(0),
+                    violations: vec![InvariantViolation {
+                        invariant: "OpenStore",
+                        detail: format!("initial open: {e}"),
+                    }],
+                    ops: OpStream::empty(),
+                };
+            }
+        };
     let mut root: Option<Cid> = None;
     let mut oracle = Oracle::new();
     let mut halt_ops = false;
@@ -1804,5 +1823,127 @@ where
         restarts: RestartCount(restarts_counter.load(Ordering::Relaxed)),
         violations,
         ops: OpStream::empty(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_config() -> GauntletConfig {
+        GauntletConfig {
+            seed: Seed(0),
+            io: IoBackend::Real,
+            workload: WorkloadModel::default(),
+            op_count: OpCount(0),
+            invariants: InvariantSet::EMPTY,
+            limits: RunLimits {
+                max_wall_ms: Some(WallMs(30_000)),
+            },
+            restart_policy: RestartPolicy::Never,
+            store: StoreConfig {
+                max_file_size: MaxFileSize(8 * 1024),
+                group_commit: GroupCommitConfig::default(),
+                shard_count: ShardCount(1),
+            },
+            eventlog: None,
+            writer_concurrency: WriterConcurrency(1),
+        }
+    }
+
+    fn flaky_open(
+        attempts: Arc<AtomicUsize>,
+        sim: Arc<SimulatedIO>,
+        store_cfg: BlockStoreConfig,
+    ) -> impl FnMut(usize) -> Result<Harness<Arc<SimulatedIO>>, String> + Send + 'static {
+        move |_attempt: usize| -> Result<Harness<Arc<SimulatedIO>>, String> {
+            let n = attempts.fetch_add(1, Ordering::Relaxed);
+            if n == 0 {
+                return Err("simulated EIO on initial open".to_string());
+            }
+            let factory_sim = Arc::clone(&sim);
+            let make_io = move || Arc::clone(&factory_sim);
+            TranquilBlockStore::<Arc<SimulatedIO>>::open_with_io(store_cfg.clone(), make_io)
+                .map(|s| Harness {
+                    store: Arc::new(s),
+                    eventlog: None,
+                })
+                .map_err(|e| e.to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn run_inner_generic_retries_initial_open_on_transient_io_error() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let cfg = minimal_config();
+        let store_cfg = blockstore_config(dir.path(), &cfg.store);
+        let sim: Arc<SimulatedIO> = Arc::new(SimulatedIO::pristine(0));
+        let attempts = Arc::new(AtomicUsize::new(0));
+
+        let report = run_inner_generic::<Arc<SimulatedIO>, _, _>(
+            cfg,
+            OpStream::empty(),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+            flaky_open(Arc::clone(&attempts), Arc::clone(&sim), store_cfg),
+            || {},
+            true,
+            Duration::ZERO,
+        )
+        .await;
+
+        let opens: Vec<&InvariantViolation> = report
+            .violations
+            .iter()
+            .filter(|v| v.invariant == "OpenStore")
+            .collect();
+        assert!(
+            opens.is_empty(),
+            "expected initial open to retry, got OpenStore violations: {opens:?}"
+        );
+        let total = attempts.load(Ordering::Relaxed);
+        assert!(
+            total >= 2,
+            "expected at least one retry after first failure, attempts={total}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_inner_generic_concurrent_retries_initial_open_on_transient_io_error() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let mut cfg = minimal_config();
+        cfg.writer_concurrency = WriterConcurrency(2);
+        let store_cfg = blockstore_config(dir.path(), &cfg.store);
+        let sim: Arc<SimulatedIO> = Arc::new(SimulatedIO::pristine(0));
+        let attempts = Arc::new(AtomicUsize::new(0));
+
+        let report = run_inner_generic_concurrent::<Arc<SimulatedIO>, _, _>(
+            cfg,
+            OpStream::empty(),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+            flaky_open(Arc::clone(&attempts), Arc::clone(&sim), store_cfg),
+            || {},
+            true,
+            Duration::ZERO,
+        )
+        .await;
+
+        let opens: Vec<&InvariantViolation> = report
+            .violations
+            .iter()
+            .filter(|v| v.invariant == "OpenStore")
+            .collect();
+        assert!(
+            opens.is_empty(),
+            "expected initial open to retry, got OpenStore violations: {opens:?}"
+        );
+        let total = attempts.load(Ordering::Relaxed);
+        assert!(
+            total >= 2,
+            "expected at least one retry after first failure, attempts={total}"
+        );
     }
 }

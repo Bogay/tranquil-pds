@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::io;
+use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use cid::Cid;
@@ -150,6 +152,24 @@ impl Drop for WriterHandle {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct OpenRetryPolicy {
+    pub max_attempts: NonZeroU8,
+    pub initial_backoff: Duration,
+    pub max_backoff: Duration,
+}
+
+impl Default for OpenRetryPolicy {
+    fn default() -> Self {
+        const DEFAULT_MAX_ATTEMPTS: NonZeroU8 = NonZeroU8::new(5).unwrap();
+        Self {
+            max_attempts: DEFAULT_MAX_ATTEMPTS,
+            initial_backoff: Duration::from_millis(100),
+            max_backoff: Duration::from_secs(2),
+        }
+    }
+}
+
 impl TranquilBlockStore<RealIO> {
     pub fn open(config: BlockStoreConfig) -> Result<Self, RepoError> {
         Self::open_with_hook(config, None)
@@ -160,6 +180,50 @@ impl TranquilBlockStore<RealIO> {
         post_sync_hook: Option<Arc<dyn PostBlockstoreHook>>,
     ) -> Result<Self, RepoError> {
         Self::open_with_io_hook(config, RealIO::new, post_sync_hook)
+    }
+
+    pub fn open_with_retry(
+        config: BlockStoreConfig,
+        policy: OpenRetryPolicy,
+    ) -> Result<Self, RepoError> {
+        retry_with_backoff(policy, &mut |_| Self::open(config.clone()))
+    }
+}
+
+fn retry_with_backoff<T, F>(policy: OpenRetryPolicy, op: &mut F) -> Result<T, RepoError>
+where
+    F: FnMut(u8) -> Result<T, RepoError>,
+{
+    retry_attempt(policy, op, 0, policy.initial_backoff)
+}
+
+fn retry_attempt<T, F>(
+    policy: OpenRetryPolicy,
+    op: &mut F,
+    attempt: u8,
+    backoff: Duration,
+) -> Result<T, RepoError>
+where
+    F: FnMut(u8) -> Result<T, RepoError>,
+{
+    match op(attempt) {
+        Ok(t) => Ok(t),
+        Err(e) if attempt + 1 >= policy.max_attempts.get() => Err(e),
+        Err(e) => {
+            tracing::warn!(
+                attempt,
+                error = %e,
+                backoff_ms = u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX),
+                "blockstore open failed, retrying"
+            );
+            std::thread::sleep(backoff);
+            retry_attempt(
+                policy,
+                op,
+                attempt + 1,
+                (backoff * 2).min(policy.max_backoff),
+            )
+        }
     }
 }
 
@@ -331,15 +395,7 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
         let scan_pos = &mut { start_offset };
         let (scanned_entries, last_valid_end) = std::iter::from_fn(|| {
             match super::data_file::decode_block_record(io, fd, *scan_pos, file_size) {
-                Err(e) => {
-                    tracing::warn!(
-                        file_id = %file_id,
-                        offset = scan_pos.raw(),
-                        error = %e,
-                        "IO error during recovery scan, stopping"
-                    );
-                    None
-                }
+                Err(e) => Some(Err(e)),
                 Ok(None) => None,
                 Ok(Some(ReadBlockRecord::Valid {
                     offset,
@@ -354,7 +410,7 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
                     let record_size = BLOCK_RECORD_OVERHEAD as u64 + u64::from(raw_len);
                     let new_end = offset.advance(record_size);
                     *scan_pos = new_end;
-                    Some((
+                    Some(Ok((
                         cid_bytes,
                         BlockLocation {
                             file_id,
@@ -362,20 +418,30 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
                             length,
                         },
                         new_end,
-                    ))
+                    )))
                 }
                 Ok(Some(ReadBlockRecord::Corrupted { .. } | ReadBlockRecord::Truncated { .. })) => {
                     None
                 }
             }
         })
-        .fold(
+        .try_fold(
             (Vec::new(), start_offset),
-            |(mut entries, _), (cid, loc, new_end)| {
+            |(mut entries, _), item: io::Result<_>| {
+                let (cid, loc, new_end) = item?;
                 entries.push((cid, loc));
-                (entries, new_end)
+                Ok::<_, io::Error>((entries, new_end))
             },
-        );
+        )
+        .map_err(|e| {
+            tracing::warn!(
+                file_id = %file_id,
+                offset = scan_pos.raw(),
+                error = %e,
+                "IO error during recovery scan, aborting to preserve durable tail"
+            );
+            RepoError::storage(e)
+        })?;
 
         if file_size > last_valid_end.raw() {
             tracing::info!(
@@ -711,5 +777,215 @@ impl<S: StorageIO + Send + Sync + 'static> TranquilBlockStore<S> {
     pub fn refcount_of(&self, cid: &Cid) -> Result<Option<u32>, RepoError> {
         let cid_bytes = cid_to_bytes(cid)?;
         Ok(self.index.get(&cid_bytes).map(|entry| entry.refcount.raw()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use crate::blockstore::data_file::{
+        BLOCK_FORMAT_VERSION, BLOCK_HEADER_SIZE, BLOCK_MAGIC, encode_block_record,
+    };
+    use crate::blockstore::manager::DATA_FILE_EXTENSION;
+    use crate::io::FileId;
+
+    struct EioOnReadAtRange {
+        inner: RealIO,
+        target_path: PathBuf,
+        target_min: u64,
+        target_max: u64,
+        fired: AtomicBool,
+        fd_paths: Mutex<HashMap<FileId, PathBuf>>,
+    }
+
+    impl StorageIO for EioOnReadAtRange {
+        fn open(&self, path: &Path, opts: OpenOptions) -> io::Result<FileId> {
+            let fd = self.inner.open(path, opts)?;
+            self.fd_paths
+                .lock()
+                .unwrap()
+                .insert(fd, path.to_path_buf());
+            Ok(fd)
+        }
+
+        fn close(&self, fd: FileId) -> io::Result<()> {
+            self.fd_paths.lock().unwrap().remove(&fd);
+            self.inner.close(fd)
+        }
+
+        fn read_at(&self, fd: FileId, offset: u64, buf: &mut [u8]) -> io::Result<usize> {
+            let path_match = self.fd_paths.lock().unwrap().get(&fd).cloned();
+            let in_target_range = path_match.as_ref() == Some(&self.target_path)
+                && offset >= self.target_min
+                && offset <= self.target_max;
+            if in_target_range && !self.fired.swap(true, Ordering::SeqCst) {
+                return Err(io::Error::other("simulated EIO on read"));
+            }
+            self.inner.read_at(fd, offset, buf)
+        }
+
+        fn write_at(&self, fd: FileId, offset: u64, buf: &[u8]) -> io::Result<usize> {
+            self.inner.write_at(fd, offset, buf)
+        }
+
+        fn sync(&self, fd: FileId) -> io::Result<()> {
+            self.inner.sync(fd)
+        }
+
+        fn file_size(&self, fd: FileId) -> io::Result<u64> {
+            self.inner.file_size(fd)
+        }
+
+        fn truncate(&self, fd: FileId, size: u64) -> io::Result<()> {
+            self.inner.truncate(fd, size)
+        }
+
+        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            self.inner.rename(from, to)
+        }
+
+        fn delete(&self, path: &Path) -> io::Result<()> {
+            self.inner.delete(path)
+        }
+
+        fn mkdir(&self, path: &Path) -> io::Result<()> {
+            self.inner.mkdir(path)
+        }
+
+        fn sync_dir(&self, path: &Path) -> io::Result<()> {
+            self.inner.sync_dir(path)
+        }
+
+        fn list_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
+            self.inner.list_dir(path)
+        }
+    }
+
+    #[test]
+    fn scan_and_index_does_not_truncate_acked_block_on_transient_eio() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data_dir = tmp.path().join("data");
+        let index_dir = tmp.path().join("index");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&index_dir).unwrap();
+
+        let file_id = DataFileId::new(0);
+        let file_path = data_dir.join(format!("{file_id}.{DATA_FILE_EXTENSION}"));
+
+        let setup = RealIO::new();
+        let fd = setup.open(&file_path, OpenOptions::read_write()).unwrap();
+        let mut header = [0u8; BLOCK_HEADER_SIZE];
+        header[..4].copy_from_slice(&BLOCK_MAGIC);
+        header[4] = BLOCK_FORMAT_VERSION;
+        setup.write_all_at(fd, 0, &header).unwrap();
+
+        let cid_a = [0xAAu8; CID_SIZE];
+        let data_a = vec![1u8; 64];
+        let block_a_offset = BlockOffset::new(BLOCK_HEADER_SIZE as u64);
+        let len_a =
+            encode_block_record(&setup, fd, block_a_offset, &cid_a, &data_a).unwrap();
+
+        let block_b_offset_raw = BLOCK_HEADER_SIZE as u64 + len_a;
+        let block_b_offset = BlockOffset::new(block_b_offset_raw);
+        let cid_b = [0xBBu8; CID_SIZE];
+        let data_b = vec![2u8; 64];
+        let len_b = encode_block_record(&setup, fd, block_b_offset, &cid_b, &data_b).unwrap();
+
+        setup.sync(fd).unwrap();
+        setup.close(fd).unwrap();
+        drop(setup);
+
+        let total_size = block_b_offset_raw + len_b;
+        assert_eq!(std::fs::metadata(&file_path).unwrap().len(), total_size);
+
+        let wrapper = EioOnReadAtRange {
+            inner: RealIO::new(),
+            target_path: file_path.clone(),
+            target_min: block_b_offset_raw,
+            target_max: block_b_offset_raw + (BLOCK_RECORD_OVERHEAD as u64) - 1,
+            fired: AtomicBool::new(false),
+            fd_paths: Mutex::new(HashMap::new()),
+        };
+
+        let index = BlockIndex::open(&index_dir).unwrap();
+
+        let result = TranquilBlockStore::<EioOnReadAtRange>::replay_single_file(
+            &wrapper,
+            &data_dir,
+            &index,
+            file_id,
+            BlockOffset::new(BLOCK_HEADER_SIZE as u64),
+        );
+
+        assert!(
+            result.is_err(),
+            "replay must surface transient EIO instead of silently truncating"
+        );
+
+        let post_size = std::fs::metadata(&file_path).unwrap().len();
+        assert_eq!(
+            post_size, total_size,
+            "scan truncated durable acked block past EIO point: expected {total_size} bytes, got {post_size}"
+        );
+    }
+
+    fn instant_policy(max_attempts: u8) -> OpenRetryPolicy {
+        OpenRetryPolicy {
+            max_attempts: NonZeroU8::new(max_attempts).expect("max_attempts must be nonzero"),
+            initial_backoff: Duration::ZERO,
+            max_backoff: Duration::ZERO,
+        }
+    }
+
+    #[test]
+    fn retry_with_backoff_succeeds_on_first_attempt() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result = retry_with_backoff(instant_policy(5), &mut |_| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            Ok::<u8, RepoError>(42)
+        });
+        assert_eq!(result.expect("ok"), 42);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn retry_with_backoff_recovers_after_transient_failures() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result = retry_with_backoff(instant_policy(5), &mut |_| {
+            let n = calls.fetch_add(1, Ordering::Relaxed);
+            if n >= 2 {
+                Ok::<u8, RepoError>(7)
+            } else {
+                Err(RepoError::storage(io::Error::other("transient EIO")))
+            }
+        });
+        assert_eq!(result.expect("ok"), 7);
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn retry_with_backoff_gives_up_after_max_attempts() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result: Result<u8, RepoError> = retry_with_backoff(instant_policy(3), &mut |_| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            Err(RepoError::storage(io::Error::other("permanent EIO")))
+        });
+        assert!(result.is_err(), "expected exhaustion error");
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn retry_with_backoff_passes_attempt_index_to_op() {
+        let observed = std::sync::Mutex::new(Vec::<u8>::new());
+        let _result: Result<(), RepoError> = retry_with_backoff(instant_policy(4), &mut |attempt| {
+            observed.lock().unwrap().push(attempt);
+            Err(RepoError::storage(io::Error::other("EIO")))
+        });
+        assert_eq!(*observed.lock().unwrap(), vec![0, 1, 2, 3]);
     }
 }

@@ -460,3 +460,115 @@ async fn mst_restart_churn_single_seed() {
     assert_clean(&report);
     assert!(report.restarts.0 >= 1);
 }
+
+#[tokio::test]
+async fn torn_pages_only_completes_within_budget() {
+    let cfg = GauntletConfig {
+        seed: Seed(0),
+        io: IoBackend::Simulated {
+            fault: FaultConfig::torn_pages_only(),
+        },
+        workload: WorkloadModel {
+            weights: OpWeights {
+                add: 80,
+                delete: 10,
+                compact: 5,
+                checkpoint: 5,
+                ..OpWeights::default()
+            },
+            size_distribution: SizeDistribution::Fixed(ValueBytes(128)),
+            collections: vec![
+                CollectionName("app.bsky.feed.post".to_string()),
+                CollectionName("app.bsky.feed.like".to_string()),
+            ],
+            key_space: KeySpaceSize(500),
+            did_space: DidSpaceSize(32),
+            retention_max_secs: RetentionMaxSecs(3600),
+        },
+        op_count: OpCount(2_000),
+        invariants: InvariantSet::REFCOUNT_CONSERVATION
+            | InvariantSet::REACHABILITY
+            | InvariantSet::ACKED_WRITE_PERSISTENCE
+            | InvariantSet::READ_AFTER_WRITE
+            | InvariantSet::RESTART_IDEMPOTENT,
+        limits: RunLimits {
+            max_wall_ms: Some(WallMs(60_000)),
+        },
+        restart_policy: RestartPolicy::CrashAtSyscall(OpInterval(500)),
+        store: StoreConfig {
+            max_file_size: MaxFileSize(16 * 1024),
+            group_commit: GroupCommitConfig {
+                verify_persisted_blocks: true,
+                ..GroupCommitConfig::default()
+            },
+            shard_count: ShardCount(1),
+        },
+        eventlog: None,
+        writer_concurrency: WriterConcurrency(1),
+    };
+    let report = Gauntlet::new(cfg).expect("build gauntlet").run().await;
+    let budget_violations: Vec<&str> = report
+        .violations
+        .iter()
+        .filter(|v| v.invariant == "WallClockBudget")
+        .map(|v| v.detail.as_str())
+        .collect();
+    assert!(
+        budget_violations.is_empty(),
+        "torn-pages exceeded budget: {budget_violations:?}; ops_executed={}",
+        report.ops_executed.0
+    );
+    assert_eq!(
+        report.ops_executed.0, 2_000,
+        "expected all ops to execute under torn-pages-only faults"
+    );
+}
+
+#[tokio::test]
+async fn real_io_gauntlet_uses_scratch_root_for_tempdir() {
+    let scratch = tempfile::TempDir::new().expect("scratch dir");
+    let scratch_path = scratch.path().to_path_buf();
+    let cfg = fast_sanity_config(Seed(11));
+    let report = Gauntlet::new(cfg)
+        .expect("build gauntlet")
+        .with_scratch_root(scratch_path.clone())
+        .run()
+        .await;
+    assert_clean(&report);
+    let entries: Vec<std::path::PathBuf> = std::fs::read_dir(&scratch_path)
+        .expect("read scratch")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    assert!(
+        entries.is_empty(),
+        "scratch root must be empty after gauntlet drop, found: {entries:?}"
+    );
+}
+
+#[test]
+fn farm_run_many_timed_with_scratch_roots_honors_assignment() {
+    let scratch = tempfile::TempDir::new().expect("scratch dir");
+    let root_a = scratch.path().join("a");
+    let root_b = scratch.path().join("b");
+    std::fs::create_dir_all(&root_a).expect("mkdir a");
+    std::fs::create_dir_all(&root_b).expect("mkdir b");
+    let roots = vec![root_a.clone(), root_b.clone()];
+    let reports = farm::run_many_timed_with_scratch_roots(
+        |seed| fast_sanity_config(seed),
+        &roots,
+        (0..2).map(Seed),
+    );
+    assert_eq!(reports.len(), 2);
+    reports.iter().for_each(|(r, _)| assert_clean(r));
+    [&root_a, &root_b].iter().for_each(|root| {
+        let leftover: Vec<std::path::PathBuf> = std::fs::read_dir(root)
+            .expect("read scratch root")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "scratch root {} must be empty after farm completes, found: {leftover:?}",
+            root.display()
+        );
+    });
+}
