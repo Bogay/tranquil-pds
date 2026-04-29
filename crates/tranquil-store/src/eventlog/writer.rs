@@ -3,15 +3,26 @@ use std::sync::Arc;
 
 use tracing::warn;
 
-use crate::io::StorageIO;
+use crate::io::{FileId, StorageIO};
 
 use super::manager::SegmentManager;
-use super::segment_file::{SEGMENT_HEADER_SIZE, SegmentWriter, ValidEvent};
+use super::segment_file::{
+    SEGMENT_HEADER_SIZE, SEGMENT_MAGIC, SegmentWriter, ValidEvent, ValidateEventRecord,
+    validate_event_record,
+};
 use super::segment_index::{DEFAULT_INDEX_INTERVAL, SegmentIndex, rebuild_from_segment};
 use super::sidecar::build_sidecar_from_segment;
 use super::types::{
     DidHash, EventSequence, EventTypeTag, SegmentId, SegmentOffset, TimestampMicros,
 };
+
+const VALIDATE_RETRY_ATTEMPTS: u32 = 32;
+
+#[derive(Debug, Clone)]
+struct PendingAppend {
+    event: ValidEvent,
+    offset: SegmentOffset,
+}
 
 #[derive(Debug)]
 pub struct SyncResult {
@@ -31,7 +42,8 @@ pub struct EventLogWriter<S: StorageIO> {
     max_payload: u32,
     event_count_in_segment: usize,
     last_event_offset: Option<SegmentOffset>,
-    pending_events: Vec<ValidEvent>,
+    pending: Vec<PendingAppend>,
+    poisoned: bool,
 }
 
 impl<S: StorageIO> EventLogWriter<S> {
@@ -83,8 +95,23 @@ impl<S: StorageIO> EventLogWriter<S> {
             max_payload,
             event_count_in_segment: 0,
             last_event_offset: None,
-            pending_events: Vec::new(),
+            pending: Vec::new(),
+            poisoned: false,
         })
+    }
+
+    fn truncate_and_init_fresh(
+        manager: Arc<SegmentManager<S>>,
+        fd: FileId,
+        active_id: SegmentId,
+        prev_segments: &[SegmentId],
+        index_interval: usize,
+        max_payload: u32,
+    ) -> io::Result<Self> {
+        manager.io().truncate(fd, 0)?;
+        let next_seq = find_last_seq_from_segments(&manager, prev_segments, max_payload)?
+            .map_or(EventSequence::new(1), |s| s.next());
+        Self::init_fresh(manager, active_id, next_seq, index_interval, max_payload)
     }
 
     fn recover_active(
@@ -97,6 +124,19 @@ impl<S: StorageIO> EventLogWriter<S> {
         let handle = manager.open_for_append(active_id)?;
         let fd = handle.fd();
 
+        let prev_segments = &segments[..segments.len().saturating_sub(1)];
+
+        if highest_segment_has_torn_header(manager.io(), fd)? {
+            return Self::truncate_and_init_fresh(
+                Arc::clone(&manager),
+                fd,
+                active_id,
+                prev_segments,
+                index_interval,
+                max_payload,
+            );
+        }
+
         let (index, last_seq_in_active) = match rebuild_from_segment(
             manager.io(),
             fd,
@@ -107,15 +147,11 @@ impl<S: StorageIO> EventLogWriter<S> {
             Err(rebuild_err) => {
                 let file_size = manager.io().file_size(fd)?;
                 if file_size <= SEGMENT_HEADER_SIZE as u64 {
-                    manager.io().truncate(fd, 0)?;
-                    let prev_segments = &segments[..segments.len().saturating_sub(1)];
-                    let next_seq =
-                        find_last_seq_from_segments(&manager, prev_segments, max_payload)?
-                            .map_or(EventSequence::new(1), |s| s.next());
-                    return Self::init_fresh(
+                    return Self::truncate_and_init_fresh(
                         Arc::clone(&manager),
+                        fd,
                         active_id,
-                        next_seq,
+                        prev_segments,
                         index_interval,
                         max_payload,
                     );
@@ -130,8 +166,6 @@ impl<S: StorageIO> EventLogWriter<S> {
         };
 
         let position = SegmentOffset::new(manager.io().file_size(fd)?);
-
-        let prev_segments = &segments[..segments.len().saturating_sub(1)];
 
         let next_seq = match last_seq_in_active {
             Some(seq) => {
@@ -196,7 +230,8 @@ impl<S: StorageIO> EventLogWriter<S> {
             max_payload,
             event_count_in_segment,
             last_event_offset,
-            pending_events: Vec::new(),
+            pending: Vec::new(),
+            poisoned: false,
         })
     }
 
@@ -227,28 +262,20 @@ impl<S: StorageIO> EventLogWriter<S> {
             payload,
         };
 
-        let offset = self.active_writer.append_event(self.manager.io(), &event)?;
-
-        let should_index = self.event_count_in_segment == 0
-            || self
-                .event_count_in_segment
-                .is_multiple_of(self.index_interval);
-        if should_index {
-            self.active_index.record(seq, offset);
-        }
-
-        self.event_count_in_segment = self
-            .event_count_in_segment
-            .checked_add(1)
-            .expect("event_count_in_segment overflow");
-        self.last_event_offset = Some(offset);
-        self.next_seq = seq.next();
-        self.pending_events.push(event);
-
-        Ok(seq)
+        self.append_inner(event).map(|_| seq)
     }
 
     pub fn append_valid_event(&mut self, event: ValidEvent) -> io::Result<()> {
+        self.append_inner(event)
+    }
+
+    fn append_inner(&mut self, event: ValidEvent) -> io::Result<()> {
+        if self.poisoned {
+            return Err(io::Error::other(
+                "writer poisoned by partial-valid sync; reopen required",
+            ));
+        }
+
         let offset = self.active_writer.append_event(self.manager.io(), &event)?;
 
         let should_index = self.event_count_in_segment == 0
@@ -265,21 +292,52 @@ impl<S: StorageIO> EventLogWriter<S> {
             .expect("event_count_in_segment overflow");
         self.last_event_offset = Some(offset);
         self.next_seq = event.seq.next();
-        self.pending_events.push(event);
+        self.pending.push(PendingAppend { event, offset });
 
         Ok(())
     }
 
-    pub fn peek_pending_event(&self, seq: EventSequence) -> Option<&ValidEvent> {
-        self.pending_events.iter().find(|e| e.seq == seq)
-    }
-
     pub fn sync(&mut self) -> io::Result<SyncResult> {
-        if !self.pending_events.is_empty() {
-            self.active_writer.sync(self.manager.io())?;
+        if self.poisoned {
+            return Err(io::Error::other(
+                "writer poisoned by partial-valid sync; reopen required",
+            ));
         }
 
-        let flushed = std::mem::take(&mut self.pending_events);
+        if !self.pending.is_empty() {
+            self.active_writer.sync(self.manager.io())?;
+            self.manager.io().barrier()?;
+        }
+
+        let pending = std::mem::take(&mut self.pending);
+
+        let fd = self.active_writer.fd();
+        let file_size = self.manager.io().file_size(fd)?;
+
+        let valid_count = pending
+            .iter()
+            .take_while(|p| {
+                validate_with_retry(
+                    self.manager.io(),
+                    fd,
+                    p.offset,
+                    file_size,
+                    self.max_payload,
+                    p.event.seq,
+                )
+            })
+            .count();
+
+        if valid_count < pending.len() {
+            self.poisoned = true;
+        }
+
+        let flushed: Vec<ValidEvent> = pending
+            .into_iter()
+            .take(valid_count)
+            .map(|p| p.event)
+            .collect();
+
         self.synced_seq = flushed.last().map(|e| e.seq).unwrap_or(self.synced_seq);
 
         Ok(SyncResult {
@@ -290,12 +348,22 @@ impl<S: StorageIO> EventLogWriter<S> {
         })
     }
 
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned
+    }
+
     pub fn rotate_if_needed(&mut self) -> io::Result<Option<SegmentId>> {
+        if self.poisoned {
+            return Err(io::Error::other(
+                "writer poisoned by partial-valid sync; reopen required",
+            ));
+        }
+
         if !self.manager.should_rotate(self.active_writer.position()) {
             return Ok(None);
         }
 
-        if !self.pending_events.is_empty() {
+        if !self.pending.is_empty() {
             return Ok(None);
         }
 
@@ -384,6 +452,40 @@ impl<S: StorageIO> EventLogWriter<S> {
             self.active_index.record(last_written, offset);
         }
     }
+}
+
+fn validate_with_retry<S: StorageIO>(
+    io: &S,
+    fd: FileId,
+    offset: SegmentOffset,
+    file_size: u64,
+    max_payload: u32,
+    expected_seq: EventSequence,
+) -> bool {
+    (0..VALIDATE_RETRY_ATTEMPTS).any(|_| {
+        matches!(
+            validate_event_record(io, fd, offset, file_size, max_payload),
+            Ok(Some(ValidateEventRecord::Valid { seq, .. })) if seq == expected_seq
+        )
+    })
+}
+
+fn highest_segment_has_torn_header<S: StorageIO>(io: &S, fd: FileId) -> io::Result<bool> {
+    let file_size = io.file_size(fd)?;
+    if file_size < SEGMENT_HEADER_SIZE as u64 {
+        return Ok(true);
+    }
+    let outcomes: Vec<bool> = (0..VALIDATE_RETRY_ATTEMPTS)
+        .filter_map(|_| {
+            let mut header = [0u8; SEGMENT_MAGIC.len()];
+            io.read_exact_at(fd, 0, &mut header)
+                .ok()
+                .map(|()| header == SEGMENT_MAGIC)
+        })
+        .collect();
+    let saw_match = outcomes.iter().any(|&ok| ok);
+    let saw_mismatch = outcomes.iter().any(|&ok| !ok);
+    Ok(!saw_match && saw_mismatch)
 }
 
 fn find_last_seq_from_segments<S: StorageIO>(

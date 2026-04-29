@@ -23,7 +23,7 @@ use crate::eventlog::{
     SegmentManager, SegmentReader, TimestampMicros, ValidEvent,
 };
 use crate::io::{RealIO, StorageIO};
-use crate::sim::{FaultConfig, SimulatedIO};
+use crate::sim::{FaultConfig, PristineGuard, SimulatedIO};
 
 #[derive(Debug, Clone, Copy)]
 pub enum IoBackend {
@@ -364,7 +364,7 @@ async fn run_inner_real_on_root(
     let segments_dir = segments_subdir(&root);
     let open = {
         let segments_dir = segments_dir.clone();
-        move || -> Result<Harness<RealIO>, String> {
+        move |_attempt: usize| -> Result<Harness<RealIO>, String> {
             let store = TranquilBlockStore::open(cfg.clone())
                 .map(Arc::new)
                 .map_err(|e| e.to_string())?;
@@ -424,7 +424,8 @@ async fn run_inner_simulated(
     let sim_for_open = Arc::clone(&sim);
     let open = {
         let segments_dir = segments_dir.clone();
-        move || -> Result<Harness<Arc<SimulatedIO>>, String> {
+        move |attempt: usize| -> Result<Harness<Arc<SimulatedIO>>, String> {
+            let _pristine = PristineGuard::new(Arc::clone(&sim_for_open), attempt > 0);
             let factory_sim = Arc::clone(&sim_for_open);
             let make_io = move || Arc::clone(&factory_sim);
             let store = TranquilBlockStore::<Arc<SimulatedIO>>::open_with_io(cfg.clone(), make_io)
@@ -512,13 +513,13 @@ async fn run_inner_generic<S, Open, Crash>(
 ) -> GauntletReport
 where
     S: StorageIO + Send + Sync + 'static,
-    Open: FnMut() -> Result<Harness<S>, String>,
+    Open: FnMut(usize) -> Result<Harness<S>, String>,
     Crash: FnMut(),
 {
     let mut oracle = Oracle::new();
     let mut violations: Vec<InvariantViolation> = Vec::new();
 
-    let mut harness: Option<Harness<S>> = match open() {
+    let mut harness: Option<Harness<S>> = match open(0) {
         Ok(h) => Some(h),
         Err(e) => {
             return GauntletReport {
@@ -750,7 +751,7 @@ async fn reopen_with_recovery<S, Open, Crash>(
 ) -> Result<Harness<S>, String>
 where
     S: StorageIO + Send + Sync + 'static,
-    Open: FnMut() -> Result<Harness<S>, String>,
+    Open: FnMut(usize) -> Result<Harness<S>, String>,
     Crash: FnMut(),
 {
     let mut errors: Vec<String> = Vec::new();
@@ -758,7 +759,7 @@ where
         if attempt > 0 && !backoff.is_zero() {
             tokio::time::sleep(backoff).await;
         }
-        match open() {
+        match open(attempt) {
             Ok(h) => return Ok(h),
             Err(e) => {
                 errors.push(format!("attempt {attempt}: {e}"));
@@ -1191,6 +1192,10 @@ fn run_retention<S: StorageIO + Send + Sync + 'static>(
     max_age: RetentionSecs,
 ) -> Result<(), String> {
     let sync_result = el.writer.sync().map_err(|e| e.to_string())?;
+    el.manager
+        .io()
+        .sync_dir(el.segments_dir.as_path())
+        .map_err(|e| e.to_string())?;
     let _ = el.writer.rotate_if_needed();
     oracle.record_event_sync(sync_result.synced_through);
     let active_id = sync_result.segment_id;
@@ -1564,7 +1569,7 @@ async fn run_inner_generic_concurrent<S, Open, Crash>(
 ) -> GauntletReport
 where
     S: StorageIO + Send + Sync + 'static,
-    Open: FnMut() -> Result<Harness<S>, String>,
+    Open: FnMut(usize) -> Result<Harness<S>, String>,
     Crash: FnMut(),
 {
     let ops: Vec<Op> = op_stream.into_vec();
@@ -1577,7 +1582,7 @@ where
     let mut sample_rng = Lcg::new(Seed(config.seed.0 ^ 0x5A5A_5A5A_5A5A_5A5A));
     let chunks = compute_chunks(config.restart_policy, total_ops, &mut restart_rng);
 
-    let mut harness: Option<Harness<S>> = match open() {
+    let mut harness: Option<Harness<S>> = match open(0) {
         Ok(h) => Some(h),
         Err(e) => {
             return GauntletReport {

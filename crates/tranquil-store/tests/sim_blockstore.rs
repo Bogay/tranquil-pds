@@ -12,7 +12,9 @@ use tranquil_store::blockstore::{
     GroupCommitConfig, HINT_RECORD_SIZE, HintFileWriter, HintOffset, TranquilBlockStore,
     WallClockMs, WriteCursor, hint_file_path,
 };
-use tranquil_store::{FaultConfig, OpenOptions, SimulatedIO, StorageIO, sim_seed_range};
+use tranquil_store::{
+    FaultConfig, OpenOptions, SimulatedIO, StorageIO, SyncReorderWindow, sim_seed_range,
+};
 
 use common::{Rng, advance_epoch, block_data, test_cid, with_runtime};
 
@@ -689,5 +691,62 @@ fn sim_multi_file_rotation_crash_recovery() {
                 );
             });
         });
+    });
+}
+
+#[test]
+fn sim_sync_reorder_loses_first_commit_durability() {
+    with_runtime(|| {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = BlockStoreConfig {
+            data_dir: dir.path().join("data"),
+            index_dir: dir.path().join("index"),
+            max_file_size: DEFAULT_MAX_FILE_SIZE,
+            group_commit: GroupCommitConfig::default(),
+            shard_count: 1,
+        };
+
+        let fault = FaultConfig {
+            sync_reorder_window: SyncReorderWindow(4),
+            ..FaultConfig::none()
+        };
+        let sim: Arc<SimulatedIO> = Arc::new(SimulatedIO::new(706, fault));
+
+        let cid = test_cid(0);
+        let data = block_data(0);
+
+        {
+            let s = Arc::clone(&sim);
+            let store = TranquilBlockStore::<Arc<SimulatedIO>>::open_with_io(
+                config.clone(),
+                move || Arc::clone(&s),
+            )
+            .unwrap();
+            store
+                .put_blocks_blocking(vec![(cid, data.clone())])
+                .unwrap();
+        }
+
+        sim.crash();
+
+        let s = Arc::clone(&sim);
+        let store = TranquilBlockStore::<Arc<SimulatedIO>>::open_with_io(config, move || {
+            Arc::clone(&s)
+        })
+        .unwrap();
+
+        match store.get_block_sync(&cid) {
+            Ok(Some(d)) => assert_eq!(
+                &d[..],
+                &data[..],
+                "block content mismatch after crash"
+            ),
+            Ok(None) => panic!(
+                "durability bug: put_blocks_blocking returned Ok but block missing after crash"
+            ),
+            Err(e) => panic!(
+                "durability bug: block read failed after crash: {e}"
+            ),
+        }
     });
 }

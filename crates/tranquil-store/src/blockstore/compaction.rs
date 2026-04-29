@@ -222,7 +222,8 @@ fn stream_compact<S: StorageIO>(
                 .io()
                 .sync_dir(manager.data_dir())
                 .map_err(CompactionError::from)
-        });
+        })
+        .and_then(|()| manager.io().barrier().map_err(CompactionError::from));
 
     let _ = manager.io().close(hint_fd);
 

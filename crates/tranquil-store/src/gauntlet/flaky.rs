@@ -405,6 +405,8 @@ fn mount_ext4(device: &Path, target: &Path) -> Result<(), FlakyError> {
     let out = Command::new("mount")
         .arg("-t")
         .arg("ext4")
+        .arg("-o")
+        .arg("errors=continue")
         .arg(device)
         .arg(target)
         .output()?;

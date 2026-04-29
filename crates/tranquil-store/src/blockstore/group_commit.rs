@@ -1343,6 +1343,10 @@ fn process_batch<S: StorageIO>(
         )
         .map_err(|e| rollback_on_err(CommitError::from(e)))?;
     hint_writer.sync().map_err(|e| rollback_on_err(e.into()))?;
+    manager
+        .io()
+        .barrier()
+        .map_err(|e| rollback_on_err(e.into()))?;
     let sync_nanos = t.elapsed().as_nanos() as u64;
 
     if !rotations.is_empty() {

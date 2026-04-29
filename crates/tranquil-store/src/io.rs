@@ -104,6 +104,10 @@ pub trait StorageIO: Send + Sync {
     fn sync_dir(&self, path: &Path) -> io::Result<()>;
     fn list_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>>;
 
+    fn barrier(&self) -> io::Result<()> {
+        Ok(())
+    }
+
     fn write_all_at(&self, fd: FileId, offset: u64, buf: &[u8]) -> io::Result<()> {
         let written = Cell::new(0usize);
         std::iter::from_fn(|| (written.get() < buf.len()).then_some(()))
@@ -189,6 +193,9 @@ impl<S: StorageIO> StorageIO for Arc<S> {
     }
     fn list_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
         (**self).list_dir(path)
+    }
+    fn barrier(&self) -> io::Result<()> {
+        (**self).barrier()
     }
     fn mmap_file(&self, fd: FileId) -> io::Result<MappedFile> {
         (**self).mmap_file(fd)

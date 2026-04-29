@@ -9,7 +9,7 @@ use super::workload::{
     ByteRange, DidSpaceSize, KeySpaceSize, OpCount, OpWeights, RetentionMaxSecs, SizeDistribution,
     ValueBytes, WorkloadModel,
 };
-use crate::blockstore::GroupCommitConfig;
+use crate::blockstore::{GroupCommitConfig, MAX_BLOCK_SIZE};
 use crate::sim::FaultConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -402,7 +402,7 @@ fn huge_values(seed: Seed) -> GauntletConfig {
         workload: block_workload(
             block_weights(85, 5, 8, 2),
             SizeDistribution::HeavyTail(
-                ByteRange::new(ValueBytes(256), ValueBytes(16 * 1024 * 1024))
+                ByteRange::new(ValueBytes(256), ValueBytes(MAX_BLOCK_SIZE))
                     .expect("huge_values ByteRange"),
             ),
             KeySpaceSize(64),

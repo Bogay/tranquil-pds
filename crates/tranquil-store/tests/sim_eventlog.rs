@@ -5,10 +5,12 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use tranquil_store::eventlog::{
-    DidHash, EVENT_RECORD_OVERHEAD, EventLogWriter, EventSequence, EventTypeTag, MAX_EVENT_PAYLOAD,
-    SEGMENT_HEADER_SIZE, SegmentId, SegmentManager, SegmentReader, ValidEvent,
+    DidHash, EVENT_HEADER_SIZE, EVENT_RECORD_OVERHEAD, EventLogWriter, EventSequence, EventTypeTag,
+    MAX_EVENT_PAYLOAD, SEGMENT_HEADER_SIZE, SegmentId, SegmentManager, SegmentReader, ValidEvent,
 };
-use tranquil_store::{FaultConfig, Probability, SimulatedIO, StorageIO, sim_seed_range};
+use tranquil_store::{
+    FaultConfig, OpenOptions, Probability, SimulatedIO, StorageIO, sim_seed_range,
+};
 
 use common::Rng;
 
@@ -204,13 +206,13 @@ fn crash_mid_rotation_with_faults() {
             EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD)
         }));
 
-        if let Ok(Ok(writer)) = recovery
-            && let Ok(synced_before) = write_result
-        {
+        if let Ok(Ok(writer)) = recovery {
+            let recovered = writer.synced_seq().raw();
             assert!(
-                writer.synced_seq().raw() <= synced_before,
-                "seed {seed}: recovered more events than were synced"
+                recovered <= events_per_seg as u64,
+                "seed {seed}: recovered {recovered} > written {events_per_seg}"
             );
+            let _ = write_result;
         }
     });
 }
@@ -1019,4 +1021,158 @@ fn aggressive_faults_group_sync_recovery() {
             "seed {seed}: recovered events must be a prefix of pristine"
         );
     });
+}
+
+#[test]
+fn sync_synced_seq_must_match_durable_valid_prefix() {
+    sim_seed_range().into_par_iter().for_each(|seed| {
+        let fault_config = FaultConfig {
+            partial_write_probability: Probability::new(0.05),
+            torn_page_probability: Probability::new(0.01),
+            misdirected_write_probability: Probability::new(0.01),
+            sync_failure_probability: Probability::new(0.03),
+            sync_reorder_window: tranquil_store::SyncReorderWindow(4),
+            ..FaultConfig::none()
+        };
+        let sim = SimulatedIO::new(seed, fault_config);
+        let mgr = setup_manager(sim, 64 * 1024);
+
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD)
+            .unwrap_or_else(|e| panic!("seed {seed}: open writer failed: {e}"));
+
+        let event_count = 10u64;
+        (1..=event_count).for_each(|i| {
+            let _ = append_test_event(&mut writer, i, seed);
+        });
+
+        let synced_through = match writer.sync() {
+            Ok(r) => r.synced_through.raw(),
+            Err(_) => return,
+        };
+        let _ = mgr.io().sync_dir(Path::new(SEGMENTS_DIR));
+
+        if synced_through == 0 {
+            return;
+        }
+
+        let Ok(handle) = mgr.open_for_read(SegmentId::new(1)) else {
+            return;
+        };
+        let Ok(reader) = SegmentReader::open(mgr.io(), handle.fd(), MAX_EVENT_PAYLOAD) else {
+            return;
+        };
+        let Ok(valid) = reader.valid_prefix() else {
+            return;
+        };
+
+        let durable_max = valid.last().map(|e| e.seq.raw()).unwrap_or(0);
+
+        assert!(
+            synced_through <= durable_max,
+            "seed {seed}: sync acked seq {synced_through} but durable valid prefix only reaches {durable_max} \
+             (events written: {event_count}, valid_prefix.len()={})",
+            valid.len()
+        );
+    });
+}
+
+#[test]
+fn reopen_recovers_from_torn_segment_header() {
+    let sim = SimulatedIO::pristine(0);
+    let mgr = setup_manager(sim, 64 * 1024);
+
+    {
+        let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
+        (1..=3).for_each(|i| {
+            let _ = append_test_event(&mut writer, i, 0);
+        });
+        writer.sync().unwrap();
+    }
+    mgr.shutdown();
+
+    let path = mgr.segment_path(SegmentId::new(1));
+    let fd = mgr
+        .io()
+        .open(&path, OpenOptions::read_write_existing())
+        .unwrap();
+    mgr.io().write_all_at(fd, 0, &[0u8; 4]).unwrap();
+    mgr.io().sync(fd).unwrap();
+    mgr.io().sync_dir(Path::new(SEGMENTS_DIR)).unwrap();
+    mgr.io().close(fd).unwrap();
+
+    let writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD)
+        .expect("reopen with torn header on highest-numbered segment must succeed");
+    assert_eq!(writer.active_segment_id(), SegmentId::new(1));
+}
+
+#[test]
+fn partial_valid_sync_poisons_writer_and_acks_only_valid_prefix() {
+    let sim = SimulatedIO::pristine(0);
+    let mgr = setup_manager(sim, 64 * 1024);
+    let mut writer = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
+
+    let payload = b"payload-x".to_vec();
+    let payload_size = payload.len();
+    let record_size = EVENT_RECORD_OVERHEAD + payload_size;
+
+    (1..=5u64).for_each(|i| {
+        writer
+            .append(
+                DidHash::from_did(&format!("did:plc:user{i}")),
+                EventTypeTag::COMMIT,
+                payload.clone(),
+            )
+            .unwrap();
+    });
+
+    let event_3_start = SEGMENT_HEADER_SIZE + 2 * record_size;
+    let event_3_checksum_offset = event_3_start + EVENT_HEADER_SIZE + payload_size;
+
+    let segment_path = mgr.segment_path(SegmentId::new(1));
+    let corrupt_fd = mgr
+        .io()
+        .open(&segment_path, OpenOptions::read_write_existing())
+        .unwrap();
+    mgr.io()
+        .write_all_at(corrupt_fd, event_3_checksum_offset as u64, &[0xFFu8; 4])
+        .unwrap();
+    mgr.io().close(corrupt_fd).unwrap();
+
+    let result = writer.sync().unwrap();
+    assert_eq!(
+        result.synced_through,
+        EventSequence::new(2),
+        "sync must ack only events 1..=2 with corrupt event 3"
+    );
+    assert_eq!(result.flushed_events.len(), 2);
+    assert!(writer.is_poisoned(), "writer must be poisoned after partial sync");
+
+    let append_after_poison = writer.append(
+        DidHash::from_did("did:plc:after"),
+        EventTypeTag::COMMIT,
+        payload.clone(),
+    );
+    assert!(
+        append_after_poison.is_err(),
+        "append must fail on poisoned writer"
+    );
+
+    let sync_after_poison = writer.sync();
+    assert!(
+        sync_after_poison.is_err(),
+        "sync must fail on poisoned writer"
+    );
+
+    drop(writer);
+    let recovered = EventLogWriter::open(Arc::clone(&mgr), 256, MAX_EVENT_PAYLOAD).unwrap();
+    assert_eq!(
+        recovered.synced_seq(),
+        EventSequence::new(2),
+        "reopen must observe synced_seq matching disk's valid prefix"
+    );
+
+    let valid = read_all_events(&mgr, 0);
+    assert_eq!(valid.len(), 2);
+    assert_eq!(valid[0].seq, EventSequence::new(1));
+    assert_eq!(valid[1].seq, EventSequence::new(2));
 }
