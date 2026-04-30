@@ -244,6 +244,8 @@ pub trait InfraRepository: Send + Sync {
 
     async fn mark_comms_failed(&self, id: Uuid, error: &str) -> Result<(), DbError>;
 
+    async fn mark_comms_failed_permanent(&self, id: Uuid, error: &str) -> Result<(), DbError>;
+
     async fn create_invite_code(
         &self,
         code: &str,

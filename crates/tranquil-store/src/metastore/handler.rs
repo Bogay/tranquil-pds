@@ -1789,6 +1789,11 @@ pub enum InfraRequest {
         error: String,
         tx: Tx<()>,
     },
+    MarkCommsFailedPermanent {
+        id: Uuid,
+        error: String,
+        tx: Tx<()>,
+    },
     CreateInviteCode {
         code: String,
         use_count: i32,
@@ -3885,6 +3890,14 @@ fn dispatch_infra<S: StorageIO>(state: &HandlerState<S>, req: InfraRequest) {
                 .metastore
                 .infra_ops()
                 .mark_comms_failed(id, &error)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        InfraRequest::MarkCommsFailedPermanent { id, error, tx } => {
+            let result = state
+                .metastore
+                .infra_ops()
+                .mark_comms_failed_permanent(id, &error)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }

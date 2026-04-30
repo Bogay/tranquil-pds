@@ -65,9 +65,13 @@ impl InfraRepository for PostgresInfraRepository {
                SET status = 'processing', updated_at = NOW()
                WHERE id IN (
                    SELECT id FROM comms_queue
-                   WHERE status = 'pending'
+                   WHERE attempts < max_attempts
                      AND scheduled_for <= $1
-                     AND attempts < max_attempts
+                     AND (
+                         status = 'pending'
+                         OR (status = 'processing'
+                             AND updated_at < $1 - INTERVAL '10 minutes')
+                     )
                    ORDER BY scheduled_for ASC
                    LIMIT $2
                    FOR UPDATE SKIP LOCKED
@@ -116,6 +120,24 @@ impl InfraRepository for PostgresInfraRepository {
                    last_error = $2,
                    updated_at = NOW(),
                    scheduled_for = NOW() + (INTERVAL '1 minute' * (attempts + 1))
+               WHERE id = $1"#,
+            id,
+            error
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(())
+    }
+
+    async fn mark_comms_failed_permanent(&self, id: Uuid, error: &str) -> Result<(), DbError> {
+        sqlx::query!(
+            r#"UPDATE comms_queue
+               SET status = 'failed'::comms_status,
+                   attempts = max_attempts,
+                   last_error = $2,
+                   updated_at = NOW()
                WHERE id = $1"#,
             id,
             error

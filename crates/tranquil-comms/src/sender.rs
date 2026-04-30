@@ -1,11 +1,7 @@
 use async_trait::async_trait;
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use reqwest::Client;
 use serde_json::json;
-use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
 use super::types::{CommsChannel, QueuedComms};
 
@@ -21,23 +17,49 @@ pub trait CommsSender: Send + Sync {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SendError {
-    #[error("Failed to spawn {command}: {source}")]
-    ProcessSpawn {
-        command: String,
-        source: std::io::Error,
-    },
-    #[error("{command} exited with non-zero status: {detail}")]
-    ProcessFailed { command: String, detail: String },
     #[error("Channel not configured: {0:?}")]
     NotConfigured(CommsChannel),
-    #[error("External service error: {0}")]
-    ExternalService(String),
+    #[error("Email configuration invalid: {0}")]
+    ConfigInvalid(String),
     #[error("Invalid recipient format: {0}")]
     InvalidRecipient(String),
+    #[error("Message construction failed: {0}")]
+    MessageBuild(String),
+    #[error("transient DNS lookup failure: {0}")]
+    DnsTransient(String),
+    #[error("permanent DNS lookup failure: {0}")]
+    DnsPermanent(String),
+    #[error("SMTP transient error: {0}")]
+    SmtpTransient(String),
+    #[error("SMTP permanent error: {0}")]
+    SmtpPermanent(String),
+    #[error("DKIM signing failed: {0}")]
+    DkimSign(String),
+    #[error("External service error: {0}")]
+    ExternalService(String),
     #[error("Request timeout")]
     Timeout,
     #[error("Max retries exceeded: {0}")]
     MaxRetriesExceeded(String),
+}
+
+impl SendError {
+    pub fn is_permanent(&self) -> bool {
+        match self {
+            Self::SmtpPermanent(_)
+            | Self::DnsPermanent(_)
+            | Self::InvalidRecipient(_)
+            | Self::MessageBuild(_)
+            | Self::DkimSign(_)
+            | Self::ConfigInvalid(_) => true,
+            Self::SmtpTransient(_)
+            | Self::DnsTransient(_)
+            | Self::Timeout
+            | Self::ExternalService(_)
+            | Self::MaxRetriesExceeded(_)
+            | Self::NotConfigured(_) => false,
+        }
+    }
 }
 
 fn create_http_client() -> Client {
@@ -100,19 +122,6 @@ where
     ))
 }
 
-pub fn sanitize_header_value(value: &str) -> String {
-    value.replace(['\r', '\n'], " ").trim().to_string()
-}
-
-pub fn mime_encode_header(value: &str) -> String {
-    if value.is_ascii() {
-        sanitize_header_value(value)
-    } else {
-        let sanitized = sanitize_header_value(value);
-        format!("=?UTF-8?B?{}?=", BASE64.encode(sanitized.as_bytes()))
-    }
-}
-
 pub fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -133,93 +142,6 @@ pub fn is_valid_phone_number(number: &str) -> bool {
 
 pub fn is_valid_signal_username(username: &str) -> bool {
     tranquil_signal::SignalUsername::parse(username).is_ok()
-}
-
-pub struct EmailSender {
-    from_address: String,
-    from_name: String,
-    sendmail_path: String,
-}
-
-impl EmailSender {
-    pub fn new(from_address: String, from_name: String, sendmail_path: String) -> Self {
-        Self {
-            from_address,
-            from_name,
-            sendmail_path,
-        }
-    }
-
-    pub fn from_config(cfg: &tranquil_config::TranquilConfig) -> Option<Self> {
-        let from_address = cfg.email.from_address.clone()?;
-        let from_name = cfg.email.from_name.clone();
-        let sendmail_path = cfg.email.sendmail_path.clone();
-        Some(Self::new(from_address, from_name, sendmail_path))
-    }
-
-    pub fn format_email(&self, notification: &QueuedComms) -> String {
-        let subject = mime_encode_header(notification.subject.as_deref().unwrap_or("Notification"));
-        let recipient = sanitize_header_value(&notification.recipient);
-        let from_header = if self.from_name.is_empty() {
-            self.from_address.clone()
-        } else {
-            format!(
-                "{} <{}>",
-                sanitize_header_value(&self.from_name),
-                self.from_address
-            )
-        };
-        format!(
-            "From: {}\r\nTo: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n{}",
-            from_header, recipient, subject, notification.body
-        )
-    }
-}
-
-#[async_trait]
-impl CommsSender for EmailSender {
-    fn channel(&self) -> CommsChannel {
-        CommsChannel::Email
-    }
-
-    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
-        let email_content = self.format_email(notification);
-        let mut child = Command::new(&self.sendmail_path)
-            .arg("-t")
-            .arg("-oi")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| SendError::ProcessSpawn {
-                command: self.sendmail_path.clone(),
-                source: e,
-            })?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(email_content.as_bytes())
-                .await
-                .map_err(|e| SendError::ProcessSpawn {
-                    command: self.sendmail_path.clone(),
-                    source: e,
-                })?;
-        }
-        let output = child
-            .wait_with_output()
-            .await
-            .map_err(|e| SendError::ProcessSpawn {
-                command: self.sendmail_path.clone(),
-                source: e,
-            })?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(SendError::ProcessFailed {
-                command: self.sendmail_path.clone(),
-                detail: stderr.to_string(),
-            });
-        }
-        Ok(())
-    }
 }
 
 const DISCORD_API_BASE: &str = "https://discord.com/api/v10";
@@ -608,5 +530,30 @@ impl CommsSender for SignalSender {
         Err(SendError::MaxRetriesExceeded(
             last_error.unwrap_or_else(|| "unknown error".to_string()),
         ))
+    }
+}
+
+#[cfg(test)]
+mod is_permanent_matrix {
+    use super::{CommsChannel, SendError};
+
+    #[test]
+    fn permanent_variants_are_permanent() {
+        assert!(SendError::SmtpPermanent("x".into()).is_permanent());
+        assert!(SendError::DnsPermanent("x".into()).is_permanent());
+        assert!(SendError::InvalidRecipient("x".into()).is_permanent());
+        assert!(SendError::MessageBuild("x".into()).is_permanent());
+        assert!(SendError::DkimSign("x".into()).is_permanent());
+        assert!(SendError::ConfigInvalid("x".into()).is_permanent());
+    }
+
+    #[test]
+    fn transient_variants_are_not_permanent() {
+        assert!(!SendError::SmtpTransient("x".into()).is_permanent());
+        assert!(!SendError::DnsTransient("x".into()).is_permanent());
+        assert!(!SendError::Timeout.is_permanent());
+        assert!(!SendError::ExternalService("x".into()).is_permanent());
+        assert!(!SendError::MaxRetriesExceeded("x".into()).is_permanent());
+        assert!(!SendError::NotConfigured(CommsChannel::Email).is_permanent());
     }
 }

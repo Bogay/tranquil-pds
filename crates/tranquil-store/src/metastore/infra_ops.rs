@@ -247,7 +247,6 @@ impl InfraOps {
 
         val.status = status_to_u8(CommsStatus::Sent);
         val.sent_at_ms = Some(Utc::now().timestamp_millis());
-        val.attempts = val.attempts.saturating_add(1);
 
         let mut batch = self.db.batch();
         batch.insert(&self.infra, key.as_slice(), val.serialize());
@@ -272,9 +271,46 @@ impl InfraOps {
         )?
         .ok_or(MetastoreError::InvalidInput("comms entry not found"))?;
 
+        let next_attempts = val.attempts.saturating_add(1);
+        let exhausted = next_attempts >= val.max_attempts;
+        let next_status = match exhausted {
+            true => CommsStatus::Failed,
+            false => CommsStatus::Pending,
+        };
+        let now_ms = Utc::now().timestamp_millis();
+        let backoff_ms = i64::from(next_attempts).saturating_mul(60_000);
+
+        val.status = status_to_u8(next_status);
+        val.error_message = Some(error.to_owned());
+        val.attempts = next_attempts;
+        val.scheduled_for_ms = now_ms.saturating_add(backoff_ms);
+
+        let mut batch = self.db.batch();
+        batch.insert(&self.infra, key.as_slice(), val.serialize());
+
+        if let Some((hk, mut hv)) =
+            self.find_history_entry(val.user_id.unwrap_or(Uuid::nil()), val.id)?
+        {
+            hv.status = status_to_u8(next_status);
+            batch.insert(&self.infra, hk.as_slice(), hv.serialize());
+        }
+
+        batch.commit().map_err(MetastoreError::Fjall)
+    }
+
+    pub fn mark_comms_failed_permanent(&self, id: Uuid, error: &str) -> Result<(), MetastoreError> {
+        let key = comms_queue_key(id);
+        let mut val: QueuedCommsValue = point_lookup(
+            &self.infra,
+            key.as_slice(),
+            QueuedCommsValue::deserialize,
+            "corrupt comms queue entry",
+        )?
+        .ok_or(MetastoreError::InvalidInput("comms entry not found"))?;
+
         val.status = status_to_u8(CommsStatus::Failed);
         val.error_message = Some(error.to_owned());
-        val.attempts = val.attempts.saturating_add(1);
+        val.attempts = val.max_attempts;
 
         let mut batch = self.db.batch();
         batch.insert(&self.infra, key.as_slice(), val.serialize());

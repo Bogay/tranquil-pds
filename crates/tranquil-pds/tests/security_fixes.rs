@@ -1,42 +1,6 @@
 mod common;
-use tranquil_pds::comms::{
-    SendError, is_valid_phone_number, is_valid_signal_username, sanitize_header_value,
-};
+use tranquil_pds::comms::{SendError, is_valid_phone_number, is_valid_signal_username};
 use tranquil_pds::image::{ImageError, ImageProcessor};
-
-#[test]
-fn test_header_injection_sanitization() {
-    let malicious = "Injected\r\nBcc: attacker@evil.com";
-    let sanitized = sanitize_header_value(malicious);
-    assert!(!sanitized.contains('\r') && !sanitized.contains('\n'));
-    assert!(sanitized.contains("Injected") && sanitized.contains("Bcc:"));
-
-    let normal = "Normal Subject Line";
-    assert_eq!(sanitize_header_value(normal), "Normal Subject Line");
-
-    let padded = "  Subject  ";
-    assert_eq!(sanitize_header_value(padded), "Subject");
-
-    let multi_newline = "Line1\r\nLine2\nLine3\rLine4";
-    let sanitized = sanitize_header_value(multi_newline);
-    assert!(!sanitized.contains('\r') && !sanitized.contains('\n'));
-    assert!(sanitized.contains("Line1") && sanitized.contains("Line4"));
-
-    let header_injection = "Normal Subject\r\nBcc: attacker@evil.com\r\nX-Injected: value";
-    let sanitized = sanitize_header_value(header_injection);
-    assert_eq!(sanitized.split("\r\n").count(), 1);
-    assert!(
-        sanitized.contains("Normal Subject")
-            && sanitized.contains("Bcc:")
-            && sanitized.contains("X-Injected:")
-    );
-
-    let with_null = "client\0id";
-    assert!(sanitize_header_value(with_null).contains("client"));
-
-    let long_input = "x".repeat(10000);
-    assert!(!sanitize_header_value(&long_input).is_empty());
-}
 
 #[test]
 fn test_phone_number_validation() {

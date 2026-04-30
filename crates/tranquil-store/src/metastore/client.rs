@@ -1860,6 +1860,18 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         recv(rx).await
     }
 
+    async fn mark_comms_failed_permanent(&self, id: Uuid, error: &str) -> Result<(), DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::Infra(
+            InfraRequest::MarkCommsFailedPermanent {
+                id,
+                error: error.to_owned(),
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
     async fn create_invite_code(
         &self,
         code: &str,

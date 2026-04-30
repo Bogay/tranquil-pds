@@ -149,13 +149,19 @@ impl CommsService {
                 }
             }
             Err(e) => {
+                let permanent = e.is_permanent();
                 let error_msg = e.to_string();
                 warn!(
                     comms_id = %comms_id,
                     error = %error_msg,
+                    permanent,
                     "Failed to send comms"
                 );
-                if let Err(db_err) = self.mark_failed(comms_id, &error_msg).await {
+                let db_result = match permanent {
+                    true => self.mark_failed_permanent(comms_id, &error_msg).await,
+                    false => self.mark_failed(comms_id, &error_msg).await,
+                };
+                if let Err(db_err) = db_result {
                     error!(
                         comms_id = %comms_id,
                         error = %db_err,
@@ -172,6 +178,14 @@ impl CommsService {
 
     async fn mark_failed(&self, id: Uuid, error: &str) -> Result<(), tranquil_db_traits::DbError> {
         self.infra_repo.mark_comms_failed(id, error).await
+    }
+
+    async fn mark_failed_permanent(
+        &self,
+        id: Uuid,
+        error: &str,
+    ) -> Result<(), tranquil_db_traits::DbError> {
+        self.infra_repo.mark_comms_failed_permanent(id, error).await
     }
 }
 
