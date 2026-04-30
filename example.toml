@@ -373,12 +373,117 @@
 # Default value: "Tranquil PDS"
 #from_name = "Tranquil PDS"
 
-# Path to the `sendmail` binary.
+# HELO/EHLO name announced to remote SMTP servers. Applies to both
+# smarthost and direct-MX modes. Defaults to the server hostname.
 #
-# Can also be specified via environment variable `SENDMAIL_PATH`.
+# Can also be specified via environment variable `MAIL_HELO_NAME`.
+#helo_name =
+
+[email.smarthost]
+# SMTP relay host. When set, mail is delivered through this host
+# instead of resolving recipient MX records directly.
 #
-# Default value: "/usr/sbin/sendmail"
-#sendmail_path = "/usr/sbin/sendmail"
+# Can also be specified via environment variable `MAIL_SMARTHOST_HOST`.
+#host =
+
+# SMTP relay port.
+#
+# Can also be specified via environment variable `MAIL_SMARTHOST_PORT`.
+#
+# Default value: 587
+#port = 587
+
+# SMTP authentication username.
+#
+# Can also be specified via environment variable `MAIL_SMARTHOST_USERNAME`.
+#username =
+
+# SMTP authentication password.
+#
+# Can also be specified via environment variable `MAIL_SMARTHOST_PASSWORD`.
+#password =
+
+# TLS mode. Valid values: "implicit", "starttls", "none". Setting "none"
+# alongside a password is rejected at startup to prevent transmitting
+# credentials in plaintext.
+#
+# Can also be specified via environment variable `MAIL_SMARTHOST_TLS`.
+#
+# Default value: "starttls"
+#tls = "starttls"
+
+# Max size of the connection pool.
+#
+# Can also be specified via environment variable `MAIL_SMARTHOST_POOL_SIZE`.
+#
+# Default value: 4
+#pool_size = 4
+
+# Per-command SMTP timeout in seconds. Bounds the security handshake.
+#
+# Can also be specified via environment variable `MAIL_SMARTHOST_COMMAND_TIMEOUT_SECS`.
+#
+# Default value: 30
+#command_timeout_secs = 30
+
+# Total per-message timeout in seconds. Wraps the entire send so a
+# stuck relay cannot stall the comms queue.
+#
+# Can also be specified via environment variable `MAIL_SMARTHOST_TOTAL_TIMEOUT_SECS`.
+#
+# Default value: 60
+#total_timeout_secs = 60
+
+[email.direct_mx]
+# Per-command SMTP timeout in seconds.
+#
+# Can also be specified via environment variable `MAIL_COMMAND_TIMEOUT_SECS`.
+#
+# Default value: 30
+#command_timeout_secs = 30
+
+# Total per-message timeout across all MX attempts in seconds.
+#
+# Can also be specified via environment variable `MAIL_TOTAL_TIMEOUT_SECS`.
+#
+# Default value: 60
+#total_timeout_secs = 60
+
+# Max number of concurrent direct-MX sends. Limits the load placed
+# on any single recipient MX during a backlog drain.
+#
+# Can also be specified via environment variable `MAIL_MAX_CONCURRENT_SENDS`.
+#
+# Default value: 8
+#max_concurrent_sends = 8
+
+# Require STARTTLS on every MX hop. When false, TLS is
+# attempted opportunistically and the session falls back to plaintext
+# if the remote does not advertise STARTTLS. Set true to refuse
+# plaintext delivery, at the cost of failing sends to MX hosts that
+# do not support TLS.
+#
+# Can also be specified via environment variable `MAIL_REQUIRE_TLS`.
+#
+# Default value: false
+#require_tls = false
+
+[email.dkim]
+# DKIM selector. When unset, outgoing mail is not signed.
+#
+# Can also be specified via environment variable `MAIL_DKIM_SELECTOR`.
+#selector =
+
+# DKIM signing domain.
+#
+# Can also be specified via environment variable `MAIL_DKIM_DOMAIN`.
+#domain =
+
+# Path to the DKIM private key in PEM format. Supports RSA and
+# Ed25519 keys.
+#
+# Can also be specified via environment variable `MAIL_DKIM_KEY_PATH`.
+#private_key_path =
 
 [discord]
 # Discord bot token. When unset, Discord integration is disabled.

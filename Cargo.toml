@@ -26,7 +26,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.7"
+version = "0.6.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 
@@ -93,6 +93,7 @@ ipld-core = "0.4"
 iroh-car = "0.5"
 jacquard-common = { version = "0.9", features = ["crypto-k256"] }
 jacquard-repo = "0.9"
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls-tls", "pool", "dkim", "tracing"] }
 jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
 k256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
 metrics = "0.24"
@@ -105,6 +106,8 @@ p384 = { version = "0.13", features = ["ecdsa"] }
 rand = "0.8"
 redis = { version = "1.0", features = ["tokio-comp", "connection-manager"] }
 regex = "1"
+rsa = "0.9"
+secrecy = { version = "0.10", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots", "http2", "charset", "macos-system-configuration"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_bytes = "0.11"

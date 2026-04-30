@@ -5,6 +5,14 @@ use std::sync::OnceLock;
 
 static CONFIG: OnceLock<TranquilConfig> = OnceLock::new();
 
+const REMOVED_ENV_VARS: &[(&str, &str)] = &[(
+    "SENDMAIL_PATH",
+    "the sendmail-binary transport was replaced with native SMTP. \
+     Configure MAIL_SMARTHOST_HOST for relay delivery, or leave it unset to \
+     deliver directly via recipient MX records. See example.toml for the full \
+     MAIL_* surface.",
+)];
+
 /// Errors discovered during configuration validation.
 #[derive(Debug)]
 pub struct ConfigError {
@@ -162,6 +170,14 @@ impl TranquilConfig {
     pub fn validate(&self, ignore_secrets: bool) -> Result<(), ConfigError> {
         let mut errors = Vec::new();
 
+        // -- removed config ---------------------------------------------------
+        errors.extend(
+            REMOVED_ENV_VARS
+                .iter()
+                .filter(|(var, _)| std::env::var_os(var).is_some())
+                .map(|(var, guidance)| format!("{var} is no longer supported: {guidance}")),
+        );
+
         // -- secrets ----------------------------------------------------------
         if !ignore_secrets && !self.secrets.allow_insecure && !cfg!(test) {
             if let Some(ref s) = self.secrets.jwt_secret {
@@ -205,6 +221,85 @@ impl TranquilConfig {
                 errors.push(
                     "secrets.master_key (MASTER_KEY) is required in production \
                      (set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=true for development)"
+                        .to_string(),
+                );
+            }
+        }
+
+        // -- email smarthost --------------------------------------------------
+        match self.email.smarthost.tls.to_ascii_lowercase().as_str() {
+            "implicit" | "starttls" => {}
+            "none" => {
+                if self.email.smarthost.password.is_some() {
+                    errors.push(
+                        "email.smarthost.tls = \"none\" with email.smarthost.password set \
+                         would transmit credentials in plaintext; use \"starttls\" or \"implicit\""
+                            .to_string(),
+                    );
+                }
+            }
+            other => errors.push(format!(
+                "email.smarthost.tls must be \"implicit\", \"starttls\", or \"none\", got \"{other}\""
+            )),
+        }
+
+        let smarthost_host_set = self
+            .email
+            .smarthost
+            .host
+            .as_deref()
+            .is_some_and(|h| !h.is_empty());
+        let username_set = self.email.smarthost.username.is_some();
+        let password_set = self.email.smarthost.password.is_some();
+        if !smarthost_host_set && (username_set || password_set) {
+            errors.push(
+                "email.smarthost.username or email.smarthost.password is set but \
+                 email.smarthost.host is empty; credentials would be silently ignored"
+                    .to_string(),
+            );
+        }
+        if smarthost_host_set && username_set != password_set {
+            errors.push(
+                "email.smarthost.username and email.smarthost.password must both be set or \
+                 both unset; otherwise authentication would silently degrade to anonymous"
+                    .to_string(),
+            );
+        }
+
+        if self.email.smarthost.command_timeout_secs == 0 {
+            errors.push("email.smarthost.command_timeout_secs must be at least 1".to_string());
+        }
+        if self.email.smarthost.total_timeout_secs == 0 {
+            errors.push("email.smarthost.total_timeout_secs must be at least 1".to_string());
+        }
+        if self.email.smarthost.pool_size == 0 {
+            errors.push("email.smarthost.pool_size must be at least 1".to_string());
+        }
+
+        if self.email.direct_mx.max_concurrent_sends == 0 {
+            errors.push("email.direct_mx.max_concurrent_sends must be at least 1".to_string());
+        }
+        if self.email.direct_mx.command_timeout_secs == 0 {
+            errors.push("email.direct_mx.command_timeout_secs must be at least 1".to_string());
+        }
+        if self.email.direct_mx.total_timeout_secs == 0 {
+            errors.push("email.direct_mx.total_timeout_secs must be at least 1".to_string());
+        }
+
+        let dkim_set = self.email.dkim.selector.is_some()
+            || self.email.dkim.domain.is_some()
+            || self.email.dkim.private_key_path.is_some();
+        if dkim_set {
+            if self.email.dkim.selector.is_none() {
+                errors
+                    .push("email.dkim.selector is required when any DKIM field is set".to_string());
+            }
+            if self.email.dkim.domain.is_none() {
+                errors.push("email.dkim.domain is required when any DKIM field is set".to_string());
+            }
+            if self.email.dkim.private_key_path.is_none() {
+                errors.push(
+                    "email.dkim.private_key_path is required when any DKIM field is set"
                         .to_string(),
                 );
             }
@@ -754,9 +849,98 @@ pub struct EmailConfig {
     #[config(env = "MAIL_FROM_NAME", default = "Tranquil PDS")]
     pub from_name: String,
 
-    /// Path to the `sendmail` binary.
-    #[config(env = "SENDMAIL_PATH", default = "/usr/sbin/sendmail")]
-    pub sendmail_path: String,
+    /// HELO/EHLO name announced to remote SMTP servers. Applies to both
+    /// smarthost and direct-MX modes. Defaults to the server hostname.
+    #[config(env = "MAIL_HELO_NAME")]
+    pub helo_name: Option<String>,
+
+    #[config(nested)]
+    pub smarthost: SmarthostConfig,
+
+    #[config(nested)]
+    pub direct_mx: DirectMxConfig,
+
+    #[config(nested)]
+    pub dkim: DkimConfig,
+}
+
+#[derive(Debug, Config)]
+pub struct SmarthostConfig {
+    /// SMTP relay host. When set, mail is delivered through this host
+    /// instead of resolving recipient MX records directly.
+    #[config(env = "MAIL_SMARTHOST_HOST")]
+    pub host: Option<String>,
+
+    /// SMTP relay port.
+    #[config(env = "MAIL_SMARTHOST_PORT", default = 587)]
+    pub port: u16,
+
+    /// SMTP authentication username.
+    #[config(env = "MAIL_SMARTHOST_USERNAME")]
+    pub username: Option<String>,
+
+    /// SMTP authentication password.
+    #[config(env = "MAIL_SMARTHOST_PASSWORD")]
+    pub password: Option<String>,
+
+    /// TLS mode. Valid values: "implicit", "starttls", "none". Setting "none"
+    /// alongside a password is rejected at startup to prevent transmitting
+    /// credentials in plaintext.
+    #[config(env = "MAIL_SMARTHOST_TLS", default = "starttls")]
+    pub tls: String,
+
+    /// Max size of the connection pool.
+    #[config(env = "MAIL_SMARTHOST_POOL_SIZE", default = 4)]
+    pub pool_size: u32,
+
+    /// Per-command SMTP timeout in seconds. Bounds the security handshake.
+    #[config(env = "MAIL_SMARTHOST_COMMAND_TIMEOUT_SECS", default = 30)]
+    pub command_timeout_secs: u64,
+
+    /// Total per-message timeout in seconds. Wraps the entire send so a
+    /// stuck relay cannot stall the comms queue.
+    #[config(env = "MAIL_SMARTHOST_TOTAL_TIMEOUT_SECS", default = 60)]
+    pub total_timeout_secs: u64,
+}
+
+#[derive(Debug, Config)]
+pub struct DirectMxConfig {
+    /// Per-command SMTP timeout in seconds.
+    #[config(env = "MAIL_COMMAND_TIMEOUT_SECS", default = 30)]
+    pub command_timeout_secs: u64,
+
+    /// Total per-message timeout across all MX attempts in seconds.
+    #[config(env = "MAIL_TOTAL_TIMEOUT_SECS", default = 60)]
+    pub total_timeout_secs: u64,
+
+    /// Max number of concurrent direct-MX sends. Limits the load placed
+    /// on any single recipient MX during a backlog drain.
+    #[config(env = "MAIL_MAX_CONCURRENT_SENDS", default = 8)]
+    pub max_concurrent_sends: usize,
+
+    /// Require STARTTLS on every MX hop. When false, TLS is
+    /// attempted opportunistically and the session falls back to plaintext
+    /// if the remote does not advertise STARTTLS. Set true to refuse
+    /// plaintext delivery, at the cost of failing sends to MX hosts that
+    /// do not support TLS.
+    #[config(env = "MAIL_REQUIRE_TLS", default = false)]
+    pub require_tls: bool,
+}
+
+#[derive(Debug, Config)]
+pub struct DkimConfig {
+    /// DKIM selector. When unset, outgoing mail is not signed.
+    #[config(env = "MAIL_DKIM_SELECTOR")]
+    pub selector: Option<String>,
+
+    /// DKIM signing domain.
+    #[config(env = "MAIL_DKIM_DOMAIN")]
+    pub domain: Option<String>,
+
+    /// Path to the DKIM private key in PEM format. Supports RSA and
+    /// Ed25519 keys.
+    #[config(env = "MAIL_DKIM_KEY_PATH")]
+    pub private_key_path: Option<String>,
 }
 
 #[derive(Debug, Config)]
@@ -1195,4 +1379,65 @@ pub struct TranquilStoreConfig {
 /// defaults, and documentation comments.
 pub fn template() -> String {
     confique::toml::template::<TranquilConfig>(confique::toml::FormatOptions::default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seed_required_env() {
+        let required = [
+            ("PDS_HOSTNAME", "test.local"),
+            ("DATABASE_URL", "postgres://localhost/test"),
+            ("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS", "1"),
+            ("INVITE_CODE_REQUIRED", "false"),
+            ("ENABLE_PDS_HOSTED_DID_WEB", "true"),
+            ("TRANQUIL_LEXICON_OFFLINE", "1"),
+        ];
+        required
+            .iter()
+            .filter(|(k, _)| std::env::var_os(k).is_none())
+            .for_each(|(k, v)| unsafe { std::env::set_var(k, v) });
+    }
+
+    #[test]
+    fn serial_validate_rejects_legacy_sendmail_path() {
+        seed_required_env();
+        unsafe { std::env::set_var("SENDMAIL_PATH", "/usr/sbin/sendmail") };
+        let config = TranquilConfig::builder()
+            .env()
+            .load()
+            .expect("load fresh config");
+        let result = config.validate(true);
+        unsafe { std::env::remove_var("SENDMAIL_PATH") };
+
+        let err = result.expect_err("validate must reject SENDMAIL_PATH");
+        let mentions_sendmail = err.errors.iter().any(|e| e.contains("SENDMAIL_PATH"));
+        assert!(
+            mentions_sendmail,
+            "errors did not mention SENDMAIL_PATH: {:?}",
+            err.errors
+        );
+    }
+
+    #[test]
+    fn serial_validate_passes_when_no_legacy_env_set() {
+        seed_required_env();
+        unsafe { std::env::remove_var("SENDMAIL_PATH") };
+        let config = TranquilConfig::builder()
+            .env()
+            .load()
+            .expect("load fresh config");
+        let result = config.validate(true);
+        let leaked_legacy = result
+            .as_ref()
+            .err()
+            .map(|e| e.errors.iter().any(|s| s.contains("SENDMAIL_PATH")))
+            .unwrap_or(false);
+        assert!(
+            !leaked_legacy,
+            "validate spuriously flagged SENDMAIL_PATH when unset: {:?}",
+            result
+        );
+    }
 }
