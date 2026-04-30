@@ -28,7 +28,7 @@ pub use record::{
 };
 #[cfg(any(test, feature = "test-harness"))]
 pub use sim::{
-    FaultConfig, LatencyNs, OpRecord, Probability, PristineGuard, SimulatedIO, SyncReorderWindow,
+    FaultConfig, LatencyNs, OpRecord, PristineGuard, Probability, SimulatedIO, SyncReorderWindow,
     sim_proptest_cases, sim_seed_count, sim_seed_range, sim_single_seed,
 };
 

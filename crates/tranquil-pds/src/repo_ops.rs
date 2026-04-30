@@ -526,10 +526,8 @@ pub async fn commit_and_log(
 
     let obsolete_bytes: Vec<Vec<u8>> = obsolete_cids.iter().map(|c| c.to_bytes()).collect();
 
-    let final_ops: HashMap<(&Nsid, &Rkey), &RecordOp> = ops
-        .iter()
-        .map(|op| (op.collection_rkey(), op))
-        .collect();
+    let final_ops: HashMap<(&Nsid, &Rkey), &RecordOp> =
+        ops.iter().map(|op| (op.collection_rkey(), op)).collect();
 
     let final_record_uris: HashSet<AtUri> = final_ops
         .iter()

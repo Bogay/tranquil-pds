@@ -85,14 +85,13 @@ async fn recover_lagged_events(
         };
         for event in events {
             *last_seen = event.seq;
-            let bytes =
-                match format_event_with_prefetched_blocks(state, event, &prefetched).await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        warn!("Lag recovery format failed: {}", e);
-                        return Err(());
-                    }
-                };
+            let bytes = match format_event_with_prefetched_blocks(state, event, &prefetched).await {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!("Lag recovery format failed: {}", e);
+                    return Err(());
+                }
+            };
             if let Err(e) = socket.send(Message::Binary(bytes.into())).await {
                 warn!("Lag recovery send failed: {}", e);
                 return Err(());

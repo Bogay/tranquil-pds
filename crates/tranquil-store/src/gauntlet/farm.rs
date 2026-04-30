@@ -157,10 +157,7 @@ mod tests {
 
     #[test]
     fn scratch_for_thread_falls_back_to_root_zero_outside_pool() {
-        let roots = vec![
-            PathBuf::from("/scratch/a"),
-            PathBuf::from("/scratch/b"),
-        ];
+        let roots = vec![PathBuf::from("/scratch/a"), PathBuf::from("/scratch/b")];
         assert_eq!(
             scratch_for_thread(&roots, None),
             Some(PathBuf::from("/scratch/a"))

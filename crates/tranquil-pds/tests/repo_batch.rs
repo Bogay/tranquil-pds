@@ -402,10 +402,7 @@ async fn test_apply_writes_delete_then_create_same_rkey() {
             "{}/xrpc/com.atproto.repo.listRecords",
             base_url().await
         ))
-        .query(&[
-            ("repo", did.as_str()),
-            ("collection", "app.bsky.feed.post"),
-        ])
+        .query(&[("repo", did.as_str()), ("collection", "app.bsky.feed.post")])
         .send()
         .await
         .expect("Failed to list records");
@@ -484,10 +481,7 @@ async fn test_apply_writes_create_then_delete_same_rkey() {
             "{}/xrpc/com.atproto.repo.listRecords",
             base_url().await
         ))
-        .query(&[
-            ("repo", did.as_str()),
-            ("collection", "app.bsky.feed.post"),
-        ])
+        .query(&[("repo", did.as_str()), ("collection", "app.bsky.feed.post")])
         .send()
         .await
         .expect("Failed to list records");

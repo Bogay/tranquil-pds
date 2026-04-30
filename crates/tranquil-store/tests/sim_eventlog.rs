@@ -1157,7 +1157,10 @@ fn partial_valid_sync_poisons_writer_and_acks_only_valid_prefix() {
         "sync must ack only events 1..=2 with corrupt event 3"
     );
     assert_eq!(result.flushed_events.len(), 2);
-    assert!(writer.is_poisoned(), "writer must be poisoned after partial sync");
+    assert!(
+        writer.is_poisoned(),
+        "writer must be poisoned after partial sync"
+    );
 
     let append_after_poison = writer.append(
         DidHash::from_did("did:plc:after"),

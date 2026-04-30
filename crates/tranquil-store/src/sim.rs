@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::io::{FileId, OpenOptions, StorageIO};
@@ -561,18 +561,17 @@ impl StorageIO for SimulatedIO {
             return Err(io::Error::other("simulated EIO on read"));
         }
 
-        let read_offset =
-            if state.should_fault(seed, fault.misdirected_read_probability) {
-                let drift_sectors = state.next_random_usize(seed, 8) + 1;
-                let drift = (drift_sectors * SECTOR_BYTES) as u64;
-                if state.next_random(seed) < 0.5 {
-                    offset.saturating_sub(drift)
-                } else {
-                    offset.saturating_add(drift)
-                }
+        let read_offset = if state.should_fault(seed, fault.misdirected_read_probability) {
+            let drift_sectors = state.next_random_usize(seed, 8) + 1;
+            let drift = (drift_sectors * SECTOR_BYTES) as u64;
+            if state.next_random(seed) < 0.5 {
+                offset.saturating_sub(drift)
             } else {
-                offset
-            };
+                offset.saturating_add(drift)
+            }
+        } else {
+            offset
+        };
 
         let storage = state.storage.get(&sid).unwrap();
 
@@ -620,25 +619,22 @@ impl StorageIO for SimulatedIO {
             return Err(io::Error::other("simulated EIO on write"));
         }
 
-        let torn_len =
-            if buf.len() > 1 && state.should_fault(seed, fault.torn_page_probability) {
-                let page_base = (offset as usize) - ((offset as usize) % TORN_PAGE_BYTES);
-                let page_end = page_base + TORN_PAGE_BYTES;
-                let cap = page_end.saturating_sub(offset as usize).min(buf.len());
-                let max_sectors = cap / SECTOR_BYTES;
-                (max_sectors >= 2).then(|| {
-                    let n = state.next_random_usize(seed, max_sectors - 1) + 1;
-                    n * SECTOR_BYTES
-                })
-            } else {
-                None
-            };
+        let torn_len = if buf.len() > 1 && state.should_fault(seed, fault.torn_page_probability) {
+            let page_base = (offset as usize) - ((offset as usize) % TORN_PAGE_BYTES);
+            let page_end = page_base + TORN_PAGE_BYTES;
+            let cap = page_end.saturating_sub(offset as usize).min(buf.len());
+            let max_sectors = cap / SECTOR_BYTES;
+            (max_sectors >= 2).then(|| {
+                let n = state.next_random_usize(seed, max_sectors - 1) + 1;
+                n * SECTOR_BYTES
+            })
+        } else {
+            None
+        };
 
         let actual_len = match torn_len {
             Some(n) => n,
-            None if buf.len() > 1
-                && state.should_fault(seed, fault.partial_write_probability) =>
-            {
+            None if buf.len() > 1 && state.should_fault(seed, fault.partial_write_probability) => {
                 let partial = state.next_random_usize(seed, buf.len());
                 partial.max(1)
             }
@@ -840,8 +836,7 @@ impl StorageIO for SimulatedIO {
         }
 
         let dir_path = path.to_path_buf();
-        let actually_persisted =
-            !state.should_fault(seed, fault.dir_sync_failure_probability);
+        let actually_persisted = !state.should_fault(seed, fault.dir_sync_failure_probability);
 
         if actually_persisted {
             state.dirs_durable.insert(dir_path.clone());

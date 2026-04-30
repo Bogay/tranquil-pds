@@ -717,11 +717,11 @@ fn sim_sync_reorder_loses_first_commit_durability() {
 
         {
             let s = Arc::clone(&sim);
-            let store = TranquilBlockStore::<Arc<SimulatedIO>>::open_with_io(
-                config.clone(),
-                move || Arc::clone(&s),
-            )
-            .unwrap();
+            let store =
+                TranquilBlockStore::<Arc<SimulatedIO>>::open_with_io(config.clone(), move || {
+                    Arc::clone(&s)
+                })
+                .unwrap();
             store
                 .put_blocks_blocking(vec![(cid, data.clone())])
                 .unwrap();
@@ -730,23 +730,16 @@ fn sim_sync_reorder_loses_first_commit_durability() {
         sim.crash();
 
         let s = Arc::clone(&sim);
-        let store = TranquilBlockStore::<Arc<SimulatedIO>>::open_with_io(config, move || {
-            Arc::clone(&s)
-        })
-        .unwrap();
+        let store =
+            TranquilBlockStore::<Arc<SimulatedIO>>::open_with_io(config, move || Arc::clone(&s))
+                .unwrap();
 
         match store.get_block_sync(&cid) {
-            Ok(Some(d)) => assert_eq!(
-                &d[..],
-                &data[..],
-                "block content mismatch after crash"
-            ),
+            Ok(Some(d)) => assert_eq!(&d[..], &data[..], "block content mismatch after crash"),
             Ok(None) => panic!(
                 "durability bug: put_blocks_blocking returned Ok but block missing after crash"
             ),
-            Err(e) => panic!(
-                "durability bug: block read failed after crash: {e}"
-            ),
+            Err(e) => panic!("durability bug: block read failed after crash: {e}"),
         }
     });
 }

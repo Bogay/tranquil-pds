@@ -806,10 +806,7 @@ mod tests {
     impl StorageIO for EioOnReadAtRange {
         fn open(&self, path: &Path, opts: OpenOptions) -> io::Result<FileId> {
             let fd = self.inner.open(path, opts)?;
-            self.fd_paths
-                .lock()
-                .unwrap()
-                .insert(fd, path.to_path_buf());
+            self.fd_paths.lock().unwrap().insert(fd, path.to_path_buf());
             Ok(fd)
         }
 
@@ -887,8 +884,7 @@ mod tests {
         let cid_a = [0xAAu8; CID_SIZE];
         let data_a = vec![1u8; 64];
         let block_a_offset = BlockOffset::new(BLOCK_HEADER_SIZE as u64);
-        let len_a =
-            encode_block_record(&setup, fd, block_a_offset, &cid_a, &data_a).unwrap();
+        let len_a = encode_block_record(&setup, fd, block_a_offset, &cid_a, &data_a).unwrap();
 
         let block_b_offset_raw = BLOCK_HEADER_SIZE as u64 + len_a;
         let block_b_offset = BlockOffset::new(block_b_offset_raw);
@@ -982,10 +978,11 @@ mod tests {
     #[test]
     fn retry_with_backoff_passes_attempt_index_to_op() {
         let observed = std::sync::Mutex::new(Vec::<u8>::new());
-        let _result: Result<(), RepoError> = retry_with_backoff(instant_policy(4), &mut |attempt| {
-            observed.lock().unwrap().push(attempt);
-            Err(RepoError::storage(io::Error::other("EIO")))
-        });
+        let _result: Result<(), RepoError> =
+            retry_with_backoff(instant_policy(4), &mut |attempt| {
+                observed.lock().unwrap().push(attempt);
+                Err(RepoError::storage(io::Error::other("EIO")))
+            });
         assert_eq!(*observed.lock().unwrap(), vec![0, 1, 2, 3]);
     }
 }

@@ -554,7 +554,7 @@ fn farm_run_many_timed_with_scratch_roots_honors_assignment() {
     std::fs::create_dir_all(&root_b).expect("mkdir b");
     let roots = vec![root_a.clone(), root_b.clone()];
     let reports = farm::run_many_timed_with_scratch_roots(
-        |seed| fast_sanity_config(seed),
+        fast_sanity_config,
         &roots,
         (0..2).map(Seed),
     );

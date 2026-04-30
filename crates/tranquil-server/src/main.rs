@@ -53,16 +53,12 @@ async fn main() -> ExitCode {
                         return ExitCode::FAILURE;
                     }
                 };
-                match config.validate(*ignore_secrets) {
-                    Ok(()) => {
-                        println!("Configuration is valid.");
-                        ExitCode::SUCCESS
-                    }
-                    Err(e) => {
-                        eprint!("{e}");
-                        ExitCode::FAILURE
-                    }
+                if let Err(e) = config.validate(*ignore_secrets) {
+                    eprint!("{e}");
+                    return ExitCode::FAILURE;
                 }
+                println!("Configuration is valid.");
+                ExitCode::SUCCESS
             }
         };
     }
@@ -141,11 +137,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let cfg = tranquil_config::get();
 
-    if let Some(email_sender) = EmailSender::from_config(cfg) {
-        info!("Email comms enabled");
-        comms_service = comms_service.register_sender(email_sender);
-    } else {
-        warn!("Email comms disabled (MAIL_FROM_ADDRESS not set)");
+    match EmailSender::from_config(cfg) {
+        Ok(Some(email_sender)) => {
+            info!("Email comms enabled");
+            comms_service = comms_service.register_sender(email_sender);
+        }
+        Ok(None) => {
+            warn!("Email comms disabled (MAIL_FROM_ADDRESS unset)");
+        }
+        Err(e) => {
+            error!(error = %e, "Email configuration invalid");
+            return Err(e.into());
+        }
     }
 
     if let Some(discord_sender) = DiscordSender::from_config(cfg) {

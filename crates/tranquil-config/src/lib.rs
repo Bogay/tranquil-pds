@@ -226,84 +226,9 @@ impl TranquilConfig {
             }
         }
 
-        // -- email smarthost --------------------------------------------------
-        match self.email.smarthost.tls.to_ascii_lowercase().as_str() {
-            "implicit" | "starttls" => {}
-            "none" => {
-                if self.email.smarthost.password.is_some() {
-                    errors.push(
-                        "email.smarthost.tls = \"none\" with email.smarthost.password set \
-                         would transmit credentials in plaintext; use \"starttls\" or \"implicit\""
-                            .to_string(),
-                    );
-                }
-            }
-            other => errors.push(format!(
-                "email.smarthost.tls must be \"implicit\", \"starttls\", or \"none\", got \"{other}\""
-            )),
-        }
-
-        let smarthost_host_set = self
-            .email
-            .smarthost
-            .host
-            .as_deref()
-            .is_some_and(|h| !h.is_empty());
-        let username_set = self.email.smarthost.username.is_some();
-        let password_set = self.email.smarthost.password.is_some();
-        if !smarthost_host_set && (username_set || password_set) {
-            errors.push(
-                "email.smarthost.username or email.smarthost.password is set but \
-                 email.smarthost.host is empty; credentials would be silently ignored"
-                    .to_string(),
-            );
-        }
-        if smarthost_host_set && username_set != password_set {
-            errors.push(
-                "email.smarthost.username and email.smarthost.password must both be set or \
-                 both unset; otherwise authentication would silently degrade to anonymous"
-                    .to_string(),
-            );
-        }
-
-        if self.email.smarthost.command_timeout_secs == 0 {
-            errors.push("email.smarthost.command_timeout_secs must be at least 1".to_string());
-        }
-        if self.email.smarthost.total_timeout_secs == 0 {
-            errors.push("email.smarthost.total_timeout_secs must be at least 1".to_string());
-        }
-        if self.email.smarthost.pool_size == 0 {
-            errors.push("email.smarthost.pool_size must be at least 1".to_string());
-        }
-
-        if self.email.direct_mx.max_concurrent_sends == 0 {
-            errors.push("email.direct_mx.max_concurrent_sends must be at least 1".to_string());
-        }
-        if self.email.direct_mx.command_timeout_secs == 0 {
-            errors.push("email.direct_mx.command_timeout_secs must be at least 1".to_string());
-        }
-        if self.email.direct_mx.total_timeout_secs == 0 {
-            errors.push("email.direct_mx.total_timeout_secs must be at least 1".to_string());
-        }
-
-        let dkim_set = self.email.dkim.selector.is_some()
-            || self.email.dkim.domain.is_some()
-            || self.email.dkim.private_key_path.is_some();
-        if dkim_set {
-            if self.email.dkim.selector.is_none() {
-                errors
-                    .push("email.dkim.selector is required when any DKIM field is set".to_string());
-            }
-            if self.email.dkim.domain.is_none() {
-                errors.push("email.dkim.domain is required when any DKIM field is set".to_string());
-            }
-            if self.email.dkim.private_key_path.is_none() {
-                errors.push(
-                    "email.dkim.private_key_path is required when any DKIM field is set"
-                        .to_string(),
-                );
-            }
-        }
+        // -- email -----------------------------------------------------------
+        self.email
+            .validate(self.server.hostname_without_port(), &mut errors);
 
         // -- telegram ---------------------------------------------------------
         if self.telegram.bot_token.is_some() && self.telegram.webhook_secret.is_none() {
@@ -862,6 +787,186 @@ pub struct EmailConfig {
 
     #[config(nested)]
     pub dkim: DkimConfig,
+}
+
+impl EmailConfig {
+    pub fn validate(&self, server_hostname: &str, errors: &mut Vec<String>) {
+        match self.smarthost.tls.to_ascii_lowercase().as_str() {
+            "implicit" | "starttls" => {}
+            "none" => {
+                if self.smarthost.password.is_some() {
+                    errors.push(
+                        "email.smarthost.tls = \"none\" with email.smarthost.password set \
+                         would transmit credentials in plaintext; use \"starttls\" or \"implicit\""
+                            .to_string(),
+                    );
+                }
+            }
+            other => errors.push(format!(
+                "email.smarthost.tls must be \"implicit\", \"starttls\", or \"none\", got \"{other}\""
+            )),
+        }
+
+        let smarthost_host_set = self
+            .smarthost
+            .host
+            .as_deref()
+            .is_some_and(|h| !h.is_empty());
+        let username_set = self.smarthost.username.is_some();
+        let password_set = self.smarthost.password.is_some();
+        if !smarthost_host_set && (username_set || password_set) {
+            errors.push(
+                "email.smarthost.username or email.smarthost.password is set but \
+                 email.smarthost.host is empty; credentials would be silently ignored"
+                    .to_string(),
+            );
+        }
+        if smarthost_host_set && username_set != password_set {
+            errors.push(
+                "email.smarthost.username and email.smarthost.password must both be set or \
+                 both unset; otherwise authentication would silently degrade to anonymous"
+                    .to_string(),
+            );
+        }
+
+        if self.smarthost.command_timeout_secs == 0 {
+            errors.push("email.smarthost.command_timeout_secs must be at least 1".to_string());
+        }
+        if self.smarthost.total_timeout_secs == 0 {
+            errors.push("email.smarthost.total_timeout_secs must be at least 1".to_string());
+        }
+        if self.smarthost.pool_size == 0 {
+            errors.push("email.smarthost.pool_size must be at least 1".to_string());
+        }
+
+        if self.direct_mx.max_concurrent_sends == 0 {
+            errors.push("email.direct_mx.max_concurrent_sends must be at least 1".to_string());
+        }
+        if self.direct_mx.command_timeout_secs == 0 {
+            errors.push("email.direct_mx.command_timeout_secs must be at least 1".to_string());
+        }
+        if self.direct_mx.total_timeout_secs == 0 {
+            errors.push("email.direct_mx.total_timeout_secs must be at least 1".to_string());
+        }
+
+        let dkim_set = self.dkim.selector.is_some()
+            || self.dkim.domain.is_some()
+            || self.dkim.private_key_path.is_some();
+        if dkim_set {
+            if self.dkim.selector.is_none() {
+                errors
+                    .push("email.dkim.selector is required when any DKIM field is set".to_string());
+            }
+            if self.dkim.domain.is_none() {
+                errors.push("email.dkim.domain is required when any DKIM field is set".to_string());
+            }
+            if self.dkim.private_key_path.is_none() {
+                errors.push(
+                    "email.dkim.private_key_path is required when any DKIM field is set"
+                        .to_string(),
+                );
+            }
+        }
+
+        let Some(from_address) = self.from_address.as_deref().filter(|s| !s.is_empty()) else {
+            return;
+        };
+
+        if !looks_like_email_address(from_address) {
+            errors.push(format!(
+                "email.from_address {from_address:?} is not a valid email address"
+            ));
+        }
+        if self.from_name.chars().any(|c| c.is_control()) {
+            errors.push("email.from_name must not contain control characters".to_string());
+        }
+
+        let helo_raw = self
+            .helo_name
+            .as_deref()
+            .map(str::to_string)
+            .unwrap_or_else(|| server_hostname.to_string());
+        if !is_non_whitespace_token(&helo_raw) {
+            errors.push(format!(
+                "email HELO name {helo_raw:?} must be non-empty and contain no whitespace"
+            ));
+        }
+
+        if smarthost_host_set {
+            let host = self.smarthost.host.as_deref().unwrap_or("");
+            if !is_non_whitespace_token(host) {
+                errors.push(format!(
+                    "email.smarthost.host {host:?} must contain no whitespace"
+                ));
+            }
+            if self.smarthost.port == 0 {
+                errors.push("email.smarthost.port must be non-zero".to_string());
+            }
+            if let Some(u) = self.smarthost.username.as_deref()
+                && u.is_empty()
+            {
+                errors.push("email.smarthost.username must be non-empty".to_string());
+            }
+            if let Some(p) = self.smarthost.password.as_deref()
+                && p.is_empty()
+            {
+                errors.push("email.smarthost.password must be non-empty".to_string());
+            }
+        }
+
+        if let Some(selector) = self.dkim.selector.as_deref()
+            && !is_valid_dkim_selector(selector)
+        {
+            errors.push(format!(
+                "email.dkim.selector {selector:?} must be valid subdomain syntax"
+            ));
+        }
+        if let Some(domain) = self.dkim.domain.as_deref()
+            && !is_non_whitespace_token(domain)
+        {
+            errors.push(format!(
+                "email.dkim.domain {domain:?} must be non-empty and contain no whitespace"
+            ));
+        }
+        if let Some(key_path) = self.dkim.private_key_path.as_deref()
+            && key_path.trim().is_empty()
+        {
+            errors.push("email.dkim.private_key_path must be non-empty".to_string());
+        }
+    }
+}
+
+fn looks_like_email_address(s: &str) -> bool {
+    let trimmed = s.trim();
+    if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let mut parts = trimmed.split('@');
+    let local = parts.next().unwrap_or("");
+    let domain = parts.next().unwrap_or("");
+    parts.next().is_none() && !local.is_empty() && !domain.is_empty() && domain.contains('.')
+}
+
+fn is_non_whitespace_token(s: &str) -> bool {
+    let trimmed = s.trim();
+    !trimmed.is_empty() && !trimmed.chars().any(char::is_whitespace)
+}
+
+fn is_valid_dkim_selector(s: &str) -> bool {
+    let trimmed = s.trim();
+    !trimmed.is_empty()
+        && trimmed.split('.').all(|seg| {
+            let starts_alnum = seg
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric());
+            let ends_alnum = seg
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_ascii_alphanumeric());
+            let body_ok = seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+            starts_alnum && ends_alnum && body_ok
+        })
 }
 
 #[derive(Debug, Config)]
@@ -1439,5 +1544,130 @@ mod tests {
             "validate spuriously flagged SENDMAIL_PATH when unset: {:?}",
             result
         );
+    }
+
+    #[test]
+    fn email_address_predicate_accepts_typical_addresses() {
+        assert!(looks_like_email_address("alice@nel.pet"));
+        assert!(looks_like_email_address("a.b+tag@example.co.uk"));
+    }
+
+    #[test]
+    fn email_address_predicate_rejects_malformed() {
+        assert!(!looks_like_email_address(""));
+        assert!(!looks_like_email_address("no-at-sign"));
+        assert!(!looks_like_email_address("@nel.pet"));
+        assert!(!looks_like_email_address("alice@"));
+        assert!(!looks_like_email_address("alice@nel"));
+        assert!(!looks_like_email_address("a@b@c.com"));
+        assert!(!looks_like_email_address("alice @nel.pet"));
+    }
+
+    #[test]
+    fn dkim_selector_predicate_matches_subdomain_syntax() {
+        assert!(is_valid_dkim_selector("default"));
+        assert!(is_valid_dkim_selector("s2024-q1"));
+        assert!(is_valid_dkim_selector("mailo-2024.nel.pet"));
+        assert!(!is_valid_dkim_selector(""));
+        assert!(!is_valid_dkim_selector("a..b"));
+        assert!(!is_valid_dkim_selector("-leading"));
+        assert!(!is_valid_dkim_selector("trailing-"));
+        assert!(!is_valid_dkim_selector("s_under"));
+    }
+
+    #[test]
+    fn email_validate_disabled_when_from_address_unset() {
+        let cfg = email_config_for_test(EmailOverrides::default());
+        let mut errors = Vec::new();
+        cfg.validate("test.local", &mut errors);
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+    }
+
+    #[test]
+    fn email_validate_rejects_bad_from_address() {
+        let cfg = email_config_for_test(EmailOverrides {
+            from_address: Some("not-an-email"),
+            ..Default::default()
+        });
+        let mut errors = Vec::new();
+        cfg.validate("test.local", &mut errors);
+        assert!(
+            errors.iter().any(|e| e.contains("from_address")),
+            "expected from_address error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn email_validate_rejects_smarthost_with_bad_credentials() {
+        let cfg = email_config_for_test(EmailOverrides {
+            from_address: Some("alice@nel.pet"),
+            smarthost_host: Some("smtp.nel.pet"),
+            smarthost_username: Some(""),
+            smarthost_password: Some("hunter2"),
+            ..Default::default()
+        });
+        let mut errors = Vec::new();
+        cfg.validate("test.local", &mut errors);
+        assert!(
+            errors.iter().any(|e| e.contains("smarthost.username")),
+            "expected smarthost.username error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn email_validate_rejects_bad_dkim_selector() {
+        let cfg = email_config_for_test(EmailOverrides {
+            from_address: Some("alice@nel.pet"),
+            dkim_selector: Some("-bad"),
+            dkim_domain: Some("nel.pet"),
+            dkim_key_path: Some("/etc/dkim.key"),
+            ..Default::default()
+        });
+        let mut errors = Vec::new();
+        cfg.validate("test.local", &mut errors);
+        assert!(
+            errors.iter().any(|e| e.contains("dkim.selector")),
+            "expected dkim.selector error, got {errors:?}"
+        );
+    }
+
+    #[derive(Default)]
+    struct EmailOverrides {
+        from_address: Option<&'static str>,
+        smarthost_host: Option<&'static str>,
+        smarthost_username: Option<&'static str>,
+        smarthost_password: Option<&'static str>,
+        dkim_selector: Option<&'static str>,
+        dkim_domain: Option<&'static str>,
+        dkim_key_path: Option<&'static str>,
+    }
+
+    fn email_config_for_test(o: EmailOverrides) -> EmailConfig {
+        EmailConfig {
+            from_address: o.from_address.map(str::to_string),
+            from_name: "Tranquil PDS".to_string(),
+            helo_name: None,
+            smarthost: SmarthostConfig {
+                host: o.smarthost_host.map(str::to_string),
+                port: 587,
+                username: o.smarthost_username.map(str::to_string),
+                password: o.smarthost_password.map(str::to_string),
+                tls: "starttls".to_string(),
+                pool_size: 4,
+                command_timeout_secs: 30,
+                total_timeout_secs: 60,
+            },
+            direct_mx: DirectMxConfig {
+                command_timeout_secs: 30,
+                total_timeout_secs: 60,
+                max_concurrent_sends: 8,
+                require_tls: false,
+            },
+            dkim: DkimConfig {
+                selector: o.dkim_selector.map(str::to_string),
+                domain: o.dkim_domain.map(str::to_string),
+                private_key_path: o.dkim_key_path.map(str::to_string),
+            },
+        }
     }
 }
