@@ -120,14 +120,6 @@ in
               description = "Directory for storing blobs";
             };
           };
-
-          email = {
-            sendmail_path = mkOption {
-              type = types.path;
-              default = lib.getExe pkgs.system-sendmail;
-              description = "Path to the sendmail executable to use for sending emails.";
-            };
-          };
         };
       };
 
