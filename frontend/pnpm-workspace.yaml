@@ -1,0 +1,4 @@
+confirmModulesPurge: false
+allowBuilds:
+  es5-ext: true
+  esbuild: true

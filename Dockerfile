@@ -1,7 +1,7 @@
 FROM node:24-alpine AS frontend
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build
@@ -46,8 +46,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp target/release/tranquil-server /tmp/tranquil-pds
 
 FROM alpine:3.23
-RUN apk add --no-cache msmtp ca-certificates \
-    && ln -sf /usr/bin/msmtp /usr/sbin/sendmail
+RUN apk add --no-cache ca-certificates
 COPY --from=builder /tmp/tranquil-pds /usr/local/bin/tranquil-pds
 COPY --from=frontend /app/dist /var/lib/tranquil-pds/frontend
 WORKDIR /app
