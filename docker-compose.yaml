@@ -38,6 +38,35 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
 
+  traefik:
+    profiles: [dev]
+    image: traefik:v3.4
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /certs/pds.test.pem ]; then
+          apk add --no-cache openssl
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+            -keyout /certs/pds.test-key.pem \
+            -out /certs/pds.test.pem \
+            -days 3650 -nodes \
+            -subj "/CN=pds.test" \
+            -addext "subjectAltName=DNS:pds.test,DNS:*.pds.test"
+          echo "Certs generated"
+        fi
+        exec traefik \
+          --providers.file.filename=/etc/traefik/dynamic.yaml \
+          --entrypoints.websecure.address=:443
+    ports:
+      - "443:443"
+    volumes:
+      - ./traefik.dev.yaml:/etc/traefik/dynamic.yaml:ro
+      - certs:/certs
+    networks:
+      default:
+        aliases:
+          - pds.test
+
   prometheus:
     profiles: [prod]
     image: prom/prometheus:v3.8.0
@@ -57,3 +86,4 @@ volumes:
   blob_data:
   store_data:
   prometheus_data:
+  certs:

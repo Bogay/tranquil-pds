@@ -1,0 +1,30 @@
+tls:
+  certificates:
+    - certFile: /certs/pds.test.pem
+      keyFile: /certs/pds.test-key.pem
+
+http:
+  routers:
+    backend:
+      rule: "Host(`pds.test`) && (PathPrefix(`/xrpc`) || PathPrefix(`/oauth`) || PathPrefix(`/.well-known`) || PathPrefix(`/u`) || Path(`/health`) || Path(`/`))"
+      entryPoints:
+        - websecure
+      service: backend
+      tls: {}
+    frontend:
+      rule: "Host(`pds.test`)"
+      entryPoints:
+        - websecure
+      service: frontend
+      priority: 1
+      tls: {}
+
+  services:
+    backend:
+      loadBalancer:
+        servers:
+          - url: "http://app-dev:3000"
+    frontend:
+      loadBalancer:
+        servers:
+          - url: "http://frontend-dev:5173"
