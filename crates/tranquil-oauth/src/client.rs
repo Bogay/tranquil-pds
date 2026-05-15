@@ -78,18 +78,21 @@ impl ClientMetadataCache {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             jwks_cache: Arc::new(RwLock::new(HashMap::new())),
-            http_client: Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .pool_max_idle_per_host(10)
-                .pool_idle_timeout(std::time::Duration::from_secs(90))
-                .user_agent(concat!(
-                    "Tranquil-PDS/",
-                    env!("CARGO_PKG_VERSION"),
-                    " (ATProto; +https://tangled.org/tranquil.farm/tranquil-pds)"
-                ))
-                .build()
-                .unwrap_or_else(|_| Client::new()),
+            http_client: {
+                let builder = Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .connect_timeout(std::time::Duration::from_secs(10))
+                    .pool_max_idle_per_host(10)
+                    .pool_idle_timeout(std::time::Duration::from_secs(90))
+                    .user_agent(concat!(
+                        "Tranquil-PDS/",
+                        env!("CARGO_PKG_VERSION"),
+                        " (ATProto; +https://tangled.org/tranquil.farm/tranquil-pds)"
+                    ));
+                #[cfg(feature = "native-tls-roots")]
+                let builder = builder.danger_accept_invalid_certs(true);
+                builder.build().unwrap_or_else(|_| Client::new())
+            },
             cache_ttl_secs,
         }
     }

@@ -23,3 +23,6 @@ sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+
+[features]
+native-tls-roots = []

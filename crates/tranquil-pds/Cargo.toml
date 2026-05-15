@@ -91,6 +91,7 @@ s3-storage = ["tranquil-storage/s3", "dep:aws-config", "dep:aws-sdk-s3"]
 s3 = ["s3-storage"]
 valkey = ["tranquil-cache/valkey", "dep:redis"]
 frontend = []
+native-tls-roots = ["tranquil-oauth/native-tls-roots"]
 
 [dev-dependencies]
 ciborium = { workspace = true }
