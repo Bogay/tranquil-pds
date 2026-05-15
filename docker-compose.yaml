@@ -37,6 +37,13 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+      - ./scripts/init-dev-dbs.sql:/docker-entrypoint-initdb.d/init-dev-dbs.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pds"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   traefik:
     profiles: [dev]
