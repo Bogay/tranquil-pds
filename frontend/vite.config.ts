@@ -20,6 +20,13 @@ export default defineConfig(({ mode }) => {
         "/health": target,
         "/u": target,
       },
+      hmr: env.VITE_HMR_HOST
+        ? {
+            protocol: env.VITE_HMR_PROTOCOL || "wss",
+            host: env.VITE_HMR_HOST,
+            clientPort: parseInt(env.VITE_HMR_PORT || "443"),
+          }
+        : undefined,
     },
   };
 });

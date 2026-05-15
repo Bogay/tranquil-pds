@@ -57,6 +57,25 @@ services:
     depends_on:
       - app
 
+  frontend-dev:
+    profiles: [dev]
+    image: node:24-alpine
+    working_dir: /app
+    command: sh -c "corepack enable && corepack prepare pnpm@latest --activate && pnpm install --ignore-scripts && pnpm dev --host 0.0.0.0"
+    environment:
+      CI: "true"
+      npm_config_store_dir: "/pnpm-store"
+      VITE_API_URL: "http://app-dev:3000"
+      VITE_HMR_PROTOCOL: "wss"
+      VITE_HMR_HOST: "pds.test"
+      VITE_HMR_PORT: "443"
+    volumes:
+      - ./frontend:/app
+      - node_modules:/app/node_modules
+      - pnpm_store:/pnpm-store
+    depends_on:
+      - app-dev
+
   db:
     image: postgres:18-alpine
     environment:
@@ -139,4 +158,6 @@ volumes:
   prometheus_data:
   cargo_target:
   cargo_registry:
+  node_modules:
+  pnpm_store:
   certs:
