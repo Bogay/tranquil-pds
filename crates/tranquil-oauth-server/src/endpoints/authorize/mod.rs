@@ -3,7 +3,7 @@ use axum::{
     extract::{Query, State},
     http::{
         HeaderMap, StatusCode,
-        header::{LOCATION, SET_COOKIE},
+        header::{CACHE_CONTROL, CONTENT_TYPE, LOCATION, SET_COOKIE},
     },
     response::{IntoResponse, Response},
 };
@@ -153,6 +153,123 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+const COOKIE_TEST_NAME: &str = "cookie-test";
+const COOKIE_TEST_PERSISTENCE_SECONDS: i64 = 31 * 24 * 60 * 60;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CookieTest {
+    Testing,
+    Succeeded,
+}
+
+impl CookieTest {
+    fn token(self) -> &'static str {
+        match self {
+            CookieTest::Testing => "testing",
+            CookieTest::Succeeded => "succeeded",
+        }
+    }
+}
+
+fn extract_cookie_test(headers: &HeaderMap) -> Option<CookieTest> {
+    let value = headers
+        .get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|cookie_str| {
+            cookie_str
+                .split(';')
+                .map(str::trim)
+                .find_map(|cookie| cookie.strip_prefix(&format!("{COOKIE_TEST_NAME}=")))
+        })?;
+    [CookieTest::Testing, CookieTest::Succeeded]
+        .into_iter()
+        .find(|test| test.token() == value)
+}
+
+fn make_cookie_test(test: CookieTest) -> String {
+    let base = format!(
+        "{}={}; Path=/oauth; HttpOnly; Secure; SameSite=Lax",
+        COOKIE_TEST_NAME,
+        test.token()
+    );
+    match test {
+        CookieTest::Testing => base,
+        CookieTest::Succeeded => format!("{base}; Max-Age={COOKIE_TEST_PERSISTENCE_SECONDS}"),
+    }
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn build_form_redirect_html(raw_query: Option<&str>, extra_params: &[(&str, &str)]) -> String {
+    let mut inputs = String::new();
+    if let Some(query_str) = raw_query {
+        for pair in query_str.split('&') {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next().unwrap_or("");
+            let value = parts.next().unwrap_or("");
+            if key.is_empty() {
+                continue;
+            }
+            if extra_params.iter().any(|(k, _)| *k == key) {
+                continue;
+            }
+            inputs.push_str(&format!(
+                "<input type=\"hidden\" name=\"{}\" value=\"{}\" />",
+                html_escape(key),
+                html_escape(&urlencoding::decode(value).unwrap_or_else(|_| value.into()))
+            ));
+        }
+    }
+    for (name, value) in extra_params {
+        inputs.push_str(&format!(
+            "<input type=\"hidden\" name=\"{}\" value=\"{}\" />",
+            html_escape(name),
+            html_escape(value)
+        ));
+    }
+    format!(
+        "<!DOCTYPE html>\
+<html lang=\"en\">\
+<head><meta charset=\"utf-8\"></head>\
+<body>\
+<form method=\"GET\" action=\"/oauth/authorize\">\
+{}\
+</form>\
+<script>document.forms[0].submit()</script>\
+</body>\
+</html>",
+        inputs
+    )
+}
+
+fn cookie_retry_html(continue_url: &str) -> String {
+    format!(
+        "<!DOCTYPE html>\
+<html lang=\"en\">\
+<head>\
+<meta charset=\"utf-8\">\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+<title>Cookies Required</title>\
+</head>\
+<body>\
+<h1>Cookies Required</h1>\
+<p>This browser may not support cookies needed for auth! Please enable cookies in your browser settings.</p>\
+<hr>\
+<br>\
+<p>Have a nice day or whateva</p>\
+<p><a href=\"{}\">Continue</a></p>\
+</body>\
+</html>",
+        html_escape(continue_url)
+    )
+}
+
 fn make_device_cookie(device_id: &tranquil_types::DeviceId) -> String {
     let signed_value = tranquil_pds::config::AuthConfig::get().sign_device_cookie(device_id);
     format!(
@@ -166,6 +283,8 @@ pub struct AuthorizeQuery {
     pub request_uri: Option<String>,
     pub client_id: Option<String>,
     pub new_account: Option<bool>,
+    #[serde(rename = "redirect-test")]
+    pub redirect_test: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -351,3 +470,81 @@ pub use login::*;
 pub use passkey::*;
 pub use registration::*;
 pub use two_factor::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    fn cookie_headers(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("cookie", HeaderValue::from_str(value).unwrap());
+        headers
+    }
+
+    #[test]
+    fn cookie_test_extracted_from_surrounding_cookies() {
+        let headers =
+            cookie_headers("oauth_device_id=nekomilker; cookie-test=testing; milk=strange");
+        assert_eq!(extract_cookie_test(&headers), Some(CookieTest::Testing));
+    }
+
+    #[test]
+    fn cookie_test_missing_leaves_none() {
+        let headers = cookie_headers("oauth_device_id=nekomilker");
+        assert_eq!(extract_cookie_test(&headers), None);
+    }
+
+    #[test]
+    fn cookie_test_name_is_not_a_prefix_match() {
+        let headers = cookie_headers("cookie-test-nekomilk=1");
+        assert_eq!(extract_cookie_test(&headers), None);
+    }
+
+    #[test]
+    fn unexpected_cookie_test_value_is_not_survival_evidence() {
+        let headers = cookie_headers("cookie-test=nekomilk");
+        assert_eq!(extract_cookie_test(&headers), None);
+    }
+
+    #[test]
+    fn testing_cookie_expires_and_success_cookie_persists() {
+        let testing = make_cookie_test(CookieTest::Testing);
+        assert!(testing.starts_with("cookie-test=testing"));
+        assert!(testing.contains("Path=/oauth"));
+        assert!(testing.contains("HttpOnly"));
+        assert!(!testing.contains("Max-Age"));
+        let succeeded = make_cookie_test(CookieTest::Succeeded);
+        assert!(succeeded.contains("Max-Age=2678400"));
+    }
+
+    #[test]
+    fn form_redirect_forwards_and_escapes_query_params() {
+        let html = build_form_redirect_html(
+            Some("request_uri=%22%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E&client_id=web"),
+            &[("redirect-test", "1")],
+        );
+        assert!(html.contains("name=\"request_uri\""));
+        assert!(html.contains("name=\"client_id\""));
+        assert!(html.contains("value=\"&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;\""));
+        assert!(html.contains("name=\"redirect-test\" value=\"1\""));
+    }
+
+    #[test]
+    fn form_redirect_extra_param_wins_over_query_duplicate() {
+        let html = build_form_redirect_html(
+            Some("redirect-test=9&request_uri=uri"),
+            &[("redirect-test", "1")],
+        );
+        assert_eq!(html.matches("name=\"redirect-test\"").count(), 1);
+        assert!(html.contains("value=\"1\""));
+    }
+
+    #[test]
+    fn retry_page_escapes_the_continue_url() {
+        let html = cookie_retry_html("\"><script>alert(1)</script>");
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("href=\"&quot;&gt;&lt;script&gt;"));
+        assert!(html.contains("Cookies Required"));
+    }
+}

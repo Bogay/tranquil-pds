@@ -4,23 +4,141 @@ pub async fn authorize_get(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<AuthorizeQuery>,
+    uri: axum::http::Uri,
 ) -> Response {
+    let user_agent = extract_user_agent(&headers);
+    let cookie_test = extract_cookie_test(&headers);
+    let has_passed_cookie_test = matches!(cookie_test, Some(CookieTest::Succeeded));
+    let has_existing_device_session = extract_device_cookie(&headers).is_some();
+    let mut success_cookie_val: Option<String> = None;
+
+    macro_rules! respond {
+        ($e:expr) => {{
+            let mut __resp: Response = ($e).into_response();
+            if let Some(ref cookie) = success_cookie_val {
+                if let Ok(val) = axum::http::HeaderValue::from_str(cookie) {
+                    __resp.headers_mut().append(SET_COOKIE, val);
+                }
+            }
+            __resp
+        }};
+    }
+
+    if user_agent
+        .as_ref()
+        .is_some_and(|ua| ua.contains("iPhone OS"))
+        && !has_passed_cookie_test
+        && !has_existing_device_session
+    {
+        let current = uri.to_string();
+        tracing::info!(
+            ua = ?user_agent,
+            has_passed_cookie_test,
+            has_existing_device_session,
+            redirect_test = ?query.redirect_test,
+            "entering iOS cookie-preservation test"
+        );
+
+        match query.redirect_test.as_deref() {
+            None => {
+                tracing::info!("iOS user-agent detected, beginning cookie-preservation test");
+                let cookie = make_cookie_test(CookieTest::Testing);
+                let html = build_form_redirect_html(uri.query(), &[("redirect-test", "1")]);
+                return (
+                    StatusCode::OK,
+                    [
+                        (SET_COOKIE, cookie),
+                        (CACHE_CONTROL, "no-store".to_string()),
+                        (CONTENT_TYPE, "text/html; charset=utf-8".to_string()),
+                    ],
+                    html,
+                )
+                    .into_response();
+            }
+            Some("1") => {
+                if cookie_test.is_some() {
+                    tracing::info!("cookie-test passed, browser preserves cookies on redirect");
+                    success_cookie_val = Some(make_cookie_test(CookieTest::Succeeded));
+                } else {
+                    tracing::info!("cookie-test failed on first attempt, showing retry");
+                    let cookie = make_cookie_test(CookieTest::Testing);
+                    let continue_url = current.replace("redirect-test=1", "redirect-test=2");
+                    let html = cookie_retry_html(&continue_url);
+                    return (
+                        StatusCode::OK,
+                        [
+                            (SET_COOKIE, cookie),
+                            (CACHE_CONTROL, "no-store".to_string()),
+                            (CONTENT_TYPE, "text/html; charset=utf-8".to_string()),
+                        ],
+                        html,
+                    )
+                        .into_response();
+                }
+            }
+            Some(_) => {
+                if cookie_test.is_some() {
+                    tracing::info!("cookie-test passed on retry");
+                    success_cookie_val = Some(make_cookie_test(CookieTest::Succeeded));
+                } else {
+                    tracing::info!("cookie-test failed after retry, redirecting with OAuth error");
+                    if let Some(ref request_uri) = query.request_uri {
+                        let err_request_id = RequestId::from(request_uri.clone());
+                        if let Ok(Some(data)) = state
+                            .repos
+                            .oauth
+                            .get_authorization_request(&err_request_id)
+                            .await
+                        {
+                            let _ = state
+                                .repos
+                                .oauth
+                                .delete_authorization_request(&err_request_id)
+                                .await;
+                            let sep = if data.parameters.redirect_uri.contains('?') {
+                                '&'
+                            } else {
+                                '?'
+                            };
+                            let mut redirect_url = format!(
+                                "{}error=ERR_COOKIES_UNSUPPORTED&error_description={}",
+                                data.parameters.redirect_uri,
+                                url_encode(
+                                    "Cookies are required for authorization. Please enable cookies in your browser settings and try again."
+                                )
+                            );
+                            redirect_url.insert(data.parameters.redirect_uri.len(), sep);
+                            if let Some(ref s) = data.parameters.state {
+                                redirect_url.push_str(&format!("&state={}", url_encode(s)));
+                            }
+                            return redirect_see_other(&redirect_url);
+                        }
+                    }
+                    return redirect_to_frontend_error(
+                        "ERR_COOKIES_UNSUPPORTED",
+                        "Cookies are required for authorization. Please enable cookies in your browser settings and try again.",
+                    );
+                }
+            }
+        }
+    }
+
     let request_uri = match query.request_uri {
         Some(uri) => uri,
         None => {
             if wants_json(&headers) {
-                return (
+                return respond!((
                     StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({
                         "error": "invalid_request",
                         "error_description": "Missing request_uri parameter. Use PAR to initiate authorization."
                     })),
-                ).into_response();
+                ));
             }
-            return redirect_to_frontend_error(
+            return respond!(redirect_to_frontend_error(
                 "invalid_request",
                 "Missing request_uri parameter. Use PAR to initiate authorization.",
-            );
+            ));
         }
     };
     let request_id = RequestId::from(request_uri.clone());
@@ -33,31 +151,33 @@ pub async fn authorize_get(
         Ok(Some(data)) => data,
         Ok(None) => {
             if wants_json(&headers) {
-                return (
+                return respond!((
                     StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({
                         "error": "invalid_request",
                         "error_description": "Invalid or expired request_uri. Please start a new authorization request."
                     })),
-                ).into_response();
+                ));
             }
-            return redirect_to_frontend_error(
+            return respond!(redirect_to_frontend_error(
                 "invalid_request",
                 "Invalid or expired request_uri. Please start a new authorization request.",
-            );
+            ));
         }
         Err(e) => {
             if wants_json(&headers) {
-                return (
+                return respond!((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({
                         "error": "server_error",
                         "error_description": format!("Database error: {:?}", e)
                     })),
-                )
-                    .into_response();
+                ));
             }
-            return redirect_to_frontend_error("server_error", "A database error occurred.");
+            return respond!(redirect_to_frontend_error(
+                "server_error",
+                "A database error occurred."
+            ));
         }
     };
     if request_data.expires_at < Utc::now() {
@@ -67,18 +187,18 @@ pub async fn authorize_get(
             .delete_authorization_request(&request_id)
             .await;
         if wants_json(&headers) {
-            return (
+            return respond!((
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
                     "error": "invalid_request",
                     "error_description": "Authorization request has expired. Please start a new request."
                 })),
-            ).into_response();
+            ));
         }
-        return redirect_to_frontend_error(
+        return respond!(redirect_to_frontend_error(
             "invalid_request",
             "Authorization request has expired. Please start a new request.",
-        );
+        ));
     }
     let client_cache = &state.client_metadata_cache;
     let client_name = client_cache
@@ -87,15 +207,14 @@ pub async fn authorize_get(
         .ok()
         .and_then(|m| m.client_name);
     if wants_json(&headers) {
-        return Json(AuthorizeResponse {
+        return respond!(Json(AuthorizeResponse {
             client_id: request_data.parameters.client_id.clone(),
             client_name: client_name.clone(),
             scope: request_data.parameters.scope.clone(),
             redirect_uri: request_data.parameters.redirect_uri.clone(),
             state: request_data.parameters.state.clone(),
             login_hint: request_data.parameters.login_hint.clone(),
-        })
-        .into_response();
+        }));
     }
     let force_new_account = query.new_account.unwrap_or(false);
 
@@ -131,16 +250,16 @@ pub async fn authorize_get(
                         .await
                     {
                         tracing::error!(error = %e, "Failed to set delegated DID on authorization request");
-                        return redirect_to_frontend_error(
+                        return respond!(redirect_to_frontend_error(
                             "server_error",
                             "Failed to initialize delegation flow",
-                        );
+                        ));
                     }
-                    return redirect_see_other(&format!(
+                    return respond!(redirect_see_other(&format!(
                         "/app/oauth/delegation?request_uri={}&delegated_did={}",
                         url_encode(&request_uri),
                         url_encode(&user.did)
-                    ));
+                    )));
                 }
             }
             Ok(None) => {
@@ -155,10 +274,10 @@ pub async fn authorize_get(
     }
 
     if request_data.parameters.prompt == Some(Prompt::Create) {
-        return redirect_see_other(&format!(
+        return respond!(redirect_see_other(&format!(
             "/app/oauth/register?request_uri={}",
             url_encode(&request_uri)
-        ));
+        )));
     }
 
     if !force_new_account
@@ -176,16 +295,16 @@ pub async fn authorize_get(
             .as_ref()
             .map(|h| format!("&login_hint={}", url_encode(h)))
             .unwrap_or_default();
-        return redirect_see_other(&format!(
+        return respond!(redirect_see_other(&format!(
             "/app/oauth/accounts?request_uri={}{}",
             url_encode(&request_uri),
             login_hint_param
-        ));
+        )));
     }
-    redirect_see_other(&format!(
+    respond!(redirect_see_other(&format!(
         "/app/oauth/login?request_uri={}",
         url_encode(&request_uri)
-    ))
+    )))
 }
 
 pub async fn authorize_get_json(
