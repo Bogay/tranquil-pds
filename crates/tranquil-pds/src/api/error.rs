@@ -666,9 +666,7 @@ impl From<crate::auth::extractor::AuthError> for ApiError {
                 Self::OAuthExpiredToken(Some(msg))
             }
             crate::auth::extractor::AuthError::UseDpopNonce(nonce) => Self::UseDpopNonce(nonce),
-            crate::auth::extractor::AuthError::InvalidDpopProof(msg) => {
-                Self::InvalidDpopProof(msg)
-            }
+            crate::auth::extractor::AuthError::InvalidDpopProof(msg) => Self::InvalidDpopProof(msg),
         }
     }
 }

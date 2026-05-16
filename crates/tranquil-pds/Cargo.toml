@@ -55,6 +55,7 @@ metrics-exporter-prometheus = { workspace = true }
 multibase = { workspace = true }
 multihash = { workspace = true }
 p256 = { workspace = true }
+parking_lot = { workspace = true }
 rand = { workspace = true }
 redis = { workspace = true, optional = true }
 regex = { workspace = true }

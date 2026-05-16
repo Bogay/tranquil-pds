@@ -25,7 +25,10 @@ async fn create_account_and_get_did(handle: &str, email: &str, password: &str) -
         .expect("createAccount request failed");
     assert_eq!(res.status(), StatusCode::OK, "createAccount failed");
     let body: Value = res.json().await.expect("invalid createAccount JSON");
-    let did_str = body["did"].as_str().expect("no did in response").to_string();
+    let did_str = body["did"]
+        .as_str()
+        .expect("no did in response")
+        .to_string();
     let _ = verify_new_account(&client, &did_str).await;
     Did::new(did_str).expect("invalid DID format")
 }
@@ -69,9 +72,7 @@ async fn delete_oldest_tokens_evicts_lowest_created_at() {
     let repos = get_test_repos().await;
 
     let base = Utc::now();
-    let token_ids: Vec<String> = (0..5)
-        .map(|i| format!("tok-{}-{}", ts, i))
-        .collect();
+    let token_ids: Vec<String> = (0..5).map(|i| format!("tok-{}-{}", ts, i)).collect();
 
     for (i, tid) in token_ids.iter().enumerate() {
         let created = base + Duration::seconds(i as i64);
@@ -101,8 +102,7 @@ async fn delete_oldest_tokens_evicts_lowest_created_at() {
 
     let remaining_ids: std::collections::HashSet<String> =
         remaining.iter().map(|t| t.token_id.0.clone()).collect();
-    let expected_ids: std::collections::HashSet<String> =
-        token_ids[2..].iter().cloned().collect();
+    let expected_ids: std::collections::HashSet<String> = token_ids[2..].iter().cloned().collect();
     assert_eq!(
         remaining_ids, expected_ids,
         "surviving tokens must be the three newest by created_at"
