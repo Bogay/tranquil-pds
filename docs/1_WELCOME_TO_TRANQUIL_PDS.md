@@ -30,6 +30,7 @@ Why do we disallow mixing them? Because it defeats the purpose of the OAuth scop
 > - Be right
 > - Be good
 > - Be fun
+>
 > "Be right" as in follow spec. The reference implementation has several instances of non-spec behaviour. Our aim is for Tranquil to have as little as possible of that. Every so often we are forced to do that to have any chance at Bluesky working but when there is a spec way to accomplished something that's the method Tranquil supports. This does cause issues like mentioned above but we feel it is worth it to set a community precedent that spec matters. Open protocols live and die by spec and whether or not it's followed.
 > "Be good" as in be a good, useful, featureful, fast implementation. Tranquil is full of features that we felt have been missing from the PDSs scene. Things like passkeys, totp 2fa, more comms methods than email, SSO sign up and sign on but also more unique features like delegated accounts. We want to be something maximally useful to us and to you!
 > "Be fun" as in be fun to make and use! This is a hobby project for both of us and we don't have plans for it to ever be more than that. Tranquil isn't a cooporate product, it's a community and personal project born out of a wish for something better. We're going to have fun with it, we hope you do too!
