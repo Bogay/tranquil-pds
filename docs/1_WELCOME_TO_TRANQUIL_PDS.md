@@ -24,6 +24,18 @@ Therefore that's a caveat to Tranquil, **you accidentally or purposefully help t
 There's one aspect of Tranquil that doesn't work with regular apps which isn't necessarily a spec violation but our taste (we try to keep matters of taste to a minimum, and we're debating having this one configurable): mixing [transitional OAuth](https://atproto.com/specs/oauth#transitional-scopes) with properly scoped OAuth.
 Why do we disallow mixing them? Because it defeats the purpose of the OAuth scopes if you tack on a "and everything else" scope at the end. We think apps should do better and just correctly choose the right scopes to their own apps.
 
+> 🌺 Nel
+>
+> One way I've taken to quickly summerising the goal of Tranquil is:
+> - Be right
+> - Be good
+> - Be fun
+> "Be right" as in follow spec. The reference implementation has several instances of non-spec behaviour. Our aim is for Tranquil to have as little as possible of that. Every so often we are forced to do that to have any chance at Bluesky working but when there is a spec way to accomplished something that's the method Tranquil supports. This does cause issues like mentioned above but we feel it is worth it to set a community precedent that spec matters. Open protocols live and die by spec and whether or not it's followed.
+> "Be good" as in be a good, useful, featureful, fast implementation. Tranquil is full of features that we felt have been missing from the PDSs scene. Things like passkeys, totp 2fa, more comms methods than email, SSO sign up and sign on but also more unique features like delegated accounts. We want to be something maximally useful to us and to you!
+> "Be fun" as in be fun to make and use! This is a hobby project for both of us and we don't have plans for it to ever be more than that. Tranquil isn't a cooporate product, it's a community and personal project born out of a wish for something better. We're going to have fun with it, we hope you do too!
+>
+> All these three are also acompanied by a general "by the community, for the community" approach. We'd love to hear your ideas, wants and needs and get your contributions. Tranquil is for you just as much as it is for us! Anyways back to Lewis he's a clever guy.
+
 Hopefully this has given you some insight into what drives us and what guides our hands when writing Tranquil. If we've stimulated your imagination on what a PDS could do better for you, for us, then please get involved! We need more hands and more voices.
 
 # Deployment
