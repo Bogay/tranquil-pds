@@ -189,9 +189,15 @@ export interface ServerLinks {
   termsOfService?: string;
 }
 
+export interface ServerContact {
+  email?: string;
+}
+
 export interface ServerDescription {
   availableUserDomains: string[];
   inviteCodeRequired: boolean;
+  did: string;
+  contact?: ServerContact;
   links?: ServerLinks;
   version?: string;
   availableCommsChannels?: VerificationChannel[];

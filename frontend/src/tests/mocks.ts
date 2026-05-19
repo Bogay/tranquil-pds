@@ -265,13 +265,26 @@ export const mockData = {
   describeServer: (overrides?: Record<string, unknown>) => ({
     availableUserDomains: ["test.tranquil.dev"],
     inviteCodeRequired: false,
+    did: "did:web:test.tranquil.dev",
+    contact: {
+      email: "admin@test.tranquil.dev",
+    },
     links: {
       privacyPolicy: "https://example.com/privacy",
       termsOfService: "https://example.com/tos",
     },
     selfHostedDidWebEnabled: true,
     availableCommsChannels: ["email", "discord", "telegram", "signal"],
+    discordBotUsername: "test-bot",
+    discordAppId: "123456789",
+    telegramBotUsername: "test_tg_bot",
     ...overrides,
+  }),
+  serverStats: () => ({
+    userCount: 42,
+    repoCount: 42,
+    recordCount: 1234,
+    blobStorageBytes: 5678,
   }),
   describeRepo: (did: string) => ({
     handle: "testuser.test.tranquil.dev",

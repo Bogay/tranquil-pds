@@ -24,8 +24,9 @@
   import InviteCodesContent from '../components/dashboard/InviteCodesContent.svelte'
   import DidDocumentContent from '../components/dashboard/DidDocumentContent.svelte'
   import AdminContent from '../components/dashboard/AdminContent.svelte'
+  import AboutContent from '../components/dashboard/AboutContent.svelte'
 
-  type Section = 'settings' | 'security' | 'sessions' | 'app-passwords' | 'comms' | 'repo' | 'controllers' | 'invite-codes' | 'did-document' | 'admin'
+  type Section = 'settings' | 'security' | 'sessions' | 'app-passwords' | 'comms' | 'repo' | 'controllers' | 'invite-codes' | 'did-document' | 'admin' | 'about'
 
   const auth = $derived(getAuthState())
   let dropdownOpen = $state(false)
@@ -75,6 +76,7 @@
       '/invite-codes': 'invite-codes',
       '/did-document': 'did-document',
       '/admin': 'admin',
+      '/about': 'about',
     }
     return sectionMap[path] ?? null
   })
@@ -150,6 +152,7 @@
     'invite-codes': '/invite-codes',
     'did-document': '/did-document',
     'admin': '/admin',
+    'about': '/about',
   }
 
   function selectSection(section: Section) {
@@ -181,9 +184,11 @@
     { id: 'admin', label: $_('dashboard.navAdmin'), show: session?.isAdmin ?? false, highlight: 'admin' },
   ])
 
+  const aboutItem = { id: 'about' as Section, label: $_('dashboard.navAbout') }
   const visibleNavItems = $derived(navItems.filter(item => item.show))
 
   function getSectionTitle(section: Section): string {
+    if (section === 'about') return aboutItem.label
     const item = navItems.find(i => i.id === section)
     return item?.label ?? ''
   }
@@ -276,6 +281,18 @@
           </button>
         {/each}
       </nav>
+
+      <div class="nav-footer">
+        <button
+          type="button"
+          class="nav-item"
+          class:active={currentSection === aboutItem.id}
+          onclick={() => selectSection(aboutItem.id)}
+        >
+          <span class="nav-label">{aboutItem.label}</span>
+          <span class="nav-chevron">›</span>
+        </button>
+      </div>
     </aside>
 
     <main class="content" class:hidden-mobile={currentSection === null}>
@@ -309,6 +326,8 @@
           <DidDocumentContent {session} />
         {:else if currentSection === 'admin'}
           <AdminContent {session} />
+        {:else if currentSection === 'about'}
+          <AboutContent {session} />
         {/if}
       </div>
     </main>

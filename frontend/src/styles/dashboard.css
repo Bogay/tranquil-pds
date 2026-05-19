@@ -191,6 +191,11 @@ button.dropdown-item.logout-item {
   overflow-y: auto;
 }
 
+.nav-footer {
+  padding: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
 .nav-item {
   display: flex;
   align-items: center;

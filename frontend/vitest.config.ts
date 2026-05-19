@@ -6,6 +6,11 @@ export default defineConfig({
       hot: false,
     }),
   ],
+  define: {
+    __SVELTE_VERSION__: JSON.stringify("0.0.0-test"),
+    __SVELTE_I18N_VERSION__: JSON.stringify("0.0.0-test"),
+    __VITE_VERSION__: JSON.stringify("0.0.0-test"),
+  },
   resolve: {
     conditions: ["browser", "development"],
   },

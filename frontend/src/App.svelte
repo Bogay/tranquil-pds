@@ -78,6 +78,7 @@
     '/invite-codes',
     '/did-document',
     '/admin',
+    '/about',
   ])
 
   function getComponent(path: string) {

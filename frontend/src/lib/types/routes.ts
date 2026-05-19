@@ -14,6 +14,7 @@ export const routes = {
   didDocument: "/did-document",
   migrate: "/migrate",
   admin: "/admin",
+  about: "/about",
   verify: "/verify",
   resetPassword: "/reset-password",
   recoverPasskey: "/recover-passkey",

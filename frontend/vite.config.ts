@@ -1,6 +1,11 @@
 import process from "node:process";
+import { readFileSync } from "node:fs";
 import { defineConfig, loadEnv } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+
+const sveltePkg = JSON.parse(readFileSync("./node_modules/svelte/package.json", "utf-8"));
+const svelteI18nPkg = JSON.parse(readFileSync("./node_modules/svelte-i18n/package.json", "utf-8"));
+const vitePkg = JSON.parse(readFileSync("./node_modules/vite/package.json", "utf-8"));
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
@@ -8,6 +13,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [svelte()],
+    define: {
+      __SVELTE_VERSION__: JSON.stringify(sveltePkg.version),
+      __SVELTE_I18N_VERSION__: JSON.stringify(svelteI18nPkg.version),
+      __VITE_VERSION__: JSON.stringify(vitePkg.version),
+    },
     build: {
       outDir: "dist",
     },
