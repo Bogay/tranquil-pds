@@ -352,7 +352,7 @@ impl SignalClient {
         let manager = init_rx
             .await
             .ok()?
-            .map_err(|e| tracing::error!(error = %e, "failed to load registered signal manager"))
+            .map_err(|e| tracing::debug!(error = %e, "no linked signal device"))
             .ok()?;
 
         Self::from_manager(manager, shutdown)

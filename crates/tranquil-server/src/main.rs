@@ -106,19 +106,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut state = AppState::new(shutdown.clone()).await?;
 
-    let signal_sender = if tranquil_config::get().signal.enabled {
-        let slot = Arc::new(tranquil_signal::SignalSlot::default());
-        state = state.with_signal_sender(slot.clone());
-        if let Some(provider) = &state.signal_store_provider
-            && let Some(client) = provider.load_signal_client(shutdown.clone()).await
-        {
-            slot.set_client(client).await;
-            info!("Signal device already linked");
-        }
-        Some(SignalSender::new(slot))
-    } else {
-        None
-    };
+    let signal_slot = Arc::new(tranquil_signal::SignalSlot::default());
+    state = state.with_signal_sender(signal_slot.clone());
+    if let Some(provider) = &state.signal_store_provider
+        && let Some(client) = provider.load_signal_client(shutdown.clone()).await
+    {
+        signal_slot.set_client(client).await;
+        info!("Signal device linked");
+    }
+    let signal_sender = SignalSender::new(signal_slot);
 
     tranquil_sync::listener::start_sequencer_listener(state.clone()).await;
 
@@ -223,10 +219,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         comms_service = comms_service.register_sender(telegram_sender);
     }
 
-    if let Some(sender) = signal_sender {
-        info!("Signal comms enabled");
-        comms_service = comms_service.register_sender(sender);
-    }
+    comms_service = comms_service.register_sender(signal_sender);
 
     let comms_handle = tokio::spawn(comms_service.run(shutdown.clone()));
 

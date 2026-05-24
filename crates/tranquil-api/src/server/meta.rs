@@ -5,7 +5,7 @@ use tranquil_pds::BUILD_VERSION;
 use tranquil_pds::state::AppState;
 use tranquil_pds::util::{discord_app_id, discord_bot_username, telegram_bot_username};
 
-fn get_available_comms_channels() -> Vec<CommsChannel> {
+async fn get_available_comms_channels(state: &AppState) -> Vec<CommsChannel> {
     let cfg = tranquil_config::get();
     let mut channels = vec![CommsChannel::Email];
     if cfg.discord.bot_token.is_some() {
@@ -14,7 +14,9 @@ fn get_available_comms_channels() -> Vec<CommsChannel> {
     if cfg.telegram.bot_token.is_some() {
         channels.push(CommsChannel::Telegram);
     }
-    if cfg.signal.enabled {
+    if let Some(slot) = &state.signal_sender
+        && slot.is_linked().await
+    {
         channels.push(CommsChannel::Signal);
     }
     channels
@@ -66,7 +68,7 @@ pub struct DescribeServerOutput {
     pub telegram_bot_username: Option<String>,
 }
 
-pub async fn describe_server() -> Json<DescribeServerOutput> {
+pub async fn describe_server(State(state): State<AppState>) -> Json<DescribeServerOutput> {
     let cfg = tranquil_config::get();
     let pds_hostname = &cfg.server.hostname;
 
@@ -82,7 +84,7 @@ pub async fn describe_server() -> Json<DescribeServerOutput> {
             email: cfg.server.contact_email.clone(),
         },
         version: BUILD_VERSION,
-        available_comms_channels: get_available_comms_channels(),
+        available_comms_channels: get_available_comms_channels(&state).await,
         self_hosted_did_web_enabled: is_self_hosted_did_web_enabled(),
         discord_bot_username: discord_bot_username().map(String::from),
         discord_app_id: discord_app_id().map(String::from),

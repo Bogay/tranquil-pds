@@ -9,7 +9,6 @@ use tranquil_pds::state::AppState;
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalStatusOutput {
-    pub enabled: bool,
     pub linked: bool,
 }
 
@@ -23,13 +22,12 @@ pub async fn get_signal_status(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
 ) -> Result<Json<SignalStatusOutput>, ApiError> {
-    let enabled = tranquil_config::get().signal.enabled;
     let linked = match &state.signal_sender {
         Some(slot) => slot.is_linked().await,
         None => false,
     };
 
-    Ok(Json(SignalStatusOutput { enabled, linked }))
+    Ok(Json(SignalStatusOutput { linked }))
 }
 
 pub async fn link_signal_device(

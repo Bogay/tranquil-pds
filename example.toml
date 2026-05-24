@@ -510,15 +510,6 @@
 # Can also be specified via environment variable `TELEGRAM_WEBHOOK_SECRET`.
 #webhook_secret =
 
-[signal]
-# Protocol state is stored in postgres' signal_* tables.
-# Link a device via the admin API before enabling.
-#
-# Can also be specified via environment variable `SIGNAL_ENABLED`.
-#
-# Default value: false
-#enabled = false
-
 [notifications]
 # Polling interval in milliseconds for the comms queue.
 #

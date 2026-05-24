@@ -65,7 +65,6 @@
   let logoPreview = $state<string | null>(null)
   let serverConfigLoading = $state(false)
 
-  let signalEnabled = $state(false)
   let signalLinked = $state(false)
   let signalQr = $state<string | null>(null)
   let signalLoading = $state(false)
@@ -236,7 +235,6 @@
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
     try {
       const status = await api.getSignalStatus(session.accessJwt)
-      signalEnabled = status.enabled
       signalLinked = status.linked
       signalPollErrors = 0
       if (signalLinked && signalQr) {
@@ -401,33 +399,31 @@
     </form>
   </section>
 
-  {#if signalEnabled}
-    <section class="config-section">
-      <div class="section-header-row">
-        <h3>{$_('admin.signalIntegration')}</h3>
-        {#if signalLinked}
-          <span class="badge verified">{$_('admin.signalLinked')}</span>
-        {:else if !signalQr}
-          <span class="badge unverified">{$_('admin.signalNotLinked')}</span>
-        {/if}
-      </div>
-
-      {#if signalQr}
-        <div class="qr-container">
-          <p>{$_('admin.signalLinking')}</p>
-          <img src="data:image/png;base64,{signalQr}" alt="Signal QR" class="qr-code" />
-        </div>
-      {:else if signalLinked}
-        <button type="button" class="danger sm" onclick={unlinkSignal} disabled={signalLoading}>
-          {$_('admin.signalUnlinkDevice')}
-        </button>
-      {:else}
-        <button type="button" onclick={linkSignal} disabled={signalLoading}>
-          {signalLoading ? $_('common.loading') : $_('admin.signalLinkDevice')}
-        </button>
+  <section class="config-section">
+    <div class="section-header-row">
+      <h3>{$_('admin.signalIntegration')}</h3>
+      {#if signalLinked}
+        <span class="badge verified">{$_('admin.signalLinked')}</span>
+      {:else if !signalQr}
+        <span class="badge unverified">{$_('admin.signalNotLinked')}</span>
       {/if}
-    </section>
-  {/if}
+    </div>
+
+    {#if signalQr}
+      <div class="qr-container">
+        <p>{$_('admin.signalLinking')}</p>
+        <img src="data:image/png;base64,{signalQr}" alt="Signal QR" class="qr-code" />
+      </div>
+    {:else if signalLinked}
+      <button type="button" class="danger sm" onclick={unlinkSignal} disabled={signalLoading}>
+        {$_('admin.signalUnlinkDevice')}
+      </button>
+    {:else}
+      <button type="button" onclick={linkSignal} disabled={signalLoading}>
+        {signalLoading ? $_('common.loading') : $_('admin.signalLinkDevice')}
+      </button>
+    {/if}
+  </section>
 
   <section class="stats-section">
     <div class="section-header-row">

@@ -142,9 +142,6 @@ pub struct TranquilConfig {
     pub telegram: TelegramConfig,
 
     #[config(nested)]
-    pub signal: SignalConfig,
-
-    #[config(nested)]
     pub notifications: NotificationConfig,
 
     #[config(nested)]
@@ -1069,14 +1066,6 @@ pub struct TelegramConfig {
     /// Secret token for incoming webhook verification.
     #[config(env = "TELEGRAM_WEBHOOK_SECRET")]
     pub webhook_secret: Option<String>,
-}
-
-#[derive(Debug, Config)]
-pub struct SignalConfig {
-    /// Protocol state is stored in postgres' signal_* tables.
-    /// Link a device via the admin API before enabling.
-    #[config(env = "SIGNAL_ENABLED", default = false)]
-    pub enabled: bool,
 }
 
 #[derive(Debug, Config)]

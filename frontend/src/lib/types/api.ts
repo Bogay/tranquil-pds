@@ -255,7 +255,6 @@ export interface ServerStats {
 }
 
 export interface SignalStatus {
-  enabled: boolean;
   linked: boolean;
 }
 
