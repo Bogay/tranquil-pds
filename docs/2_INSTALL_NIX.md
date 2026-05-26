@@ -217,7 +217,7 @@ The log entry shold look something like this:
 
 ## Binary cache
 
-The flake publishes its package, frontend, and devshell to [tranquil.cachix.org](https://tranquil.cachix.org). To pull from it instead of building locally, add to your NixOS config:
+Flake artifacts, package, frontend, and devshell, are built in CI and pushed to [tranquil.cachix.org](https://tranquil.cachix.org). To pull from it instead of building locally, add to your NixOS config:
 
 ```nix
 nix.settings = {

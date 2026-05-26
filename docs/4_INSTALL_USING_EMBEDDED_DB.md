@@ -48,9 +48,8 @@ Shared, regardless of init system:
 
 ### Nix
 
-1. Set `services.tranquil-pds.database.createLocally = false`. This removes the local postgres service and the automatic `database.url`.
-2. Set `services.tranquil-pds.settings.storage.repo_backend = "tranquil-store";`.
-3. Leave `data_dir` at its default. It sits under the service state directory and needs no extra work. If you relocate it, ensure the service user can write there.
+1. Set `services.tranquil-pds.settings.storage.repo_backend = "tranquil-store";`.
+2. Make sure all the postgres related options are left as their default. Otherwise you might end up with a useless running instance of postgres.
 
 That's it!!
 
