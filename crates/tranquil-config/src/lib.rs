@@ -104,6 +104,7 @@ pub fn load(config_path: Option<&PathBuf>) -> Result<TranquilConfig, confique::E
 
 // Root configuration
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct TranquilConfig {
     #[config(nested)]
     pub server: ServerConfig,
@@ -417,6 +418,7 @@ impl TranquilConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct ServerConfig {
     /// Public hostname of the PDS, such as `pds.example.com`.
     #[config(env = "PDS_HOSTNAME")]
@@ -564,6 +566,7 @@ impl ServerConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct FrontendConfig {
     /// Whether to enable the built in serving of the frontend.
     #[config(env = "FRONTEND_ENABLED", default = true)]
@@ -576,6 +579,7 @@ pub struct FrontendConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct DatabaseConfig {
     /// PostgreSQL connection URL.
     #[config(env = "DATABASE_URL")]
@@ -595,6 +599,7 @@ pub struct DatabaseConfig {
 }
 
 #[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct SecretsConfig {
     /// Secret used for signing JWTs. Must be at least 32 characters in
     /// production.
@@ -721,6 +726,7 @@ impl fmt::Display for RepoBackend {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct StorageConfig {
     /// Storage backend: `filesystem` or `s3`.
     #[config(env = "BLOB_STORAGE_BACKEND", default = "filesystem")]
@@ -753,6 +759,7 @@ impl StorageConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct CacheConfig {
     /// Cache backend: `ripple` by default, or `valkey`.
     #[config(env = "CACHE_BACKEND", default = "ripple")]
@@ -767,6 +774,7 @@ pub struct CacheConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct PlcConfig {
     /// Base URL of the PLC directory.
     #[config(env = "PLC_DIRECTORY_URL", default = "https://plc.directory")]
@@ -786,6 +794,7 @@ pub struct PlcConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct FirehoseConfig {
     /// Size of the in-memory broadcast buffer for firehose events.
     #[config(env = "FIREHOSE_BUFFER_SIZE", default = 10000)]
@@ -816,6 +825,7 @@ impl FirehoseConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct EmailConfig {
     /// Sender email address. When unset, email sending is disabled.
     #[config(env = "MAIL_FROM_ADDRESS")]
@@ -1021,6 +1031,7 @@ fn is_valid_dkim_selector(s: &str) -> bool {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct SmarthostConfig {
     /// SMTP relay host. When set, mail is delivered through this host
     /// instead of resolving recipient MX records directly.
@@ -1060,6 +1071,7 @@ pub struct SmarthostConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct DirectMxConfig {
     /// Per-command SMTP timeout in seconds.
     #[config(env = "MAIL_COMMAND_TIMEOUT_SECS", default = 30)]
@@ -1084,6 +1096,7 @@ pub struct DirectMxConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct DkimConfig {
     /// DKIM selector. When unset, outgoing mail is not signed.
     #[config(env = "MAIL_DKIM_SELECTOR")]
@@ -1100,6 +1113,7 @@ pub struct DkimConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct DiscordConfig {
     /// Discord bot token. When unset, Discord integration is disabled.
     #[config(env = "DISCORD_BOT_TOKEN")]
@@ -1107,6 +1121,7 @@ pub struct DiscordConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct TelegramConfig {
     /// Telegram bot token. When unset, Telegram integration is disabled.
     #[config(env = "TELEGRAM_BOT_TOKEN")]
@@ -1118,6 +1133,7 @@ pub struct TelegramConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct NotificationConfig {
     /// Polling interval in milliseconds for the comms queue.
     #[config(env = "NOTIFICATION_POLL_INTERVAL_MS", default = 1000)]
@@ -1140,6 +1156,7 @@ pub trait SsoProviderIssuerConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct SsoConfig {
     #[config(nested)]
     pub github: SsoGitHubConfig,
@@ -1161,6 +1178,7 @@ pub struct SsoConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct SsoGitHubConfig {
     #[config(env = "SSO_GITHUB_ENABLED", default = false)]
     pub enabled: bool,
@@ -1194,6 +1212,7 @@ impl SsoProviderConfig for SsoGitHubConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct SsoDiscordConfig {
     #[config(env = "SSO_DISCORD_ENABLED", default = false)]
     pub enabled: bool,
@@ -1227,6 +1246,7 @@ impl SsoProviderConfig for SsoDiscordConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct SsoGoogleConfig {
     #[config(env = "SSO_GOOGLE_ENABLED", default = false)]
     pub enabled: bool,
@@ -1260,6 +1280,7 @@ impl SsoProviderConfig for SsoGoogleConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct SsoGitLabConfig {
     #[config(env = "SSO_GITLAB_ENABLED", default = false)]
     pub enabled: bool,
@@ -1302,6 +1323,7 @@ impl SsoProviderIssuerConfig for SsoGitLabConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct SsoOidcConfig {
     #[config(env = "SSO_OIDC_ENABLED", default = false)]
     pub enabled: bool,
@@ -1344,6 +1366,7 @@ impl SsoProviderIssuerConfig for SsoOidcConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct SsoAppleConfig {
     #[config(env = "SSO_APPLE_ENABLED", default = false)]
     pub enabled: bool,
@@ -1362,6 +1385,7 @@ pub struct SsoAppleConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct ModerationConfig {
     /// External report-handling service URL.
     #[config(env = "REPORT_SERVICE_URL")]
@@ -1373,6 +1397,7 @@ pub struct ModerationConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct ImportConfig {
     /// Whether the PDS accepts repo imports.
     #[config(env = "ACCEPTING_REPO_IMPORTS", default = true)]
@@ -1404,6 +1429,7 @@ fn split_comma_list(value: &str) -> Result<Vec<String>, std::convert::Infallible
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct RippleCacheConfig {
     /// Address to bind the Ripple gossip protocol listener.
     #[config(env = "RIPPLE_BIND", default = "0.0.0.0:0")]
@@ -1427,6 +1453,7 @@ pub struct RippleCacheConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct ScheduledConfig {
     /// Interval in seconds between scheduled delete checks.
     #[config(env = "SCHEDULED_DELETE_CHECK_INTERVAL_SECS", default = 3600)]
@@ -1474,6 +1501,7 @@ pub struct ScheduledConfig {
 }
 
 #[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct TranquilStoreConfig {
     /// Directory for tranquil-store data: the metastore, eventlog, and blockstore.
     #[config(
@@ -1546,6 +1574,98 @@ mod tests {
             .iter()
             .filter(|(k, _)| std::env::var_os(k).is_none())
             .for_each(|(k, v)| unsafe { std::env::set_var(k, v) });
+    }
+
+    #[test]
+    fn load_rejects_unknown_top_level_key() {
+        let dir = std::env::temp_dir().join(format!(
+            "tranquil-config-unknown-toplevel-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir tempdir");
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[server]
+hostname = "test.local"
+
+[totally_made_up]
+foo = "bar"
+"#,
+        )
+        .expect("write tempfile");
+
+        let result = TranquilConfig::builder().file(&path).load();
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+
+        let err = format!("{:#}", result.expect_err("load must reject unknown key"));
+        assert!(
+            err.contains("totally_made_up"),
+            "expected totally_made_up in error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn load_rejects_unknown_nested_key() {
+        let dir = std::env::temp_dir().join(format!(
+            "tranquil-config-unknown-nested-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir tempdir");
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[server]
+hostname = "test.local"
+not_a_real_field = "oops"
+"#,
+        )
+        .expect("write tempfile");
+
+        let result = TranquilConfig::builder().file(&path).load();
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+
+        let err = format!("{:#}", result.expect_err("load must reject unknown key"));
+        assert!(
+            err.contains("not_a_real_field"),
+            "expected not_a_real_field in error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn load_accepts_known_keys() {
+        let dir = std::env::temp_dir().join(format!(
+            "tranquil-config-known-keys-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir tempdir");
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[server]
+hostname = "test.local"
+port = 3000
+
+[database]
+url = "postgres://localhost/test"
+
+[email.smarthost]
+host = "smtp.example"
+port = 587
+"#,
+        )
+        .expect("write tempfile");
+
+        let result = TranquilConfig::builder().file(&path).load();
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+
+        result.expect("known keys must load successfully");
     }
 
     #[test]
