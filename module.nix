@@ -116,7 +116,8 @@ in
           storage = {
             path = mkOption {
               type = types.path;
-              default = "/var/lib/tranquil-pds/blobs";
+              default = "${cfg.dataDir}/blobs";
+              defaultText = "\${cfg.dataDir}/blobs";
               description = "Directory for storing blobs";
             };
           };
@@ -124,7 +125,8 @@ in
           tranquil_store = {
             data_dir = mkOption {
               type = types.path;
-              default = "/var/lib/tranquil-pds/store";
+              default = "${cfg.dataDir}/store";
+              defaultText = "\${cfg.dataDir}/store";
               description = "Directory for tranquil-store files";
             };
           };
