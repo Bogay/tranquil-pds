@@ -175,6 +175,9 @@ type PutResponse = tokio::sync::oneshot::Sender<Result<Vec<BlockLocation>, Commi
 type ApplyResponse = tokio::sync::oneshot::Sender<Result<(), CommitError>>;
 type CompactResponse = tokio::sync::oneshot::Sender<Result<CompactionResult, CompactionError>>;
 type RepairResponse = tokio::sync::oneshot::Sender<Result<u64, CommitError>>;
+type RepairBlocksResponse = tokio::sync::oneshot::Sender<Result<u64, CompactionError>>;
+type RepairBlockSet = Vec<(CidBytes, Vec<u8>)>;
+type DeferredRepairBlock = (RepairBlockSet, RepairBlocksResponse);
 type QuiesceResponse = tokio::sync::oneshot::Sender<BlockstoreSnapshot>;
 type QuiesceResume = tokio::sync::oneshot::Receiver<()>;
 
@@ -196,6 +199,10 @@ pub enum CommitRequest {
     RepairLeaked {
         leaked_cids: Vec<(CidBytes, RefCount)>,
         response: RepairResponse,
+    },
+    RepairBlocks {
+        blocks: RepairBlockSet,
+        response: RepairBlocksResponse,
     },
     Quiesce {
         response: QuiesceResponse,
@@ -668,6 +675,10 @@ enum ClassifyResult {
         leaked_cids: Vec<(CidBytes, RefCount)>,
         response: RepairResponse,
     },
+    RepairBlocks {
+        blocks: RepairBlockSet,
+        response: RepairBlocksResponse,
+    },
     Quiesce {
         response: QuiesceResponse,
         resume: QuiesceResume,
@@ -704,6 +715,9 @@ fn classify_request(req: CommitRequest) -> ClassifyResult {
             leaked_cids,
             response,
         },
+        CommitRequest::RepairBlocks { blocks, response } => {
+            ClassifyResult::RepairBlocks { blocks, response }
+        }
         CommitRequest::Quiesce { response, resume } => ClassifyResult::Quiesce { response, resume },
         CommitRequest::Shutdown => ClassifyResult::Shutdown,
     }
@@ -720,6 +734,7 @@ struct DrainResult {
     shutdown: bool,
     deferred_compacts: Vec<(DataFileId, u64, CompactResponse)>,
     deferred_repairs: Vec<(Vec<(CidBytes, RefCount)>, RepairResponse)>,
+    deferred_repair_blocks: Vec<DeferredRepairBlock>,
     deferred_quiesces: Vec<(QuiesceResponse, QuiesceResume)>,
 }
 
@@ -735,6 +750,7 @@ fn drain_batch(
                 shutdown: true,
                 deferred_compacts: Vec::new(),
                 deferred_repairs: Vec::new(),
+                deferred_repair_blocks: Vec::new(),
                 deferred_quiesces: Vec::new(),
             };
         }
@@ -748,6 +764,7 @@ fn drain_batch(
                 shutdown: false,
                 deferred_compacts: vec![(file_id, grace_period_ms, response)],
                 deferred_repairs: Vec::new(),
+                deferred_repair_blocks: Vec::new(),
                 deferred_quiesces: Vec::new(),
             };
         }
@@ -760,6 +777,17 @@ fn drain_batch(
                 shutdown: false,
                 deferred_compacts: Vec::new(),
                 deferred_repairs: vec![(leaked_cids, response)],
+                deferred_repair_blocks: Vec::new(),
+                deferred_quiesces: Vec::new(),
+            };
+        }
+        ClassifyResult::RepairBlocks { blocks, response } => {
+            return DrainResult {
+                entries: Vec::new(),
+                shutdown: false,
+                deferred_compacts: Vec::new(),
+                deferred_repairs: Vec::new(),
+                deferred_repair_blocks: vec![(blocks, response)],
                 deferred_quiesces: Vec::new(),
             };
         }
@@ -769,6 +797,7 @@ fn drain_batch(
                 shutdown: false,
                 deferred_compacts: Vec::new(),
                 deferred_repairs: Vec::new(),
+                deferred_repair_blocks: Vec::new(),
                 deferred_quiesces: vec![(response, resume)],
             };
         }
@@ -781,6 +810,7 @@ fn drain_batch(
         shutdown: false,
         deferred_compacts: Vec::new(),
         deferred_repairs: Vec::new(),
+        deferred_repair_blocks: Vec::new(),
         deferred_quiesces: Vec::new(),
     };
 
@@ -801,6 +831,10 @@ fn drain_batch(
                 response,
             } => {
                 r.deferred_repairs.push((leaked_cids, response));
+                false
+            }
+            ClassifyResult::RepairBlocks { blocks, response } => {
+                r.deferred_repair_blocks.push((blocks, response));
                 false
             }
             ClassifyResult::Quiesce { response, resume } => {
@@ -946,6 +980,19 @@ fn commit_loop<S: StorageIO, C: Clock>(
                 let _ = response.send(Ok(repaired));
                 continue;
             }
+            Ok(CommitRequest::RepairBlocks { blocks, response }) => {
+                let result = compaction::repair_blocks_on_writer_thread(
+                    manager,
+                    index,
+                    &blocks,
+                    epoch.current(),
+                    &ctx.file_ids,
+                    &ctx.hint_positions,
+                    epoch,
+                );
+                let _ = response.send(result);
+                continue;
+            }
             Ok(CommitRequest::Quiesce { response, resume }) => {
                 handle_quiesce(manager, state, epoch, response, resume);
                 continue;
@@ -1018,6 +1065,22 @@ fn commit_loop<S: StorageIO, C: Clock>(
                 let _ = response.send(Ok(repaired));
             });
 
+        drain
+            .deferred_repair_blocks
+            .into_iter()
+            .for_each(|(blocks, response)| {
+                let result = compaction::repair_blocks_on_writer_thread(
+                    manager,
+                    index,
+                    &blocks,
+                    epoch.current(),
+                    &ctx.file_ids,
+                    &ctx.hint_positions,
+                    epoch,
+                );
+                let _ = response.send(result);
+            });
+
         maybe_checkpoint(
             index,
             epoch,
@@ -1062,6 +1125,7 @@ fn drain_and_process_remaining<S: StorageIO, C: Clock>(
     let mut entries: Vec<BatchEntry> = Vec::new();
     let mut compacts: Vec<(DataFileId, u64, CompactResponse)> = Vec::new();
     let mut repairs: Vec<(Vec<(CidBytes, RefCount)>, RepairResponse)> = Vec::new();
+    let mut repair_blocks: Vec<DeferredRepairBlock> = Vec::new();
 
     std::iter::from_fn(|| receiver.try_recv().ok()).for_each(|req| match classify_request(req) {
         ClassifyResult::Batch(entry) => entries.push(entry),
@@ -1074,6 +1138,7 @@ fn drain_and_process_remaining<S: StorageIO, C: Clock>(
             leaked_cids,
             response,
         } => repairs.push((leaked_cids, response)),
+        ClassifyResult::RepairBlocks { blocks, response } => repair_blocks.push((blocks, response)),
         ClassifyResult::Shutdown | ClassifyResult::Quiesce { .. } => {}
     });
 
@@ -1109,6 +1174,19 @@ fn drain_and_process_remaining<S: StorageIO, C: Clock>(
         let repaired =
             index.repair_leaked_refcounts(&leaked_cids, epoch.current(), ctx.clock.wall_millis());
         let _ = response.send(Ok(repaired));
+    });
+
+    repair_blocks.into_iter().for_each(|(blocks, response)| {
+        let result = compaction::repair_blocks_on_writer_thread(
+            manager,
+            index,
+            &blocks,
+            epoch.current(),
+            &ctx.file_ids,
+            &ctx.hint_positions,
+            epoch,
+        );
+        let _ = response.send(result);
     });
 
     shutdown_checkpoint(index, epoch, &ctx.hint_positions);

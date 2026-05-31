@@ -187,6 +187,111 @@ fn purge_phantom_file<S: StorageIO>(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(super) fn repair_blocks_on_writer_thread<S: StorageIO>(
+    manager: &DataFileManager<S>,
+    index: &BlockIndex,
+    blocks: &[(CidBytes, Vec<u8>)],
+    current_epoch: CommitEpoch,
+    file_ids: &FileIdAllocator,
+    hint_positions: &super::group_commit::ShardHintPositions,
+    epoch: &super::types::EpochCounter,
+) -> Result<u64, CompactionError> {
+    if blocks.is_empty() {
+        return Ok(0);
+    }
+
+    let new_file_id = file_ids.allocate();
+    let new_handle = manager.open_for_append(new_file_id)?;
+    let mut writer = DataFileWriter::new(manager.io(), new_handle.fd(), new_file_id)?;
+
+    let hint_path = hint_file_path(manager.data_dir(), new_file_id);
+    let hint_fd = manager.io().open(&hint_path, OpenOptions::read_write())?;
+    let mut hint_writer = HintFileWriter::new(manager.io(), hint_fd);
+
+    let mut relocations: Vec<(CidBytes, BlockLocation)> = Vec::with_capacity(blocks.len());
+    let write_result = blocks.iter().try_for_each(|(cid, data)| {
+        let refcount = index.get(cid).map(|e| e.refcount.raw()).unwrap_or(1).max(1);
+        let loc = writer.append_block(cid, data)?;
+        hint_writer.append_relocate(cid, &loc, refcount)?;
+        relocations.push((*cid, loc));
+        Ok::<_, CompactionError>(())
+    });
+
+    let record_count = u32::try_from(relocations.len()).unwrap_or(u32::MAX);
+    let writer_position = writer.position();
+    let finalize = write_result
+        .and_then(|()| writer.sync().map_err(CompactionError::from))
+        .and_then(|()| {
+            hint_writer
+                .append_commit_marker(
+                    current_epoch.raw(),
+                    record_count,
+                    new_file_id,
+                    writer_position,
+                )
+                .map_err(CompactionError::from)
+        })
+        .and_then(|()| hint_writer.sync().map_err(CompactionError::from))
+        .and_then(|()| {
+            manager
+                .io()
+                .sync_dir(manager.data_dir())
+                .map_err(CompactionError::from)
+        })
+        .and_then(|()| manager.io().barrier().map_err(CompactionError::from));
+
+    let final_hint_offset = hint_writer.position();
+    let _ = manager.io().close(hint_fd);
+
+    if let Err(e) =
+        finalize.and_then(|()| verify_repaired_blocks(manager, new_file_id, &relocations))
+    {
+        manager.delete_data_file(new_file_id).ok();
+        manager
+            .io()
+            .delete(&hint_file_path(manager.data_dir(), new_file_id))
+            .ok();
+        return Err(e);
+    }
+
+    hint_positions.record_extra(new_file_id, final_hint_offset);
+    index.apply_compaction(&relocations, &[]);
+    index
+        .write_checkpoint(epoch.current(), hint_positions)
+        .map_err(CompactionError::Io)?;
+
+    tracing::info!(
+        dest = %new_file_id,
+        repaired = relocations.len(),
+        "structural repair complete"
+    );
+
+    Ok(relocations.len() as u64)
+}
+
+fn verify_repaired_blocks<S: StorageIO>(
+    manager: &DataFileManager<S>,
+    file_id: DataFileId,
+    relocations: &[(CidBytes, BlockLocation)],
+) -> Result<(), CompactionError> {
+    let handle = manager.open_for_read(file_id)?;
+    let file_size = manager.io().file_size(handle.fd())?;
+    relocations.iter().try_for_each(|(cid, loc)| {
+        match super::data_file::decode_block_record(
+            manager.io(),
+            handle.fd(),
+            loc.offset,
+            file_size,
+        ) {
+            Ok(Some(ReadBlockRecord::Valid { cid_bytes, .. })) if cid_bytes == *cid => Ok(()),
+            _ => Err(CompactionError::Io(io::Error::other(
+                "repaired block failed read-back verification",
+            ))),
+        }
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn stream_compact<S: StorageIO>(
     manager: &DataFileManager<S>,
     index: &BlockIndex,
