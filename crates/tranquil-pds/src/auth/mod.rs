@@ -522,7 +522,7 @@ async fn validate_bearer_token_with_options_internal(
                 auth_source: AuthSource::OAuth,
             });
         } else {
-            return Err(TokenValidationError::TokenExpired);
+            return Err(TokenValidationError::OAuthTokenExpired);
         }
     }
 
