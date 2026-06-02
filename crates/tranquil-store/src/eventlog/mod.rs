@@ -26,7 +26,10 @@ use crate::blockstore::BlocksSynced;
 use crate::fsync_order::PostBlockstoreHook;
 use crate::io::StorageIO;
 
-use commit_loop::{CommitThread, FreezeResponse, PendingBytesBudget, WriterNotify, WriterRequest};
+use commit_loop::{
+    CommitThread, FreezeResponse, PendingBytesBudget, WriterNotify, WriterRequest,
+    writer_terminated,
+};
 
 pub use bridge::{DeferredBroadcast, EventLogBridge};
 pub use manager::{SEGMENT_FILE_EXTENSION, SegmentManager, parse_segment_id, segment_path};
@@ -51,6 +54,7 @@ pub use writer::{EventLogWriter, SyncResult};
 
 const DEFAULT_BROADCAST_BUFFER: usize = 16384;
 pub const DEFAULT_PENDING_BYTES_BUDGET: u64 = 1024 * 1024 * 1024;
+const WRITER_RESPONSE_POLL: Duration = Duration::from_millis(100);
 
 pub struct EventWithMutations {
     pub event: SequencedEvent,
@@ -187,7 +191,7 @@ impl<S: StorageIO + 'static> EventLog<S> {
         self.commit_thread
             .sender()
             .send(WriterRequest::Append(event))
-            .map_err(|_| io::Error::other("eventlog writer thread terminated"))
+            .map_err(|_| writer_terminated())
     }
 
     pub fn append_event(
@@ -261,10 +265,24 @@ impl<S: StorageIO + 'static> EventLog<S> {
         self.commit_thread
             .sender()
             .send(WriterRequest::SyncBarrier { response: resp_tx })
-            .map_err(|_| io::Error::other("eventlog writer thread terminated"))?;
-        resp_rx
-            .recv()
-            .map_err(|_| io::Error::other("eventlog writer thread terminated"))?
+            .map_err(|_| writer_terminated())?;
+        self.await_writer_response(&resp_rx)
+    }
+
+    fn await_writer_response<T>(&self, resp_rx: &flume::Receiver<io::Result<T>>) -> io::Result<T> {
+        loop {
+            match resp_rx.recv_timeout(WRITER_RESPONSE_POLL) {
+                Ok(result) => return result,
+                Err(flume::RecvTimeoutError::Disconnected) => {
+                    return Err(writer_terminated());
+                }
+                Err(flume::RecvTimeoutError::Timeout) => {
+                    if self.notify.is_terminated() {
+                        return Err(writer_terminated());
+                    }
+                }
+            }
+        }
     }
 
     pub fn get_events_since(
@@ -432,11 +450,9 @@ impl<S: StorageIO + 'static> EventLog<S> {
                 response: resp_tx,
                 resume: resume_rx,
             })
-            .map_err(|_| io::Error::other("eventlog writer thread terminated"))?;
+            .map_err(|_| writer_terminated())?;
 
-        let freeze_resp: FreezeResponse = resp_rx
-            .recv()
-            .map_err(|_| io::Error::other("eventlog writer thread terminated"))??;
+        let freeze_resp: FreezeResponse = self.await_writer_response(&resp_rx)?;
 
         let all_segments = self.manager.list_segments()?;
         let sealed_segments: Vec<SegmentId> = all_segments

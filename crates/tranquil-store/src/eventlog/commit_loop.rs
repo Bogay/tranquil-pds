@@ -21,6 +21,10 @@ const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 const REORDER_TIMEOUT: Duration = Duration::from_millis(100);
 const GAP_ABANDON_TIMEOUT: Duration = Duration::from_secs(5);
 
+pub(super) fn writer_terminated() -> io::Error {
+    io::Error::other("eventlog writer thread terminated")
+}
+
 pub struct FreezeResponse {
     pub synced_through: EventSequence,
     pub segment_id: SegmentId,
@@ -42,6 +46,7 @@ pub enum WriterRequest {
 pub struct WriterNotify {
     synced_seq: AtomicU64,
     poisoned: AtomicBool,
+    terminated: AtomicBool,
     mutex: Mutex<()>,
     cond: Condvar,
 }
@@ -128,9 +133,14 @@ impl WriterNotify {
         Self {
             synced_seq: AtomicU64::new(initial_synced),
             poisoned: AtomicBool::new(false),
+            terminated: AtomicBool::new(false),
             mutex: Mutex::new(()),
             cond: Condvar::new(),
         }
+    }
+
+    pub(super) fn is_terminated(&self) -> bool {
+        self.terminated.load(Ordering::Acquire)
     }
 
     pub fn wait_for_sync(&self, target: EventSequence) -> io::Result<()> {
@@ -143,6 +153,9 @@ impl WriterNotify {
         if self.poisoned.load(Ordering::Acquire) {
             return Err(io::Error::other("eventlog writer poisoned"));
         }
+        if self.terminated.load(Ordering::Acquire) {
+            return Err(io::Error::other("eventlog writer thread terminated"));
+        }
 
         let deadline = Instant::now() + SYNC_TIMEOUT;
         let mut guard = self.mutex.lock();
@@ -153,6 +166,9 @@ impl WriterNotify {
             }
             if self.poisoned.load(Ordering::Acquire) {
                 return Err(io::Error::other("eventlog writer poisoned"));
+            }
+            if self.terminated.load(Ordering::Acquire) {
+                return Err(io::Error::other("eventlog writer thread terminated"));
             }
 
             let now = Instant::now();
@@ -175,6 +191,12 @@ impl WriterNotify {
 
     fn poison(&self) {
         self.poisoned.store(true, Ordering::Release);
+        let _guard = self.mutex.lock();
+        self.cond.notify_all();
+    }
+
+    fn terminate(&self) {
+        self.terminated.store(true, Ordering::Release);
         let _guard = self.mutex.lock();
         self.cond.notify_all();
     }
@@ -372,12 +394,40 @@ impl<'a> Drop for CloseOnDrop<'a> {
     }
 }
 
+fn fail_abandoned_request(request: WriterRequest) {
+    match request {
+        WriterRequest::SyncBarrier { response } => {
+            let _ = response.send(Err(writer_terminated()));
+        }
+        WriterRequest::Freeze { response, .. } => {
+            let _ = response.send(Err(writer_terminated()));
+        }
+        WriterRequest::Append(_) | WriterRequest::Shutdown => {}
+    }
+}
+
+struct TerminateOnDrop<'a> {
+    notify: &'a WriterNotify,
+    receiver: &'a flume::Receiver<WriterRequest>,
+}
+
+impl Drop for TerminateOnDrop<'_> {
+    fn drop(&mut self) {
+        self.notify.terminate();
+        self.receiver.drain().for_each(fail_abandoned_request);
+    }
+}
+
 fn writer_loop<S: StorageIO>(
     receiver: &flume::Receiver<WriterRequest>,
     writer: &mut EventLogWriter<S>,
     ctx: &WriterCtx<'_, S>,
 ) {
     let _close = CloseOnDrop(ctx.pending_bytes);
+    let _terminate = TerminateOnDrop {
+        notify: ctx.notify,
+        receiver,
+    };
     let mut reorder = ReorderBuffer::new(writer.current_seq().next().raw());
 
     loop {

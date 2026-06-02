@@ -51,9 +51,8 @@ fn seed_repo(stores: &TestStores, idx: u64) -> Uuid {
     uid
 }
 
-fn append_event(stores: &TestStores, idx: u64) {
-    let did = test_did(idx);
-    let event = SequencedEvent {
+fn make_commit_event(did: &Did, idx: u64) -> SequencedEvent {
+    SequencedEvent {
         seq: SequenceNumber::from_raw(0),
         did: did.clone(),
         created_at: chrono::Utc::now(),
@@ -68,7 +67,12 @@ fn append_event(stores: &TestStores, idx: u64) {
         active: None,
         status: None,
         rev: Some(format!("rev{idx}")),
-    };
+    }
+}
+
+fn append_event(stores: &TestStores, idx: u64) {
+    let did = test_did(idx);
+    let event = make_commit_event(&did, idx);
     stores
         .eventlog
         .append_event(&did, RepoEventType::Commit, &event)
@@ -988,6 +992,71 @@ fn run_cross_store_fault_scenario(seed: u64) {
 fn sim_cross_store_coordinated_commit_under_faults() {
     sim_seed_range().into_par_iter().for_each(|seed| {
         run_cross_store_fault_scenario(seed);
+    });
+}
+
+fn open_fault_eventlog(
+    dir: &std::path::Path,
+    sim: &std::sync::Arc<SimulatedIO>,
+) -> std::sync::Arc<EventLog<std::sync::Arc<SimulatedIO>>> {
+    std::sync::Arc::new(
+        EventLog::open(
+            EventLogConfig {
+                segments_dir: dir.join("eventlog/segments"),
+                ..EventLogConfig::default()
+            },
+            std::sync::Arc::clone(sim),
+        )
+        .unwrap(),
+    )
+}
+
+fn run_eventlog_commit_loop_under_faults(seed: u64) {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join("eventlog/segments")).unwrap();
+    let fault = sim_fault_for(seed);
+    let sim = std::sync::Arc::new(SimulatedIO::new(seed, fault));
+    let did = test_did(seed);
+    let event_count = (seed % 40) + 20;
+
+    let mut acked_sync_seq: u64 = 0;
+    {
+        sim.set_pristine_mode(true);
+        let eventlog = open_fault_eventlog(dir.path(), &sim);
+        sim.set_pristine_mode(false);
+
+        (0..event_count).for_each(|i| {
+            if eventlog
+                .append_event(&did, RepoEventType::Commit, &make_commit_event(&did, i))
+                .is_ok()
+                && let Ok(result) = eventlog.sync()
+            {
+                acked_sync_seq = acked_sync_seq.max(result.synced_through.raw());
+            }
+        });
+
+        sim.crash();
+        drop(eventlog);
+    }
+
+    sim.set_pristine_mode(true);
+    let reopened = open_fault_eventlog(dir.path(), &sim);
+    let recovered = reopened.max_seq().raw();
+    assert!(
+        recovered >= acked_sync_seq,
+        "seed={seed} fault={fault:?}: events acknowledged synced through {acked_sync_seq} must survive crash, recovered max_seq={recovered}"
+    );
+    assert!(
+        recovered <= event_count,
+        "seed={seed} fault={fault:?}: recovery invented events beyond the {event_count} appended, recovered max_seq={recovered}"
+    );
+    let _ = reopened.shutdown();
+}
+
+#[test]
+fn sim_eventlog_commit_loop_durability_under_faults() {
+    sim_seed_range().into_par_iter().for_each(|seed| {
+        run_eventlog_commit_loop_under_faults(seed);
     });
 }
 
