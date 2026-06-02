@@ -39,27 +39,77 @@ pub enum PlcOpType {
     Tombstone,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Error)]
+#[error("service type must not be empty")]
+pub struct EmptyServiceType;
+
+mod custom_service_type {
+    use super::EmptyServiceType;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct CustomServiceType(String);
+
+    impl CustomServiceType {
+        pub(super) fn new(name: String) -> Result<Self, EmptyServiceType> {
+            match name.as_str() {
+                "" => Err(EmptyServiceType),
+                _ => Ok(Self(name)),
+            }
+        }
+
+        pub fn as_str(&self) -> &str {
+            &self.0
+        }
+    }
+}
+
+pub use custom_service_type::CustomServiceType;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceType {
-    #[serde(rename = "AtprotoPersonalDataServer")]
     Pds,
-    #[serde(rename = "AtprotoAppView")]
-    AppView,
-    #[serde(rename = "AtprotoLabeler")]
     Labeler,
+    Other(CustomServiceType),
 }
 
 impl ServiceType {
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Pds => "AtprotoPersonalDataServer",
-            Self::AppView => "AtprotoAppView",
             Self::Labeler => "AtprotoLabeler",
+            Self::Other(name) => name.as_str(),
         }
     }
+}
 
-    pub fn is_pds(self) -> bool {
-        matches!(self, Self::Pds)
+impl TryFrom<String> for ServiceType {
+    type Error = EmptyServiceType;
+
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        match name.as_str() {
+            "AtprotoPersonalDataServer" => Ok(Self::Pds),
+            "AtprotoLabeler" => Ok(Self::Labeler),
+            _ => CustomServiceType::new(name).map(Self::Other),
+        }
+    }
+}
+
+impl Serialize for ServiceType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ServiceType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let name = String::deserialize(deserializer)?;
+        Self::try_from(name).map_err(serde::de::Error::custom)
     }
 }
 
@@ -624,5 +674,81 @@ mod tests {
         });
         let signed = sign_operation(&op, &key).unwrap();
         assert!(signed.get("sig").is_some());
+    }
+
+    #[test]
+    fn test_service_type_known_round_trip() {
+        let cases = [
+            (ServiceType::Pds, "\"AtprotoPersonalDataServer\""),
+            (ServiceType::Labeler, "\"AtprotoLabeler\""),
+        ];
+        cases.iter().for_each(|(variant, encoded)| {
+            assert_eq!(serde_json::to_string(variant).unwrap(), *encoded);
+            assert_eq!(
+                serde_json::from_str::<ServiceType>(encoded).unwrap(),
+                *variant
+            );
+        });
+    }
+
+    #[test]
+    fn test_service_type_custom_round_trips() {
+        let parsed: ServiceType = serde_json::from_str("\"ConchFeedGenerator\"").unwrap();
+        assert_eq!(
+            parsed,
+            ServiceType::try_from("ConchFeedGenerator".to_string()).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string(&parsed).unwrap(),
+            "\"ConchFeedGenerator\""
+        );
+    }
+
+    #[test]
+    fn test_service_type_custom_normalizes_known_names() {
+        assert_eq!(
+            ServiceType::try_from("AtprotoPersonalDataServer".to_string()).unwrap(),
+            ServiceType::Pds
+        );
+        assert_eq!(
+            ServiceType::try_from("AtprotoLabeler".to_string()).unwrap(),
+            ServiceType::Labeler
+        );
+    }
+
+    #[test]
+    fn test_appview_is_not_a_named_type() {
+        assert_eq!(
+            ServiceType::try_from("AtprotoAppView".to_string()).unwrap(),
+            ServiceType::Other(CustomServiceType::new("AtprotoAppView".to_string()).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_service_type_rejects_empty() {
+        assert!(ServiceType::try_from(String::new()).is_err());
+        assert!(serde_json::from_str::<ServiceType>("\"\"").is_err());
+    }
+
+    #[test]
+    fn test_plc_operation_with_custom_service_round_trips() {
+        let op_json = json!({
+            "type": "plc_operation",
+            "rotationKeys": ["did:key:zScallop"],
+            "verificationMethods": { "atproto": "did:key:zUni" },
+            "alsoKnownAs": ["at://whelk.nel.pet"],
+            "services": {
+                "atproto_pds": { "type": "AtprotoPersonalDataServer", "endpoint": "https://nel.pet" },
+                "custom_feedgen": { "type": "ConchFeedGenerator", "endpoint": "https://feed.nel.pet" }
+            },
+            "prev": null
+        });
+        let op: PlcOperation = serde_json::from_value(op_json.clone()).unwrap();
+        assert_eq!(
+            op.services["custom_feedgen"].service_type,
+            ServiceType::try_from("ConchFeedGenerator".to_string()).unwrap()
+        );
+        assert_eq!(op.services["atproto_pds"].service_type, ServiceType::Pds);
+        assert_eq!(serde_json::to_value(&op).unwrap(), op_json);
     }
 }

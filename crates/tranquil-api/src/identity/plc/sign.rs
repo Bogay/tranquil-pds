@@ -9,7 +9,7 @@ use tranquil_pds::api::ApiError;
 use tranquil_pds::api::error::DbResultExt;
 use tranquil_pds::auth::{Auth, Permissive};
 use tranquil_pds::circuit_breaker::with_circuit_breaker;
-use tranquil_pds::plc::{PlcError, PlcService, ServiceType, create_update_op, sign_operation};
+use tranquil_pds::plc::{PlcError, PlcService, create_update_op, sign_operation};
 use tranquil_pds::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -19,14 +19,7 @@ pub struct SignPlcOperationInput {
     pub rotation_keys: Option<Vec<String>>,
     pub also_known_as: Option<Vec<String>>,
     pub verification_methods: Option<HashMap<String, String>>,
-    pub services: Option<HashMap<String, ServiceInput>>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct ServiceInput {
-    #[serde(rename = "type")]
-    pub service_type: ServiceType,
-    pub endpoint: String,
+    pub services: Option<HashMap<String, PlcService>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -106,25 +99,12 @@ pub async fn sign_plc_operation(
     if last_op.is_tombstone() {
         return Err(ApiError::from(PlcError::Tombstoned));
     }
-    let services = input.services.map(|s| {
-        s.into_iter()
-            .map(|(k, v)| {
-                (
-                    k,
-                    PlcService {
-                        service_type: v.service_type,
-                        endpoint: v.endpoint,
-                    },
-                )
-            })
-            .collect()
-    });
     let unsigned_op = create_update_op(
         &last_op,
         input.rotation_keys,
         input.verification_methods,
         input.also_known_as,
-        services,
+        input.services,
     )
     .map_err(|e| match e {
         PlcError::Tombstoned => ApiError::InvalidRequest("Cannot update tombstoned DID".into()),
