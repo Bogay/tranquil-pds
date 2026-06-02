@@ -110,6 +110,86 @@ async fn full_stack_restart_port() {
 }
 
 #[tokio::test]
+async fn read_corruption_detects_no_silent_mismatch() {
+    let reports = farm::run_many(
+        |seed| {
+            let mut cfg = config_for(Scenario::ReadCorruption, seed);
+            ConfigOverrides {
+                op_count: Some(4_000),
+                ..ConfigOverrides::default()
+            }
+            .apply_to(&mut cfg);
+            cfg
+        },
+        (0..4).map(Seed),
+    );
+    let failures: Vec<String> = reports
+        .iter()
+        .filter(|r| !r.is_clean())
+        .map(|r| {
+            format!(
+                "seed {}: {}",
+                r.seed.0,
+                r.violations
+                    .iter()
+                    .map(|v| format!("{}: {}", v.invariant, v.detail))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        })
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n---\n"));
+}
+
+#[tokio::test]
+async fn mst_list_walk_validates_under_recoverable_faults() {
+    let reports = farm::run_many(
+        |seed| {
+            let mut cfg = config_for(Scenario::BlockChurnRecoverable, seed);
+            ConfigOverrides {
+                op_count: Some(4_000),
+                ..ConfigOverrides::default()
+            }
+            .apply_to(&mut cfg);
+            cfg
+        },
+        (0..6).map(Seed),
+    );
+    let failures: Vec<String> = reports
+        .iter()
+        .filter(|r| !r.is_clean())
+        .map(|r| {
+            format!(
+                "seed {}: {}",
+                r.seed.0,
+                r.violations
+                    .iter()
+                    .map(|v| format!("{}: {}", v.invariant, v.detail))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        })
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n---\n"));
+}
+
+#[tokio::test]
+async fn inline_commit_synchronous_path_sanity() {
+    let mut cfg = config_for(Scenario::InlineCommit, Seed(5));
+    ConfigOverrides {
+        op_count: Some(2_000),
+        ..ConfigOverrides::default()
+    }
+    .apply_to(&mut cfg);
+    let report = Gauntlet::new(cfg).expect("build gauntlet").run().await;
+    assert_clean(&report);
+    assert!(
+        report.restarts.0 >= 1,
+        "InlineCommit must exercise at least one restart of the synchronous commit path"
+    );
+}
+
+#[tokio::test]
 async fn compaction_idempotent_sanity() {
     let cfg = GauntletConfig {
         seed: Seed(3),
