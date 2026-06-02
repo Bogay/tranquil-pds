@@ -56,6 +56,10 @@ impl Oracle {
         self.live.contains_key(&(coll.clone(), rkey.clone()))
     }
 
+    pub fn expected_record_cid(&self, coll: &CollectionName, rkey: &RecordKey) -> Option<CidBytes> {
+        self.live.get(&(coll.clone(), rkey.clone())).copied()
+    }
+
     pub fn set_root(&mut self, root: Cid) {
         self.current_root = Some(root);
     }

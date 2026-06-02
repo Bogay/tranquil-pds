@@ -77,6 +77,52 @@ pub fn mst_get_tolerant<S: StorageIO + Send + Sync + 'static, C: Clock>(
     }
 }
 
+pub fn walk_mst_entries_tolerant<S: StorageIO + Send + Sync + 'static, C: Clock>(
+    store: &TranquilBlockStore<S, C>,
+    root: Cid,
+    lost: &HashSet<CidBytes>,
+) -> Result<Option<Vec<(String, CidBytes)>>, String> {
+    let mut to_visit: Vec<Cid> = vec![root];
+    let mut visited: HashSet<CidBytes> = HashSet::new();
+    let mut entries: Vec<(String, CidBytes)> = Vec::new();
+
+    while let Some(cid) = to_visit.pop() {
+        let cid_bytes = try_cid_to_fixed(&cid).map_err(|e| format!("cid format: {e}"))?;
+        if !visited.insert(cid_bytes) {
+            continue;
+        }
+        if lost.contains(&cid_bytes) {
+            return Ok(None);
+        }
+        let node = match store.get_block_sync(&cid_bytes) {
+            Ok(Some(bytes)) => match serde_ipld_dagcbor::from_slice::<NodeData>(&bytes) {
+                Ok(n) => n,
+                Err(_) => return Ok(None),
+            },
+            Ok(None) => return Ok(None),
+            Err(_) => return Ok(None),
+        };
+        let keys = full_keys(&node)?;
+        keys.iter().zip(node.entries.iter()).try_for_each(
+            |(key, entry)| -> Result<(), String> {
+                let value =
+                    try_cid_to_fixed(&entry.value).map_err(|e| format!("cid format: {e}"))?;
+                entries.push((key.clone(), value));
+                Ok(())
+            },
+        )?;
+        if let Some(left) = node.left {
+            to_visit.push(left);
+        }
+        node.entries
+            .iter()
+            .filter_map(|e| e.tree)
+            .for_each(|t| to_visit.push(t));
+    }
+
+    Ok(Some(entries))
+}
+
 fn read_node<S: StorageIO + Send + Sync + 'static, C: Clock>(
     store: &TranquilBlockStore<S, C>,
     cid_bytes: &CidBytes,

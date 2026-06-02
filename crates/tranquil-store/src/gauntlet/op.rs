@@ -67,6 +67,7 @@ pub enum Op {
     ReadBlock {
         value_seed: ValueSeed,
     },
+    MstList,
     ExternalDeleteDataFile {
         choice: FileChoice,
     },
@@ -74,7 +75,10 @@ pub enum Op {
 
 impl Op {
     pub const fn is_read_only(&self) -> bool {
-        matches!(self, Op::ReadRecord { .. } | Op::ReadBlock { .. })
+        matches!(
+            self,
+            Op::ReadRecord { .. } | Op::ReadBlock { .. } | Op::MstList
+        )
     }
 }
 

@@ -25,6 +25,7 @@ pub struct OpWeights {
     pub run_retention: u32,
     pub read_record: u32,
     pub read_block: u32,
+    pub mst_list: u32,
     pub external_delete_data_file: u32,
     pub advance_time: u32,
 }
@@ -40,6 +41,7 @@ impl OpWeights {
             + self.run_retention
             + self.read_record
             + self.read_block
+            + self.mst_list
             + self.external_delete_data_file
             + self.advance_time
     }
@@ -113,6 +115,7 @@ impl Default for WorkloadModel {
                 run_retention: 0,
                 read_record: 0,
                 read_block: 0,
+                mst_list: 0,
                 external_delete_data_file: 0,
                 advance_time: 0,
             },
@@ -152,7 +155,8 @@ impl WorkloadModel {
                 let t7 = t6 + w.run_retention;
                 let t8 = t7 + w.read_record;
                 let t9 = t8 + w.read_block;
-                let t10 = t9 + w.external_delete_data_file;
+                let t10 = t9 + w.mst_list;
+                let t11 = t10 + w.external_delete_data_file;
 
                 match bucket {
                     b if b < t1 => Op::AddRecord {
@@ -184,7 +188,8 @@ impl WorkloadModel {
                     b if b < t9 => Op::ReadBlock {
                         value_seed: ValueSeed(rng.next_u32()),
                     },
-                    b if b < t10 => Op::ExternalDeleteDataFile {
+                    b if b < t10 => Op::MstList,
+                    b if b < t11 => Op::ExternalDeleteDataFile {
                         choice: FileChoice(rng.next_u32()),
                     },
                     _ => Op::AdvanceTime {

@@ -245,11 +245,16 @@ impl Default for ConsistencyCheckOptions {
     }
 }
 
-pub fn verify_store_consistency<S: StorageIO + 'static>(
-    blockstore: &TranquilBlockStore<RealIO, SystemClock>,
+pub fn verify_store_consistency<BS, BC, ES>(
+    blockstore: &TranquilBlockStore<BS, BC>,
     metastore: &Metastore,
-    eventlog: &EventLog<S>,
-) -> ConsistencyReport {
+    eventlog: &EventLog<ES>,
+) -> ConsistencyReport
+where
+    BS: StorageIO + Send + Sync + 'static,
+    BC: Clock,
+    ES: StorageIO + 'static,
+{
     verify_store_consistency_with_options(
         blockstore,
         metastore,
@@ -258,12 +263,17 @@ pub fn verify_store_consistency<S: StorageIO + 'static>(
     )
 }
 
-pub fn verify_store_consistency_with_options<S: StorageIO + 'static>(
-    blockstore: &TranquilBlockStore<RealIO, SystemClock>,
+pub fn verify_store_consistency_with_options<BS, BC, ES>(
+    blockstore: &TranquilBlockStore<BS, BC>,
     metastore: &Metastore,
-    eventlog: &EventLog<S>,
+    eventlog: &EventLog<ES>,
     options: ConsistencyCheckOptions,
-) -> ConsistencyReport {
+) -> ConsistencyReport
+where
+    BS: StorageIO + Send + Sync + 'static,
+    BC: Clock,
+    ES: StorageIO + 'static,
+{
     let mut report = ConsistencyReport::default();
 
     let block_index = blockstore.block_index();
@@ -567,8 +577,8 @@ fn check_cursor_vs_eventlog<S: StorageIO + 'static>(
     }
 }
 
-fn check_orphan_data_files(
-    blockstore: &TranquilBlockStore<RealIO, SystemClock>,
+fn check_orphan_data_files<BS: StorageIO + Send + Sync + 'static, BC: Clock>(
+    blockstore: &TranquilBlockStore<BS, BC>,
     block_index: &BlockIndex,
     report: &mut ConsistencyReport,
 ) {
@@ -600,8 +610,8 @@ fn check_orphan_data_files(
     });
 }
 
-fn check_missing_indexed_files(
-    blockstore: &TranquilBlockStore<RealIO, SystemClock>,
+fn check_missing_indexed_files<BS: StorageIO + Send + Sync + 'static, BC: Clock>(
+    blockstore: &TranquilBlockStore<BS, BC>,
     block_index: &BlockIndex,
     report: &mut ConsistencyReport,
 ) {
@@ -623,8 +633,8 @@ fn check_missing_indexed_files(
         .for_each(|(fid, _)| report.missing_indexed_files.push(*fid));
 }
 
-fn check_orphan_hint_files(
-    blockstore: &TranquilBlockStore<RealIO, SystemClock>,
+fn check_orphan_hint_files<BS: StorageIO + Send + Sync + 'static, BC: Clock>(
+    blockstore: &TranquilBlockStore<BS, BC>,
     report: &mut ConsistencyReport,
 ) {
     let data_files: HashSet<DataFileId> = match blockstore.list_data_files() {

@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 
 use crate::clock::{Clock, SimClock};
@@ -134,6 +134,23 @@ impl FaultConfig {
             misdirected_read_probability: Probability::ZERO,
             bit_flip_on_read_probability: Probability::ZERO,
             ..Self::moderate()
+        }
+    }
+
+    pub fn read_faults() -> Self {
+        Self {
+            misdirected_read_probability: Probability::new(0.05),
+            bit_flip_on_read_probability: Probability::new(0.05),
+            io_error_probability: Probability::new(0.01),
+            ..Self::none()
+        }
+    }
+
+    pub fn read_corruption() -> Self {
+        Self {
+            misdirected_read_probability: Probability::new(0.05),
+            bit_flip_on_read_probability: Probability::new(0.05),
+            ..Self::none()
         }
     }
 
@@ -381,6 +398,9 @@ pub struct SimulatedIO {
     state: Mutex<SimState>,
     fault_config: FaultConfig,
     pristine_mode: AtomicBool,
+    write_crash_armed: AtomicBool,
+    write_crash_countdown: AtomicI64,
+    write_crashed: AtomicBool,
     rng_seed: u64,
     clock: SimClock,
 }
@@ -401,9 +421,33 @@ impl SimulatedIO {
             }),
             fault_config,
             pristine_mode: AtomicBool::new(false),
+            write_crash_armed: AtomicBool::new(false),
+            write_crash_countdown: AtomicI64::new(-1),
+            write_crashed: AtomicBool::new(false),
             rng_seed: seed,
             clock: SimClock::new(seed),
         }
+    }
+
+    pub fn arm_write_crash(&self, after_writes: i64) {
+        self.write_crashed.store(false, Ordering::Relaxed);
+        self.write_crash_countdown
+            .store(after_writes, Ordering::Relaxed);
+        self.write_crash_armed.store(true, Ordering::Relaxed);
+    }
+
+    fn write_crash_fired(&self) -> bool {
+        if !self.write_crash_armed.load(Ordering::Relaxed) {
+            return false;
+        }
+        if self.write_crashed.load(Ordering::Relaxed) {
+            return true;
+        }
+        if self.write_crash_countdown.fetch_sub(1, Ordering::Relaxed) <= 0 {
+            self.write_crashed.store(true, Ordering::Relaxed);
+            return true;
+        }
+        false
     }
 
     pub fn clock(&self) -> SimClock {
@@ -442,6 +486,10 @@ impl SimulatedIO {
 
     pub fn crash(&self) -> Vec<PathBuf> {
         let mut state = self.state.lock().unwrap();
+
+        self.write_crash_armed.store(false, Ordering::Relaxed);
+        self.write_crashed.store(false, Ordering::Relaxed);
+        self.write_crash_countdown.store(-1, Ordering::Relaxed);
 
         state.fds.clear();
         state.pending_syncs.clear();
@@ -716,6 +764,10 @@ impl StorageIO for SimulatedIO {
         let stream = sid.0;
         self.jitter(stream, offset);
 
+        if self.write_crash_fired() {
+            return Err(io::Error::other("simulated crash mid-commit"));
+        }
+
         if state.storage.get(&sid).is_some_and(|s| s.io_poisoned) {
             return Err(io::Error::other("simulated EIO after delayed sync fault"));
         }
@@ -825,6 +877,10 @@ impl StorageIO for SimulatedIO {
             .map(|s| s.buffered.len() as u64)
             .unwrap_or(0);
         self.jitter(stream, fsize);
+
+        if self.write_crashed.load(Ordering::Relaxed) {
+            return Err(io::Error::other("simulated crash mid-commit"));
+        }
 
         if state.storage.get(&sid).is_some_and(|s| s.io_poisoned) {
             return Err(io::Error::other("simulated EIO after delayed sync fault"));

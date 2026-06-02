@@ -36,6 +36,8 @@ pub enum Scenario {
     RetentionTimeTravel,
     EventlogTimeTravelChaos,
     BlockChurnRecoverable,
+    ReadCorruption,
+    InlineCommit,
 }
 
 impl Scenario {
@@ -63,6 +65,8 @@ impl Scenario {
             Self::RetentionTimeTravel => "RetentionTimeTravel",
             Self::EventlogTimeTravelChaos => "EventlogTimeTravelChaos",
             Self::BlockChurnRecoverable => "BlockChurnRecoverable",
+            Self::ReadCorruption => "ReadCorruption",
+            Self::InlineCommit => "InlineCommit",
         }
     }
 
@@ -90,6 +94,8 @@ impl Scenario {
             Self::RetentionTimeTravel => "retention-time-travel",
             Self::EventlogTimeTravelChaos => "eventlog-time-travel-chaos",
             Self::BlockChurnRecoverable => "block-churn-recoverable",
+            Self::ReadCorruption => "read-corruption",
+            Self::InlineCommit => "inline-commit",
         }
     }
 
@@ -137,6 +143,12 @@ impl Scenario {
             Self::BlockChurnRecoverable => {
                 "Block-only churn under recoverable faults with crashes. Deterministic vehicle for refcount/reachability recovery bugs without the single-copy corruption-detection noise."
             }
+            Self::ReadCorruption => {
+                "Read-heavy workload under misdirected-read and bit-flip faults. Validates ReadRecord/ReadBlock results against the oracle at op time: the store must never serve content that does not match the requested address."
+            }
+            Self::InlineCommit => {
+                "Synchronous inline group-commit on the real backend with persisted-block verification and frequent restarts. Drives the GroupCommitConfig synchronous + verify_persisted_blocks path that production single-writer commits use."
+            }
         }
     }
 
@@ -171,6 +183,8 @@ impl Scenario {
         Self::RetentionTimeTravel,
         Self::EventlogTimeTravelChaos,
         Self::BlockChurnRecoverable,
+        Self::ReadCorruption,
+        Self::InlineCommit,
     ];
 }
 
@@ -249,6 +263,8 @@ pub fn config_for(scenario: Scenario, seed: Seed) -> GauntletConfig {
         Scenario::RetentionTimeTravel => retention_time_travel(seed),
         Scenario::EventlogTimeTravelChaos => eventlog_time_travel_chaos(seed),
         Scenario::BlockChurnRecoverable => block_churn_recoverable(seed),
+        Scenario::ReadCorruption => read_corruption(seed),
+        Scenario::InlineCommit => inline_commit(seed),
     }
 }
 
@@ -957,7 +973,22 @@ fn block_churn_recoverable(seed: Seed) -> GauntletConfig {
         io: IoBackend::Simulated {
             fault: FaultConfig::recoverable(),
         },
-        workload: sim_microbench_workload(),
+        workload: WorkloadModel {
+            weights: OpWeights {
+                add: 70,
+                delete: 10,
+                compact: 5,
+                checkpoint: 5,
+                mst_list: 10,
+                ..OpWeights::default()
+            },
+            size_distribution: SizeDistribution::Fixed(ValueBytes(128)),
+            collections: default_collections(),
+            key_space: KeySpaceSize(500),
+            did_space: DidSpaceSize(32),
+            retention_max_secs: RetentionMaxSecs(3600),
+            advance_max_secs: AdvanceMaxSecs(7200),
+        },
         op_count: OpCount(20_000),
         invariants: sim_invariants(),
         limits: RunLimits {
@@ -965,6 +996,74 @@ fn block_churn_recoverable(seed: Seed) -> GauntletConfig {
         },
         restart_policy: RestartPolicy::CrashAtSyscall(OpInterval(2_000)),
         store: sim_store(),
+        eventlog: None,
+        writer_concurrency: WriterConcurrency(1),
+        tolerate_op_errors: false,
+    }
+}
+
+fn read_corruption(seed: Seed) -> GauntletConfig {
+    GauntletConfig {
+        seed,
+        io: IoBackend::Simulated {
+            fault: FaultConfig::read_faults(),
+        },
+        workload: WorkloadModel {
+            weights: OpWeights {
+                add: 35,
+                delete: 3,
+                compact: 2,
+                read_record: 40,
+                read_block: 12,
+                mst_list: 8,
+                ..OpWeights::default()
+            },
+            size_distribution: SizeDistribution::Fixed(ValueBytes(128)),
+            collections: default_collections(),
+            key_space: KeySpaceSize(300),
+            did_space: DidSpaceSize(32),
+            retention_max_secs: RetentionMaxSecs(3600),
+            advance_max_secs: AdvanceMaxSecs(7200),
+        },
+        op_count: OpCount(20_000),
+        invariants: sim_invariants(),
+        limits: RunLimits {
+            max_wall_ms: Some(WallMs(10 * 60_000)),
+        },
+        restart_policy: RestartPolicy::Never,
+        store: sim_store(),
+        eventlog: None,
+        writer_concurrency: WriterConcurrency(1),
+        tolerate_op_errors: false,
+    }
+}
+
+fn inline_commit(seed: Seed) -> GauntletConfig {
+    GauntletConfig {
+        seed,
+        io: IoBackend::Real,
+        workload: block_workload(
+            block_weights(80, 10, 5, 5),
+            SizeDistribution::Fixed(ValueBytes(96)),
+            KeySpaceSize(300),
+        ),
+        op_count: OpCount(10_000),
+        invariants: phase2_invariants(),
+        limits: RunLimits {
+            max_wall_ms: Some(WallMs(120_000)),
+        },
+        restart_policy: RestartPolicy::EveryNOps(OpInterval(1_000)),
+        store: StoreConfig {
+            max_file_size: MaxFileSize(8 * 1024),
+            group_commit: GroupCommitConfig {
+                synchronous: true,
+                verify_persisted_blocks: true,
+                checkpoint_interval_ms: 100,
+                checkpoint_write_threshold: 16,
+                ..GroupCommitConfig::default()
+            },
+            shard_count: ShardCount(1),
+        },
         eventlog: None,
         writer_concurrency: WriterConcurrency(1),
         tolerate_op_errors: false,

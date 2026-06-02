@@ -153,6 +153,14 @@ pub(super) enum OpError {
     EventLogSync(String),
     #[error("eventlog retention: {0}")]
     EventLogRetention(String),
+    #[error("read validation: {0}")]
+    ReadValidation(String),
+}
+
+impl OpError {
+    pub(super) fn is_hard_violation(&self) -> bool {
+        matches!(self, OpError::ReadValidation(_))
+    }
 }
 
 pub struct EventLogState<S: StorageIO + Send + Sync + 'static> {
@@ -593,6 +601,14 @@ where
         let root_before = root;
         match apply_op(live, &mut root, &mut oracle, op, &config.workload, &clock).await {
             Ok(()) => {}
+            Err(e) if e.is_hard_violation() => {
+                violations.push(InvariantViolation {
+                    invariant: "ReadValidation",
+                    detail: format!("op {idx}: {e}"),
+                });
+                halt_ops = true;
+                continue;
+            }
             Err(e) => {
                 if tolerate_op_errors {
                     op_errors_counter.fetch_add(1, Ordering::Relaxed);
@@ -1196,6 +1212,85 @@ fn did_hash_for_seed(seed: DidSeed) -> DidHash {
     DidHash::from_did(&format!("did:plc:gauntlet{:08x}", seed.0))
 }
 
+fn validate_block_self_consistent<S: StorageIO + Send + Sync + 'static, C: Clock>(
+    store: &Arc<TranquilBlockStore<S, C>>,
+    requested: CidBytes,
+) -> Result<(), OpError> {
+    match store.get_block_sync(&requested) {
+        Ok(Some(bytes)) => {
+            let actual = hash_to_cid_bytes(&bytes);
+            if actual == requested {
+                Ok(())
+            } else {
+                Err(OpError::ReadValidation(format!(
+                    "block served under cid {} hashes to {}: store returned content not matching its address",
+                    hex_short(&requested),
+                    hex_short(&actual),
+                )))
+            }
+        }
+        Ok(None) => Ok(()),
+        Err(_) => Ok(()),
+    }
+}
+
+fn mst_list_violation(
+    expected: &std::collections::HashMap<String, CidBytes>,
+    actual: &std::collections::HashMap<String, CidBytes>,
+) -> Option<String> {
+    if expected == actual {
+        return None;
+    }
+    let missing: Vec<String> = expected
+        .iter()
+        .filter(|(k, v)| actual.get(*k) != Some(v))
+        .map(|(k, _)| k.clone())
+        .take(8)
+        .collect();
+    let extra: Vec<String> = actual
+        .iter()
+        .filter(|(k, v)| expected.get(*k) != Some(v))
+        .map(|(k, _)| k.clone())
+        .take(8)
+        .collect();
+    Some(format!(
+        "MST list walk mismatch: oracle has {} live records, walk found {}; missing-or-wrong {missing:?}; extra-or-wrong {extra:?}",
+        expected.len(),
+        actual.len(),
+    ))
+}
+
+async fn validate_read_record<S: StorageIO + Send + Sync + 'static, C: Clock>(
+    store: &Arc<TranquilBlockStore<S, C>>,
+    root: Cid,
+    key: &str,
+    expected: Option<CidBytes>,
+    has_lost_blocks: bool,
+) -> Result<(), OpError> {
+    let mst = Mst::load(store.clone(), root, None);
+    let Ok(Some(value_cid)) = mst.get(key).await else {
+        return Ok(());
+    };
+    let actual = try_cid_to_fixed(&value_cid)?;
+    match expected {
+        Some(x) if !has_lost_blocks && actual != x => {
+            return Err(OpError::ReadValidation(format!(
+                "{key}: MST returned cid {} but oracle holds {}",
+                hex_short(&actual),
+                hex_short(&x),
+            )));
+        }
+        None if !has_lost_blocks => {
+            return Err(OpError::ReadValidation(format!(
+                "{key}: MST holds a record with cid {} but the oracle has no live record at this key",
+                hex_short(&actual),
+            )));
+        }
+        _ => {}
+    }
+    validate_block_self_consistent(store, actual)
+}
+
 pub(super) async fn apply_op<S: StorageIO + Send + Sync + 'static, C: Clock>(
     harness: &mut Harness<S, C>,
     root: &mut Option<Cid>,
@@ -1311,15 +1406,41 @@ pub(super) async fn apply_op<S: StorageIO + Send + Sync + 'static, C: Clock>(
         Op::ReadRecord { collection, rkey } => {
             let Some(r) = *root else { return Ok(()) };
             let key = format!("{}/{}", collection.0, rkey.0);
-            let mst = Mst::load(harness.store.clone(), r, None);
-            let _ = mst.get(&key).await;
-            Ok(())
+            let expected = oracle.expected_record_cid(collection, rkey);
+            validate_read_record(&harness.store, r, &key, expected, oracle.has_lost_blocks()).await
         }
         Op::ReadBlock { value_seed } => {
             let record_bytes = make_record_bytes(*value_seed, workload.size_distribution);
             let record_cid = hash_to_cid_bytes(&record_bytes);
-            let _ = harness.store.get_block_sync(&record_cid);
-            Ok(())
+            validate_block_self_consistent(&harness.store, record_cid)
+        }
+        Op::MstList => {
+            let Some(r) = *root else {
+                return Ok(());
+            };
+            let store = harness.store.clone();
+            let lost = oracle.lost_blocks().clone();
+            let walked = tokio::task::spawn_blocking(move || {
+                super::chaos_walker::walk_mst_entries_tolerant(&store, r, &lost)
+            })
+            .await
+            .map_err(|e| OpError::Join(e.to_string()))?;
+            if oracle.has_lost_blocks() {
+                return Ok(());
+            }
+            let entries = match walked {
+                Ok(Some(entries)) => entries,
+                Ok(None) | Err(_) => return Ok(()),
+            };
+            let actual: std::collections::HashMap<String, CidBytes> = entries.into_iter().collect();
+            let expected: std::collections::HashMap<String, CidBytes> = oracle
+                .live_records()
+                .map(|(c, rk, v)| (format!("{}/{}", c.0, rk.0), *v))
+                .collect();
+            match mst_list_violation(&expected, &actual) {
+                None => Ok(()),
+                Some(detail) => Err(OpError::ReadValidation(detail)),
+            }
         }
         Op::ExternalDeleteDataFile { choice } => {
             let s = harness.store.clone();
@@ -1664,14 +1785,28 @@ async fn apply_op_concurrent<S: StorageIO + Send + Sync + 'static, C: Clock>(
                 return Ok(());
             };
             let key = format!("{}/{}", collection.0, rkey.0);
-            let mst = Mst::load(shared.store.clone(), r, None);
-            let _ = mst.get(&key).await;
-            Ok(())
+            validate_read_record(&shared.store, r, &key, None, true).await
         }
         Op::ReadBlock { value_seed } => {
             let record_bytes = make_record_bytes(*value_seed, workload.size_distribution);
             let record_cid = hash_to_cid_bytes(&record_bytes);
-            let _ = shared.store.get_block_sync(&record_cid);
+            validate_block_self_consistent(&shared.store, record_cid)
+        }
+        Op::MstList => {
+            let r = { shared.write.lock().await.root };
+            let Some(r) = r else {
+                return Ok(());
+            };
+            let store = shared.store.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                super::chaos_walker::walk_mst_entries_tolerant(
+                    &store,
+                    r,
+                    &std::collections::HashSet::new(),
+                )
+            })
+            .await
+            .map_err(|e| OpError::Join(e.to_string()))?;
             Ok(())
         }
         Op::ExternalDeleteDataFile { choice } => {
@@ -1711,6 +1846,12 @@ async fn writer_task<S: StorageIO + Send + Sync + 'static, C: Clock>(
         match apply_op_concurrent(&shared, op, &workload, &clock).await {
             Ok(()) => {
                 ops_counter.fetch_max(idx + 1, Ordering::Relaxed);
+            }
+            Err(e) if e.is_hard_violation() => {
+                return Some(InvariantViolation {
+                    invariant: "ReadValidation",
+                    detail: format!("op {idx}: {e}"),
+                });
             }
             Err(e) => {
                 if tolerate_op_errors {
