@@ -171,7 +171,7 @@ async fn fetch_lexicon_via_atproto(nsid: &str) -> Result<LexiconDoc, ScopeExpans
         return Err(ScopeExpansionError::InvalidNsid(nsid.to_string()));
     }
 
-    let authority = parts[..2]
+    let authority = parts[..parts.len() - 1]
         .iter()
         .rev()
         .cloned()
@@ -661,26 +661,23 @@ mod tests {
         }
     }
 
+    fn dns_authority(nsid: &str) -> String {
+        let parts: Vec<&str> = nsid.split('.').collect();
+        parts[..parts.len() - 1]
+            .iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+
     #[test]
     fn test_nsid_authority_extraction_for_dns() {
-        let nsid = "io.atcr.authFullApp";
-        let parts: Vec<&str> = nsid.split('.').collect();
-        let authority = parts[..2]
-            .iter()
-            .rev()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(".");
-        assert_eq!(authority, "atcr.io");
-
-        let nsid2 = "app.bsky.feed.post";
-        let parts2: Vec<&str> = nsid2.split('.').collect();
-        let authority2 = parts2[..2]
-            .iter()
-            .rev()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(".");
-        assert_eq!(authority2, "bsky.app");
+        assert_eq!(dns_authority("io.atcr.authFullApp"), "atcr.io");
+        assert_eq!(dns_authority("app.bsky.feed.post"), "feed.bsky.app");
+        assert_eq!(
+            dns_authority("community.lexicon.bookmarks.authManageBookmarks"),
+            "bookmarks.lexicon.community"
+        );
     }
 }
