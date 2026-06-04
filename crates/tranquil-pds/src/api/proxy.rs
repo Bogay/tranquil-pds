@@ -109,6 +109,35 @@ fn is_protected_method(method: &str) -> bool {
     PROTECTED_METHODS.contains(method)
 }
 
+/// Fetch the `feed` generator record from the AppView and return its `did`.
+async fn resolve_feed_generator_did(appview_url: &str, query: Option<&str>) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct GetFeedQuery {
+        feed: String,
+    }
+
+    let feed = serde_urlencoded::from_str::<GetFeedQuery>(query?)
+        .ok()?
+        .feed;
+    let at_uri = crate::types::AtUri::new(feed).ok()?;
+    let repo = at_uri.did()?;
+    let collection = at_uri.collection()?;
+    let rkey = at_uri.rkey()?;
+
+    let resp = proxy_client()
+        .get(format!("{appview_url}/xrpc/com.atproto.repo.getRecord"))
+        .query(&[("repo", repo), ("collection", collection), ("rkey", rkey)])
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        warn!(status = %resp.status(), "getFeed proxy: getRecord for feed generator failed");
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    body.get("value")?.get("did")?.as_str().map(str::to_string)
+}
+
 pub struct XrpcProxyLayer {
     state: AppState,
 }
@@ -287,10 +316,27 @@ async fn proxy_handler(
                     },
                 };
 
+                // getFeed must be audienced to the feed generator, not the AppView.
+                let (token_aud, token_lxm) = if method == "app.bsky.feed.getFeed" {
+                    match resolve_feed_generator_did(&resolved.url, query.as_deref()).await {
+                        Some(feed_did) => (feed_did, "app.bsky.feed.getFeedSkeleton"),
+                        None => {
+                            warn!(
+                                "getFeed proxy: could not resolve feed generator DID; refusing \
+                                 to mint an AppView-audienced token"
+                            );
+                            return ApiError::InvalidRequest("Could not resolve feed".into())
+                                .into_response();
+                        }
+                    }
+                } else {
+                    (resolved.did.clone(), method)
+                };
+
                 match crate::auth::create_service_token(
                     &auth_user.did,
-                    &resolved.did,
-                    Some(method),
+                    &token_aud,
+                    Some(token_lxm),
                     &key_bytes,
                 ) {
                     Ok(new_token) => {
