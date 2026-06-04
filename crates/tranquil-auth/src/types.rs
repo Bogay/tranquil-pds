@@ -15,7 +15,8 @@ impl TokenType {
         match self {
             Self::Access => "at+jwt",
             Self::Refresh => "refresh+jwt",
-            Self::Service => "jwt",
+            // RFC 7519 §5.1 recommends the uppercase "JWT".
+            Self::Service => "JWT",
         }
     }
 }
@@ -288,6 +289,17 @@ mod tests {
     #[test]
     fn token_type_rejects_unknown() {
         assert!(TokenType::from_str("bearer").is_err());
+    }
+
+    #[test]
+    fn service_token_header_serializes_typ_as_uppercase_jwt() {
+        // RFC 7519 §5.1 recommends the JWT `typ` header value be uppercase "JWT".
+        let header = Header {
+            alg: SigningAlgorithm::ES256K,
+            typ: TokenType::Service,
+        };
+        let json = serde_json::to_string(&header).expect("serialize header");
+        assert!(json.contains(r#""typ":"JWT""#), "got {json}");
     }
 
     #[test]
