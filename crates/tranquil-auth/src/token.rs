@@ -35,7 +35,7 @@ pub fn create_access_token_with_scope_metadata(
         scope,
         TokenType::Access,
         key_bytes,
-        Duration::minutes(15),
+        Duration::minutes(120),
         hostname,
     )
 }
@@ -54,7 +54,7 @@ pub fn create_access_token_with_delegation(
         scope,
         TokenType::Access,
         key_bytes,
-        Duration::minutes(15),
+        Duration::minutes(120),
         act,
         hostname,
     )
@@ -69,7 +69,7 @@ pub fn create_refresh_token_with_metadata(
         TokenScope::Refresh.as_str(),
         TokenType::Refresh,
         key_bytes,
-        Duration::days(14),
+        Duration::days(90),
         None,
     )
 }
@@ -198,7 +198,7 @@ pub fn create_access_token_hs256_with_metadata(
         TokenScope::Access.as_str(),
         TokenType::Access,
         secret,
-        Duration::minutes(15),
+        Duration::minutes(120),
     )
 }
 
@@ -211,7 +211,7 @@ pub fn create_refresh_token_hs256_with_metadata(
         TokenScope::Refresh.as_str(),
         TokenType::Refresh,
         secret,
-        Duration::days(14),
+        Duration::days(90),
     )
 }
 
