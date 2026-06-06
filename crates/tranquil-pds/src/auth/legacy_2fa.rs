@@ -131,6 +131,16 @@ fn current_timestamp() -> u64 {
     u64::try_from(Utc::now().timestamp()).unwrap_or(0)
 }
 
+pub fn looks_like_totp_token(code: &str) -> bool {
+    let c = code.trim();
+    (c.len() == 6 && c.bytes().all(|b| b.is_ascii_digit()))
+        || crate::auth::is_backup_code_format(c)
+}
+
+pub fn used_totp_factor(has_totp: bool, auth_factor_token: Option<&str>) -> bool {
+    has_totp && auth_factor_token.is_some_and(looks_like_totp_token)
+}
+
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -141,6 +151,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
         == 0
 }
 
+#[derive(Debug)]
 pub enum Legacy2faOutcome {
     NotRequired,
     Blocked,
@@ -170,6 +181,7 @@ pub async fn process_legacy_2fa(
     did: &Did,
     ctx: &Legacy2faContext,
     auth_factor_token: Option<&str>,
+    verify_totp: impl AsyncFnOnce(&str) -> bool,
 ) -> Result<Legacy2faOutcome, Legacy2faFlowError> {
     if !ctx.requires_2fa() {
         return Ok(Legacy2faOutcome::NotRequired);
@@ -185,8 +197,16 @@ pub async fn process_legacy_2fa(
             Ok(Legacy2faOutcome::ChallengeSent(code))
         }
         Some(token) => {
-            validate_challenge(cache, did, token).await?;
-            Ok(Legacy2faOutcome::Verified)
+            if ctx.has_totp && looks_like_totp_token(token) {
+                if verify_totp(token).await {
+                    Ok(Legacy2faOutcome::Verified)
+                } else {
+                    Err(Legacy2faFlowError::Validation(ValidationError::InvalidCode))
+                }
+            } else {
+                validate_challenge(cache, did, token).await?;
+                Ok(Legacy2faOutcome::Verified)
+            }
         }
     }
 }
@@ -443,7 +463,9 @@ mod tests {
             allow_legacy_login: true,
         };
 
-        let outcome = process_legacy_2fa(&cache, &did, &ctx, None).await.unwrap();
+        let outcome = process_legacy_2fa(&cache, &did, &ctx, None, reject_totp)
+            .await
+            .unwrap();
         assert!(matches!(outcome, Legacy2faOutcome::NotRequired));
     }
 
@@ -458,7 +480,9 @@ mod tests {
             allow_legacy_login: true,
         };
 
-        let outcome = process_legacy_2fa(&cache, &did, &ctx, None).await.unwrap();
+        let outcome = process_legacy_2fa(&cache, &did, &ctx, None, reject_totp)
+            .await
+            .unwrap();
         assert!(matches!(outcome, Legacy2faOutcome::NotRequired));
     }
 
@@ -473,7 +497,9 @@ mod tests {
             allow_legacy_login: false,
         };
 
-        let outcome = process_legacy_2fa(&cache, &did, &ctx, None).await.unwrap();
+        let outcome = process_legacy_2fa(&cache, &did, &ctx, None, reject_totp)
+            .await
+            .unwrap();
         assert!(matches!(outcome, Legacy2faOutcome::Blocked));
     }
 
@@ -488,7 +514,9 @@ mod tests {
             allow_legacy_login: true,
         };
 
-        let outcome = process_legacy_2fa(&cache, &did, &ctx, None).await.unwrap();
+        let outcome = process_legacy_2fa(&cache, &did, &ctx, None, reject_totp)
+            .await
+            .unwrap();
         assert!(matches!(outcome, Legacy2faOutcome::ChallengeSent(_)));
     }
 
@@ -503,7 +531,9 @@ mod tests {
             allow_legacy_login: false,
         };
 
-        let outcome = process_legacy_2fa(&cache, &did, &ctx, None).await.unwrap();
+        let outcome = process_legacy_2fa(&cache, &did, &ctx, None, reject_totp)
+            .await
+            .unwrap();
         assert!(matches!(outcome, Legacy2faOutcome::ChallengeSent(_)));
     }
 
@@ -520,7 +550,7 @@ mod tests {
 
         let code = create_challenge(&cache, &did).await.unwrap();
 
-        let outcome = process_legacy_2fa(&cache, &did, &ctx, Some(code.as_str()))
+        let outcome = process_legacy_2fa(&cache, &did, &ctx, Some(code.as_str()), reject_totp)
             .await
             .unwrap();
         assert!(matches!(outcome, Legacy2faOutcome::Verified));
@@ -549,5 +579,154 @@ mod tests {
 
         let result = validate_challenge(&cache, &did, "12345678").await;
         assert_eq!(result.unwrap_err(), ValidationError::CacheUnavailable);
+    }
+
+    async fn reject_totp(_code: &str) -> bool {
+        false
+    }
+
+    async fn accept_totp(_code: &str) -> bool {
+        true
+    }
+
+    #[tokio::test]
+    async fn test_totp_shaped_token_accepted_via_verifier() {
+        let cache = MockCache::new();
+        let did = Did::new("did:plc:totp1".to_string()).unwrap();
+        let ctx = Legacy2faContext {
+            is_app_password: false,
+            email_2fa_enabled: false,
+            has_totp: true,
+            allow_legacy_login: true,
+        };
+
+        let outcome = process_legacy_2fa(&cache, &did, &ctx, Some("123456"), accept_totp)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, Legacy2faOutcome::Verified));
+    }
+
+    #[tokio::test]
+    async fn test_totp_shaped_token_rejected_does_not_touch_email_challenge() {
+        let cache = MockCache::new();
+        let did = Did::new("did:plc:totp2".to_string()).unwrap();
+        let ctx = Legacy2faContext {
+            is_app_password: false,
+            email_2fa_enabled: true,
+            has_totp: true,
+            allow_legacy_login: true,
+        };
+
+        // An email challenge exists for this user.
+        let email_code = create_challenge(&cache, &did).await.unwrap();
+
+        // Five wrong TOTP-shaped attempts. If these incremented the email attempt
+        // counter, the email challenge would be exhausted (MAX_ATTEMPTS = 5).
+        for _ in 0..5 {
+            let err = process_legacy_2fa(&cache, &did, &ctx, Some("000000"), reject_totp)
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                err,
+                Legacy2faFlowError::Validation(ValidationError::InvalidCode)
+            ));
+        }
+
+        // The email challenge is still valid and consumable.
+        let outcome =
+            process_legacy_2fa(&cache, &did, &ctx, Some(email_code.as_str()), reject_totp)
+                .await
+                .unwrap();
+        assert!(matches!(outcome, Legacy2faOutcome::Verified));
+    }
+
+    #[tokio::test]
+    async fn test_email_shaped_token_routes_to_email_path_when_totp_present() {
+        let cache = MockCache::new();
+        let did = Did::new("did:plc:totp3".to_string()).unwrap();
+        let ctx = Legacy2faContext {
+            is_app_password: false,
+            email_2fa_enabled: true,
+            has_totp: true,
+            allow_legacy_login: true,
+        };
+
+        let email_code = create_challenge(&cache, &did).await.unwrap();
+
+        // reject_totp would fail if this routed to the verifier; it must route to email.
+        let outcome =
+            process_legacy_2fa(&cache, &did, &ctx, Some(email_code.as_str()), reject_totp)
+                .await
+                .unwrap();
+        assert!(matches!(outcome, Legacy2faOutcome::Verified));
+    }
+
+    #[tokio::test]
+    async fn test_backup_code_shaped_token_routes_to_verifier() {
+        let cache = MockCache::new();
+        let did = Did::new("did:plc:totp4".to_string()).unwrap();
+        let ctx = Legacy2faContext {
+            is_app_password: false,
+            email_2fa_enabled: false,
+            has_totp: true,
+            allow_legacy_login: true,
+        };
+
+        // No email challenge created. If this routed to email it would be
+        // ChallengeNotFound; Verified proves it went to the verifier.
+        let outcome = process_legacy_2fa(&cache, &did, &ctx, Some("ABCD2345"), accept_totp)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, Legacy2faOutcome::Verified));
+    }
+
+    #[tokio::test]
+    async fn test_totp_shaped_token_ignored_when_no_totp() {
+        let cache = MockCache::new();
+        let did = Did::new("did:plc:totp5".to_string()).unwrap();
+        let ctx = Legacy2faContext {
+            is_app_password: false,
+            email_2fa_enabled: true,
+            has_totp: false,
+            allow_legacy_login: false,
+        };
+
+        // has_totp = false -> 6-digit token routes to email path; no challenge -> NotFound.
+        let err = process_legacy_2fa(&cache, &did, &ctx, Some("123456"), reject_totp)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            Legacy2faFlowError::Validation(ValidationError::ChallengeNotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_looks_like_totp_token() {
+        // 6-digit TOTP codes
+        assert!(looks_like_totp_token("123456"));
+        assert!(looks_like_totp_token("  000000  "));
+        // backup-code format (8 chars, backup alphabet)
+        assert!(looks_like_totp_token("ABCD2345"));
+        // email challenge codes normalize to 10 alphanumeric chars -> not TOTP-shaped
+        assert!(!looks_like_totp_token("ABCDEFGHIJ"));
+        assert!(!looks_like_totp_token("ABCDE-FGHIJ"));
+        // wrong lengths / non-digits
+        assert!(!looks_like_totp_token("12345"));
+        assert!(!looks_like_totp_token("1234567"));
+        assert!(!looks_like_totp_token("12345A"));
+        assert!(!looks_like_totp_token(""));
+    }
+
+    #[test]
+    fn test_used_totp_factor() {
+        // strong MFA factors completed the login -> true
+        assert!(used_totp_factor(true, Some("123456")));
+        assert!(used_totp_factor(true, Some("ABCD2345")));
+        // email-shaped code, or no token, or no TOTP on the account -> false
+        assert!(!used_totp_factor(true, Some("ABCDEFGHIJ")));
+        assert!(!used_totp_factor(true, None));
+        assert!(!used_totp_factor(false, Some("123456")));
+        assert!(!used_totp_factor(true, Some("")));
     }
 }

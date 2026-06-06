@@ -15,7 +15,10 @@ use tranquil_pds::auth::{
     Active, Auth, NormalizedLoginIdentifier, Permissive, require_legacy_session_mfa,
     require_reauth_window,
 };
-use tranquil_pds::rate_limit::{LoginLimit, RateLimited, RefreshSessionLimit};
+use tranquil_pds::rate_limit::{
+    LoginLimit, RateLimited, RefreshSessionLimit, TotpVerifyLimit,
+    check_user_rate_limit_with_message,
+};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{AccountState, Did, Handle, PlainPassword};
 use tranquil_types::TokenId;
@@ -168,17 +171,33 @@ pub async fn create_session(
     let has_totp = row.totp_enabled;
     let email_2fa_enabled = row.email_2fa_enabled;
     let is_legacy_login = has_totp || email_2fa_enabled;
+    let used_totp_factor = tranquil_pds::auth::legacy_2fa::used_totp_factor(
+        has_totp,
+        input.auth_factor_token.as_deref(),
+    );
     let twofa_ctx = tranquil_pds::auth::legacy_2fa::Legacy2faContext {
         is_app_password: app_password_name.is_some(),
         email_2fa_enabled,
         has_totp,
         allow_legacy_login: row.allow_legacy_login,
     };
+    if let Some(token) = input.auth_factor_token.as_deref()
+        && has_totp
+        && tranquil_pds::auth::legacy_2fa::looks_like_totp_token(token)
+    {
+        check_user_rate_limit_with_message::<TotpVerifyLimit>(
+            &state,
+            row.did.as_str(),
+            "Too many verification attempts. Please try again in a few minutes.",
+        )
+        .await?;
+    }
     match tranquil_pds::auth::legacy_2fa::process_legacy_2fa(
         state.cache.as_ref(),
         &row.did,
         &twofa_ctx,
         input.auth_factor_token.as_deref(),
+        async |t: &str| crate::server::totp::verify_totp_or_backup_for_user(&state, &row.did, t).await,
     )
     .await
     {
@@ -285,7 +304,7 @@ pub async fn create_session(
         error!("Failed to insert session: {:?}", e);
         return Err(ApiError::InternalError(None));
     }
-    if is_legacy_login {
+    if is_legacy_login && !used_totp_factor {
         warn!(
             did = %row.did,
             ip = %client_ip,
