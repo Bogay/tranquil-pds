@@ -4,6 +4,7 @@ use crate::crdt::lww_map::LwwDelta;
 use crate::metrics;
 use crate::transport::{ChannelTag, IncomingFrame, Transport};
 use foca::{Config, Foca, Notification, Runtime, Timer};
+use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::collections::HashSet;
@@ -187,6 +188,7 @@ impl GossipEngine {
         let (timer_tx, mut timer_rx) = mpsc::channel::<(Timer<PeerId>, Duration)>(256);
 
         const WATERMARK_STALE_SECS: u64 = 30;
+        const ANTI_ENTROPY_SECS: u64 = 30;
 
         tokio::spawn(async move {
             let mut runtime = BufferedRuntime::new();
@@ -215,6 +217,11 @@ impl GossipEngine {
 
             let mut gossip_tick = tokio::time::interval(Duration::from_millis(gossip_interval_ms));
             gossip_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            let mut anti_entropy_tick =
+                tokio::time::interval(Duration::from_secs(ANTI_ENTROPY_SECS));
+            anti_entropy_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut ae_rng = StdRng::from_os_rng();
 
             loop {
                 tokio::select! {
@@ -339,6 +346,25 @@ impl GossipEngine {
                             rate_limit_bytes = store.rate_limit_estimated_bytes(),
                             "gossip health check"
                         );
+                    }
+                    _ = anti_entropy_tick.tick() => {
+                        let peers: Vec<SocketAddr> = members.active_peers().collect();
+                        if !peers.is_empty() {
+                            let snapshot = store.peek_full_state();
+                            if !snapshot.is_empty() {
+                                let peer = peers[ae_rng.random_range(0..peers.len())];
+                                chunk_and_serialize(&snapshot).into_iter().for_each(|chunk| {
+                                    let t = transport.clone();
+                                    let c = shutdown.clone();
+                                    tokio::spawn(async move {
+                                        tokio::select! {
+                                            _ = c.cancelled() => {}
+                                            _ = t.send(peer, ChannelTag::CrdtSync, &chunk) => {}
+                                        }
+                                    });
+                                });
+                            }
+                        }
                     }
                 }
             }
