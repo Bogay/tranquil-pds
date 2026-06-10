@@ -22,7 +22,7 @@ impl RippleEngine {
         let store = Arc::new(ShardedCrdtStore::new(config.machine_id));
 
         let (transport, incoming_rx) =
-            Transport::bind(config.bind_addr, shutdown.clone())
+            Transport::bind(config.bind_addr, None, shutdown.clone())
                 .await
                 .map_err(|e| RippleStartError::Bind(e.to_string()))?;
 

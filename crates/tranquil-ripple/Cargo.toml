@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 backon = { workspace = true }
 bincode = { workspace = true }
 foca = { workspace = true }
+hkdf = { workspace = true }
 metrics = { workspace = true }
 parking_lot = { workspace = true }
 quinn = { workspace = true }
@@ -19,10 +20,12 @@ rand = "0.9"
 rcgen = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "io-util", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+x509-parser = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }
