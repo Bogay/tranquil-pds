@@ -160,18 +160,17 @@ impl Cache for NoOpCache {
     }
 }
 
-pub struct NoOpRateLimiter;
-
-#[async_trait]
-impl DistributedRateLimiter for NoOpRateLimiter {
-    async fn check_rate_limit(&self, _key: &str, _limit: u32, _window_ms: u64) -> bool {
-        true
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum CacheInitError {
+    #[error("ripple config: {0}")]
+    Config(#[from] tranquil_ripple::RippleConfigError),
+    #[error("ripple start: {0}")]
+    Start(#[from] tranquil_ripple::RippleStartError),
 }
 
 pub async fn create_cache(
     shutdown: tokio_util::sync::CancellationToken,
-) -> (Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>) {
+) -> Result<(Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>), CacheInitError> {
     let cache_cfg = tranquil_config::try_get().map(|c| &c.cache);
     let backend = cache_cfg.map(|c| c.backend.as_str()).unwrap_or("ripple");
     let valkey_url = cache_cfg.and_then(|c| c.valkey_url.as_deref());
@@ -183,7 +182,7 @@ pub async fn create_cache(
                 Ok(cache) => {
                     tracing::info!("using valkey cache at {url}");
                     let rate_limiter = Arc::new(RedisRateLimiter::new(cache.connection()));
-                    return (Arc::new(cache), rate_limiter);
+                    return Ok((Arc::new(cache), rate_limiter));
                 }
                 Err(e) => {
                     tracing::warn!("failed to connect to valkey: {e}. falling back to ripple.");
@@ -201,26 +200,13 @@ pub async fn create_cache(
         );
     }
 
-    match tranquil_ripple::RippleConfig::from_config() {
-        Ok(config) => {
-            let peer_count = config.seed_peers.len();
-            match tranquil_ripple::RippleEngine::start(config, shutdown).await {
-                Ok((cache, rate_limiter, _bound_addr)) => {
-                    match peer_count {
-                        0 => tracing::info!("ripple cache started (single-node)"),
-                        n => tracing::info!("ripple cache started ({n} seed peers)"),
-                    }
-                    (cache, rate_limiter)
-                }
-                Err(e) => {
-                    tracing::error!("ripple engine failed to start: {e:#}. running without cache.");
-                    (Arc::new(NoOpCache), Arc::new(NoOpRateLimiter))
-                }
-            }
-        }
-        Err(e) => {
-            tracing::error!("ripple config error: {e:#}. running without cache.");
-            (Arc::new(NoOpCache), Arc::new(NoOpRateLimiter))
-        }
+    let config = tranquil_ripple::RippleConfig::from_config()?;
+    let peer_count = config.seed_peers.len();
+    let (cache, rate_limiter, _bound_addr) =
+        tranquil_ripple::RippleEngine::start(config, shutdown).await?;
+    match peer_count {
+        0 => tracing::info!("ripple cache started as a single node"),
+        n => tracing::info!("ripple cache started with {n} seed peers"),
     }
+    Ok((cache, rate_limiter))
 }

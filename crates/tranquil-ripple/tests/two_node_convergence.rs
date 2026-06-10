@@ -16,6 +16,8 @@ async fn spawn_pair(
         machine_id: 1,
         gossip_interval_ms: 100,
         cache_max_bytes: 64 * 1024 * 1024,
+        cluster_key: None,
+        allow_insecure: false,
     };
     let (cache_a, rl_a, addr_a) = RippleEngine::start(config_a, shutdown.clone())
         .await
@@ -27,6 +29,8 @@ async fn spawn_pair(
         machine_id: 2,
         gossip_interval_ms: 100,
         cache_max_bytes: 64 * 1024 * 1024,
+        cluster_key: None,
+        allow_insecure: false,
     };
     let (cache_b, rl_b, _addr_b) = RippleEngine::start(config_b, shutdown.clone())
         .await
@@ -634,6 +638,8 @@ async fn two_node_partition_recovery() {
         machine_id: 100,
         gossip_interval_ms: 100,
         cache_max_bytes: 64 * 1024 * 1024,
+        cluster_key: None,
+        allow_insecure: false,
     };
     let (cache_a, _rl_a, addr_a) = RippleEngine::start(config_a, shutdown.clone())
         .await
@@ -660,6 +666,8 @@ async fn two_node_partition_recovery() {
         machine_id: 200,
         gossip_interval_ms: 100,
         cache_max_bytes: 64 * 1024 * 1024,
+        cluster_key: None,
+        allow_insecure: false,
     };
     let (cache_b, _rl_b, _addr_b) = RippleEngine::start(config_b, shutdown.clone())
         .await

@@ -312,7 +312,9 @@
 #valkey_url =
 
 [cache.ripple]
-# Address to bind the Ripple gossip protocol listener.
+# Address to bind the Ripple gossip protocol listener. With the default
+# value and no cluster_key or peers configured, the listener binds
+# loopback instead and runs as a single node.
 #
 # Can also be specified via environment variable `RIPPLE_BIND`.
 #
@@ -342,6 +344,20 @@
 #
 # Default value: 256
 #cache_max_mb = 256
+
+# Pre-shared cluster key authenticating ripple peers. Every node in the
+# cluster must set the same value. When unset, peers are unauthenticated.
+#
+# Can also be specified via environment variable `RIPPLE_CLUSTER_KEY`.
+#cluster_key =
+
+# Allow ripple to bind a non-loopback address without a cluster key.
+# Peers will be unauthenticated. Intended for trusted private networks.
+#
+# Can also be specified via environment variable `RIPPLE_ALLOW_INSECURE`.
+#
+# Default value: false
+#allow_insecure = false
 
 [plc]
 # Base URL of the PLC directory.

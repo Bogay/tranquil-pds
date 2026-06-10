@@ -259,6 +259,9 @@ impl TranquilConfig {
         // -- tls --------------------------------------------------------------
         self.server.tls.validate(&mut errors);
 
+        // -- cache ------------------------------------------------------------
+        self.cache.validate(&mut errors);
+
         // -- SSO providers ----------------------------------------------------
         self.validate_sso_provider("sso.github", &self.sso.github, &mut errors);
         self.validate_sso_provider("sso.google", &self.sso.google, &mut errors);
@@ -784,6 +787,31 @@ pub struct CacheConfig {
 
     #[config(nested)]
     pub ripple: RippleCacheConfig,
+}
+
+impl CacheConfig {
+    pub fn validate(&self, errors: &mut Vec<String>) {
+        let clustered = self
+            .ripple
+            .peers
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .any(|p| !p.trim().is_empty());
+        let keyed = self
+            .ripple
+            .cluster_key
+            .as_deref()
+            .is_some_and(|k| !k.trim().is_empty());
+        if self.backend == "ripple" && clustered && !keyed && !self.ripple.allow_insecure {
+            errors.push(
+                "cache.ripple.peers (RIPPLE_PEERS) is set without cache.ripple.cluster_key \
+                 (RIPPLE_CLUSTER_KEY); set the cluster key to authenticate peers, or set \
+                 cache.ripple.allow_insecure (RIPPLE_ALLOW_INSECURE) for a trusted private network"
+                    .to_string(),
+            );
+        }
+    }
 }
 
 #[derive(Debug, Config)]
@@ -1444,7 +1472,9 @@ fn split_comma_list(value: &str) -> Result<Vec<String>, std::convert::Infallible
 #[derive(Debug, Config)]
 #[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct RippleCacheConfig {
-    /// Address to bind the Ripple gossip protocol listener.
+    /// Address to bind the Ripple gossip protocol listener. With the default
+    /// value and no cluster_key or peers configured, the listener binds
+    /// loopback instead and runs as a single node.
     #[config(env = "RIPPLE_BIND", default = "0.0.0.0:0")]
     pub bind_addr: String,
 
@@ -1463,6 +1493,16 @@ pub struct RippleCacheConfig {
     /// Maximum cache size in megabytes.
     #[config(env = "RIPPLE_CACHE_MAX_MB", default = 256)]
     pub cache_max_mb: usize,
+
+    /// Pre-shared cluster key authenticating ripple peers. Every node in the
+    /// cluster must set the same value. When unset, peers are unauthenticated.
+    #[config(env = "RIPPLE_CLUSTER_KEY")]
+    pub cluster_key: Option<String>,
+
+    /// Allow ripple to bind a non-loopback address without a cluster key.
+    /// Peers will be unauthenticated. Intended for trusted private networks.
+    #[config(env = "RIPPLE_ALLOW_INSECURE", default = false)]
+    pub allow_insecure: bool,
 }
 
 #[derive(Debug, Config)]
@@ -1857,6 +1897,52 @@ port = 587
             errors.iter().any(|e| e.contains("http3")),
             "expected http3 error, got {errors:?}"
         );
+    }
+
+    fn cache_config_for_test(
+        peers: Option<Vec<String>>,
+        cluster_key: Option<&str>,
+        allow_insecure: bool,
+    ) -> CacheConfig {
+        CacheConfig {
+            backend: "ripple".to_string(),
+            valkey_url: None,
+            ripple: RippleCacheConfig {
+                bind_addr: "0.0.0.0:0".to_string(),
+                peers,
+                machine_id: None,
+                gossip_interval_ms: 200,
+                cache_max_mb: 256,
+                cluster_key: cluster_key.map(str::to_string),
+                allow_insecure,
+            },
+        }
+    }
+
+    #[test]
+    fn cache_validate_rejects_clustered_keyless_ripple() {
+        let mut errors = Vec::new();
+        cache_config_for_test(Some(vec!["10.0.0.7:7000".to_string()]), None, false)
+            .validate(&mut errors);
+        assert!(
+            errors.iter().any(|e| e.contains("RIPPLE_CLUSTER_KEY")),
+            "expected cluster key error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn cache_validate_accepts_keyed_insecure_or_standalone() {
+        let mut errors = Vec::new();
+        cache_config_for_test(
+            Some(vec!["10.0.0.7:7000".to_string()]),
+            Some("nautilus-secret"),
+            false,
+        )
+        .validate(&mut errors);
+        cache_config_for_test(Some(vec!["10.0.0.7:7000".to_string()]), None, true)
+            .validate(&mut errors);
+        cache_config_for_test(None, None, false).validate(&mut errors);
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
     }
 
     #[derive(Default)]

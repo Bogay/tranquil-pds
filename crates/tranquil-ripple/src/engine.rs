@@ -5,7 +5,7 @@ use crate::eviction::MemoryBudget;
 use crate::gossip::{GossipEngine, PeerId};
 use crate::metrics;
 use crate::rate_limiter::RippleRateLimiter;
-use crate::transport::Transport;
+use crate::transport::{ClusterKey, Transport};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -21,8 +21,20 @@ impl RippleEngine {
     {
         let store = Arc::new(ShardedCrdtStore::new(config.machine_id));
 
+        let cluster_key = match config.cluster_key.as_deref() {
+            Some(secret) => Some(ClusterKey::new(secret)),
+            None => {
+                if !config.bind_addr.ip().is_loopback() && !config.allow_insecure {
+                    return Err(RippleStartError::Config(format!(
+                        "ripple is bound to non-loopback {} without RIPPLE_CLUSTER_KEY. Set the cluster key to authenticate peers, or set RIPPLE_ALLOW_INSECURE=true to bind unauthenticated on a trusted network",
+                        config.bind_addr
+                    )));
+                }
+                None
+            }
+        };
         let (transport, incoming_rx) =
-            Transport::bind(config.bind_addr, None, shutdown.clone())
+            Transport::bind(config.bind_addr, cluster_key, shutdown.clone())
                 .await
                 .map_err(|e| RippleStartError::Bind(e.to_string()))?;
 

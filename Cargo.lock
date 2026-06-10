@@ -7709,6 +7709,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "redis",
+ "thiserror 2.0.18",
  "tokio-util",
  "tracing",
  "tranquil-config",

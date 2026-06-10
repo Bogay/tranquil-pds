@@ -359,7 +359,9 @@ impl AppState {
         let rate_limiters = Arc::new(RateLimiters::new());
         let repo_write_locks = Arc::new(RepoWriteLocks::new());
         let circuit_breakers = Arc::new(CircuitBreakers::new());
-        let (cache, distributed_rate_limiter) = create_cache(shutdown.clone()).await;
+        let (cache, distributed_rate_limiter) = create_cache(shutdown.clone())
+            .await
+            .expect("Failed to initialize cache and distributed rate limiter at startup");
         let did_resolver = Arc::new(DidResolver::new());
         let cross_pds_oauth = Arc::new(CrossPdsOAuthClient::new(cache.clone()));
         let sso_config = SsoConfig::init();

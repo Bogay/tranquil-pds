@@ -8,5 +8,5 @@ pub mod metrics;
 pub mod rate_limiter;
 pub mod transport;
 
-pub use config::RippleConfig;
+pub use config::{RippleConfig, RippleConfigError};
 pub use engine::{RippleEngine, RippleStartError};

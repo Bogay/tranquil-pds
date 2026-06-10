@@ -16,5 +16,6 @@ tranquil-ripple = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 redis = { workspace = true, optional = true }
+thiserror = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

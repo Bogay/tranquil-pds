@@ -692,6 +692,8 @@ pub async fn spawn_cluster(pool: Option<sqlx::PgPool>, node_count: usize) -> Vec
             machine_id: i as u64 + 1,
             gossip_interval_ms: 100,
             cache_max_bytes: 64 * 1024 * 1024,
+            cluster_key: None,
+            allow_insecure: false,
         };
         let (cache, rate_limiter, addr) = RippleEngine::start(config, shutdown.clone())
             .await
