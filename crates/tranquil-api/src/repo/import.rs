@@ -77,27 +77,6 @@ pub async fn import_repo(
         blocks.len(),
         root
     );
-    let Some(root_block) = blocks.get(&root) else {
-        return Err(ApiError::InvalidRequest(
-            "Root block not found in CAR file".into(),
-        ));
-    };
-    let commit_did: Did = match jacquard_repo::commit::Commit::from_cbor(root_block) {
-        Ok(commit) => commit
-            .did()
-            .as_str()
-            .parse()
-            .map_err(|_| ApiError::InvalidRequest("Commit contains invalid DID".into()))?,
-        Err(e) => {
-            return Err(ApiError::InvalidRequest(format!("Invalid commit: {}", e)));
-        }
-    };
-    if commit_did != *did {
-        return Err(ApiError::InvalidRepo(format!(
-            "CAR file is for DID {} but you are authenticated as {}",
-            commit_did, did
-        )));
-    }
     let skip_verification = std::env::var("SKIP_IMPORT_VERIFICATION")
         .ok()
         .map(|v| v == "true" || v == "1")
@@ -108,11 +87,13 @@ pub async fn import_repo(
         });
     let is_migration = user.inbound_migration && user.deactivated_at.is_some();
     if skip_verification {
-        warn!("Skipping all CAR verification for import (SKIP_IMPORT_VERIFICATION=true)");
-    } else if is_migration {
-        debug!("Verifying CAR file structure for migration (skipping signature verification)");
+        warn!("Skipping all CAR verification for repo import (SKIP_IMPORT_VERIFICATION=true)");
+    } else {
+        debug!(
+            "Verifying CAR file structure for repo import (skipping signature and DID verification)"
+        );
         let verifier = CarVerifier::new();
-        match verifier.verify_car_structure_only(did, &root, &blocks) {
+        match verifier.verify_car_structure_only(&root, &blocks) {
             Ok(verified) => {
                 debug!(
                     "CAR structure verification successful: rev={}, data_cid={}",
@@ -136,56 +117,6 @@ pub async fn import_repo(
             }
             Err(e) => {
                 error!("CAR structure verification error: {:?}", e);
-                return Err(ApiError::InvalidRequest(format!(
-                    "CAR verification failed: {}",
-                    e
-                )));
-            }
-        }
-    } else {
-        debug!("Verifying CAR file signature and structure for DID {}", did);
-        let verifier = CarVerifier::new();
-        match verifier.verify_car(did, &root, &blocks).await {
-            Ok(verified) => {
-                debug!(
-                    "CAR verification successful: rev={}, data_cid={}",
-                    verified.rev, verified.data_cid
-                );
-            }
-            Err(tranquil_pds::sync::verify::VerifyError::DidMismatch {
-                commit_did,
-                expected_did,
-            }) => {
-                return Err(ApiError::InvalidRepo(format!(
-                    "CAR file is for DID {} but you are authenticated as {}",
-                    commit_did, expected_did
-                )));
-            }
-            Err(tranquil_pds::sync::verify::VerifyError::InvalidSignature) => {
-                return Err(ApiError::InvalidRequest(
-                    "CAR file commit signature verification failed".into(),
-                ));
-            }
-            Err(tranquil_pds::sync::verify::VerifyError::DidResolutionFailed(msg)) => {
-                warn!("DID resolution failed during import verification: {}", msg);
-                return Err(ApiError::InvalidRequest(format!(
-                    "Failed to verify DID: {}",
-                    msg
-                )));
-            }
-            Err(tranquil_pds::sync::verify::VerifyError::NoSigningKey) => {
-                return Err(ApiError::InvalidRequest(
-                    "DID document does not contain a signing key".into(),
-                ));
-            }
-            Err(tranquil_pds::sync::verify::VerifyError::MstValidationFailed(msg)) => {
-                return Err(ApiError::InvalidRequest(format!(
-                    "MST validation failed: {}",
-                    msg
-                )));
-            }
-            Err(e) => {
-                error!("CAR verification error: {:?}", e);
                 return Err(ApiError::InvalidRequest(format!(
                     "CAR verification failed: {}",
                     e

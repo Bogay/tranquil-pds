@@ -92,30 +92,20 @@ impl CarVerifier {
 
     pub fn verify_car_structure_only(
         &self,
-        expected_did: &Did,
         root_cid: &Cid,
         blocks: &HashMap<Cid, Bytes>,
-    ) -> Result<VerifiedCar, VerifyError> {
+    ) -> Result<StructureVerifiedCar, VerifyError> {
         let root_block = blocks
             .get(root_cid)
             .ok_or_else(|| VerifyError::BlockNotFound(root_cid.to_string()))?;
         let commit =
             Commit::from_cbor(root_block).map_err(|e| VerifyError::InvalidCommit(e.to_string()))?;
-        let commit_did = commit.did().as_str();
-        if commit_did != expected_did.as_str() {
-            return Err(VerifyError::DidMismatch {
-                commit_did: commit_did.to_string(),
-                expected_did: expected_did.to_string(),
-            });
-        }
+        let commit_did = commit.did().to_string().into();
         let data_cid = commit.data();
         self.verify_mst_structure(data_cid, blocks)?;
-        debug!(
-            "MST structure verified for DID {} (signature verification skipped for migration)",
-            expected_did
-        );
-        Ok(VerifiedCar {
-            did: expected_did.clone(),
+        debug!("MST structure verified for commit: {:?}", commit);
+        Ok(StructureVerifiedCar {
+            did: commit_did,
             rev: commit.rev().to_string(),
             data_cid: *data_cid,
             prev: commit.prev().cloned(),
@@ -287,6 +277,14 @@ impl CarVerifier {
         );
         Ok(())
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct StructureVerifiedCar {
+    pub did: Did,
+    pub rev: String,
+    pub data_cid: Cid,
+    pub prev: Option<Cid>,
 }
 
 #[derive(Debug, Clone)]

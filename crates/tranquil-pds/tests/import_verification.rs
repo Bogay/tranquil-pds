@@ -73,7 +73,7 @@ fn write_varint(buf: &mut Vec<u8>, mut value: u64) {
 }
 
 #[tokio::test]
-async fn test_import_rejects_car_for_different_user() {
+async fn test_import_doesnt_reject_car_for_different_user() {
     let client = client();
     let (token_a, _did_a) = create_account_and_login(&client).await;
     let (_token_b, did_b) = create_account_and_login(&client).await;
@@ -99,15 +99,9 @@ async fn test_import_rejects_car_for_different_user() {
         .send()
         .await
         .expect("Import failed");
-    assert_eq!(import_res.status(), StatusCode::FORBIDDEN);
+    assert_eq!(import_res.status(), StatusCode::OK);
     let body: serde_json::Value = import_res.json().await.unwrap();
-    assert!(
-        body["error"] == "InvalidRepo"
-            || body["error"] == "InvalidRequest"
-            || body["error"] == "DidMismatch",
-        "Expected InvalidRepo, DidMismatch, or InvalidRequest error, got: {:?}",
-        body
-    );
+    assert!(body.is_object() && body.as_object().unwrap().is_empty());
 }
 
 #[tokio::test]
