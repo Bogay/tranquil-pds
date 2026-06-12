@@ -158,11 +158,47 @@ pub struct SessionMfaStatus {
     pub last_reauth_at: Option<DateTime<Utc>>,
 }
 
+/// Window during which a just-rotated refresh token may still be presented by a
+/// benignly-racing or retrying client without being treated as a compromise.
+/// The window is measured per rotated token from its own rotation time
+/// (`used_refresh_tokens.used_at` / the metastore marker's `rotated_at_ms`),
+/// matching the reference atproto PDS `REFRESH_GRACE_MS`
+/// (`account-manager.ts::rotateRefreshToken`), which shortens a rotated refresh
+/// token's lifetime to a 2-hour revocation grace period.
+pub const REFRESH_GRACE_PERIOD_SECS: i64 = 2 * 60 * 60;
+
+/// The session's current token identity (plus its signing key) needed to re-mint
+/// the access/refresh JWTs during a grace-window replay. We carry the key so the
+/// caller can verify the presented token's signature before issuing anything.
+#[derive(Debug, Clone)]
+pub struct RefreshGraceReplay {
+    pub did: Did,
+    pub scope: Option<String>,
+    pub controller_did: Option<Did>,
+    pub access_jti: String,
+    pub refresh_jti: String,
+    pub access_expires_at: DateTime<Utc>,
+    pub refresh_expires_at: DateTime<Utc>,
+    pub key_bytes: Vec<u8>,
+    pub encryption_version: i32,
+}
+
 #[derive(Debug, Clone)]
 pub enum RefreshSessionResult {
     Success,
-    TokenAlreadyUsed,
-    ConcurrentRefresh,
+    GraceReplay(RefreshGraceReplay),
+    Compromise,
+}
+
+#[derive(Debug, Clone)]
+pub enum RefreshGraceLookup {
+    NotUsed,
+    Replay(RefreshGraceReplay),
+    Compromised {
+        session_id: SessionId,
+        key_bytes: Vec<u8>,
+        encryption_version: i32,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -230,16 +266,7 @@ pub trait SessionRepository: Send + Sync {
         app_password_name: &str,
     ) -> Result<Vec<String>, DbError>;
 
-    async fn check_refresh_token_used(
-        &self,
-        refresh_jti: &str,
-    ) -> Result<Option<SessionId>, DbError>;
-
-    async fn mark_refresh_token_used(
-        &self,
-        refresh_jti: &str,
-        session_id: SessionId,
-    ) -> Result<bool, DbError>;
+    async fn lookup_refresh_grace(&self, refresh_jti: &str) -> Result<RefreshGraceLookup, DbError>;
 
     async fn list_app_passwords(&self, user_id: Uuid) -> Result<Vec<AppPasswordRecord>, DbError>;
 

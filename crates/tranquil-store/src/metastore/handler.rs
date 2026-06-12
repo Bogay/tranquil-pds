@@ -892,14 +892,9 @@ pub enum SessionRequest {
         app_password_name: String,
         tx: Tx<Vec<String>>,
     },
-    CheckRefreshTokenUsed {
+    LookupRefreshGrace {
         refresh_jti: String,
-        tx: Tx<Option<SessionId>>,
-    },
-    MarkRefreshTokenUsed {
-        refresh_jti: String,
-        session_id: SessionId,
-        tx: Tx<bool>,
+        tx: Tx<tranquil_db_traits::RefreshGraceLookup>,
     },
     ListAppPasswords {
         user_id: Uuid,
@@ -960,8 +955,7 @@ impl SessionRequest {
             Self::CreateSession { .. }
             | Self::GetSessionByAccessJti { .. }
             | Self::GetSessionForRefresh { .. }
-            | Self::CheckRefreshTokenUsed { .. }
-            | Self::MarkRefreshTokenUsed { .. }
+            | Self::LookupRefreshGrace { .. }
             | Self::DeleteSessionByAccessJti { .. }
             | Self::DeleteSessionById { .. } => Routing::Global,
             Self::DeleteSessionsByDid { did, .. }
@@ -3744,23 +3738,11 @@ fn dispatch_session<S: StorageIO>(state: &HandlerState<S>, req: SessionRequest) 
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
-        SessionRequest::CheckRefreshTokenUsed { refresh_jti, tx } => {
+        SessionRequest::LookupRefreshGrace { refresh_jti, tx } => {
             let result = state
                 .metastore
                 .session_ops()
-                .check_refresh_token_used(&refresh_jti)
-                .map_err(metastore_to_db);
-            let _ = tx.send(result);
-        }
-        SessionRequest::MarkRefreshTokenUsed {
-            refresh_jti,
-            session_id,
-            tx,
-        } => {
-            let result = state
-                .metastore
-                .session_ops()
-                .mark_refresh_token_used(&refresh_jti, session_id)
+                .lookup_refresh_grace(&refresh_jti)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }

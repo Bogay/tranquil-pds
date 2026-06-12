@@ -1,10 +1,11 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use sqlx::PgPool;
 use tranquil_db_traits::{
     AppPasswordCreate, AppPasswordPrivilege, AppPasswordRecord, DbError, LoginType,
-    RefreshSessionResult, SessionForRefresh, SessionId, SessionListItem, SessionMfaStatus,
-    SessionRefreshData, SessionRepository, SessionToken, SessionTokenCreate,
+    REFRESH_GRACE_PERIOD_SECS, RefreshGraceLookup, RefreshGraceReplay, RefreshSessionResult,
+    SessionForRefresh, SessionId, SessionListItem, SessionMfaStatus, SessionRefreshData,
+    SessionRepository, SessionToken, SessionTokenCreate,
 };
 use tranquil_types::Did;
 use uuid::Uuid;
@@ -267,40 +268,51 @@ impl SessionRepository for PostgresSessionRepository {
         Ok(rows)
     }
 
-    async fn check_refresh_token_used(
-        &self,
-        refresh_jti: &str,
-    ) -> Result<Option<SessionId>, DbError> {
-        let row = sqlx::query_scalar!(
-            "SELECT session_id FROM used_refresh_tokens WHERE refresh_jti = $1",
+    async fn lookup_refresh_grace(&self, refresh_jti: &str) -> Result<RefreshGraceLookup, DbError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT u.used_at, st.id AS session_id, st.did, st.scope, st.controller_did,
+                   st.access_jti, st.refresh_jti, st.access_expires_at, st.refresh_expires_at,
+                   k.key_bytes, k.encryption_version
+            FROM used_refresh_tokens u
+            JOIN session_tokens st ON st.id = u.session_id
+            JOIN users us ON st.did = us.did
+            JOIN user_keys k ON us.id = k.user_id
+            WHERE u.refresh_jti = $1
+            "#,
             refresh_jti
         )
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(SessionId::new))
-    }
+        // No marker (or a missing users/user_keys join row) degrades to NotUsed.
+        // That is safe: the normal refresh path then fails closed with "Invalid
+        // refresh token" without mutating any state.
+        let Some(r) = row else {
+            return Ok(RefreshGraceLookup::NotUsed);
+        };
 
-    async fn mark_refresh_token_used(
-        &self,
-        refresh_jti: &str,
-        session_id: SessionId,
-    ) -> Result<bool, DbError> {
-        let result = sqlx::query!(
-            r#"
-            INSERT INTO used_refresh_tokens (refresh_jti, session_id)
-            VALUES ($1, $2)
-            ON CONFLICT (refresh_jti) DO NOTHING
-            "#,
-            refresh_jti,
-            session_id.as_i32()
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(result.rows_affected() > 0)
+        let grace_cutoff = Utc::now() - Duration::seconds(REFRESH_GRACE_PERIOD_SECS);
+        if r.used_at > grace_cutoff {
+            Ok(RefreshGraceLookup::Replay(RefreshGraceReplay {
+                did: Did::from(r.did),
+                scope: r.scope,
+                controller_did: r.controller_did.map(Did::from),
+                access_jti: r.access_jti,
+                refresh_jti: r.refresh_jti,
+                access_expires_at: r.access_expires_at,
+                refresh_expires_at: r.refresh_expires_at,
+                key_bytes: r.key_bytes,
+                encryption_version: r.encryption_version.unwrap_or(0),
+            }))
+        } else {
+            Ok(RefreshGraceLookup::Compromised {
+                session_id: SessionId::new(r.session_id),
+                key_bytes: r.key_bytes,
+                encryption_version: r.encryption_version.unwrap_or(0),
+            })
+        }
     }
 
     async fn list_app_passwords(&self, user_id: Uuid) -> Result<Vec<AppPasswordRecord>, DbError> {
@@ -524,21 +536,10 @@ impl SessionRepository for PostgresSessionRepository {
     ) -> Result<RefreshSessionResult, DbError> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        if let Ok(Some(session_id)) = sqlx::query_scalar!(
-            "SELECT session_id FROM used_refresh_tokens WHERE refresh_jti = $1 FOR UPDATE",
-            data.old_refresh_jti
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        {
-            let _ = sqlx::query!("DELETE FROM session_tokens WHERE id = $1", session_id)
-                .execute(&mut *tx)
-                .await;
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(RefreshSessionResult::TokenAlreadyUsed);
-        }
-
-        let result = sqlx::query!(
+        // Atomically claim the old refresh jti. The INSERT serializes concurrent
+        // rotations of the same token: exactly one request inserts the row, the
+        // rest see `rows_affected == 0`.
+        let claimed = sqlx::query!(
             "INSERT INTO used_refresh_tokens (refresh_jti, session_id) VALUES ($1, $2) ON CONFLICT (refresh_jti) DO NOTHING",
             data.old_refresh_jti,
             data.session_id.as_i32()
@@ -547,19 +548,42 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        if result.rows_affected() == 0 {
-            let _ = sqlx::query!(
-                "DELETE FROM session_tokens WHERE id = $1",
-                data.session_id.as_i32()
-            )
-            .execute(&mut *tx)
-            .await;
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(RefreshSessionResult::ConcurrentRefresh);
+        if claimed.rows_affected() == 0 {
+            // Another request already rotated this token. Nothing to write, so
+            // end our transaction before reading the winner's committed row.
+            tx.rollback().await.map_err(map_sqlx_error)?;
+
+            // Within the grace window (measured from this token's own rotation
+            // time) we replay the session's current tokens so a benignly-racing
+            // client keeps a working session instead of being revoked.
+            match self.lookup_refresh_grace(&data.old_refresh_jti).await? {
+                RefreshGraceLookup::Replay(replay) => {
+                    return Ok(RefreshSessionResult::GraceReplay(replay));
+                }
+                RefreshGraceLookup::Compromised { .. } | RefreshGraceLookup::NotUsed => {
+                    // Outside the grace window, or the marker/session vanished
+                    // concurrently: genuine reuse. Revoke the session (delete is
+                    // idempotent).
+                    sqlx::query!(
+                        "DELETE FROM session_tokens WHERE id = $1",
+                        data.session_id.as_i32()
+                    )
+                    .execute(&self.pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+                    return Ok(RefreshSessionResult::Compromise);
+                }
+            }
         }
 
+        // We won the rotation.
         sqlx::query!(
-            "UPDATE session_tokens SET access_jti = $1, refresh_jti = $2, access_expires_at = $3, refresh_expires_at = $4, updated_at = NOW() WHERE id = $5",
+            r#"
+            UPDATE session_tokens
+            SET access_jti = $1, refresh_jti = $2, access_expires_at = $3,
+                refresh_expires_at = $4, updated_at = NOW()
+            WHERE id = $5
+            "#,
             data.new_access_jti,
             data.new_refresh_jti,
             data.new_access_expires_at,

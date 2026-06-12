@@ -505,16 +505,72 @@ pub async fn refresh_session(
             )));
         }
     };
-    if let Ok(Some(_)) = state
-        .repos
-        .session
-        .check_refresh_token_used(&refresh_jti)
-        .await
-    {
-        warn!("Refresh token reuse detected for jti: {}", refresh_jti);
-        return Err(ApiError::AuthenticationFailed(Some(
-            "Refresh token has been revoked due to suspected compromise".into(),
-        )));
+    match state.repos.session.lookup_refresh_grace(&refresh_jti).await {
+        Ok(tranquil_db_traits::RefreshGraceLookup::NotUsed) => {}
+        Ok(tranquil_db_traits::RefreshGraceLookup::Replay(replay)) => {
+            // Verify the presented token's signature before issuing anything: a
+            // rotated jti is a public value, so we must never mint for a forged
+            // unsigned token carrying it.
+            let key = match tranquil_pds::config::decrypt_key(
+                &replay.key_bytes,
+                Some(replay.encryption_version),
+            ) {
+                Ok(k) => k,
+                Err(e) => {
+                    error!("Failed to decrypt user key for grace replay: {:?}", e);
+                    return Err(ApiError::InternalError(None));
+                }
+            };
+            if tranquil_pds::auth::verify_refresh_token(&refresh_token, &key).is_err() {
+                return Err(ApiError::AuthenticationFailed(Some(
+                    "Invalid refresh token".into(),
+                )));
+            }
+            info!(
+                "Refresh token reuse within grace window for jti: {refresh_jti}; replaying tokens"
+            );
+            let (access_jwt, refresh_jwt) = remint_grace_tokens(&replay, &key)?;
+            return build_refresh_session_output(&state, replay.did, access_jwt, refresh_jwt).await;
+        }
+        Ok(tranquil_db_traits::RefreshGraceLookup::Compromised {
+            session_id,
+            key_bytes,
+            encryption_version,
+        }) => {
+            // Never revoke a session for an unverified token: verify the
+            // signature first, so a forged unsigned token cannot force a logout.
+            let key = match tranquil_pds::config::decrypt_key(&key_bytes, Some(encryption_version))
+            {
+                Ok(k) => k,
+                Err(e) => {
+                    error!("Failed to decrypt user key for grace check: {:?}", e);
+                    return Err(ApiError::InternalError(None));
+                }
+            };
+            if tranquil_pds::auth::verify_refresh_token(&refresh_token, &key).is_err() {
+                return Err(ApiError::AuthenticationFailed(Some(
+                    "Invalid refresh token".into(),
+                )));
+            }
+            warn!(
+                "Refresh token reuse outside grace window for jti: {refresh_jti}; revoking session"
+            );
+            if let Err(e) = state.repos.session.delete_session_by_id(session_id).await {
+                error!(
+                    "Failed to revoke session {} for refresh token reuse: {:?}",
+                    session_id.as_i32(),
+                    e
+                );
+                return Err(ApiError::InternalError(None));
+            }
+            return Err(ApiError::AuthenticationFailed(Some(
+                "Refresh token has been revoked due to suspected compromise".into(),
+            )));
+        }
+        Err(e) => {
+            error!("Database error checking refresh token grace: {:?}", e);
+            return Err(ApiError::InternalError(None));
+        }
     }
     let session_row = match state
         .repos
@@ -579,22 +635,27 @@ pub async fn refresh_session(
         new_access_expires_at: new_access_meta.expires_at,
         new_refresh_expires_at: new_refresh_meta.expires_at,
     };
-    match state
+    let (access_jwt, refresh_jwt) = match state
         .repos
         .session
         .refresh_session_atomic(&refresh_data)
         .await
     {
-        Ok(tranquil_db_traits::RefreshSessionResult::Success) => {}
-        Ok(tranquil_db_traits::RefreshSessionResult::TokenAlreadyUsed) => {
-            warn!("Refresh token reuse detected during atomic operation");
-            return Err(ApiError::AuthenticationFailed(Some(
-                "Refresh token has been revoked due to suspected compromise".into(),
-            )));
+        Ok(tranquil_db_traits::RefreshSessionResult::Success) => {
+            (new_access_meta.token, new_refresh_meta.token)
         }
-        Ok(tranquil_db_traits::RefreshSessionResult::ConcurrentRefresh) => {
+        Ok(tranquil_db_traits::RefreshSessionResult::GraceReplay(replay)) => {
+            // Lost a benign concurrent rotation; re-mint the winner's tokens
+            // using this session's signing key (same user, unchanged by rotation).
+            info!(
+                "Concurrent refresh within grace window for session_id: {}; replaying tokens",
+                session_row.id
+            );
+            remint_grace_tokens(&replay, &key_bytes)?
+        }
+        Ok(tranquil_db_traits::RefreshSessionResult::Compromise) => {
             warn!(
-                "Concurrent refresh detected for session_id: {}",
+                "Refresh token reuse outside grace window or unreplayable rotation conflict for session_id: {}",
                 session_row.id
             );
             return Err(ApiError::AuthenticationFailed(Some(
@@ -605,12 +666,55 @@ pub async fn refresh_session(
             error!("Database error during session refresh: {:?}", e);
             return Err(ApiError::InternalError(None));
         }
-    }
-    let did_for_doc = session_row.did.clone();
+    };
+    build_refresh_session_output(&state, session_row.did, access_jwt, refresh_jwt).await
+}
+
+/// Re-mint the access/refresh JWTs for a grace-window replay from the session's
+/// current jtis and signing key. We never persist the signed JWTs; they are
+/// reconstructed on demand so a benignly-racing client converges on the same
+/// credentials the winning rotation produced. `key_bytes` is the owning user's
+/// already-decrypted signing key.
+fn remint_grace_tokens(
+    replay: &tranquil_db_traits::RefreshGraceReplay,
+    key_bytes: &[u8],
+) -> Result<(String, String), ApiError> {
+    let access_jwt = tranquil_pds::auth::create_access_token_with_jti(
+        &replay.did,
+        key_bytes,
+        replay.scope.as_deref(),
+        replay.controller_did.as_deref(),
+        None,
+        &replay.access_jti,
+        replay.access_expires_at,
+    )
+    .map_err(|e| {
+        error!("Failed to re-mint access token for grace replay: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
+    let refresh_jwt = tranquil_pds::auth::create_refresh_token_with_jti(
+        &replay.did,
+        key_bytes,
+        &replay.refresh_jti,
+        replay.refresh_expires_at,
+    )
+    .map_err(|e| {
+        error!("Failed to re-mint refresh token for grace replay: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
+    Ok((access_jwt, refresh_jwt))
+}
+
+async fn build_refresh_session_output(
+    state: &AppState,
+    did: Did,
+    access_jwt: String,
+    refresh_jwt: String,
+) -> Result<Json<RefreshSessionOutput>, ApiError> {
     let did_resolver = state.did_resolver.clone();
     let (db_result, did_doc) = tokio::join!(
-        state.repos.user.get_session_info_by_did(&session_row.did),
-        did_resolver.fetch_did_document(&did_for_doc)
+        state.repos.user.get_session_info_by_did(&did),
+        did_resolver.fetch_did_document(&did)
     );
     match db_result {
         Ok(Some(u)) => {
@@ -621,10 +725,10 @@ pub async fn refresh_session(
             let account_state =
                 AccountState::from_db_fields(u.deactivated_at, u.takedown_ref.clone(), None, None);
             Ok(Json(RefreshSessionOutput {
-                access_jwt: new_access_meta.token,
-                refresh_jwt: new_refresh_meta.token,
+                access_jwt,
+                refresh_jwt,
                 handle,
-                did: session_row.did,
+                did,
                 email: u.email,
                 email_confirmed: u.channel_verification.email,
                 preferred_channel: u.preferred_comms_channel.as_str().to_string(),
@@ -637,7 +741,7 @@ pub async fn refresh_session(
             }))
         }
         Ok(None) => {
-            error!("User not found for existing session: {}", session_row.did);
+            error!("User not found for existing session: {}", did);
             Err(ApiError::InternalError(None))
         }
         Err(e) => {

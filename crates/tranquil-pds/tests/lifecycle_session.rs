@@ -158,6 +158,9 @@ async fn test_session_lifecycle_refresh_invalidates_old() {
     let refresh_body: Value = refresh_res.json().await.unwrap();
     let new_refresh_jwt = refresh_body["refreshJwt"].as_str().unwrap();
     assert_ne!(refresh_jwt, new_refresh_jwt, "Refresh tokens should differ");
+    // A signed reuse within the grace window is benign: it replays the session's
+    // current tokens rather than revoking. The deep assertions live in
+    // jwt_security.rs::test_refresh_token_replay_grace_and_forgery.
     let reuse_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.refreshSession",
@@ -167,11 +170,24 @@ async fn test_session_lifecycle_refresh_invalidates_old() {
         .send()
         .await
         .expect("Failed reuse attempt");
-    assert!(
-        reuse_res.status() == StatusCode::UNAUTHORIZED
-            || reuse_res.status() == StatusCode::BAD_REQUEST,
-        "Old refresh token should be invalid after use"
+    assert_eq!(
+        reuse_res.status(),
+        StatusCode::OK,
+        "Signed reuse within grace replays the session"
     );
+    let reuse_body: Value = reuse_res.json().await.unwrap();
+    let replayed_refresh = reuse_body["refreshJwt"].as_str().unwrap();
+    // The replayed refresh token works for a subsequent refresh.
+    let followup = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.refreshSession",
+            base_url().await
+        ))
+        .bearer_auth(replayed_refresh)
+        .send()
+        .await
+        .expect("Failed followup refresh");
+    assert_eq!(followup.status(), StatusCode::OK);
 }
 
 #[tokio::test]

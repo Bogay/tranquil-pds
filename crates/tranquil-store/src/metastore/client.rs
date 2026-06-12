@@ -1596,30 +1596,14 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
         recv(rx).await
     }
 
-    async fn check_refresh_token_used(
+    async fn lookup_refresh_grace(
         &self,
         refresh_jti: &str,
-    ) -> Result<Option<tranquil_db_traits::SessionId>, DbError> {
+    ) -> Result<tranquil_db_traits::RefreshGraceLookup, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Session(
-            SessionRequest::CheckRefreshTokenUsed {
+            SessionRequest::LookupRefreshGrace {
                 refresh_jti: refresh_jti.to_owned(),
-                tx,
-            },
-        ))?;
-        recv(rx).await
-    }
-
-    async fn mark_refresh_token_used(
-        &self,
-        refresh_jti: &str,
-        session_id: tranquil_db_traits::SessionId,
-    ) -> Result<bool, DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool.send(MetastoreRequest::Session(
-            SessionRequest::MarkRefreshTokenUsed {
-                refresh_jti: refresh_jti.to_owned(),
-                session_id,
                 tx,
             },
         ))?;

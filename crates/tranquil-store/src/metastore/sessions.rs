@@ -209,25 +209,34 @@ pub fn session_id_counter_key() -> SmallVec<[u8; 128]> {
     KeyBuilder::new().tag(KeyTag::SESSION_ID_COUNTER).build()
 }
 
-fn serialize_ttl_i32(expires_at_ms: i64, session_id: i32) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(12);
-    buf.extend_from_slice(&u64::try_from(expires_at_ms).unwrap_or(0).to_be_bytes());
-    buf.extend_from_slice(&session_id.to_be_bytes());
-    buf
-}
-
 fn deserialize_ttl_i32(bytes: &[u8]) -> Option<i32> {
     let rest = bytes.get(8..)?;
     let arr: [u8; 4] = rest.try_into().ok()?;
     Some(i32::from_be_bytes(arr))
 }
 
-pub fn serialize_used_refresh_value(expires_at_ms: i64, session_id: i32) -> Vec<u8> {
-    serialize_ttl_i32(expires_at_ms, session_id)
+pub fn serialize_used_refresh_value(
+    expires_at_ms: i64,
+    session_id: i32,
+    rotated_at_ms: i64,
+) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(20);
+    buf.extend_from_slice(&u64::try_from(expires_at_ms).unwrap_or(0).to_be_bytes());
+    buf.extend_from_slice(&session_id.to_be_bytes());
+    buf.extend_from_slice(&rotated_at_ms.to_be_bytes());
+    buf
 }
 
-pub fn deserialize_used_refresh_value(bytes: &[u8]) -> Option<i32> {
-    deserialize_ttl_i32(bytes)
+/// Decode a used-refresh marker. The 20-byte format carries the rotation time;
+/// the legacy 12-byte format predates it (rotation time unknown), so callers
+/// must treat its `None` as outside the grace window.
+pub fn deserialize_used_refresh_value(bytes: &[u8]) -> Option<(i32, Option<i64>)> {
+    let session_id = deserialize_ttl_i32(&bytes[..12.min(bytes.len())])?;
+    let rotated_at_ms = bytes
+        .get(12..20)
+        .and_then(|s| <[u8; 8]>::try_from(s).ok())
+        .map(i64::from_be_bytes);
+    Some((session_id, rotated_at_ms))
 }
 
 fn serialize_ttl_i64(timestamp_ms: i64) -> Vec<u8> {
@@ -336,10 +345,29 @@ mod tests {
     fn used_refresh_value_roundtrip() {
         let session_id = 7;
         let expires_at_ms = 1700000600000i64;
-        let bytes = serialize_used_refresh_value(expires_at_ms, session_id);
+        let rotated_at_ms = 1700000123000i64;
+        let bytes = serialize_used_refresh_value(expires_at_ms, session_id, rotated_at_ms);
+        assert_eq!(bytes.len(), 20);
         let ttl = u64::from_be_bytes(bytes[..8].try_into().unwrap());
         assert_eq!(ttl, u64::try_from(expires_at_ms).unwrap_or(0));
-        assert_eq!(deserialize_used_refresh_value(&bytes), Some(session_id));
+        assert_eq!(
+            deserialize_used_refresh_value(&bytes),
+            Some((session_id, Some(rotated_at_ms)))
+        );
+    }
+
+    #[test]
+    fn used_refresh_value_legacy_12_byte_decodes_without_rotated_at() {
+        // Pre-upgrade markers carry no rotation time; rotated_at must be None.
+        let session_id = 9i32;
+        let expires_at_ms = 1700000600000i64;
+        let mut bytes = u64::try_from(expires_at_ms).unwrap().to_be_bytes().to_vec();
+        bytes.extend_from_slice(&session_id.to_be_bytes());
+        assert_eq!(bytes.len(), 12);
+        assert_eq!(
+            deserialize_used_refresh_value(&bytes),
+            Some((session_id, None))
+        );
     }
 
     #[test]

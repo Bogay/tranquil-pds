@@ -429,6 +429,245 @@ mod tests {
         });
     }
 
+    fn legacy_session_create(
+        did: &str,
+        access_jti: &str,
+        refresh_jti: &str,
+    ) -> tranquil_db_traits::SessionTokenCreate {
+        let now = chrono::Utc::now();
+        tranquil_db_traits::SessionTokenCreate {
+            did: tranquil_types::Did::new(did.to_string()).unwrap(),
+            access_jti: access_jti.to_string(),
+            refresh_jti: refresh_jti.to_string(),
+            access_expires_at: now + chrono::Duration::minutes(120),
+            refresh_expires_at: now + chrono::Duration::days(90),
+            login_type: tranquil_db_traits::LoginType::Legacy,
+            mfa_verified: false,
+            scope: None,
+            controller_did: None,
+            app_password_name: None,
+        }
+    }
+
+    fn create_test_user(ms: &Metastore, did: &str, handle: &str) {
+        let input = tranquil_db_traits::CreatePasswordAccountInput {
+            handle: tranquil_types::Handle::new(handle.to_string()).unwrap(),
+            email: None,
+            did: tranquil_types::Did::new(did.to_string()).unwrap(),
+            password_hash: "test-hash".to_string(),
+            preferred_comms_channel: tranquil_db_traits::CommsChannel::Email,
+            discord_username: None,
+            telegram_username: None,
+            signal_username: None,
+            deactivated_at: None,
+            inbound_migration: false,
+            encrypted_key_bytes: vec![7u8; 32],
+            encryption_version: 0,
+            reserved_key_id: None,
+            commit_cid: "bafyreib2rxk3ryblouj3fxza5jvx6psmwewwessc4m6g6e7pqhhkwqomfi".to_string(),
+            repo_rev: "rev0".to_string(),
+            genesis_block_cids: vec![],
+            invite_code: None,
+            birthdate_pref: None,
+        };
+        ms.user_ops().create_password_account(&input).unwrap();
+    }
+
+    fn legacy_refresh_data(
+        session_id: tranquil_db_traits::SessionId,
+        old_refresh_jti: &str,
+        new_access_jti: &str,
+        new_refresh_jti: &str,
+    ) -> tranquil_db_traits::SessionRefreshData {
+        let now = chrono::Utc::now();
+        tranquil_db_traits::SessionRefreshData {
+            old_refresh_jti: old_refresh_jti.to_string(),
+            session_id,
+            new_access_jti: new_access_jti.to_string(),
+            new_refresh_jti: new_refresh_jti.to_string(),
+            new_access_expires_at: now + chrono::Duration::minutes(120),
+            new_refresh_expires_at: now + chrono::Duration::days(90),
+        }
+    }
+
+    #[test]
+    fn legacy_refresh_grace_replays_within_window() {
+        use tranquil_db_traits::{RefreshGraceLookup, RefreshSessionResult};
+        let (_dir, ms) = open_fresh();
+        create_test_user(&ms, "did:plc:grace", "grace.test");
+        let ops = ms.session_ops();
+
+        let session_id = ops
+            .create_session(&legacy_session_create("did:plc:grace", "acc0", "ref0"))
+            .unwrap();
+
+        // The winning request rotates ref0 -> ref1.
+        let win = legacy_refresh_data(session_id, "ref0", "acc1", "ref1");
+        assert!(matches!(
+            ops.refresh_session_atomic(&win).unwrap(),
+            RefreshSessionResult::Success
+        ));
+
+        // A racing client re-presents ref0; the up-front grace lookup points at
+        // the session's current tokens for re-minting (jtis, not signed JWTs),
+        // carrying the signing key so the caller can verify the presented token.
+        match ops.lookup_refresh_grace("ref0").unwrap() {
+            RefreshGraceLookup::Replay(replay) => {
+                assert_eq!(replay.did.as_str(), "did:plc:grace");
+                assert_eq!(replay.access_jti, "acc1");
+                assert_eq!(replay.refresh_jti, "ref1");
+                assert_eq!(replay.key_bytes, vec![7u8; 32]);
+            }
+            other => panic!("expected Replay, got {other:?}"),
+        }
+
+        // The atomic path (two requests both past the used-check) also yields
+        // the winner's current tokens rather than revoking.
+        let lose = legacy_refresh_data(session_id, "ref0", "accX", "refX");
+        match ops.refresh_session_atomic(&lose).unwrap() {
+            RefreshSessionResult::GraceReplay(replay) => {
+                assert_eq!(replay.access_jti, "acc1");
+                assert_eq!(replay.refresh_jti, "ref1");
+            }
+            other => panic!("expected GraceReplay, got {other:?}"),
+        }
+
+        // Crucially, the session is still alive on the winner's tokens — nobody
+        // got logged out.
+        let alive = ops.get_session_by_access_jti("acc1").unwrap();
+        assert!(
+            alive.is_some(),
+            "session must survive a benign concurrent refresh"
+        );
+        assert_eq!(alive.unwrap().refresh_jti, "ref1");
+    }
+
+    // Per-token grace: a token two rotations stale but rotated moments ago is
+    // still within its own grace window, so it must replay the session's CURRENT
+    // tokens (acc2/ref2) rather than revoking. Regression for the defect where
+    // only the immediate predecessor was replayable.
+    #[test]
+    fn legacy_refresh_superseded_token_within_grace_replays() {
+        use tranquil_db_traits::{RefreshGraceLookup, RefreshSessionResult};
+        let (_dir, ms) = open_fresh();
+        create_test_user(&ms, "did:plc:reuse", "reuse.test");
+        let ops = ms.session_ops();
+
+        let session_id = ops
+            .create_session(&legacy_session_create("did:plc:reuse", "acc0", "ref0"))
+            .unwrap();
+        ops.refresh_session_atomic(&legacy_refresh_data(session_id, "ref0", "acc1", "ref1"))
+            .unwrap();
+        ops.refresh_session_atomic(&legacy_refresh_data(session_id, "ref1", "acc2", "ref2"))
+            .unwrap();
+
+        // ref0 is two rotations back but was rotated just now: still in window.
+        match ops.lookup_refresh_grace("ref0").unwrap() {
+            RefreshGraceLookup::Replay(replay) => {
+                assert_eq!(replay.access_jti, "acc2");
+                assert_eq!(replay.refresh_jti, "ref2");
+            }
+            other => panic!("expected Replay, got {other:?}"),
+        }
+        match ops
+            .refresh_session_atomic(&legacy_refresh_data(session_id, "ref0", "z", "z"))
+            .unwrap()
+        {
+            RefreshSessionResult::GraceReplay(replay) => {
+                assert_eq!(replay.access_jti, "acc2");
+                assert_eq!(replay.refresh_jti, "ref2");
+            }
+            other => panic!("expected GraceReplay, got {other:?}"),
+        }
+        // The session is still alive on the current tokens — nobody logged out.
+        assert!(ops.get_session_by_access_jti("acc2").unwrap().is_some());
+    }
+
+    // An old-format (12-byte, no rotated_at) used marker has unknown rotation
+    // time and must classify as Compromised, never Replay.
+    #[test]
+    fn legacy_old_format_marker_is_compromise() {
+        use tranquil_db_traits::RefreshGraceLookup;
+        let (_dir, ms) = open_fresh();
+        create_test_user(&ms, "did:plc:oldfmt", "oldfmt.test");
+        let ops = ms.session_ops();
+
+        let session_id = ops
+            .create_session(&legacy_session_create("did:plc:oldfmt", "acc0", "ref0"))
+            .unwrap();
+
+        // Write a pre-upgrade 12-byte marker (TTL prefix + session_id) directly.
+        let mut marker = 0u64.to_be_bytes().to_vec();
+        marker.extend_from_slice(&session_id.as_i32().to_be_bytes());
+        assert_eq!(marker.len(), 12);
+        ms.partition(Partition::Auth)
+            .insert(
+                super::sessions::session_used_refresh_key("ref0").as_slice(),
+                marker,
+            )
+            .unwrap();
+
+        assert!(matches!(
+            ops.lookup_refresh_grace("ref0").unwrap(),
+            RefreshGraceLookup::Compromised { .. }
+        ));
+    }
+
+    // A current-format marker whose rotation predates the grace window is genuine
+    // reuse: lookup classifies Compromised, the atomic path returns Compromise and
+    // revokes, and the session is gone afterwards.
+    #[test]
+    fn legacy_refresh_stale_rotation_outside_grace_is_compromise() {
+        use tranquil_db_traits::{
+            REFRESH_GRACE_PERIOD_SECS, RefreshGraceLookup, RefreshSessionResult,
+        };
+        let (_dir, ms) = open_fresh();
+        create_test_user(&ms, "did:plc:stale", "stale.test");
+        let ops = ms.session_ops();
+
+        let session_id = ops
+            .create_session(&legacy_session_create("did:plc:stale", "acc0", "ref0"))
+            .unwrap();
+
+        // Overwrite ref0's used marker with a current 20-byte marker rotated 3h ago,
+        // well outside the 2h grace window.
+        let stale_rotated_at_ms =
+            (chrono::Utc::now() - chrono::Duration::hours(3)).timestamp_millis();
+        let refresh_expires_at_ms =
+            (chrono::Utc::now() + chrono::Duration::days(90)).timestamp_millis();
+        assert!(
+            stale_rotated_at_ms
+                < (chrono::Utc::now() - chrono::Duration::seconds(REFRESH_GRACE_PERIOD_SECS))
+                    .timestamp_millis()
+        );
+        ms.partition(Partition::Auth)
+            .insert(
+                super::sessions::session_used_refresh_key("ref0").as_slice(),
+                super::sessions::serialize_used_refresh_value(
+                    refresh_expires_at_ms,
+                    session_id.as_i32(),
+                    stale_rotated_at_ms,
+                ),
+            )
+            .unwrap();
+
+        match ops.lookup_refresh_grace("ref0").unwrap() {
+            RefreshGraceLookup::Compromised { key_bytes, .. } => {
+                assert_eq!(key_bytes, vec![7u8; 32]);
+            }
+            other => panic!("expected Compromised, got {other:?}"),
+        }
+
+        assert!(matches!(
+            ops.refresh_session_atomic(&legacy_refresh_data(session_id, "ref0", "z", "z"))
+                .unwrap(),
+            RefreshSessionResult::Compromise
+        ));
+
+        // The session was actually revoked.
+        assert!(ops.get_session_by_access_jti("acc0").unwrap().is_none());
+    }
+
     #[test]
     fn reopen_preserves_partitions() {
         let dir = tempfile::TempDir::new().unwrap();

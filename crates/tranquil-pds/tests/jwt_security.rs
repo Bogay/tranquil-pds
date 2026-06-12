@@ -673,8 +673,12 @@ async fn test_deactivated_account_behavior() {
     assert_eq!(post_body["error"], "AccountDeactivated");
 }
 
+// End-to-end regression for the legacy refresh grace window and the
+// verify-before-mutate fixes: a signed replay within the 2h grace window converges
+// on the winner's current tokens, while a forged replay is rejected without
+// destroying the session.
 #[tokio::test]
-async fn test_refresh_token_replay_protection() {
+async fn test_refresh_token_replay_grace_and_forgery() {
     let url = base_url().await;
     let http_client = client();
     let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
@@ -728,6 +732,7 @@ async fn test_refresh_token_replay_protection() {
     let confirmed: Value = confirm.json().await.unwrap();
     let refresh_jwt = confirmed["refreshJwt"].as_str().unwrap().to_string();
 
+    // 1. Rotate refresh_jwt once; capture the winner's tokens.
     let first = http_client
         .post(format!("{}/xrpc/com.atproto.server.refreshSession", url))
         .header("Authorization", format!("Bearer {}", refresh_jwt))
@@ -735,12 +740,74 @@ async fn test_refresh_token_replay_protection() {
         .await
         .unwrap();
     assert_eq!(first.status(), StatusCode::OK);
+    let first_body: Value = first.json().await.unwrap();
+    let winner_refresh = first_body["refreshJwt"].as_str().unwrap().to_string();
+    let winner_access = first_body["accessJwt"].as_str().unwrap().to_string();
 
+    // 2. Signed replay of the original (now-rotated) token within the grace
+    // window: 200, returning the session's current tokens. The re-minted JWTs are
+    // not byte-identical to the winner's because the pinned claims still carry a
+    // fresh `iat` (see create_signed_token_pinned), so assert they VERIFY and WORK
+    // instead: the returned refreshJwt drives a subsequent refresh.
     let replay = http_client
         .post(format!("{}/xrpc/com.atproto.server.refreshSession", url))
         .header("Authorization", format!("Bearer {}", refresh_jwt))
         .send()
         .await
         .unwrap();
-    assert_eq!(replay.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(replay.status(), StatusCode::OK);
+    let replay_body: Value = replay.json().await.unwrap();
+    let replayed_refresh = replay_body["refreshJwt"].as_str().unwrap().to_string();
+    let replayed_access = replay_body["accessJwt"].as_str().unwrap().to_string();
+
+    // The replayed access token authenticates.
+    let who = http_client
+        .get(format!("{}/xrpc/com.atproto.server.getSession", url))
+        .header("Authorization", format!("Bearer {}", replayed_access))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(who.status(), StatusCode::OK);
+
+    // The replayed refresh token rotates the session forward (200), proving the
+    // grace replay handed back the live session's current credentials.
+    let from_replay = http_client
+        .post(format!("{}/xrpc/com.atproto.server.refreshSession", url))
+        .header("Authorization", format!("Bearer {}", replayed_refresh))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(from_replay.status(), StatusCode::OK);
+    let from_replay_body: Value = from_replay.json().await.unwrap();
+    let current_refresh = from_replay_body["refreshJwt"].as_str().unwrap().to_string();
+    assert!(!winner_refresh.is_empty() && !winner_access.is_empty());
+
+    // 3. Forged replay: tamper the original token's signature segment with
+    // same-length valid base64url garbage. Must be rejected (401) WITHOUT
+    // destroying the session.
+    let parts: Vec<&str> = refresh_jwt.split('.').collect();
+    assert_eq!(parts.len(), 3);
+    let garbage_sig: String = parts[2]
+        .chars()
+        .map(|c| if c == 'A' { 'B' } else { 'A' })
+        .collect();
+    assert_eq!(garbage_sig.len(), parts[2].len());
+    let forged = format!("{}.{}.{}", parts[0], parts[1], garbage_sig);
+
+    let forged_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.refreshSession", url))
+        .header("Authorization", format!("Bearer {}", forged))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(forged_res.status(), StatusCode::UNAUTHORIZED);
+
+    // The session survived the forgery: the current refresh token still works.
+    let after_forge = http_client
+        .post(format!("{}/xrpc/com.atproto.server.refreshSession", url))
+        .header("Authorization", format!("Bearer {}", current_refresh))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after_forge.status(), StatusCode::OK);
 }

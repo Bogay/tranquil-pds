@@ -43,7 +43,8 @@ pub use repo::{
 pub use scope::{DbScope, InvalidScopeError};
 pub use sequence::{SequenceNumber, deserialize_optional_sequence};
 pub use session::{
-    AppPasswordCreate, AppPasswordPrivilege, AppPasswordRecord, LoginType, RefreshSessionResult,
+    AppPasswordCreate, AppPasswordPrivilege, AppPasswordRecord, LoginType,
+    REFRESH_GRACE_PERIOD_SECS, RefreshGraceLookup, RefreshGraceReplay, RefreshSessionResult,
     SessionForRefresh, SessionId, SessionListItem, SessionMfaStatus, SessionRefreshData,
     SessionRepository, SessionToken, SessionTokenCreate,
 };

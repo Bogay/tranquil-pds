@@ -20,9 +20,9 @@ use super::user_hash::UserHashMap;
 use super::users::UserValue;
 
 use tranquil_db_traits::{
-    AppPasswordCreate, AppPasswordRecord, LoginType, RefreshSessionResult, SessionForRefresh,
-    SessionId, SessionListItem, SessionMfaStatus, SessionRefreshData, SessionToken,
-    SessionTokenCreate,
+    AppPasswordCreate, AppPasswordRecord, LoginType, REFRESH_GRACE_PERIOD_SECS, RefreshGraceLookup,
+    RefreshGraceReplay, RefreshSessionResult, SessionForRefresh, SessionId, SessionListItem,
+    SessionMfaStatus, SessionRefreshData, SessionToken, SessionTokenCreate,
 };
 use tranquil_types::Did;
 
@@ -169,6 +169,84 @@ impl SessionOps {
             &self.auth,
             session_by_did_key(user_hash, session.id).as_slice(),
         );
+    }
+
+    pub fn lookup_refresh_grace(
+        &self,
+        refresh_jti: &str,
+    ) -> Result<RefreshGraceLookup, MetastoreError> {
+        let used_key = session_used_refresh_key(refresh_jti);
+        let used = self
+            .auth
+            .get(used_key.as_slice())
+            .map_err(MetastoreError::Fjall)?;
+        let Some(raw) = used else {
+            return Ok(RefreshGraceLookup::NotUsed);
+        };
+        let (session_id, rotated_at_ms) = deserialize_used_refresh_value(&raw)
+            .ok_or(MetastoreError::CorruptData("corrupt used refresh value"))?;
+
+        // Marker without a live session, or without a loadable user key, degrades
+        // to NotUsed: we cannot verify the presented token, so we never mutate.
+        let Some(session) = self.load_session_by_id(session_id)? else {
+            return Ok(RefreshGraceLookup::NotUsed);
+        };
+        let user_hash = self.resolve_user_hash_from_did(&session.did);
+        let Some(user) = self.load_user_value(user_hash)? else {
+            return Ok(RefreshGraceLookup::NotUsed);
+        };
+
+        // Per-token grace measured from this token's own rotation time. A legacy
+        // marker (no rotated_at) is treated as outside the window.
+        let grace_cutoff_ms =
+            (Utc::now() - chrono::Duration::seconds(REFRESH_GRACE_PERIOD_SECS)).timestamp_millis();
+        if let Some(rotated_at_ms) = rotated_at_ms
+            && rotated_at_ms > grace_cutoff_ms
+        {
+            return Ok(RefreshGraceLookup::Replay(self.build_grace_replay(
+                &session,
+                user.key_bytes,
+                user.encryption_version,
+            )?));
+        }
+
+        Ok(RefreshGraceLookup::Compromised {
+            session_id: SessionId::new(session_id),
+            key_bytes: user.key_bytes,
+            encryption_version: user.encryption_version,
+        })
+    }
+
+    /// Assemble the session's current token identity plus its signing key for a
+    /// grace-window replay.
+    fn build_grace_replay(
+        &self,
+        session: &SessionTokenValue,
+        key_bytes: Vec<u8>,
+        encryption_version: i32,
+    ) -> Result<RefreshGraceReplay, MetastoreError> {
+        let did = Did::new(session.did.clone())
+            .map_err(|_| MetastoreError::CorruptData("invalid session did"))?;
+        let access_expires_at =
+            DateTime::<Utc>::from_timestamp_millis(session.access_expires_at_ms)
+                .ok_or(MetastoreError::CorruptData("invalid access expiry"))?;
+        let refresh_expires_at =
+            DateTime::<Utc>::from_timestamp_millis(session.refresh_expires_at_ms)
+                .ok_or(MetastoreError::CorruptData("invalid refresh expiry"))?;
+        Ok(RefreshGraceReplay {
+            did,
+            scope: session.scope.clone(),
+            controller_did: session
+                .controller_did
+                .clone()
+                .and_then(|d| Did::new(d).ok()),
+            access_jti: session.access_jti.clone(),
+            refresh_jti: session.refresh_jti.clone(),
+            access_expires_at,
+            refresh_expires_at,
+            key_bytes,
+            encryption_version,
+        })
     }
 
     fn collect_sessions_for_did(
@@ -540,51 +618,6 @@ impl SessionOps {
             .collect())
     }
 
-    pub fn check_refresh_token_used(
-        &self,
-        refresh_jti: &str,
-    ) -> Result<Option<SessionId>, MetastoreError> {
-        let key = session_used_refresh_key(refresh_jti);
-        match self
-            .auth
-            .get(key.as_slice())
-            .map_err(MetastoreError::Fjall)?
-        {
-            Some(raw) => Ok(deserialize_used_refresh_value(&raw).map(SessionId::new)),
-            None => Ok(None),
-        }
-    }
-
-    pub fn mark_refresh_token_used(
-        &self,
-        refresh_jti: &str,
-        session_id: SessionId,
-    ) -> Result<bool, MetastoreError> {
-        let key = session_used_refresh_key(refresh_jti);
-        let existing = self
-            .auth
-            .get(key.as_slice())
-            .map_err(MetastoreError::Fjall)?;
-
-        match existing {
-            Some(_) => Ok(false),
-            None => {
-                let session = self.load_session_by_id(session_id.as_i32())?;
-                let expires_at_ms = session
-                    .map(|s| s.refresh_expires_at_ms)
-                    .unwrap_or(Utc::now().timestamp_millis().saturating_add(86_400_000));
-
-                self.auth
-                    .insert(
-                        key.as_slice(),
-                        serialize_used_refresh_value(expires_at_ms, session_id.as_i32()),
-                    )
-                    .map_err(MetastoreError::Fjall)?;
-                Ok(true)
-            }
-        }
-    }
-
     pub fn list_app_passwords(
         &self,
         user_id: Uuid,
@@ -837,49 +870,59 @@ impl SessionOps {
             .map_err(MetastoreError::Fjall)?;
 
         if already_used.is_some() {
-            let mut batch = self.db.batch();
-            let session = self.load_session_by_id(data.session_id.as_i32())?;
-            if let Some(s) = session {
-                self.delete_session_indexes(&mut batch, &s);
+            // The old refresh token was already rotated. Within the per-token
+            // grace window, replay the session's current tokens so this
+            // benignly-racing client keeps a working session instead of being
+            // revoked.
+            match self.lookup_refresh_grace(&data.old_refresh_jti)? {
+                RefreshGraceLookup::Replay(replay) => {
+                    return Ok(RefreshSessionResult::GraceReplay(replay));
+                }
+                RefreshGraceLookup::Compromised { .. } | RefreshGraceLookup::NotUsed => {
+                    // Outside the grace window: genuine reuse. Revoke the session.
+                    let mut batch = self.db.batch();
+                    if let Some(s) = self.load_session_by_id(data.session_id.as_i32())? {
+                        self.delete_session_indexes(&mut batch, &s);
+                    }
+                    batch.commit().map_err(MetastoreError::Fjall)?;
+                    return Ok(RefreshSessionResult::Compromise);
+                }
             }
-            batch.commit().map_err(MetastoreError::Fjall)?;
-            return Ok(RefreshSessionResult::TokenAlreadyUsed);
         }
 
         let mut session = match self.load_session_by_id(data.session_id.as_i32())? {
             Some(s) => s,
-            None => return Ok(RefreshSessionResult::ConcurrentRefresh),
+            None => return Ok(RefreshSessionResult::Compromise),
         };
 
         if session.refresh_jti != data.old_refresh_jti {
-            return Ok(RefreshSessionResult::ConcurrentRefresh);
+            return Ok(RefreshSessionResult::Compromise);
         }
 
         let user_hash = self.resolve_user_hash_from_did(&session.did);
         let old_access_jti = session.access_jti.clone();
         let old_refresh_jti = session.refresh_jti.clone();
+        let rotated_at_ms = Utc::now().timestamp_millis();
 
         session.access_jti = data.new_access_jti.clone();
         session.refresh_jti = data.new_refresh_jti.clone();
         session.access_expires_at_ms = data.new_access_expires_at.timestamp_millis();
         session.refresh_expires_at_ms = data.new_refresh_expires_at.timestamp_millis();
-        session.updated_at_ms = Utc::now().timestamp_millis();
+        session.updated_at_ms = rotated_at_ms;
 
-        let new_access_index = SessionIndexValue {
-            user_hash: user_hash.raw(),
-            session_id: session.id,
-        };
-        let new_refresh_index = SessionIndexValue {
+        let index = SessionIndexValue {
             user_hash: user_hash.raw(),
             session_id: session.id,
         };
 
         let mut batch = self.db.batch();
 
+        // Record the rotation time so a benign replay of this token can be graced
+        // from its own rotation moment.
         batch.insert(
             &self.auth,
             used_key.as_slice(),
-            serialize_used_refresh_value(session.refresh_expires_at_ms, session.id),
+            serialize_used_refresh_value(session.refresh_expires_at_ms, session.id, rotated_at_ms),
         );
 
         batch.remove(
@@ -899,12 +942,12 @@ impl SessionOps {
         batch.insert(
             &self.auth,
             session_by_access_key(&data.new_access_jti).as_slice(),
-            new_access_index.serialize(session.refresh_expires_at_ms),
+            index.serialize(session.refresh_expires_at_ms),
         );
         batch.insert(
             &self.auth,
             session_by_refresh_key(&data.new_refresh_jti).as_slice(),
-            new_refresh_index.serialize(session.refresh_expires_at_ms),
+            index.serialize(session.refresh_expires_at_ms),
         );
         batch.insert(
             &self.auth,

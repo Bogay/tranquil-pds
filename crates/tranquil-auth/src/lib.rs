@@ -5,10 +5,11 @@ mod verify;
 
 pub use token::{
     create_access_token, create_access_token_hs256, create_access_token_hs256_with_metadata,
-    create_access_token_with_delegation, create_access_token_with_metadata,
-    create_access_token_with_scope_metadata, create_refresh_token, create_refresh_token_hs256,
-    create_refresh_token_hs256_with_metadata, create_refresh_token_with_metadata,
-    create_service_token, create_service_token_hs256,
+    create_access_token_with_delegation, create_access_token_with_jti,
+    create_access_token_with_metadata, create_access_token_with_scope_metadata,
+    create_refresh_token, create_refresh_token_hs256, create_refresh_token_hs256_with_metadata,
+    create_refresh_token_with_jti, create_refresh_token_with_metadata, create_service_token,
+    create_service_token_hs256,
 };
 
 pub use totp::{

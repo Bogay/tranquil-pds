@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT u.used_at, st.id AS session_id, st.did, st.scope, st.controller_did,\n                   st.access_jti, st.refresh_jti, st.access_expires_at, st.refresh_expires_at,\n                   k.key_bytes, k.encryption_version\n            FROM used_refresh_tokens u\n            JOIN session_tokens st ON st.id = u.session_id\n            JOIN users us ON st.did = us.did\n            JOIN user_keys k ON us.id = k.user_id\n            WHERE u.refresh_jti = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "used_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "session_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "controller_did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "access_jti",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "refresh_jti",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "access_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "refresh_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "key_bytes",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 10,
+        "name": "encryption_version",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "c08e3760be75071ac5e281cb3b05b3a02dccbf35b96c3d50c652878a38c9f9e6"
+}

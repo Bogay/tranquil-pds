@@ -4,7 +4,7 @@ use super::types::{
 use anyhow::Result;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use hmac::{Hmac, Mac};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use sha2::Sha256;
@@ -74,6 +74,54 @@ pub fn create_refresh_token_with_metadata(
     )
 }
 
+/// Re-mint an access token carrying a specific `jti` and expiry. Used by the
+/// refresh grace window to reproduce a session's current access token without
+/// persisting the signed JWT itself.
+pub fn create_access_token_with_jti(
+    did: &str,
+    key_bytes: &[u8],
+    scopes: Option<&str>,
+    controller_did: Option<&str>,
+    hostname: Option<&str>,
+    jti: &str,
+    expires_at: DateTime<Utc>,
+) -> Result<String> {
+    let scope = scopes.unwrap_or(TokenScope::Access.as_str());
+    let act = controller_did.map(|c| ActClaim { sub: c.to_string() });
+    Ok(create_signed_token_pinned(
+        did,
+        scope,
+        TokenType::Access,
+        key_bytes,
+        expires_at,
+        jti.to_string(),
+        act,
+        hostname,
+    )?
+    .token)
+}
+
+/// Re-mint a refresh token carrying a specific `jti` and expiry. Counterpart to
+/// [`create_access_token_with_jti`] for the refresh grace window.
+pub fn create_refresh_token_with_jti(
+    did: &str,
+    key_bytes: &[u8],
+    jti: &str,
+    expires_at: DateTime<Utc>,
+) -> Result<String> {
+    Ok(create_signed_token_pinned(
+        did,
+        TokenScope::Refresh.as_str(),
+        TokenType::Refresh,
+        key_bytes,
+        expires_at,
+        jti.to_string(),
+        None,
+        None,
+    )?
+    .token)
+}
+
 pub fn create_service_token(
     did: &str,
     aud: &str,
@@ -122,14 +170,27 @@ fn create_signed_token_with_act(
     act: Option<ActClaim>,
     hostname: Option<&str>,
 ) -> Result<TokenWithMetadata> {
-    let signing_key = SigningKey::from_slice(key_bytes)?;
-
     let expires_at = Utc::now()
         .checked_add_signed(duration)
         .expect("valid timestamp");
+    let jti = uuid::Uuid::new_v4().to_string();
+    create_signed_token_pinned(did, scope, typ, key_bytes, expires_at, jti, act, hostname)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_signed_token_pinned(
+    did: &str,
+    scope: &str,
+    typ: TokenType,
+    key_bytes: &[u8],
+    expires_at: DateTime<Utc>,
+    jti: String,
+    act: Option<ActClaim>,
+    hostname: Option<&str>,
+) -> Result<TokenWithMetadata> {
+    let signing_key = SigningKey::from_slice(key_bytes)?;
 
     let expiration = expires_at.timestamp();
-    let jti = uuid::Uuid::new_v4().to_string();
 
     let aud_hostname = hostname.map(|h| h.to_string()).unwrap_or_else(|| {
         tranquil_config::try_get()
