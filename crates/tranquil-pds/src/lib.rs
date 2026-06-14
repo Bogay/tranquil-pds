@@ -111,6 +111,7 @@ pub fn app_with_routes(state: AppState, external: ExternalRoutes) -> Router {
                     http::header::CONTENT_TYPE,
                     http::header::CONTENT_ENCODING,
                     http::header::ACCEPT_ENCODING,
+                    http::header::USER_AGENT,
                     util::HEADER_DPOP,
                     util::HEADER_ATPROTO_PROXY,
                     util::HEADER_ATPROTO_ACCEPT_LABELERS,
