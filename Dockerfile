@@ -1,4 +1,4 @@
-FROM node:24-alpine AS frontend
+FROM node:24-trixie-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
@@ -6,8 +6,10 @@ RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build
 
-FROM rust:1.96-alpine AS builder
-RUN apk add --no-cache ca-certificates musl-dev pkgconfig openssl-dev openssl-libs-static mold clang protoc
+FROM rust:1.96-slim-trixie AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates pkg-config libssl-dev mold clang protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
 ENV RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=mold"
 WORKDIR /app
 ARG SLIM="false"
@@ -36,8 +38,9 @@ COPY crates/tranquil-store ./crates/tranquil-store
 COPY crates/tranquil-signal ./crates/tranquil-signal
 COPY crates/tranquil-server ./crates/tranquil-server
 COPY migrations ./migrations
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=tranquil-target,target=/app/target,sharing=locked \
     if [ "$SLIM" = "true" ]; then \
       SQLX_OFFLINE=true cargo build --release -p tranquil-server --no-default-features; \
     else \
@@ -45,8 +48,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     fi && \
     cp target/release/tranquil-server /tmp/tranquil-pds
 
-FROM alpine:3.23
-RUN apk add --no-cache ca-certificates
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /tmp/tranquil-pds /usr/local/bin/tranquil-pds
 COPY --from=frontend /app/dist /var/lib/tranquil-pds/frontend
 WORKDIR /app
