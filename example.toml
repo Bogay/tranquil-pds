@@ -4,7 +4,7 @@
 # Can also be specified via environment variable `PDS_HOSTNAME`.
 #
 # Required! This value must be specified.
-#hostname =
+#hostname = "pds.example.com"
 
 # Address to bind the HTTP server to.
 #
@@ -24,7 +24,7 @@
 # Defaults to the PDS hostname when not set.
 #
 # Can also be specified via environment variable `PDS_USER_HANDLE_DOMAINS`.
-#user_handle_domains =
+#user_handle_domains = ["example.com"]
 
 # Enable PDS-hosted did:web identities.  Hosting did:web requires a
 # long-term commitment to serve DID documents; opt-in only.
