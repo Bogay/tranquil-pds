@@ -34,6 +34,7 @@ enum Command {
         ignore_secrets: bool,
     },
     ConfigTemplate,
+    Healthcheck,
 }
 
 #[tokio::main]
@@ -44,6 +45,7 @@ async fn main() -> ExitCode {
 
     if let Some(command) = &cli.command {
         return match command {
+            Command::Healthcheck => healthcheck(cli.config.as_ref()).await,
             Command::ConfigTemplate => {
                 print!("{}", tranquil_config::template());
                 ExitCode::SUCCESS
@@ -96,6 +98,41 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             error!("Fatal error: {}", e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn healthcheck(config: Option<&PathBuf>) -> ExitCode {
+    let cfg = match tranquil_config::load(config) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("Failed to load configuration: {e:#}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let tls = cfg.server.tls.material().is_some();
+    let scheme = if tls { "https" } else { "http" };
+    let url = format!("{scheme}://localhost:{}/xrpc/_health", cfg.server.port);
+    let client = match reqwest::Client::builder()
+        .danger_accept_invalid_certs(tls)
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("Failed to build healthcheck client: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match client.get(&url).send().await {
+        Ok(response) if response.status().is_success() => ExitCode::SUCCESS,
+        Ok(response) => {
+            eprintln!("Healthcheck returned {}", response.status());
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("Healthcheck request failed: {e}");
             ExitCode::FAILURE
         }
     }

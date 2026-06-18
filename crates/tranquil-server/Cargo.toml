@@ -26,6 +26,7 @@ http = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 quinn = { workspace = true }
+reqwest = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 thiserror = { workspace = true }
