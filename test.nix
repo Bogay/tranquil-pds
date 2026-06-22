@@ -6,7 +6,7 @@
 pkgs.testers.nixosTest {
   name = "tranquil-pds";
 
-  nodes.server = {
+  containers.server = {
     config,
     pkgs,
     ...
@@ -124,7 +124,7 @@ pkgs.testers.nixosTest {
         server.succeed("test -d /var/lib/tranquil-pds/blobs")
 
     with subtest("postgres database created"):
-        server.succeed("sudo -u tranquil-pds psql -d tranquil-pds -c 'SELECT 1'")
+        server.succeed("runuser -u tranquil-pds -- psql -d tranquil-pds -c 'SELECT 1'")
 
     with subtest("healthcheck via backend"):
         xrpc("GET", "_health", via="backend")
@@ -201,7 +201,7 @@ pkgs.testers.nixosTest {
 
     with subtest("mark account verified"):
         server.succeed(
-            f"sudo -u tranquil-pds psql -d tranquil-pds "
+            f"runuser -u tranquil-pds -- psql -d tranquil-pds "
             f"-c \"UPDATE users SET email_verified = true WHERE did = '{did}'\""
         )
 
