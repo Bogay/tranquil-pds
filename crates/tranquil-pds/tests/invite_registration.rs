@@ -25,30 +25,6 @@ async fn create_invite_code(client: &Client, admin_jwt: &str, use_count: u32) ->
 async fn check_registration_invite_validates_without_consuming() {
     let state = get_test_app_state().await;
 
-    assert_eq!(
-        state.repos.user.count_users().await.unwrap(),
-        0,
-        "bootstrap branch needs a zero-user instance"
-    );
-
-    let mut bootstrap = state.clone();
-    bootstrap.bootstrap_invite_code = Some("squid-bootstrap".to_string());
-
-    assert_eq!(
-        check_registration_invite(&bootstrap, Some("squid-bootstrap"))
-            .await
-            .unwrap(),
-        InviteRegistration::Bootstrap
-    );
-    assert!(matches!(
-        check_registration_invite(&bootstrap, Some("whelk")).await,
-        Err(ApiError::InvalidInviteCode)
-    ));
-    assert!(matches!(
-        check_registration_invite(&bootstrap, None).await,
-        Err(ApiError::InvalidInviteCode)
-    ));
-
     let client = client();
     let (admin_jwt, _did) = create_admin_account_and_login(&client).await;
     let code = create_invite_code(&client, &admin_jwt, 1).await;

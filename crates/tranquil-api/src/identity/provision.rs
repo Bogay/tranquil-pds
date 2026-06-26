@@ -45,15 +45,9 @@ pub async fn submit_plc_genesis(
     let hostname = &tranquil_config::get().server.hostname;
     let pds_endpoint = format!("https://{}", hostname);
 
-    let rotation_key = tranquil_config::get()
-        .secrets
-        .plc_rotation_key
-        .clone()
-        .unwrap_or_else(|| tranquil_pds::plc::signing_key_to_did_key(signing_key));
-
     let genesis_result = tranquil_pds::plc::create_genesis_operation(
         signing_key,
-        &rotation_key,
+        tranquil_config::get().secrets.plc_rotation_key.as_deref(),
         handle,
         &pds_endpoint,
     )

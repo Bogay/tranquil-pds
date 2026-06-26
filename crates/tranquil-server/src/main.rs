@@ -62,6 +62,12 @@ async fn main() -> ExitCode {
                     eprint!("{e}");
                     return ExitCode::FAILURE;
                 }
+                if let Some(key) = config.secrets.plc_rotation_key.as_deref()
+                    && let Err(reason) = tranquil_pds::plc::validate_rotation_did_key(key)
+                {
+                    eprintln!("secrets.plc_rotation_key (PLC_ROTATION_KEY) {reason}");
+                    return ExitCode::FAILURE;
+                }
                 if !*ignore_secrets
                     && let Some((cert, key)) = config.server.tls.material()
                     && let Err(e) = tls::load_certified_key(cert, key)
@@ -87,6 +93,13 @@ async fn main() -> ExitCode {
 
     if let Err(e) = config.validate(false) {
         error!("{e}");
+        return ExitCode::FAILURE;
+    }
+
+    if let Some(key) = config.secrets.plc_rotation_key.as_deref()
+        && let Err(reason) = tranquil_pds::plc::validate_rotation_did_key(key)
+    {
+        error!("secrets.plc_rotation_key (PLC_ROTATION_KEY) {reason}");
         return ExitCode::FAILURE;
     }
 

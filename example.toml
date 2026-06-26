@@ -4,7 +4,7 @@
 # Can also be specified via environment variable `PDS_HOSTNAME`.
 #
 # Required! This value must be specified.
-#hostname = "pds.example.com"
+#hostname =
 
 # Address to bind the HTTP server to.
 #
@@ -24,7 +24,7 @@
 # Defaults to the PDS hostname when not set.
 #
 # Can also be specified via environment variable `PDS_USER_HANDLE_DOMAINS`.
-#user_handle_domains = ["example.com"]
+#user_handle_domains =
 
 # Enable PDS-hosted did:web identities.  Hosting did:web requires a
 # long-term commitment to serve DID documents; opt-in only.
@@ -200,7 +200,9 @@
 # Can also be specified via environment variable `MASTER_KEY`.
 #master_key =
 
-# PLC rotation key (DID key). If not set, user-level keys are used.
+# Optional operator-held PLC recovery key, as a public `did:key`. The PDS
+# continues to sign PLC operations with the per-account signing key, which
+# always remains in `rotationKeys`.
 #
 # Can also be specified via environment variable `PLC_ROTATION_KEY`.
 #plc_rotation_key =

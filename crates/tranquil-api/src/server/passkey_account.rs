@@ -224,15 +224,9 @@ pub async fn create_passkey_account(
                     ));
                 }
             } else {
-                let rotation_key = tranquil_config::get()
-                    .secrets
-                    .plc_rotation_key
-                    .clone()
-                    .unwrap_or_else(|| tranquil_pds::plc::signing_key_to_did_key(&secret_key));
-
                 let genesis_result = match tranquil_pds::plc::create_genesis_operation(
                     &secret_key,
-                    &rotation_key,
+                    tranquil_config::get().secrets.plc_rotation_key.as_deref(),
                     &handle,
                     &pds_endpoint,
                 ) {

@@ -1043,15 +1043,9 @@ pub async fn complete_registration(
             d.to_string()
         }
         _ => {
-            let rotation_key = tranquil_config::get()
-                .secrets
-                .plc_rotation_key
-                .clone()
-                .unwrap_or_else(|| tranquil_pds::plc::signing_key_to_did_key(&signing_key));
-
             let genesis_result = match tranquil_pds::plc::create_genesis_operation(
                 &signing_key,
-                &rotation_key,
+                tranquil_config::get().secrets.plc_rotation_key.as_deref(),
                 &handle,
                 &pds_endpoint,
             ) {

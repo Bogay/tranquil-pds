@@ -491,16 +491,10 @@ pub async fn get_recommended_did_credentials(
     let rotation_keys = if auth.did.starts_with("did:web:") {
         vec![]
     } else {
-        let server_rotation_key = match &tranquil_config::get().secrets.plc_rotation_key {
-            Some(key) => key.clone(),
-            None => {
-                warn!(
-                    "PLC_ROTATION_KEY not set, falling back to user's signing key for rotation key recommendation"
-                );
-                did_key.clone()
-            }
-        };
-        vec![server_rotation_key]
+        tranquil_pds::plc::rotation_keys_for(
+            tranquil_config::get().secrets.plc_rotation_key.as_deref(),
+            &signing_key,
+        )
     };
     Ok(Json(GetRecommendedDidCredentialsOutput {
         rotation_keys,

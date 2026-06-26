@@ -632,7 +632,9 @@ pub struct SecretsConfig {
     #[config(env = "MASTER_KEY")]
     pub master_key: Option<String>,
 
-    /// PLC rotation key (DID key). If not set, user-level keys are used.
+    /// Optional operator-held PLC recovery key, as a public `did:key`. The PDS
+    /// continues to sign PLC operations with the per-account signing key, which
+    /// always remains in `rotationKeys`.
     #[config(env = "PLC_ROTATION_KEY")]
     pub plc_rotation_key: Option<String>,
 

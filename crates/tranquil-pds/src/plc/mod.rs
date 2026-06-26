@@ -114,6 +114,7 @@ impl<'de> Deserialize<'de> for ServiceType {
 }
 
 pub const SECP256K1_MULTICODEC_PREFIX: [u8; 2] = [0xe7, 0x01];
+pub const P256_MULTICODEC_PREFIX: [u8; 2] = [0x80, 0x24];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlcOperation {
@@ -415,6 +416,100 @@ pub fn signing_key_to_did_key(signing_key: &SigningKey) -> String {
     format!("did:key:{}", encoded)
 }
 
+pub fn rotation_keys_for(
+    configured_rotation_key: Option<&str>,
+    signing_key: &SigningKey,
+) -> Vec<String> {
+    let signing_did_key = signing_key_to_did_key(signing_key);
+    match configured_rotation_key {
+        Some(key) if key != signing_did_key.as_str() => vec![key.to_string(), signing_did_key],
+        _ => vec![signing_did_key],
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequiredRotationKey {
+    Signing,
+    Operator,
+}
+
+impl RequiredRotationKey {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Signing => {
+                "Rotation keys must include the PDS-managed signing key so the server can sign future operations"
+            }
+            Self::Operator => {
+                "Rotation keys must include the operator-held PLC recovery key configured for this server"
+            }
+        }
+    }
+}
+
+pub fn missing_required_rotation_key(
+    rotation_keys: &[&str],
+    signing_did_key: &str,
+    configured_rotation_key: Option<&str>,
+) -> Option<RequiredRotationKey> {
+    if !rotation_keys.contains(&signing_did_key) {
+        return Some(RequiredRotationKey::Signing);
+    }
+    match configured_rotation_key {
+        Some(operator_key) if !rotation_keys.contains(&operator_key) => {
+            Some(RequiredRotationKey::Operator)
+        }
+        _ => None,
+    }
+}
+
+fn validate_compressed_did_key<V, E>(
+    key_bytes: &[u8],
+    label: &str,
+    did_key: &str,
+    parse: impl Fn(&[u8]) -> Result<V, E>,
+) -> Result<(), String>
+where
+    E: std::fmt::Display,
+{
+    if key_bytes.len() != 33 {
+        return Err(format!(
+            "`{did_key}` must be a compressed {label} public key"
+        ));
+    }
+    parse(key_bytes)
+        .map(|_| ())
+        .map_err(|e| format!("`{did_key}` is not a valid {label} public key: {e}"))
+}
+
+pub fn validate_rotation_did_key(did_key: &str) -> Result<(), String> {
+    let multibase_part = did_key
+        .strip_prefix("did:key:")
+        .ok_or_else(|| format!("must be a did:key, got `{did_key}`"))?;
+    let (base, decoded) = multibase::decode(multibase_part)
+        .map_err(|e| format!("`{did_key}` is not valid multibase: {e}"))?;
+    if base != multibase::Base::Base58Btc {
+        return Err(format!("`{did_key}` must use base58btc multibase encoding"));
+    }
+    let (prefix, key_bytes) = decoded.split_at(decoded.len().min(2));
+    if prefix == SECP256K1_MULTICODEC_PREFIX {
+        validate_compressed_did_key(
+            key_bytes,
+            "secp256k1",
+            did_key,
+            k256::ecdsa::VerifyingKey::from_sec1_bytes,
+        )
+    } else if prefix == P256_MULTICODEC_PREFIX {
+        validate_compressed_did_key(
+            key_bytes,
+            "p256",
+            did_key,
+            p256::ecdsa::VerifyingKey::from_sec1_bytes,
+        )
+    } else {
+        Err(format!("`{did_key}` is not a secp256k1 or p256 did:key"))
+    }
+}
+
 pub struct GenesisResult {
     pub did: String,
     pub signed_operation: Value,
@@ -422,13 +517,14 @@ pub struct GenesisResult {
 
 pub fn create_genesis_operation(
     signing_key: &SigningKey,
-    rotation_key: &str,
+    configured_rotation_key: Option<&str>,
     handle: &str,
     pds_endpoint: &str,
 ) -> Result<GenesisResult, PlcError> {
     let signing_did_key = signing_key_to_did_key(signing_key);
+    let rotation_keys = rotation_keys_for(configured_rotation_key, signing_key);
     let mut verification_methods = HashMap::new();
-    verification_methods.insert("atproto".to_string(), signing_did_key.clone());
+    verification_methods.insert("atproto".to_string(), signing_did_key);
     let mut services = HashMap::new();
     services.insert(
         "atproto_pds".to_string(),
@@ -439,7 +535,7 @@ pub fn create_genesis_operation(
     );
     let genesis_op = PlcOperation {
         op_type: PlcOpType::Operation,
-        rotation_keys: vec![rotation_key.to_string()],
+        rotation_keys,
         verification_methods,
         also_known_as: vec![format!("at://{}", handle)],
         services,
@@ -649,6 +745,132 @@ mod tests {
         let key = SigningKey::random(&mut rand::thread_rng());
         let did_key = signing_key_to_did_key(&key);
         assert!(did_key.starts_with("did:key:z"));
+    }
+
+    #[test]
+    fn test_rotation_keys_default_is_signing_key() {
+        let key = SigningKey::random(&mut rand::thread_rng());
+        let signing_did_key = signing_key_to_did_key(&key);
+        assert_eq!(rotation_keys_for(None, &key), vec![signing_did_key]);
+    }
+
+    #[test]
+    fn test_rotation_keys_prepends_operator_key() {
+        let key = SigningKey::random(&mut rand::thread_rng());
+        let signing_did_key = signing_key_to_did_key(&key);
+        let operator_key = "did:key:zQ3shScallopRecoveryKey";
+        assert_eq!(
+            rotation_keys_for(Some(operator_key), &key),
+            vec![operator_key.to_string(), signing_did_key.clone()]
+        );
+    }
+
+    #[test]
+    fn test_rotation_keys_dedupes_when_operator_equals_signing() {
+        let key = SigningKey::random(&mut rand::thread_rng());
+        let signing_did_key = signing_key_to_did_key(&key);
+        assert_eq!(
+            rotation_keys_for(Some(&signing_did_key), &key),
+            vec![signing_did_key]
+        );
+    }
+
+    #[test]
+    fn test_genesis_includes_signing_key_with_operator_rotation_key() {
+        let key = SigningKey::random(&mut rand::thread_rng());
+        let signing_did_key = signing_key_to_did_key(&key);
+        let operator_key = "did:key:zQ3shWhelkOperatorKey";
+        let result =
+            create_genesis_operation(&key, Some(operator_key), "whelk.nel.pet", "https://nel.pet")
+                .unwrap();
+        let rotation_keys = result.signed_operation["rotationKeys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(rotation_keys, vec![operator_key, signing_did_key.as_str()]);
+        assert!(
+            verify_operation_signature(
+                &result.signed_operation,
+                &[operator_key.to_string(), signing_did_key]
+            )
+            .unwrap()
+        );
+    }
+
+    fn p256_did_key(key: &p256::ecdsa::SigningKey) -> String {
+        let point = key.verifying_key().to_encoded_point(true);
+        let mut prefixed = Vec::from(P256_MULTICODEC_PREFIX);
+        prefixed.extend_from_slice(point.as_bytes());
+        format!(
+            "did:key:{}",
+            multibase::encode(multibase::Base::Base58Btc, &prefixed)
+        )
+    }
+
+    #[test]
+    fn test_validate_rotation_did_key_accepts_secp256k1() {
+        let key = SigningKey::random(&mut rand::thread_rng());
+        assert!(validate_rotation_did_key(&signing_key_to_did_key(&key)).is_ok());
+    }
+
+    #[test]
+    fn test_validate_rotation_did_key_accepts_p256() {
+        let key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
+        assert!(validate_rotation_did_key(&p256_did_key(&key)).is_ok());
+    }
+
+    #[test]
+    fn test_validate_rotation_did_key_rejects_non_did_key() {
+        assert!(validate_rotation_did_key("did:plc:squid").is_err());
+        assert!(validate_rotation_did_key("zSomeMultibaseButNoPrefix").is_err());
+    }
+
+    #[test]
+    fn test_validate_rotation_did_key_rejects_unknown_multicodec() {
+        let mut ed25519 = vec![0xed, 0x01];
+        ed25519.extend_from_slice(&[0u8; 32]);
+        let did_key = format!(
+            "did:key:{}",
+            multibase::encode(multibase::Base::Base58Btc, &ed25519)
+        );
+        assert!(validate_rotation_did_key(&did_key).is_err());
+    }
+
+    #[test]
+    fn test_validate_rotation_did_key_rejects_non_base58btc() {
+        let key = SigningKey::random(&mut rand::thread_rng());
+        let point = key.verifying_key().to_encoded_point(true);
+        let mut prefixed = Vec::from(SECP256K1_MULTICODEC_PREFIX);
+        prefixed.extend_from_slice(point.as_bytes());
+        let hex_did_key = format!(
+            "did:key:{}",
+            multibase::encode(multibase::Base::Base16Lower, &prefixed)
+        );
+        assert!(validate_rotation_did_key(&hex_did_key).is_err());
+    }
+
+    #[test]
+    fn test_missing_required_rotation_key() {
+        let signing = "did:key:zSigning";
+        let operator = "did:key:zOperator";
+        assert_eq!(
+            missing_required_rotation_key(&[operator], signing, None),
+            Some(RequiredRotationKey::Signing)
+        );
+        assert_eq!(
+            missing_required_rotation_key(&[signing], signing, Some(operator)),
+            Some(RequiredRotationKey::Operator)
+        );
+        assert_eq!(
+            missing_required_rotation_key(&[operator, signing], signing, Some(operator)),
+            None
+        );
+        assert_eq!(
+            missing_required_rotation_key(&[signing], signing, None),
+            None
+        );
     }
 
     #[test]

@@ -67,19 +67,14 @@ pub async fn submit_plc_operation(
     })?;
 
     let user_did_key = signing_key_to_did_key(&signing_key);
-    let server_rotation_key = tranquil_config::get()
-        .secrets
-        .plc_rotation_key
-        .clone()
-        .unwrap_or_else(|| user_did_key.clone());
     if let Some(rotation_keys) = op.get("rotationKeys").and_then(Value::as_array) {
-        let has_server_key = rotation_keys
-            .iter()
-            .any(|k| k.as_str() == Some(&server_rotation_key));
-        if !has_server_key {
-            return Err(ApiError::InvalidRequest(
-                "Rotation keys do not include server's rotation key".into(),
-            ));
+        let rotation_key_strs: Vec<&str> = rotation_keys.iter().filter_map(Value::as_str).collect();
+        if let Some(missing) = tranquil_pds::plc::missing_required_rotation_key(
+            &rotation_key_strs,
+            &user_did_key,
+            tranquil_config::get().secrets.plc_rotation_key.as_deref(),
+        ) {
+            return Err(ApiError::InvalidRequest(missing.message().into()));
         }
     }
     if let Some(services) = op.get("services").and_then(Value::as_object)

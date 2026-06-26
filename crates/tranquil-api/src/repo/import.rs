@@ -14,6 +14,35 @@ use tranquil_pds::sync::verify::CarVerifier;
 use tranquil_pds::types::Did;
 use tranquil_types::{AtUri, CidLink};
 
+fn map_car_verify_error(e: tranquil_pds::sync::verify::VerifyError) -> ApiError {
+    use tranquil_pds::sync::verify::VerifyError;
+    match e {
+        VerifyError::DidMismatch {
+            commit_did,
+            expected_did,
+        } => ApiError::InvalidRepo(format!(
+            "CAR file is for DID {} but you are authenticated as {}",
+            commit_did, expected_did
+        )),
+        VerifyError::InvalidSignature => ApiError::InvalidRequest(
+            "Repo commit signature does not match the DID document signing key".into(),
+        ),
+        VerifyError::NoSigningKey => {
+            ApiError::InvalidRequest("DID document has no atproto signing key".into())
+        }
+        VerifyError::DidResolutionFailed(msg) => {
+            ApiError::InvalidRequest(format!("Could not resolve DID document: {}", msg))
+        }
+        VerifyError::MstValidationFailed(msg) => {
+            ApiError::InvalidRequest(format!("MST validation failed: {}", msg))
+        }
+        other => {
+            error!("CAR verification failed: {:?}", other);
+            ApiError::InvalidRequest(format!("CAR verification failed: {}", other))
+        }
+    }
+}
+
 pub async fn import_repo(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
@@ -88,41 +117,23 @@ pub async fn import_repo(
     let is_migration = user.inbound_migration && user.deactivated_at.is_some();
     if skip_verification {
         warn!("Skipping all CAR verification for repo import (SKIP_IMPORT_VERIFICATION=true)");
-    } else {
+    } else if is_migration {
+        let verified = CarVerifier::new()
+            .verify_car_structure_only(&root, &blocks)
+            .map_err(map_car_verify_error)?;
         debug!(
-            "Verifying CAR file structure for repo import (skipping signature and DID verification)"
+            "CAR structure verified for migration import: rev={}, data_cid={}",
+            verified.rev, verified.data_cid
         );
-        let verifier = CarVerifier::new();
-        match verifier.verify_car_structure_only(&root, &blocks) {
-            Ok(verified) => {
-                debug!(
-                    "CAR structure verification successful: rev={}, data_cid={}",
-                    verified.rev, verified.data_cid
-                );
-            }
-            Err(tranquil_pds::sync::verify::VerifyError::DidMismatch {
-                commit_did,
-                expected_did,
-            }) => {
-                return Err(ApiError::InvalidRepo(format!(
-                    "CAR file is for DID {} but you are authenticated as {}",
-                    commit_did, expected_did
-                )));
-            }
-            Err(tranquil_pds::sync::verify::VerifyError::MstValidationFailed(msg)) => {
-                return Err(ApiError::InvalidRequest(format!(
-                    "MST validation failed: {}",
-                    msg
-                )));
-            }
-            Err(e) => {
-                error!("CAR structure verification error: {:?}", e);
-                return Err(ApiError::InvalidRequest(format!(
-                    "CAR verification failed: {}",
-                    e
-                )));
-            }
-        }
+    } else {
+        let verified = CarVerifier::new()
+            .verify_car(did, &root, &blocks)
+            .await
+            .map_err(map_car_verify_error)?;
+        debug!(
+            "CAR signature and structure verified: rev={}, data_cid={}",
+            verified.rev, verified.data_cid
+        );
     }
     let max_blocks = tranquil_config::get().import.max_blocks as usize;
     let _write_lock = state.repo_write_locks.lock(user_id).await;

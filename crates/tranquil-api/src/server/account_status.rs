@@ -197,18 +197,19 @@ async fn assert_valid_did_document_for_service(
         .await
         .map_err(ApiError::InvalidRequest)?;
 
+        let doc_rotation_keys = doc_data
+            .get("rotationKeys")
+            .and_then(Value::as_array)
+            .map(|arr| arr.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
+
         let server_rotation_key = tranquil_config::get().secrets.plc_rotation_key.clone();
-        if let Some(ref expected_rotation_key) = server_rotation_key {
-            let rotation_keys = doc_data
-                .get("rotationKeys")
-                .and_then(Value::as_array)
-                .map(|arr| arr.iter().filter_map(Value::as_str).collect::<Vec<_>>())
-                .unwrap_or_default();
-            if !rotation_keys.contains(&expected_rotation_key.as_str()) {
-                return Err(ApiError::InvalidRequest(
-                    "Server rotation key not included in PLC DID data".into(),
-                ));
-            }
+        if let Some(ref expected_rotation_key) = server_rotation_key
+            && !doc_rotation_keys.contains(&expected_rotation_key.as_str())
+        {
+            return Err(ApiError::InvalidRequest(
+                "Server rotation key not included in PLC DID data".into(),
+            ));
         }
 
         let doc_signing_key = doc_data
@@ -241,6 +242,16 @@ async fn assert_valid_did_document_for_service(
                 );
                 return Err(ApiError::InvalidRequest(
                     "DID document verification method does not match expected signing key".into(),
+                ));
+            }
+
+            if !doc_rotation_keys.contains(&expected_did_key.as_str()) {
+                warn!(
+                    "DID {} rotation keys {:?} omit the PDS-managed signing key {}",
+                    did, doc_rotation_keys, expected_did_key
+                );
+                return Err(ApiError::InvalidRequest(
+                    "PLC rotation keys omit the PDS-managed signing key required to sign operations for this identity".into(),
                 ));
             }
         }

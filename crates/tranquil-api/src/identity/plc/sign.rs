@@ -9,7 +9,10 @@ use tranquil_pds::api::ApiError;
 use tranquil_pds::api::error::DbResultExt;
 use tranquil_pds::auth::{Auth, Permissive};
 use tranquil_pds::circuit_breaker::with_circuit_breaker;
-use tranquil_pds::plc::{PlcError, PlcService, create_update_op, sign_operation};
+use tranquil_pds::plc::{
+    PlcError, PlcService, create_update_op, missing_required_rotation_key, sign_operation,
+    signing_key_to_did_key,
+};
 use tranquil_pds::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -114,6 +117,18 @@ pub async fn sign_plc_operation(
             ApiError::InternalError(None)
         }
     })?;
+
+    let signing_did_key = signing_key_to_did_key(&signing_key);
+    if let Some(rotation_keys) = unsigned_op.get("rotationKeys").and_then(Value::as_array) {
+        let rotation_key_strs: Vec<&str> = rotation_keys.iter().filter_map(Value::as_str).collect();
+        if let Some(missing) = missing_required_rotation_key(
+            &rotation_key_strs,
+            &signing_did_key,
+            tranquil_config::get().secrets.plc_rotation_key.as_deref(),
+        ) {
+            return Err(ApiError::InvalidRequest(missing.message().into()));
+        }
+    }
 
     let signed_op = sign_operation(&unsigned_op, &signing_key).map_err(|e| {
         error!("Failed to sign PLC operation: {:?}", e);
