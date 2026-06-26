@@ -116,7 +116,10 @@ pub async fn create_app_password(
             .await
             .ok()
             .flatten();
-        let granted_scopes = grant.map(|g| g.granted_scopes).unwrap_or_default();
+        let granted_scopes = match grant {
+            Some(g) => g.granted_scopes,
+            None => return Err(ApiError::InsufficientScope(None)),
+        };
 
         let requested = input.scopes.as_deref().unwrap_or("atproto");
         let intersected = intersect_scopes(requested, granted_scopes.as_str());

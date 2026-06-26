@@ -187,6 +187,40 @@ impl DelegationOps {
         }
     }
 
+    pub fn remap_grant_scopes(&self, from: &str, to: &str) -> Result<usize, MetastoreError> {
+        let prefix = super::encoding::KeyBuilder::new()
+            .tag(super::keys::KeyTag::DELEG_GRANT)
+            .build();
+
+        let mut batch = self.db.batch();
+        let migrated = self.indexes.prefix(prefix.as_slice()).try_fold(
+            0usize,
+            |count, guard| -> Result<usize, MetastoreError> {
+                let (key_bytes, val_bytes) = guard.into_inner().map_err(MetastoreError::Fjall)?;
+                match DelegationGrantValue::deserialize(&val_bytes) {
+                    Some(mut val) if val.granted_scopes == from => {
+                        val.granted_scopes = to.to_owned();
+                        batch.insert(&self.indexes, key_bytes, val.serialize());
+                        Ok(count + 1)
+                    }
+                    Some(_) => Ok(count),
+                    None => {
+                        tracing::warn!("skipping corrupt delegation grant during scope remap");
+                        Ok(count)
+                    }
+                }
+            },
+        )?;
+
+        match migrated {
+            0 => Ok(0),
+            _ => {
+                batch.commit().map_err(MetastoreError::Fjall)?;
+                Ok(migrated)
+            }
+        }
+    }
+
     pub fn get_delegation(
         &self,
         delegated_did: &Did,
@@ -408,5 +442,89 @@ impl DelegationOps {
             user_agent: v.user_agent.clone(),
             created_at: DateTime::from_timestamp_millis(v.created_at_ms).unwrap_or_default(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metastore::{Metastore, MetastoreConfig};
+
+    const OWNER_FULL: &str = "atproto repo:* blob:*/* identity:* account:*?action=manage";
+
+    fn fresh() -> (tempfile::TempDir, Metastore) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ms = Metastore::open(dir.path(), MetastoreConfig::default()).expect("open metastore");
+        (dir, ms)
+    }
+
+    fn did(s: &str) -> Did {
+        Did::new(s.to_owned()).expect("valid did")
+    }
+
+    #[test]
+    fn remap_upgrades_only_matching_grants() {
+        let (_dir, ms) = fresh();
+        let ops = ms.delegation_ops();
+
+        let owner = did("did:plc:nel");
+        let ctrl_owner = did("did:plc:olaren");
+        let ctrl_editor = did("did:plc:teq");
+
+        ops.create_delegation(&owner, &ctrl_owner, &DbScope::new("atproto").unwrap(), &owner)
+            .unwrap();
+        ops.create_delegation(
+            &owner,
+            &ctrl_editor,
+            &DbScope::new("repo:* blob:*/*").unwrap(),
+            &owner,
+        )
+        .unwrap();
+
+        assert_eq!(ops.remap_grant_scopes("atproto", OWNER_FULL).unwrap(), 1);
+
+        let upgraded = ops.get_delegation(&owner, &ctrl_owner).unwrap().unwrap();
+        assert_eq!(upgraded.granted_scopes.as_str(), OWNER_FULL);
+
+        let untouched = ops.get_delegation(&owner, &ctrl_editor).unwrap().unwrap();
+        assert_eq!(untouched.granted_scopes.as_str(), "repo:* blob:*/*");
+    }
+
+    #[test]
+    fn remap_is_idempotent() {
+        let (_dir, ms) = fresh();
+        let ops = ms.delegation_ops();
+        let owner = did("did:plc:limpet");
+        let ctrl = did("did:plc:whelk");
+
+        ops.create_delegation(&owner, &ctrl, &DbScope::new("atproto").unwrap(), &owner)
+            .unwrap();
+
+        assert_eq!(ops.remap_grant_scopes("atproto", OWNER_FULL).unwrap(), 1);
+        assert_eq!(ops.remap_grant_scopes("atproto", OWNER_FULL).unwrap(), 0);
+    }
+
+    #[test]
+    fn remap_skips_corrupt_grant() {
+        let (_dir, ms) = fresh();
+        let ops = ms.delegation_ops();
+
+        let owner = did("did:plc:nautilus");
+        let ctrl = did("did:plc:periwinkle");
+        ops.create_delegation(&owner, &ctrl, &DbScope::new("atproto").unwrap(), &owner)
+            .unwrap();
+
+        let corrupt_key = grant_key(
+            UserHash::from_did("did:plc:conch"),
+            UserHash::from_did("did:plc:scallop"),
+        );
+        let mut batch = ops.db.batch();
+        batch.insert(&ops.indexes, corrupt_key.as_slice(), b"not a grant".as_slice());
+        batch.commit().unwrap();
+
+        assert_eq!(ops.remap_grant_scopes("atproto", OWNER_FULL).unwrap(), 1);
+
+        let upgraded = ops.get_delegation(&owner, &ctrl).unwrap().unwrap();
+        assert_eq!(upgraded.granted_scopes.as_str(), OWNER_FULL);
     }
 }

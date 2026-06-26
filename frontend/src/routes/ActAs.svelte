@@ -1,7 +1,7 @@
 <script lang="ts">
   import AuthenticatedRoute from '../components/AuthenticatedRoute.svelte'
   import { navigate } from '../lib/router.svelte'
-  import { generateCodeVerifier, generateCodeChallenge, saveOAuthState, generateState, createDPoPProofForRequest, setDPoPNonce } from '../lib/oauth'
+  import { generateCodeVerifier, generateCodeChallenge, saveOAuthState, generateState, createDPoPProofForRequest, setDPoPNonce, SCOPES } from '../lib/oauth'
   import { _ } from '../lib/i18n'
   import type { Session, DelegationControlledAccount } from '../lib/types/api'
   import type { AuthenticatedClient } from '../lib/authenticated-client'
@@ -54,7 +54,7 @@
         client_id: `${hostname}/oauth-client-metadata.json`,
         redirect_uri: `${hostname}/app/`,
         response_type: 'code',
-        scope: 'atproto',
+        scope: SCOPES,
         state: state,
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',

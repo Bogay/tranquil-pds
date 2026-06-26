@@ -42,6 +42,7 @@
   let controllers = $state<Controller[]>([])
   let controlledAccounts = $state<ControlledAccount[]>([])
   let scopePresets = $state<ScopePreset[]>([])
+  let defaultScopes = $state('')
 
   let hasControllers = $derived(controllers.length > 0)
   let controlsAccounts = $derived(controlledAccounts.length > 0)
@@ -50,7 +51,7 @@
 
   let showAddController = $state(false)
   let addControllerIdentifier = $state('')
-  let addControllerScopes = $state('atproto')
+  let addControllerScopes = $state('')
   let addingController = $state(false)
   let addControllerConfirmed = $state(false)
   let resolvedController = $state<{ did: string; handle?: string; pdsUrl?: string; isLocal: boolean } | null>(null)
@@ -119,7 +120,7 @@
   let showCreateDelegated = $state(false)
   let newDelegatedHandle = $state('')
   let newDelegatedEmail = $state('')
-  let newDelegatedScopes = $state('atproto')
+  let newDelegatedScopes = $state('')
   let creatingDelegated = $state(false)
 
   onMount(async () => {
@@ -168,6 +169,9 @@
         description: p.description,
         scopes: unsafeAsScopeSet(p.scopes)
       }))
+      defaultScopes = scopePresets.find(p => p.name === 'owner')?.scopes ?? scopePresets[0]?.scopes ?? ''
+      addControllerScopes = defaultScopes
+      newDelegatedScopes = defaultScopes
     }
   }
 
@@ -181,7 +185,7 @@
     if (result.ok) {
       toast.success($_('delegation.controllerAdded'))
       addControllerIdentifier = ''
-      addControllerScopes = 'atproto'
+      addControllerScopes = defaultScopes
       addControllerConfirmed = false
       resolvedController = null
       showAddController = false
@@ -214,7 +218,7 @@
       toast.success($_('delegation.accountCreated', { values: { handle: result.value.handle } }))
       newDelegatedHandle = ''
       newDelegatedEmail = ''
-      newDelegatedScopes = 'atproto'
+      newDelegatedScopes = defaultScopes
       showCreateDelegated = false
       await loadControlledAccounts()
     }
@@ -224,7 +228,6 @@
   function getScopeLabel(scopes: ScopeSet): string {
     const preset = scopePresets.find(p => p.scopes === scopes)
     if (preset) return preset.label
-    if ((scopes as string) === 'atproto') return $_('delegation.scopeOwner')
     if ((scopes as string) === '') return $_('delegation.scopeViewer')
     return $_('delegation.scopeCustom')
   }

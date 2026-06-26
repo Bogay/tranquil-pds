@@ -351,34 +351,16 @@ pub async fn consent_post(
     } else {
         original_scope_str.to_string()
     };
-
     let requested_scopes: Vec<&str> = effective_scope_str.split_whitespace().collect();
-    let has_granular_scopes = requested_scopes.iter().any(|s| is_granular_scope(s));
-    let user_denied_some_granular = has_granular_scopes
-        && requested_scopes
-            .iter()
-            .filter(|s| is_granular_scope(s))
-            .any(|s| !form.approved_scopes.contains(&s.to_string()));
     let atproto_was_requested = requested_scopes.contains(&"atproto");
-    if atproto_was_requested
-        && !has_granular_scopes
-        && !form.approved_scopes.contains(&"atproto".to_string())
-    {
+    if atproto_was_requested && !form.approved_scopes.contains(&"atproto".to_string()) {
         return json_error(
             StatusCode::BAD_REQUEST,
             "invalid_request",
             "The atproto scope was requested and must be approved",
         );
     }
-    let final_approved: Vec<String> = if user_denied_some_granular {
-        form.approved_scopes
-            .iter()
-            .filter(|s| *s != "atproto")
-            .cloned()
-            .collect()
-    } else {
-        form.approved_scopes.clone()
-    };
+    let final_approved: Vec<String> = form.approved_scopes.clone();
     if final_approved.is_empty() {
         return json_error(
             StatusCode::BAD_REQUEST,

@@ -148,7 +148,14 @@ pub async fn handle_authorization_code_grant(
             .await
             .ok()
             .flatten();
-        let granted_scopes = grant.map(|g| g.granted_scopes).unwrap_or_default();
+        let granted_scopes = match grant {
+            Some(g) => g.granted_scopes,
+            None => {
+                return Err(OAuthError::InvalidGrant(
+                    "Delegation grant not found or revoked".to_string(),
+                ));
+            }
+        };
         let requested = authorized.parameters.scope.as_deref().unwrap_or("atproto");
         let intersected = intersect_scopes(requested, granted_scopes.as_str());
         (Some(intersected), Some(controller.clone()))

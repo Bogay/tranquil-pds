@@ -12,12 +12,18 @@ pub struct ScopePreset {
     pub scopes: &'static str,
 }
 
+pub const OWNER_FULL_SCOPES: &str =
+    "atproto repo:* blob:*/* identity:* account:*?action=manage";
+
+pub const EDITOR_FULL_SCOPES: &str =
+    "atproto repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*";
+
 pub const SCOPE_PRESETS: &[ScopePreset] = &[
     ScopePreset {
         name: "owner",
         label: "Owner",
         description: "Full control including delegation management",
-        scopes: "atproto",
+        scopes: OWNER_FULL_SCOPES,
     },
     ScopePreset {
         name: "admin",
@@ -29,7 +35,7 @@ pub const SCOPE_PRESETS: &[ScopePreset] = &[
         name: "editor",
         label: "Editor",
         description: "Post content and upload media",
-        scopes: "repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*",
+        scopes: EDITOR_FULL_SCOPES,
     },
     ScopePreset {
         name: "viewer",
@@ -40,36 +46,19 @@ pub const SCOPE_PRESETS: &[ScopePreset] = &[
 ];
 
 pub fn intersect_scopes(requested: &str, granted: &str) -> String {
-    if granted.is_empty() {
-        return String::new();
-    }
-
     let requested_set: HashSet<&str> = requested.split_whitespace().collect();
     let granted_set: HashSet<&str> = granted.split_whitespace().collect();
 
-    let granted_has_atproto = granted_set.contains("atproto");
-    let requested_has_atproto = requested_set.contains("atproto");
-
-    if granted_has_atproto {
-        let mut scopes: Vec<&str> = requested_set.into_iter().collect();
-        scopes.sort();
-        return scopes.join(" ");
-    }
-
-    if requested_has_atproto {
-        let mut scopes: Vec<&str> = granted_set.into_iter().collect();
-        scopes.sort();
-        return scopes.join(" ");
-    }
-
-    let mut result: Vec<&str> = requested_set
+    let mut scopes: Vec<&str> = requested_set
         .iter()
-        .filter(|requested_scope| any_granted_covers(requested_scope, &granted_set))
+        .filter(|requested_scope| {
+            **requested_scope != "atproto" && any_granted_covers(requested_scope, &granted_set)
+        })
         .copied()
+        .chain(requested_set.contains("atproto").then_some("atproto"))
         .collect();
-
-    result.sort();
-    result.join(" ")
+    scopes.sort();
+    scopes.join(" ")
 }
 
 fn any_granted_covers(requested: &str, granted: &HashSet<&str>) -> bool {
@@ -159,17 +148,91 @@ mod tests {
     }
 
     #[test]
-    fn test_intersect_granted_atproto() {
-        let result = intersect_scopes("repo:* blob:*/*", "atproto");
+    fn test_intersect_owner_grant_covers_requested() {
+        let result = intersect_scopes("repo:* blob:*/*", OWNER_FULL_SCOPES);
         assert!(result.contains("repo:*"));
         assert!(result.contains("blob:*/*"));
     }
 
     #[test]
-    fn test_intersect_requested_atproto() {
-        let result = intersect_scopes("atproto", "repo:* blob:*/*");
-        assert!(result.contains("repo:*"));
+    fn test_intersect_bare_atproto_grant_is_auth_only() {
+        let requested = "atproto repo:*?action=create blob:*/*";
+        assert_eq!(intersect_scopes(requested, "atproto"), "atproto");
+    }
+
+    #[test]
+    fn test_intersect_bare_atproto_request_is_auth_only() {
+        assert_eq!(intersect_scopes("atproto", "repo:* blob:*/*"), "atproto");
+    }
+
+    #[test]
+    fn test_intersect_downscoped_request_keeps_atproto() {
+        let approved = "atproto repo:*?action=create blob:*/* account:*?action=manage";
+        let result = intersect_scopes(approved, OWNER_FULL_SCOPES);
+        assert!(result.split_whitespace().any(|s| s == "atproto"));
+        assert!(result.contains("account:*?action=manage"));
+        assert!(result.contains("repo:*?action=create"));
         assert!(result.contains("blob:*/*"));
+        assert!(!result.contains("identity"));
+    }
+
+    #[test]
+    fn test_intersect_owner_passes_through_identity() {
+        let requested = "atproto repo:*?action=create identity:* account:*?action=manage";
+        let result = intersect_scopes(requested, OWNER_FULL_SCOPES);
+        assert!(result.contains("identity:*"));
+        assert!(result.contains("account:*?action=manage"));
+    }
+
+    #[test]
+    fn test_intersect_admin_excludes_identity() {
+        let requested = "atproto repo:*?action=create identity:* account:*?action=manage";
+        let granted = "atproto repo:* blob:*/* account:*?action=manage";
+        let result = intersect_scopes(requested, granted);
+        assert!(!result.contains("identity"));
+        assert!(result.contains("account:*?action=manage"));
+    }
+
+    #[test]
+    fn test_intersect_admin_excludes_identity_coverage_path() {
+        let requested = "repo:*?action=create identity:* account:*?action=manage";
+        let granted = "atproto repo:* blob:*/* account:*?action=manage";
+        let result = intersect_scopes(requested, granted);
+        assert!(!result.contains("identity"));
+        assert!(result.contains("account:*?action=manage"));
+        assert!(result.contains("repo:*?action=create"));
+    }
+
+    #[test]
+    fn test_intersect_editor_grant_keeps_atproto() {
+        let editor = SCOPE_PRESETS
+            .iter()
+            .find(|p| p.name == "editor")
+            .expect("editor preset")
+            .scopes;
+        let requested =
+            "atproto repo:*?action=create identity:* account:*?action=manage blob:*/*";
+        let result = intersect_scopes(requested, editor);
+        assert!(result.split_whitespace().any(|s| s == "atproto"));
+        assert!(result.contains("repo:*?action=create"));
+        assert!(result.contains("blob:*/*"));
+        assert!(!result.contains("identity"));
+        assert!(!result.contains("account"));
+    }
+
+    #[test]
+    fn test_intersect_guarantees_atproto_for_custom_grant() {
+        let result = intersect_scopes(
+            "atproto repo:*?action=create blob:*/*",
+            "repo:*?action=create blob:*/*",
+        );
+        assert!(result.split_whitespace().any(|s| s == "atproto"));
+        assert!(result.contains("blob:*/*"));
+    }
+
+    #[test]
+    fn test_intersect_no_atproto_request_stays_empty_when_uncovered() {
+        assert_eq!(intersect_scopes("identity:*", "repo:* blob:*/*"), "");
     }
 
     #[test]
@@ -181,8 +244,14 @@ mod tests {
     }
 
     #[test]
-    fn test_intersect_empty_granted() {
-        assert_eq!(intersect_scopes("atproto", ""), "");
+    fn test_intersect_viewer_grant_keeps_atproto() {
+        let requested = "atproto repo:*?action=create blob:*/* identity:*";
+        assert_eq!(intersect_scopes(requested, ""), "atproto");
+    }
+
+    #[test]
+    fn test_intersect_empty_grant_without_atproto_request_is_empty() {
+        assert_eq!(intersect_scopes("repo:*?action=create", ""), "");
     }
 
     #[test]

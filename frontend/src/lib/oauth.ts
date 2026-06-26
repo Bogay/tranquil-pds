@@ -3,7 +3,7 @@ const OAUTH_VERIFIER_KEY = "tranquil_pds_oauth_verifier";
 const DPOP_KEY_STORE = "tranquil_pds_dpop_keys";
 const DPOP_NONCE_KEY = "tranquil_pds_dpop_nonce";
 
-const SCOPES = [
+export const SCOPES = [
   "atproto",
   "repo:*?action=create",
   "repo:*?action=update",
@@ -16,7 +16,7 @@ const SCOPES = [
 const CLIENT_ID =
   !(import.meta.env.DEV) || globalThis.location?.hostname !== 'localhost'
     ? `${globalThis.location.origin}/oauth-client-metadata.json`
-    : `http://localhost/?scope=${SCOPES}`;
+    : `http://localhost/?scope=${encodeURIComponent(SCOPES)}`;
 
 const REDIRECT_URI = `${globalThis.location.origin}/app/`;
 

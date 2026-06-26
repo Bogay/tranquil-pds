@@ -482,6 +482,46 @@ struct TranquilStoreWiring {
     segments_dir: PathBuf,
 }
 
+fn migrate_delegation_preset_scopes(metastore: &tranquil_store::metastore::Metastore) {
+    const MARKER_KEY: &str = "migration:delegation_preset_scopes_v1";
+    const LEGACY_EDITOR_SCOPES: &str =
+        "repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*";
+
+    let infra = metastore.infra_ops();
+    if infra
+        .get_server_config(MARKER_KEY)
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return;
+    }
+
+    let ops = metastore.delegation_ops();
+    let owners = match ops.remap_grant_scopes("atproto", crate::delegation::OWNER_FULL_SCOPES) {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::error!(error = ?e, "delegation owner-scope migration failed, will retry on next start");
+            return;
+        }
+    };
+    let editors =
+        match ops.remap_grant_scopes(LEGACY_EDITOR_SCOPES, crate::delegation::EDITOR_FULL_SCOPES) {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::error!(error = ?e, "delegation editor-scope migration failed, will retry on next start");
+                return;
+            }
+        };
+    if owners + editors > 0 {
+        tracing::info!(owners, editors, "upgraded legacy delegation grants to preset scopes");
+    }
+
+    if let Err(e) = infra.upsert_server_config(MARKER_KEY, "done") {
+        tracing::error!(error = ?e, "failed to record delegation scope migration marker, will retry");
+    }
+}
+
 fn wire_tranquil_store(
     store_cfg: &tranquil_config::TranquilStoreConfig,
     shutdown: CancellationToken,
@@ -618,6 +658,8 @@ fn wire_tranquil_store(
             Err(e) => tracing::error!(error = %e, "orphan repo purge failed"),
         }
     }
+
+    migrate_delegation_preset_scopes(&metastore);
 
     let notifier = bridge.notifier();
     let signal_db = metastore.database().clone();

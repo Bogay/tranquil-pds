@@ -174,9 +174,7 @@ pub async fn remove_controller(
                 .session
                 .delete_app_passwords_by_controller(&auth.did, &input.controller_did)
                 .await
-                .unwrap_or(0)
-                .try_into()
-                .unwrap_or(0usize);
+                .unwrap_or(0);
 
             let revoked_oauth_tokens = state
                 .repos
@@ -232,6 +230,20 @@ pub async fn update_controller_scopes(
         .await
     {
         Ok(true) => {
+            let revoked_app_passwords = state
+                .repos
+                .session
+                .delete_app_passwords_by_controller(&auth.did, &input.controller_did)
+                .await
+                .unwrap_or(0);
+
+            let revoked_oauth_tokens = state
+                .repos
+                .oauth
+                .revoke_tokens_for_controller(&auth.did, &input.controller_did)
+                .await
+                .unwrap_or(0);
+
             let _ = state
                 .repos
                 .delegation
@@ -241,7 +253,9 @@ pub async fn update_controller_scopes(
                     Some(&input.controller_did),
                     DelegationActionType::ScopesModified,
                     Some(json!({
-                        "new_scopes": input.granted_scopes.as_str()
+                        "new_scopes": input.granted_scopes.as_str(),
+                        "revoked_app_passwords": revoked_app_passwords,
+                        "revoked_oauth_tokens": revoked_oauth_tokens
                     })),
                     None,
                     None,
