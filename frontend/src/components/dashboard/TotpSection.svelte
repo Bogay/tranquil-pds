@@ -254,7 +254,7 @@
     <div class="setup-step">
       <p>{$_('security.totpCodePlaceholder')}</p>
       <form onsubmit={handleVerifyTotp}>
-        <input type="text" bind:value={verifyCodeRaw} placeholder="000000" class="code-input" inputmode="numeric" disabled={verifyLoading} />
+        <input type="text" bind:value={verifyCodeRaw} placeholder="000000" class="code-input" inputmode="numeric" autocomplete="one-time-code" disabled={verifyLoading} />
         <div class="actions">
           <button type="button" class="secondary" onclick={() => totpSetup = goBackToQr(verifyData)}>{$_('common.back')}</button>
           <button type="submit" disabled={verifyLoading || verifyCode.length !== 6}>{$_('security.verifyAndEnable')}</button>
