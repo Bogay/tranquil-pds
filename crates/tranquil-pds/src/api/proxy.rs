@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 use crate::api::error::ApiError;
 use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
+use crate::types::{Did, Nsid};
 use crate::util::get_header_str;
 use axum::{
     body::Bytes,
@@ -275,6 +276,10 @@ async fn proxy_handler(
         .await
         {
             Ok(auth_user) => {
+                let Ok(method_nsid) = method.parse::<Nsid>() else {
+                    return ApiError::InvalidRequest(format!("Invalid XRPC method: {}", method))
+                        .into_response();
+                };
                 if let Err(e) = crate::auth::scope_check::check_rpc_scope(
                     &auth_user.auth_source,
                     auth_user.scope.as_deref(),
@@ -319,7 +324,12 @@ async fn proxy_handler(
                 // getFeed must be audienced to the feed generator, not the AppView.
                 let (token_aud, token_lxm) = if method == "app.bsky.feed.getFeed" {
                     match resolve_feed_generator_did(&resolved.url, query.as_deref()).await {
-                        Some(feed_did) => (feed_did, "app.bsky.feed.getFeedSkeleton"),
+                        Some(feed_did) => (
+                            feed_did,
+                            "app.bsky.feed.getFeedSkeleton"
+                                .parse::<Nsid>()
+                                .expect("getFeedSkeleton is a valid NSID"),
+                        ),
                         None => {
                             warn!(
                                 "getFeed proxy: could not resolve feed generator DID; refusing \

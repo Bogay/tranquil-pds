@@ -167,9 +167,13 @@ async fn test_fetch_schema_from_pds_success() {
         .mount(&pds_server)
         .await;
 
-    let doc = fetch_schema_from_pds(&pds_server.uri(), did, nsid)
-        .await
-        .unwrap();
+    let doc = fetch_schema_from_pds(
+        &pds_server.uri(),
+        &did.parse().unwrap(),
+        &nsid.parse().unwrap(),
+    )
+    .await
+    .unwrap();
     assert_eq!(doc.id, nsid);
     assert_eq!(doc.lexicon, 1);
     assert!(doc.defs.contains_key("main"));
@@ -190,7 +194,12 @@ async fn test_fetch_schema_missing_value_field() {
         .mount(&pds_server)
         .await;
 
-    let result = fetch_schema_from_pds(&pds_server.uri(), did, nsid).await;
+    let result = fetch_schema_from_pds(
+        &pds_server.uri(),
+        &did.parse().unwrap(),
+        &nsid.parse().unwrap(),
+    )
+    .await;
     assert!(matches!(result, Err(ResolveError::SchemaFetch { .. })));
 }
 
@@ -212,7 +221,12 @@ async fn test_fetch_schema_invalid_lexicon_json() {
         .mount(&pds_server)
         .await;
 
-    let result = fetch_schema_from_pds(&pds_server.uri(), did, nsid).await;
+    let result = fetch_schema_from_pds(
+        &pds_server.uri(),
+        &did.parse().unwrap(),
+        &nsid.parse().unwrap(),
+    )
+    .await;
     assert!(matches!(result, Err(ResolveError::InvalidSchema(_))));
 }
 
@@ -240,9 +254,13 @@ async fn test_full_chain_plc_to_schema() {
         .mount(&pds_server)
         .await;
 
-    let doc = resolve_lexicon_from_did(nsid, did, Some(&plc_server.uri()))
-        .await
-        .unwrap();
+    let doc = resolve_lexicon_from_did(
+        &nsid.parse().unwrap(),
+        &did.parse().unwrap(),
+        Some(&plc_server.uri()),
+    )
+    .await
+    .unwrap();
     assert_eq!(doc.id, nsid);
     assert_eq!(doc.lexicon, 1);
 }
@@ -271,7 +289,12 @@ async fn test_full_chain_schema_id_mismatch_rejected() {
         .mount(&pds_server)
         .await;
 
-    let result = resolve_lexicon_from_did(nsid, did, Some(&plc_server.uri())).await;
+    let result = resolve_lexicon_from_did(
+        &nsid.parse().unwrap(),
+        &did.parse().unwrap(),
+        Some(&plc_server.uri()),
+    )
+    .await;
     assert!(matches!(result, Err(ResolveError::InvalidSchema(_))));
 }
 
@@ -304,7 +327,12 @@ async fn test_full_chain_bad_lexicon_version_rejected() {
         .mount(&pds_server)
         .await;
 
-    let result = resolve_lexicon_from_did(nsid, did, Some(&plc_server.uri())).await;
+    let result = resolve_lexicon_from_did(
+        &nsid.parse().unwrap(),
+        &did.parse().unwrap(),
+        Some(&plc_server.uri()),
+    )
+    .await;
     assert!(matches!(result, Err(ResolveError::InvalidSchema(_))));
 }
 
@@ -323,9 +351,13 @@ async fn test_pds_trailing_slash_handled() {
         .await;
 
     let pds_url_with_slash = format!("{}/", pds_server.uri());
-    let doc = fetch_schema_from_pds(&pds_url_with_slash, did, nsid)
-        .await
-        .unwrap();
+    let doc = fetch_schema_from_pds(
+        &pds_url_with_slash,
+        &did.parse().unwrap(),
+        &nsid.parse().unwrap(),
+    )
+    .await
+    .unwrap();
     assert_eq!(doc.id, nsid);
 }
 
@@ -344,7 +376,12 @@ async fn test_fetch_schema_error_status_gives_meaningful_error() {
         .mount(&pds_server)
         .await;
 
-    let result = fetch_schema_from_pds(&pds_server.uri(), did, nsid).await;
+    let result = fetch_schema_from_pds(
+        &pds_server.uri(),
+        &did.parse().unwrap(),
+        &nsid.parse().unwrap(),
+    )
+    .await;
     let err = result.unwrap_err();
     let err_msg = err.to_string();
     assert!(

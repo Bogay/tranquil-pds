@@ -11,6 +11,7 @@ use tranquil_pds::api::ApiError;
 use tranquil_pds::api::proxy_client::{is_ssrf_safe, proxy_client};
 use tranquil_pds::auth::{AnyUser, Auth};
 use tranquil_pds::state::AppState;
+use tranquil_pds::types::{Did, Nsid};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReportReasonType {
@@ -135,6 +136,7 @@ async fn proxy_to_report_service(
         },
     };
 
+    let report_lxm = Nsid::from("com.atproto.moderation.createReport".to_string());
     let service_token = match tranquil_pds::auth::create_service_token(
         &auth_user.did,
         service_did,

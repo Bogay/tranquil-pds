@@ -353,9 +353,9 @@ pub async fn apply_writes(
         &auth,
         &input.writes,
         |w| match w {
-            WriteOp::Create { collection, .. } => collection.as_str(),
-            WriteOp::Update { collection, .. } => collection.as_str(),
-            WriteOp::Delete { collection, .. } => collection.as_str(),
+            WriteOp::Create { collection, .. } => collection,
+            WriteOp::Update { collection, .. } => collection,
+            WriteOp::Delete { collection, .. } => collection,
         },
         |w| match w {
             WriteOp::Create { .. } => WriteOpKind::Create,

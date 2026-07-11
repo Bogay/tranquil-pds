@@ -47,7 +47,7 @@ fn ref_to_context_nsid<'a>(reference: &'a str, current_context: &'a str) -> &'a 
 
 pub fn validate_record(
     registry: &LexiconRegistry,
-    nsid: &str,
+    nsid: &tranquil_types::Nsid,
     value: &serde_json::Value,
 ) -> Result<(), LexValidationError> {
     let doc = registry
@@ -527,6 +527,11 @@ mod tests {
     use super::*;
     use crate::test_schemas::test_registry;
     use serde_json::json;
+    use tranquil_types::Nsid;
+
+    fn nsid(s: &str) -> Nsid {
+        s.parse().unwrap()
+    }
 
     #[test]
     fn test_validate_valid_record() {
@@ -536,7 +541,7 @@ mod tests {
             "text": "Hello, world!",
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
-        assert!(validate_record(&registry, "com.test.basic", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.basic"), &record).is_ok());
     }
 
     #[test]
@@ -546,7 +551,7 @@ mod tests {
             "$type": "com.test.basic",
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
-        let err = validate_record(&registry, "com.test.basic", &record).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.basic"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::MissingRequired { .. }));
     }
 
@@ -558,7 +563,7 @@ mod tests {
             "text": "a".repeat(101),
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
-        let err = validate_record(&registry, "com.test.basic", &record).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.basic"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::InvalidField { .. }));
     }
 
@@ -570,7 +575,7 @@ mod tests {
             "text": "a".repeat(51),
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
-        let err = validate_record(&registry, "com.test.basic", &record).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.basic"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::InvalidField { .. }));
     }
 
@@ -582,7 +587,7 @@ mod tests {
             "$type": "com.test.profile",
             "displayName": emoji_text
         });
-        let err = validate_record(&registry, "com.test.profile", &record).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.profile"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::InvalidField { .. }));
     }
 
@@ -595,7 +600,7 @@ mod tests {
             "createdAt": "2024-01-01T00:00:00.000Z",
             "count": 101
         });
-        let err = validate_record(&registry, "com.test.basic", &record).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.basic"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::InvalidField { .. }));
 
         let record_neg = json!({
@@ -604,7 +609,7 @@ mod tests {
             "createdAt": "2024-01-01T00:00:00.000Z",
             "count": -1
         });
-        let err = validate_record(&registry, "com.test.basic", &record_neg).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.basic"), &record_neg).unwrap_err();
         assert!(matches!(err, LexValidationError::InvalidField { .. }));
     }
 
@@ -617,7 +622,7 @@ mod tests {
             "createdAt": "2024-01-01T00:00:00.000Z",
             "count": 5.0
         });
-        assert!(validate_record(&registry, "com.test.basic", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.basic"), &record).is_ok());
 
         let record_frac = json!({
             "$type": "com.test.basic",
@@ -625,7 +630,7 @@ mod tests {
             "createdAt": "2024-01-01T00:00:00.000Z",
             "count": 5.5
         });
-        let err = validate_record(&registry, "com.test.basic", &record_frac).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.basic"), &record_frac).unwrap_err();
         assert!(matches!(err, LexValidationError::InvalidField { .. }));
     }
 
@@ -638,7 +643,7 @@ mod tests {
             "createdAt": "2024-01-01T00:00:00.000Z",
             "active": "not-a-bool"
         });
-        let err = validate_record(&registry, "com.test.basic", &record).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.basic"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::InvalidField { .. }));
     }
 
@@ -651,7 +656,7 @@ mod tests {
             "createdAt": "2024-01-01T00:00:00.000Z",
             "tags": ["a", "b", "c", "d"]
         });
-        let err = validate_record(&registry, "com.test.basic", &record).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.basic"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::InvalidField { .. }));
     }
 
@@ -664,7 +669,7 @@ mod tests {
             "createdAt": "2024-01-01T00:00:00.000Z",
             "tags": ["a", "b", "c"]
         });
-        assert!(validate_record(&registry, "com.test.basic", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.basic"), &record).is_ok());
     }
 
     #[test]
@@ -678,7 +683,7 @@ mod tests {
             },
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
-        assert!(validate_record(&registry, "com.test.withref", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.withref"), &record).is_ok());
     }
 
     #[test]
@@ -691,7 +696,7 @@ mod tests {
             },
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
-        let err = validate_record(&registry, "com.test.withref", &record).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.withref"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::MissingRequired { .. }));
     }
 
@@ -713,7 +718,7 @@ mod tests {
                 }
             }
         });
-        assert!(validate_record(&registry, "com.test.withreply", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.withreply"), &record).is_ok());
     }
 
     #[test]
@@ -738,7 +743,7 @@ mod tests {
                 ]
             }
         });
-        assert!(validate_record(&registry, "com.test.withreply", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.withreply"), &record).is_ok());
 
         let bad_embed = json!({
             "$type": "com.test.withreply",
@@ -750,7 +755,7 @@ mod tests {
             }
         });
         assert!(
-            validate_record(&registry, "com.test.withreply", &bad_embed).is_err(),
+            validate_record(&registry, &nsid("com.test.withreply"), &bad_embed).is_err(),
             "union with bare NSID ref must validate the matched schema"
         );
     }
@@ -852,7 +857,7 @@ mod tests {
                 }
             }
         });
-        assert!(validate_record(&registry, "com.test.withreply", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.withreply"), &record).is_ok());
 
         let bad_external = json!({
             "$type": "com.test.withreply",
@@ -866,7 +871,7 @@ mod tests {
             }
         });
         assert!(
-            validate_record(&registry, "com.test.withreply", &bad_external).is_err(),
+            validate_record(&registry, &nsid("com.test.withreply"), &bad_external).is_err(),
             "local #ref in cross-schema union must resolve against the correct schema"
         );
     }
@@ -882,7 +887,7 @@ mod tests {
                 { "$type": "com.test.withgate#disableRule" }
             ]
         });
-        assert!(validate_record(&registry, "com.test.withgate", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.withgate"), &record).is_ok());
     }
 
     #[test]
@@ -893,14 +898,14 @@ mod tests {
             "subject": "did:plc:abc123",
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
-        assert!(validate_record(&registry, "com.test.withdid", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.withdid"), &record).is_ok());
 
         let bad_did = json!({
             "$type": "com.test.withdid",
             "subject": "not-a-did",
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
-        assert!(validate_record(&registry, "com.test.withdid", &bad_did).is_err());
+        assert!(validate_record(&registry, &nsid("com.test.withdid"), &bad_did).is_err());
     }
 
     #[test]
@@ -911,14 +916,15 @@ mod tests {
             "name": "test",
             "value": null
         });
-        assert!(validate_record(&registry, "com.test.nullable", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.nullable"), &record).is_ok());
     }
 
     #[test]
     fn test_validate_unknown_lexicon() {
         let registry = test_registry();
         let record = json!({"$type": "com.example.nonexistent"});
-        let err = validate_record(&registry, "com.example.nonexistent", &record).unwrap_err();
+        let err =
+            validate_record(&registry, &nsid("com.example.nonexistent"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::LexiconNotFound(_)));
     }
 
@@ -931,14 +937,14 @@ mod tests {
             "createdAt": "2024-01-01T00:00:00.000Z",
             "unknownField": "this is fine"
         });
-        assert!(validate_record(&registry, "com.test.basic", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.basic"), &record).is_ok());
     }
 
     #[test]
     fn test_validate_no_required_fields() {
         let registry = test_registry();
         let record = json!({"$type": "com.test.profile"});
-        assert!(validate_record(&registry, "com.test.profile", &record).is_ok());
+        assert!(validate_record(&registry, &nsid("com.test.profile"), &record).is_ok());
     }
 
     #[test]
@@ -948,7 +954,7 @@ mod tests {
             "$type": "com.test.profile",
             "displayName": "a".repeat(11)
         });
-        let err = validate_record(&registry, "com.test.profile", &record).unwrap_err();
+        let err = validate_record(&registry, &nsid("com.test.profile"), &record).unwrap_err();
         assert!(matches!(err, LexValidationError::InvalidField { .. }));
     }
 
@@ -961,7 +967,7 @@ mod tests {
             "value": null
         });
         assert!(
-            validate_record(&registry, "com.test.requirednullable", &record).is_ok(),
+            validate_record(&registry, &nsid("com.test.requirednullable"), &record).is_ok(),
             "a field that is both required and nullable must accept null values"
         );
     }
@@ -975,7 +981,8 @@ mod tests {
         });
         assert!(
             matches!(
-                validate_record(&registry, "com.test.requirednullable", &record).unwrap_err(),
+                validate_record(&registry, &nsid("com.test.requirednullable"), &record)
+                    .unwrap_err(),
                 LexValidationError::MissingRequired { .. }
             ),
             "a field that is required+nullable must still be present (even if null)"
@@ -991,7 +998,7 @@ mod tests {
             "value": "hello"
         });
         assert!(
-            validate_record(&registry, "com.test.requirednullable", &record).is_ok(),
+            validate_record(&registry, &nsid("com.test.requirednullable"), &record).is_ok(),
             "a field that is required+nullable must accept non-null values"
         );
     }

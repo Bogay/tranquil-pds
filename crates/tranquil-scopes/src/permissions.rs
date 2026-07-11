@@ -4,6 +4,7 @@ use super::parser::{
     RepoScope, RpcScope, parse_scope_string,
 };
 use std::collections::HashSet;
+use tranquil_types::Nsid;
 
 #[derive(Debug, Clone)]
 pub struct ScopePermissions {
@@ -105,7 +106,7 @@ impl ScopePermissions {
         })
     }
 
-    pub fn assert_repo(&self, action: RepoAction, collection: &str) -> Result<(), ScopeError> {
+    pub fn assert_repo(&self, action: RepoAction, collection: &Nsid) -> Result<(), ScopeError> {
         if self.has_transition_generic {
             return Ok(());
         }
@@ -156,7 +157,7 @@ impl ScopePermissions {
         }
     }
 
-    pub fn assert_rpc(&self, aud: &str, lxm: &str) -> Result<(), ScopeError> {
+    pub fn assert_rpc(&self, aud: &str, lxm: &Nsid) -> Result<(), ScopeError> {
         if lxm.starts_with("chat.bsky.") {
             if self.has_transition_chat {
                 return Ok(());
@@ -256,7 +257,7 @@ impl ScopePermissions {
                 .any(|a| a.attr == AccountAttr::Email || a.attr == AccountAttr::Wildcard)
     }
 
-    pub fn allows_repo(&self, action: RepoAction, collection: &str) -> bool {
+    pub fn allows_repo(&self, action: RepoAction, collection: &Nsid) -> bool {
         self.assert_repo(action, collection).is_ok()
     }
 
@@ -264,7 +265,7 @@ impl ScopePermissions {
         self.assert_blob(mime).is_ok()
     }
 
-    pub fn allows_rpc(&self, aud: &str, lxm: &str) -> bool {
+    pub fn allows_rpc(&self, aud: &str, lxm: &Nsid) -> bool {
         self.assert_rpc(aud, lxm).is_ok()
     }
 
@@ -341,6 +342,10 @@ impl Default for ScopePermissions {
 mod tests {
     use super::*;
 
+    fn c(s: &str) -> Nsid {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn test_atproto_scope_is_identity_only() {
         let perms = ScopePermissions::from_scope_string(Some("atproto"));
@@ -388,7 +393,7 @@ mod tests {
         let perms = ScopePermissions::from_scope_string(None);
         assert!(perms.has_scope("atproto"));
         assert!(!perms.has_full_access());
-        assert!(!perms.allows_repo(RepoAction::Create, "any.collection"));
+        assert!(!perms.allows_repo(RepoAction::Create, &c("cafe.oyster.record")));
     }
 
     #[test]
@@ -412,8 +417,8 @@ mod tests {
     fn test_granular_repo_wildcard() {
         let perms =
             ScopePermissions::from_scope_string(Some("atproto repo:*?action=create blob:*/*"));
-        assert!(perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
-        assert!(perms.allows_repo(RepoAction::Create, "any.collection"));
+        assert!(perms.allows_repo(RepoAction::Create, &c("app.bsky.feed.post")));
+        assert!(perms.allows_repo(RepoAction::Create, &c("cafe.oyster.record")));
         assert!(perms.allows_blob("image/png"));
     }
 
@@ -473,9 +478,9 @@ mod tests {
     fn test_granular_scopes_without_atproto() {
         let perms = ScopePermissions::from_scope_string(Some("repo:*?action=create"));
         assert!(!perms.has_full_access());
-        assert!(perms.allows_repo(RepoAction::Create, "any.collection"));
-        assert!(!perms.allows_repo(RepoAction::Update, "any.collection"));
-        assert!(!perms.allows_repo(RepoAction::Delete, "any.collection"));
+        assert!(perms.allows_repo(RepoAction::Create, &c("cafe.oyster.record")));
+        assert!(!perms.allows_repo(RepoAction::Update, &c("cafe.oyster.record")));
+        assert!(!perms.allows_repo(RepoAction::Delete, &c("cafe.oyster.record")));
     }
 
     #[test]
@@ -483,9 +488,9 @@ mod tests {
         let perms = ScopePermissions::from_scope_string(Some(
             "atproto repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*",
         ));
-        assert!(perms.allows_repo(RepoAction::Create, "any.collection"));
-        assert!(perms.allows_repo(RepoAction::Update, "any.collection"));
-        assert!(perms.allows_repo(RepoAction::Delete, "any.collection"));
+        assert!(perms.allows_repo(RepoAction::Create, &c("cafe.oyster.record")));
+        assert!(perms.allows_repo(RepoAction::Update, &c("cafe.oyster.record")));
+        assert!(perms.allows_repo(RepoAction::Delete, &c("cafe.oyster.record")));
         assert!(perms.allows_blob("image/png"));
         assert!(perms.allows_blob("video/mp4"));
     }
@@ -530,9 +535,9 @@ mod tests {
         let perms =
             ScopePermissions::from_scope_string(Some("atproto repo:*?action=create blob:*/*"));
         assert!(!perms.has_full_access());
-        assert!(perms.allows_repo(RepoAction::Create, "any.collection"));
-        assert!(!perms.allows_repo(RepoAction::Delete, "any.collection"));
-        assert!(!perms.allows_repo(RepoAction::Update, "any.collection"));
+        assert!(perms.allows_repo(RepoAction::Create, &c("cafe.oyster.record")));
+        assert!(!perms.allows_repo(RepoAction::Delete, &c("cafe.oyster.record")));
+        assert!(!perms.allows_repo(RepoAction::Update, &c("cafe.oyster.record")));
         assert!(perms.allows_blob("image/png"));
         assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
     }
@@ -541,9 +546,9 @@ mod tests {
     fn test_atproto_alone_grants_nothing() {
         let perms = ScopePermissions::from_scope_string(Some("atproto"));
         assert!(!perms.has_full_access());
-        assert!(!perms.allows_repo(RepoAction::Create, "any.collection"));
-        assert!(!perms.allows_repo(RepoAction::Delete, "any.collection"));
-        assert!(!perms.allows_repo(RepoAction::Update, "any.collection"));
+        assert!(!perms.allows_repo(RepoAction::Create, &c("cafe.oyster.record")));
+        assert!(!perms.allows_repo(RepoAction::Delete, &c("cafe.oyster.record")));
+        assert!(!perms.allows_repo(RepoAction::Update, &c("cafe.oyster.record")));
         assert!(!perms.allows_blob("image/png"));
         assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
     }

@@ -48,7 +48,7 @@ pub async fn upload_blob(
 ) -> Result<Response, ApiError> {
     let (did, controller_did): (Did, Option<Did>) = match &auth {
         AuthAny::Service(service) => {
-            service.require_lxm("com.atproto.repo.uploadBlob")?;
+            service.require_lxm(&Nsid::from("com.atproto.repo.uploadBlob".to_string()))?;
             (service.did.clone(), None)
         }
         AuthAny::User(user) => {

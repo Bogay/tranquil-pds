@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
+use tranquil_types::Nsid;
 
 const NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const POSITIVE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -34,20 +35,20 @@ impl CacheEntry {
 }
 
 struct SchemaStore {
-    schemas: HashMap<String, PositiveEntry>,
-    insertion_order: VecDeque<String>,
+    schemas: HashMap<Nsid, PositiveEntry>,
+    insertion_order: VecDeque<Nsid>,
 }
 
 pub struct DynamicRegistry {
     store: RwLock<SchemaStore>,
-    negative_cache: RwLock<HashMap<String, NegativeEntry>>,
-    in_flight: RwLock<HashMap<String, Arc<Notify>>>,
+    negative_cache: RwLock<HashMap<Nsid, NegativeEntry>>,
+    in_flight: RwLock<HashMap<Nsid, Arc<Notify>>>,
     network_disabled: AtomicBool,
 }
 
 struct InFlightGuard<'a> {
     registry: &'a DynamicRegistry,
-    nsid: String,
+    nsid: Nsid,
 }
 
 impl Drop for InFlightGuard<'_> {
@@ -84,7 +85,7 @@ impl DynamicRegistry {
         self.network_disabled.store(disabled, Ordering::Relaxed);
     }
 
-    pub fn get_cached(&self, nsid: &str) -> Option<Arc<LexiconDoc>> {
+    pub fn get_cached(&self, nsid: &Nsid) -> Option<Arc<LexiconDoc>> {
         self.store
             .read()
             .schemas
@@ -92,7 +93,7 @@ impl DynamicRegistry {
             .map(|e| Arc::clone(&e.doc))
     }
 
-    pub(crate) fn get_entry(&self, nsid: &str) -> Option<CacheEntry> {
+    pub(crate) fn get_entry(&self, nsid: &Nsid) -> Option<CacheEntry> {
         let now = Instant::now();
         self.store.read().schemas.get(nsid).map(|e| {
             if e.expires_at > now {
@@ -103,21 +104,21 @@ impl DynamicRegistry {
         })
     }
 
-    pub fn is_negative_cached(&self, nsid: &str) -> bool {
+    pub fn is_negative_cached(&self, nsid: &Nsid) -> bool {
         let cache = self.negative_cache.read();
         cache
             .get(nsid)
             .is_some_and(|entry| entry.expires_at > Instant::now())
     }
 
-    fn insert_negative(&self, nsid: &str) {
+    fn insert_negative(&self, nsid: &Nsid) {
         let mut cache = self.negative_cache.write();
         if cache.len() >= MAX_DYNAMIC_SCHEMAS {
             let now = Instant::now();
             cache.retain(|_, entry| entry.expires_at > now);
         }
         cache.insert(
-            nsid.to_string(),
+            nsid.clone(),
             NegativeEntry {
                 expires_at: Instant::now() + NEGATIVE_CACHE_TTL,
             },
@@ -158,25 +159,25 @@ impl DynamicRegistry {
         arc
     }
 
-    fn bump_expiry(&self, nsid: &str, duration: Duration) {
+    fn bump_expiry(&self, nsid: &Nsid, duration: Duration) {
         let mut store = self.store.write();
         if let Some(entry) = store.schemas.get_mut(nsid) {
             entry.expires_at = Instant::now() + duration;
         }
     }
 
-    pub async fn resolve_and_cache(&self, nsid: &str) -> Result<Arc<LexiconDoc>, ResolveError> {
+    pub async fn resolve_and_cache(&self, nsid: &Nsid) -> Result<Arc<LexiconDoc>, ResolveError> {
         self.resolve_and_cache_with(nsid, |n| async move { resolve_lexicon(&n).await })
             .await
     }
 
     async fn resolve_and_cache_with<F, Fut>(
         &self,
-        nsid: &str,
+        nsid: &Nsid,
         resolver: F,
     ) -> Result<Arc<LexiconDoc>, ResolveError>
     where
-        F: FnOnce(String) -> Fut,
+        F: FnOnce(Nsid) -> Fut,
         Fut: std::future::Future<Output = Result<LexiconDoc, ResolveError>>,
     {
         match self.get_entry(nsid) {
@@ -188,12 +189,12 @@ impl DynamicRegistry {
 
     async fn refresh_stale<F, Fut>(
         &self,
-        nsid: &str,
+        nsid: &Nsid,
         stale: Arc<LexiconDoc>,
         resolver: F,
     ) -> Result<Arc<LexiconDoc>, ResolveError>
     where
-        F: FnOnce(String) -> Fut,
+        F: FnOnce(Nsid) -> Fut,
         Fut: std::future::Future<Output = Result<LexiconDoc, ResolveError>>,
     {
         if self.network_disabled.load(Ordering::Relaxed) {
@@ -201,12 +202,12 @@ impl DynamicRegistry {
         }
 
         match self.acquire_leadership(nsid) {
-            Some(_guard) => match resolver(nsid.to_string()).await {
+            Some(_guard) => match resolver(nsid.clone()).await {
                 Ok(doc) => Ok(self.insert_schema(doc)),
                 Err(e) => {
                     self.bump_expiry(nsid, REFRESH_FAILURE_BACKOFF);
                     tracing::warn!(
-                        nsid = nsid,
+                        nsid = %nsid,
                         error = %e,
                         "lexicon refresh failed, serving stale cached entry"
                     );
@@ -222,11 +223,11 @@ impl DynamicRegistry {
 
     async fn resolve_fresh<F, Fut>(
         &self,
-        nsid: &str,
+        nsid: &Nsid,
         resolver: F,
     ) -> Result<Arc<LexiconDoc>, ResolveError>
     where
-        F: FnOnce(String) -> Fut,
+        F: FnOnce(Nsid) -> Fut,
         Fut: std::future::Future<Output = Result<LexiconDoc, ResolveError>>,
     {
         if self.network_disabled.load(Ordering::Relaxed) {
@@ -234,17 +235,17 @@ impl DynamicRegistry {
         }
         if self.is_negative_cached(nsid) {
             return Err(ResolveError::NegativelyCached {
-                nsid: nsid.to_string(),
+                nsid: nsid.clone(),
                 ttl_secs: NEGATIVE_CACHE_TTL.as_secs(),
             });
         }
 
         match self.acquire_leadership(nsid) {
-            Some(_guard) => match resolver(nsid.to_string()).await {
+            Some(_guard) => match resolver(nsid.clone()).await {
                 Ok(doc) => Ok(self.insert_schema(doc)),
                 Err(e) => {
                     self.insert_negative(nsid);
-                    tracing::debug!(nsid = nsid, error = %e, "caching negative resolution result");
+                    tracing::debug!(nsid = %nsid, error = %e, "caching negative resolution result");
                     Err(e)
                 }
             },
@@ -253,31 +254,29 @@ impl DynamicRegistry {
                 match self.get_cached(nsid) {
                     Some(doc) => Ok(doc),
                     None if self.is_negative_cached(nsid) => Err(ResolveError::NegativelyCached {
-                        nsid: nsid.to_string(),
+                        nsid: nsid.clone(),
                         ttl_secs: NEGATIVE_CACHE_TTL.as_secs(),
                     }),
-                    None => Err(ResolveError::LeaderAborted {
-                        nsid: nsid.to_string(),
-                    }),
+                    None => Err(ResolveError::LeaderAborted { nsid: nsid.clone() }),
                 }
             }
         }
     }
 
-    fn acquire_leadership(&self, nsid: &str) -> Option<InFlightGuard<'_>> {
+    fn acquire_leadership(&self, nsid: &Nsid) -> Option<InFlightGuard<'_>> {
         let mut map = self.in_flight.write();
         if map.contains_key(nsid) {
             None
         } else {
-            map.insert(nsid.to_string(), Arc::new(Notify::new()));
+            map.insert(nsid.clone(), Arc::new(Notify::new()));
             Some(InFlightGuard {
                 registry: self,
-                nsid: nsid.to_string(),
+                nsid: nsid.clone(),
             })
         }
     }
 
-    async fn wait_for_leader(&self, nsid: &str) {
+    async fn wait_for_leader(&self, nsid: &Nsid) {
         let notify = {
             let map = self.in_flight.read();
             match map.get(nsid) {
@@ -300,7 +299,7 @@ impl DynamicRegistry {
     }
 
     #[cfg(test)]
-    fn expire_now(&self, nsid: &str) {
+    fn expire_now(&self, nsid: &Nsid) {
         let mut store = self.store.write();
         if let Some(entry) = store.schemas.get_mut(nsid) {
             entry.expires_at = Instant::now();
@@ -318,22 +317,26 @@ impl Default for DynamicRegistry {
 mod tests {
     use super::*;
 
+    fn nsid(s: &str) -> Nsid {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn test_negative_cache() {
         let registry = DynamicRegistry::new();
-        assert!(!registry.is_negative_cached("com.example.test"));
+        assert!(!registry.is_negative_cached(&nsid("com.example.test")));
 
-        registry.insert_negative("com.example.test");
-        assert!(registry.is_negative_cached("com.example.test"));
+        registry.insert_negative(&nsid("com.example.test"));
+        assert!(registry.is_negative_cached(&nsid("com.example.test")));
     }
 
     #[tokio::test]
     async fn test_negative_cache_returns_appropriate_error_variant() {
         let registry = DynamicRegistry::new();
-        registry.insert_negative("com.example.cached");
+        registry.insert_negative(&nsid("com.example.cached"));
 
         let err = registry
-            .resolve_and_cache("com.example.cached")
+            .resolve_and_cache(&nsid("com.example.cached"))
             .await
             .unwrap_err();
 
@@ -347,7 +350,11 @@ mod tests {
     #[test]
     fn test_empty_lookup() {
         let registry = DynamicRegistry::new();
-        assert!(registry.get_cached("com.example.nonexistent").is_none());
+        assert!(
+            registry
+                .get_cached(&nsid("com.example.nonexistent"))
+                .is_none()
+        );
         assert_eq!(registry.schema_count(), 0);
     }
 
@@ -356,7 +363,7 @@ mod tests {
         let registry = DynamicRegistry::new();
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "com.example.test".to_string(),
+            id: nsid("com.example.test"),
             defs: HashMap::new(),
         };
 
@@ -364,11 +371,11 @@ mod tests {
         assert_eq!(arc.id, "com.example.test");
         assert_eq!(registry.schema_count(), 1);
 
-        let retrieved = registry.get_cached("com.example.test");
+        let retrieved = registry.get_cached(&nsid("com.example.test"));
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().id, "com.example.test");
 
-        let entry = registry.get_entry("com.example.test").unwrap();
+        let entry = registry.get_entry(&nsid("com.example.test")).unwrap();
         assert!(entry.is_fresh(), "freshly inserted entry must be fresh");
     }
 
@@ -376,17 +383,17 @@ mod tests {
     fn test_negative_cache_cleared_on_insert() {
         let registry = DynamicRegistry::new();
 
-        registry.insert_negative("com.example.test");
-        assert!(registry.is_negative_cached("com.example.test"));
+        registry.insert_negative(&nsid("com.example.test"));
+        assert!(registry.is_negative_cached(&nsid("com.example.test")));
 
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "com.example.test".to_string(),
+            id: nsid("com.example.test"),
             defs: HashMap::new(),
         };
         registry.insert_schema(doc);
 
-        assert!(!registry.is_negative_cached("com.example.test"));
+        assert!(!registry.is_negative_cached(&nsid("com.example.test")));
     }
 
     #[test]
@@ -394,17 +401,25 @@ mod tests {
         let registry = DynamicRegistry::new();
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "pet.nel.stale".to_string(),
+            id: nsid("pet.nel.stale"),
             defs: HashMap::new(),
         };
         registry.insert_schema(doc);
 
-        assert!(registry.get_entry("pet.nel.stale").unwrap().is_fresh());
+        assert!(
+            registry
+                .get_entry(&nsid("pet.nel.stale"))
+                .unwrap()
+                .is_fresh()
+        );
 
-        registry.expire_now("pet.nel.stale");
+        registry.expire_now(&nsid("pet.nel.stale"));
 
         assert!(
-            !registry.get_entry("pet.nel.stale").unwrap().is_fresh(),
+            !registry
+                .get_entry(&nsid("pet.nel.stale"))
+                .unwrap()
+                .is_fresh(),
             "entry past expiry must be reported stale"
         );
     }
@@ -414,14 +429,14 @@ mod tests {
         let registry = DynamicRegistry::new();
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "pet.nel.flaky".to_string(),
+            id: nsid("pet.nel.flaky"),
             defs: HashMap::new(),
         };
         registry.insert_schema(doc);
-        registry.expire_now("pet.nel.flaky");
+        registry.expire_now(&nsid("pet.nel.flaky"));
 
         let result = registry
-            .resolve_and_cache_with("pet.nel.flaky", |n| async move {
+            .resolve_and_cache_with(&nsid("pet.nel.flaky"), |n| async move {
                 Err::<LexiconDoc, _>(ResolveError::DnsLookup {
                     domain: n,
                     reason: "simulated failure".to_string(),
@@ -432,11 +447,14 @@ mod tests {
         let served = result.expect("stale entry must be served when refresh fails");
         assert_eq!(served.id, "pet.nel.flaky");
         assert!(
-            registry.get_entry("pet.nel.flaky").unwrap().is_fresh(),
+            registry
+                .get_entry(&nsid("pet.nel.flaky"))
+                .unwrap()
+                .is_fresh(),
             "failed refresh must bump expiry so subsequent lookups skip the resolver"
         );
         assert!(
-            !registry.is_negative_cached("pet.nel.flaky"),
+            !registry.is_negative_cached(&nsid("pet.nel.flaky")),
             "stale refresh failure must not poison negative cache"
         );
     }
@@ -446,13 +464,13 @@ mod tests {
         let registry = DynamicRegistry::new();
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "pet.nel.fresh".to_string(),
+            id: nsid("pet.nel.fresh"),
             defs: HashMap::new(),
         };
         registry.insert_schema(doc);
 
         let result = registry
-            .resolve_and_cache_with("pet.nel.fresh", |_| async move {
+            .resolve_and_cache_with(&nsid("pet.nel.fresh"), |_| async move {
                 panic!("resolver must not run on fresh hit")
             })
             .await;
@@ -465,15 +483,15 @@ mod tests {
         let registry = DynamicRegistry::new();
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "pet.nel.offline".to_string(),
+            id: nsid("pet.nel.offline"),
             defs: HashMap::new(),
         };
         registry.insert_schema(doc);
-        registry.expire_now("pet.nel.offline");
+        registry.expire_now(&nsid("pet.nel.offline"));
         registry.set_network_disabled(true);
 
         let result = registry
-            .resolve_and_cache_with("pet.nel.offline", |_| async move {
+            .resolve_and_cache_with(&nsid("pet.nel.offline"), |_| async move {
                 panic!("resolver must not run when network disabled")
             })
             .await;
@@ -486,16 +504,21 @@ mod tests {
         let registry = DynamicRegistry::new();
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "pet.nel.refresh".to_string(),
+            id: nsid("pet.nel.refresh"),
             defs: HashMap::new(),
         };
         registry.insert_schema(doc);
-        registry.expire_now("pet.nel.refresh");
+        registry.expire_now(&nsid("pet.nel.refresh"));
 
-        assert!(!registry.get_entry("pet.nel.refresh").unwrap().is_fresh());
+        assert!(
+            !registry
+                .get_entry(&nsid("pet.nel.refresh"))
+                .unwrap()
+                .is_fresh()
+        );
 
         let refreshed = registry
-            .resolve_and_cache_with("pet.nel.refresh", |n| async move {
+            .resolve_and_cache_with(&nsid("pet.nel.refresh"), |n| async move {
                 Ok(LexiconDoc {
                     lexicon: 1,
                     id: n,
@@ -507,7 +530,10 @@ mod tests {
 
         assert_eq!(refreshed.id, "pet.nel.refresh");
         assert!(
-            registry.get_entry("pet.nel.refresh").unwrap().is_fresh(),
+            registry
+                .get_entry(&nsid("pet.nel.refresh"))
+                .unwrap()
+                .is_fresh(),
             "refresh must restore freshness"
         );
     }
@@ -524,7 +550,7 @@ mod tests {
                 let calls = Arc::clone(&calls);
                 tokio::spawn(async move {
                     registry
-                        .resolve_and_cache_with("pet.nel.herd", |n| {
+                        .resolve_and_cache_with(&nsid("pet.nel.herd"), |n| {
                             let calls = Arc::clone(&calls);
                             async move {
                                 calls.fetch_add(1, Ordering::SeqCst);
@@ -565,7 +591,7 @@ mod tests {
                 let calls = Arc::clone(&calls);
                 tokio::spawn(async move {
                     registry
-                        .resolve_and_cache_with("pet.nel.failHerd", |n| {
+                        .resolve_and_cache_with(&nsid("pet.nel.failHerd"), |n| {
                             let calls = Arc::clone(&calls);
                             async move {
                                 calls.fetch_add(1, Ordering::SeqCst);
@@ -590,7 +616,7 @@ mod tests {
             1,
             "single-flight must coalesce failing resolves too"
         );
-        assert!(registry.is_negative_cached("pet.nel.failHerd"));
+        assert!(registry.is_negative_cached(&nsid("pet.nel.failHerd")));
     }
 
     async fn futures_collect<T>(handles: Vec<tokio::task::JoinHandle<T>>) -> Vec<T> {
@@ -608,7 +634,7 @@ mod tests {
         (0..MAX_DYNAMIC_SCHEMAS).for_each(|i| {
             let doc = LexiconDoc {
                 lexicon: 1,
-                id: format!("pet.nel.schema{}", i),
+                id: nsid(&format!("pet.nel.schema{}", i)),
                 defs: HashMap::new(),
             };
             registry.insert_schema(doc);
@@ -617,23 +643,23 @@ mod tests {
 
         let trigger = LexiconDoc {
             lexicon: 1,
-            id: "pet.nel.trigger".to_string(),
+            id: nsid("pet.nel.trigger"),
             defs: HashMap::new(),
         };
         registry.insert_schema(trigger);
 
         assert!(
-            registry.get_cached("pet.nel.schema0").is_none(),
+            registry.get_cached(&nsid("pet.nel.schema0")).is_none(),
             "oldest entry should be evicted"
         );
         assert!(
-            registry.get_cached("pet.nel.trigger").is_some(),
+            registry.get_cached(&nsid("pet.nel.trigger")).is_some(),
             "newly inserted entry should exist"
         );
         let evict_count = MAX_DYNAMIC_SCHEMAS / 4;
         assert!(
             registry
-                .get_cached(&format!("pet.nel.schema{}", evict_count))
+                .get_cached(&nsid(&format!("pet.nel.schema{}", evict_count)))
                 .is_some(),
             "entry after eviction window should survive"
         );
@@ -644,7 +670,7 @@ mod tests {
         let registry = DynamicRegistry::new();
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "pet.nel.tracked".to_string(),
+            id: nsid("pet.nel.tracked"),
             defs: HashMap::new(),
         };
         let arc = registry.insert_schema(doc);
@@ -656,7 +682,7 @@ mod tests {
         (0..MAX_DYNAMIC_SCHEMAS).for_each(|i| {
             registry.insert_schema(LexiconDoc {
                 lexicon: 1,
-                id: format!("pet.nel.filler{}", i),
+                id: nsid(&format!("pet.nel.filler{}", i)),
                 defs: HashMap::new(),
             });
         });

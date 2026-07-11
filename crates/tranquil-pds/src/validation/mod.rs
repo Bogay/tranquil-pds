@@ -1,3 +1,4 @@
+use crate::types::{Nsid, Rkey};
 use serde_json::Value;
 use thiserror::Error;
 use tranquil_lexicon::LexValidationError;
@@ -65,7 +66,7 @@ impl RecordValidator {
     pub fn validate(
         &self,
         record: &Value,
-        collection: &str,
+        collection: &Nsid,
     ) -> Result<ValidationStatus, ValidationError> {
         self.validate_with_rkey(record, collection, None)
     }
@@ -73,13 +74,13 @@ impl RecordValidator {
     pub fn validate_with_rkey(
         &self,
         record: &Value,
-        collection: &str,
+        collection: &Nsid,
         rkey: Option<&str>,
     ) -> Result<ValidationStatus, ValidationError> {
         let (record_type, obj) = validate_preamble(record, collection)?;
         let registry = tranquil_lexicon::LexiconRegistry::global();
 
-        match tranquil_lexicon::validate_record(registry, record_type, record) {
+        match tranquil_lexicon::validate_record(registry, collection, record) {
             Ok(()) => {
                 check_banned_content(record_type, obj, rkey)?;
                 Ok(ValidationStatus::Valid)
@@ -110,7 +111,7 @@ impl RecordValidator {
 
 fn validate_preamble<'a>(
     record: &'a Value,
-    collection: &str,
+    collection: &Nsid,
 ) -> Result<(&'a str, &'a serde_json::Map<String, Value>), ValidationError> {
     let obj = record
         .as_object()
@@ -119,7 +120,7 @@ fn validate_preamble<'a>(
         .get("$type")
         .and_then(|v| v.as_str())
         .ok_or(ValidationError::MissingType)?;
-    if record_type != collection {
+    if record_type != *collection {
         return Err(ValidationError::TypeMismatch {
             expected: collection.to_string(),
             actual: record_type.to_string(),

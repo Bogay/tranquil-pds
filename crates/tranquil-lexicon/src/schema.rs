@@ -1,10 +1,11 @@
 use serde::Deserialize;
 use std::collections::HashMap;
+use tranquil_types::Nsid;
 
 #[derive(Debug, Deserialize)]
 pub struct LexiconDoc {
     pub lexicon: u32,
-    pub id: String,
+    pub id: Nsid,
     #[serde(default)]
     pub defs: HashMap<String, LexDef>,
 }

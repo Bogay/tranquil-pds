@@ -2,6 +2,7 @@ use crate::api::error::ApiError;
 use crate::oauth::scopes::{
     AccountAction, AccountAttr, IdentityAttr, RepoAction, ScopePermissions,
 };
+use crate::types::Nsid;
 
 use super::{AuthSource, TokenScope};
 
@@ -19,7 +20,7 @@ pub fn check_repo_scope(
     auth_source: &AuthSource,
     scope: Option<&str>,
     action: RepoAction,
-    collection: &str,
+    collection: &Nsid,
 ) -> Result<(), ApiError> {
     if !requires_scope_check(auth_source, scope) {
         return Ok(());
@@ -50,7 +51,7 @@ pub fn check_rpc_scope(
     auth_source: &AuthSource,
     scope: Option<&str>,
     aud: &str,
-    lxm: &str,
+    lxm: &Nsid,
 ) -> Result<(), ApiError> {
     if !requires_scope_check(auth_source, scope) {
         return Ok(());

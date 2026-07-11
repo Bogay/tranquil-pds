@@ -216,7 +216,7 @@ pub struct Claims {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub lxm: Option<String>,
+    pub lxm: Option<Nsid>,
     pub jti: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub act: Option<ActClaim>,

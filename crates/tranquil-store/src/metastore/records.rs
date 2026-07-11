@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
+use tranquil_types::{Nsid, Rkey};
 
 use super::encoding::KeyBuilder;
 use super::keys::{KeyTag, UserHash};
@@ -30,7 +31,7 @@ impl RecordValue {
     }
 }
 
-pub fn record_key(user_hash: UserHash, collection: &str, rkey: &str) -> SmallVec<[u8; 128]> {
+pub fn record_key(user_hash: UserHash, collection: &Nsid, rkey: &Rkey) -> SmallVec<[u8; 128]> {
     KeyBuilder::new()
         .tag(KeyTag::RECORDS)
         .u64(user_hash.raw())
@@ -39,7 +40,7 @@ pub fn record_key(user_hash: UserHash, collection: &str, rkey: &str) -> SmallVec
         .build()
 }
 
-pub fn record_collection_prefix(user_hash: UserHash, collection: &str) -> SmallVec<[u8; 128]> {
+pub fn record_collection_prefix(user_hash: UserHash, collection: &Nsid) -> SmallVec<[u8; 128]> {
     KeyBuilder::new()
         .tag(KeyTag::RECORDS)
         .u64(user_hash.raw())
@@ -62,6 +63,14 @@ pub fn records_prefix() -> SmallVec<[u8; 128]> {
 mod tests {
     use super::*;
     use crate::metastore::encoding::KeyReader;
+
+    fn nsid(s: &str) -> Nsid {
+        s.parse().unwrap()
+    }
+
+    fn rkey(s: &str) -> Rkey {
+        s.parse().unwrap()
+    }
 
     #[test]
     fn record_value_roundtrip() {
@@ -114,7 +123,7 @@ mod tests {
     #[test]
     fn record_key_roundtrip() {
         let hash = UserHash::from_raw(0xDEAD_BEEF_CAFE_BABE);
-        let key = record_key(hash, "app.bsky.feed.post", "3k2abcd");
+        let key = record_key(hash, &nsid("app.bsky.feed.post"), &rkey("3k2abcd"));
         let mut reader = KeyReader::new(&key);
         assert_eq!(reader.tag(), Some(KeyTag::RECORDS.raw()));
         assert_eq!(reader.u64(), Some(0xDEAD_BEEF_CAFE_BABE));
@@ -128,10 +137,10 @@ mod tests {
         let h1 = UserHash::from_raw(1);
         let h2 = UserHash::from_raw(2);
 
-        let k1 = record_key(h1, "app.bsky.feed.like", "aaa");
-        let k2 = record_key(h1, "app.bsky.feed.post", "aaa");
-        let k3 = record_key(h1, "app.bsky.feed.post", "bbb");
-        let k4 = record_key(h2, "app.bsky.feed.like", "aaa");
+        let k1 = record_key(h1, &nsid("app.bsky.feed.like"), &rkey("aaa"));
+        let k2 = record_key(h1, &nsid("app.bsky.feed.post"), &rkey("aaa"));
+        let k3 = record_key(h1, &nsid("app.bsky.feed.post"), &rkey("bbb"));
+        let k4 = record_key(h2, &nsid("app.bsky.feed.like"), &rkey("aaa"));
 
         assert!(k1.as_slice() < k2.as_slice());
         assert!(k2.as_slice() < k3.as_slice());
@@ -141,8 +150,8 @@ mod tests {
     #[test]
     fn collection_prefix_is_prefix_of_full_key() {
         let hash = UserHash::from_raw(42);
-        let prefix = record_collection_prefix(hash, "app.bsky.feed.post");
-        let full = record_key(hash, "app.bsky.feed.post", "some_rkey");
+        let prefix = record_collection_prefix(hash, &nsid("app.bsky.feed.post"));
+        let full = record_key(hash, &nsid("app.bsky.feed.post"), &rkey("some_rkey"));
         assert!(full.as_slice().starts_with(prefix.as_slice()));
     }
 
@@ -150,7 +159,7 @@ mod tests {
     fn user_prefix_is_prefix_of_collection_prefix() {
         let hash = UserHash::from_raw(42);
         let user_pfx = record_user_prefix(hash);
-        let coll_pfx = record_collection_prefix(hash, "app.bsky.feed.post");
+        let coll_pfx = record_collection_prefix(hash, &nsid("app.bsky.feed.post"));
         assert!(coll_pfx.as_slice().starts_with(user_pfx.as_slice()));
     }
 

@@ -1,11 +1,12 @@
 use crate::schema::{LexDef, LexObject, LexiconDoc, ParsedRef, parse_ref};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
+use tranquil_types::Nsid;
 
 static REGISTRY: OnceLock<LexiconRegistry> = OnceLock::new();
 
 pub struct LexiconRegistry {
-    schemas: HashMap<String, Arc<LexiconDoc>>,
+    schemas: HashMap<Nsid, Arc<LexiconDoc>>,
     #[cfg(feature = "resolve")]
     dynamic: crate::dynamic::DynamicRegistry,
 }
@@ -39,11 +40,17 @@ impl LexiconRegistry {
         self.dynamic.insert_schema(doc);
     }
 
-    pub fn get_doc(&self, nsid: &str) -> Option<Arc<LexiconDoc>> {
-        self.schemas.get(nsid).cloned().or_else(|| {
+    pub fn get_doc(&self, nsid: &Nsid) -> Option<Arc<LexiconDoc>> {
+        self.get_doc_by_key(nsid.as_str())
+    }
+
+    fn get_doc_by_key(&self, key: &str) -> Option<Arc<LexiconDoc>> {
+        self.schemas.get(key).cloned().or_else(|| {
             #[cfg(feature = "resolve")]
             {
-                self.dynamic.get_cached(nsid)
+                Nsid::new(key)
+                    .ok()
+                    .and_then(|nsid| self.dynamic.get_cached(&nsid))
             }
             #[cfg(not(feature = "resolve"))]
             {
@@ -52,7 +59,7 @@ impl LexiconRegistry {
         })
     }
 
-    pub fn get_record_def(&self, nsid: &str) -> Option<Arc<LexiconDoc>> {
+    pub fn get_record_def(&self, nsid: &Nsid) -> Option<Arc<LexiconDoc>> {
         let doc = self.get_doc(nsid)?;
         match doc.defs.get("main")? {
             LexDef::Record(_) => Some(doc),
@@ -67,11 +74,11 @@ impl LexiconRegistry {
                 Self::def_to_resolved(&doc, local)
             }
             ParsedRef::Qualified { nsid, fragment } => {
-                let doc = self.get_doc(nsid)?;
+                let doc = self.get_doc_by_key(nsid)?;
                 Self::def_to_resolved(&doc, fragment)
             }
             ParsedRef::Bare(nsid) => {
-                let doc = self.get_doc(nsid)?;
+                let doc = self.get_doc_by_key(nsid)?;
                 Self::def_to_resolved(&doc, "main")
             }
         }
@@ -90,7 +97,7 @@ impl LexiconRegistry {
         }
     }
 
-    pub fn has_schema(&self, nsid: &str) -> bool {
+    pub fn has_schema(&self, nsid: &Nsid) -> bool {
         self.get_doc(nsid).is_some()
     }
 
@@ -109,13 +116,13 @@ impl LexiconRegistry {
     #[cfg(feature = "resolve")]
     pub async fn resolve_dynamic(
         &self,
-        nsid: &str,
+        nsid: &Nsid,
     ) -> Result<Arc<LexiconDoc>, crate::resolve::ResolveError> {
         self.dynamic.resolve_and_cache(nsid).await
     }
 
     #[cfg(feature = "resolve")]
-    pub fn is_negative_cached(&self, nsid: &str) -> bool {
+    pub fn is_negative_cached(&self, nsid: &Nsid) -> bool {
         self.dynamic.is_negative_cached(nsid)
     }
 }
@@ -146,11 +153,15 @@ impl ResolvedRef {
 mod tests {
     use super::*;
 
+    fn nsid(s: &str) -> Nsid {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn test_empty_registry() {
         let registry = LexiconRegistry::new();
         assert_eq!(registry.schema_count(), 0);
-        assert!(!registry.has_schema("app.bsky.feed.post"));
+        assert!(!registry.has_schema(&nsid("app.bsky.feed.post")));
     }
 
     #[test]
@@ -158,19 +169,19 @@ mod tests {
         let mut registry = LexiconRegistry::new();
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "com.example.test".to_string(),
+            id: nsid("com.example.test"),
             defs: HashMap::new(),
         };
         registry.register(doc);
         assert_eq!(registry.schema_count(), 1);
-        assert!(registry.has_schema("com.example.test"));
-        assert!(!registry.has_schema("com.example.other"));
+        assert!(registry.has_schema(&nsid("com.example.test")));
+        assert!(!registry.has_schema(&nsid("com.example.other")));
     }
 
     #[test]
     fn test_get_record_def() {
         let registry = crate::test_schemas::test_registry();
-        let doc = registry.get_record_def("com.test.basic");
+        let doc = registry.get_record_def(&nsid("com.test.basic"));
         assert!(doc.is_some());
         let doc = doc.unwrap();
         match doc.defs.get("main").unwrap() {
@@ -185,7 +196,11 @@ mod tests {
     #[test]
     fn test_get_record_def_unknown() {
         let registry = LexiconRegistry::new();
-        assert!(registry.get_record_def("com.example.nonexistent").is_none());
+        assert!(
+            registry
+                .get_record_def(&nsid("com.example.nonexistent"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -205,7 +220,7 @@ mod tests {
     #[test]
     fn test_has_schema() {
         let registry = crate::test_schemas::test_registry();
-        assert!(registry.has_schema("com.test.basic"));
-        assert!(!registry.has_schema("com.example.nonexistent"));
+        assert!(registry.has_schema(&nsid("com.test.basic")));
+        assert!(!registry.has_schema(&nsid("com.example.nonexistent")));
     }
 }

@@ -9,13 +9,13 @@ pub async fn validate_record_with_status(
     require_lexicon: bool,
 ) -> Result<ValidationStatus, ApiError> {
     let registry = tranquil_lexicon::LexiconRegistry::global();
-    if !registry.has_schema(collection.as_str()) {
-        let _ = registry.resolve_dynamic(collection.as_str()).await;
+    if !registry.has_schema(collection) {
+        let _ = registry.resolve_dynamic(collection).await;
     }
 
     let validator = RecordValidator::new().require_lexicon(require_lexicon);
     validator
-        .validate_with_rkey(record, collection.as_str(), rkey.map(|v| v.as_str()))
+        .validate_with_rkey(record, collection, rkey)
         .map_err(validation_error_to_api_error)
 }
 

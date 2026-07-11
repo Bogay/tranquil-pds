@@ -3,9 +3,14 @@ use tranquil_pds::validation::{
     RecordValidator, ValidationError, ValidationStatus, validate_collection_nsid,
     validate_record_key,
 };
+use tranquil_types::Nsid;
 
 fn now() -> String {
     chrono::Utc::now().to_rfc3339()
+}
+
+fn c(s: &str) -> Nsid {
+    Nsid::from(s.to_string())
 }
 
 #[test]

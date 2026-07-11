@@ -4,7 +4,7 @@ use common::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use tranquil_db_traits::{Backlink, BacklinkPath};
-use tranquil_pds::types::{AtUri, Did, Nsid};
+use tranquil_pds::types::{AtUri, Did, Nsid, Rkey};
 
 #[tokio::test]
 async fn test_apply_writes_create() {

@@ -125,7 +125,7 @@ pub fn create_refresh_token_with_jti(
 pub fn create_service_token(
     did: &str,
     aud: &str,
-    lxm: Option<&str>,
+    lxm: Option<&Nsid>,
     key_bytes: &[u8],
 ) -> Result<String> {
     let signing_key = SigningKey::from_slice(key_bytes)?;
@@ -279,7 +279,7 @@ pub fn create_refresh_token_hs256_with_metadata(
 pub fn create_service_token_hs256(
     did: &str,
     aud: &str,
-    lxm: &str,
+    lxm: &Nsid,
     secret: &[u8],
 ) -> Result<String> {
     let expiration = Utc::now()

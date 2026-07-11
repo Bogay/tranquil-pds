@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use tranquil_types::{Nsid, Rkey};
 
 use super::backlink_ops::remove_backlinks_for_record;
 use super::backlinks::{BacklinkValue, backlink_by_user_key, backlink_key, discriminant_to_path};
@@ -117,7 +118,11 @@ pub fn replay_mutation_set(
     batch.insert(repo_data, meta_key.as_slice(), updated_meta.serialize());
 
     mutation_set.record_upserts.iter().for_each(|u| {
-        let key = record_key(user_hash, &u.collection, &u.rkey);
+        let key = record_key(
+            user_hash,
+            &Nsid::from(u.collection.clone()),
+            &Rkey::from(u.rkey.clone()),
+        );
         let value = RecordValue {
             record_cid: u.cid_bytes.clone(),
             takedown_ref: None,
@@ -126,7 +131,11 @@ pub fn replay_mutation_set(
     });
 
     mutation_set.record_deletes.iter().for_each(|d| {
-        let key = record_key(user_hash, &d.collection, &d.rkey);
+        let key = record_key(
+            user_hash,
+            &Nsid::from(d.collection.clone()),
+            &Rkey::from(d.rkey.clone()),
+        );
         batch.remove(repo_data, key.as_slice());
     });
 

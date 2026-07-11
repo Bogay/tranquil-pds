@@ -57,8 +57,8 @@ pub use tranquil_auth::{
     verify_refresh_token_hs256, verify_token, verify_token_es256k, verify_totp_code,
 };
 
-pub fn lxm_permits(lxm: &str, expected: &str) -> bool {
-    lxm == "*" || lxm == expected
+pub fn lxm_permits(lxm: &str, expected: &crate::types::Nsid) -> bool {
+    lxm == "*" || lxm == expected.as_str()
 }
 
 pub fn try_decrypt_user_key(
@@ -182,7 +182,7 @@ impl AuthenticatedUser {
         self.auth_source.service_claims()
     }
 
-    pub fn require_lxm(&self, expected_lxm: &str) -> Result<(), ApiError> {
+    pub fn require_lxm(&self, expected_lxm: &crate::types::Nsid) -> Result<(), ApiError> {
         match self.auth_source.service_claims() {
             Some(claims) => match &claims.lxm {
                 Some(lxm) if lxm_permits(lxm, expected_lxm) => Ok(()),
@@ -631,6 +631,10 @@ pub async fn validate_token_with_dpop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn n(s: &str) -> crate::types::Nsid {
+        crate::types::Nsid::from(s.to_string())
+    }
 
     #[test]
     fn test_lxm_permits_exact_match() {

@@ -3,6 +3,11 @@ use tranquil_pds::oauth::scopes::{
     AccountAction, IdentityAttr, ParsedScope, RepoAction, ScopePermissions, parse_scope,
     parse_scope_string,
 };
+use tranquil_types::Nsid;
+
+fn c(s: &str) -> Nsid {
+    Nsid::from(s.to_string())
+}
 
 #[test]
 fn test_repo_star_defaults_to_all_actions() {
@@ -141,9 +146,9 @@ fn test_multiple_scopes_parsing() {
 fn test_permissions_null_scope_defaults_atproto() {
     let perms = ScopePermissions::from_scope_string(None);
     assert!(!perms.has_full_access());
-    assert!(!perms.allows_repo(RepoAction::Create, "any.collection"));
-    assert!(!perms.allows_repo(RepoAction::Update, "any.collection"));
-    assert!(!perms.allows_repo(RepoAction::Delete, "any.collection"));
+    assert!(!perms.allows_repo(RepoAction::Create, &c("cafe.oyster.record")));
+    assert!(!perms.allows_repo(RepoAction::Update, &c("cafe.oyster.record")));
+    assert!(!perms.allows_repo(RepoAction::Delete, &c("cafe.oyster.record")));
 }
 
 #[test]

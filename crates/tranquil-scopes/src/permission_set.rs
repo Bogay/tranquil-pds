@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 use tokio::sync::RwLock;
 use tracing::debug;
+use tranquil_types::{Did, Nsid};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScopeExpansionError {
@@ -81,7 +82,9 @@ pub async fn expand_include_scopes(scope_string: &str) -> Result<String, ScopeEx
             match scope.strip_prefix("include:") {
                 Some(rest) => {
                     let (nsid_base, aud) = parse_include_scope(rest);
-                    expand_permission_set(nsid_base, aud).await
+                    let nsid = Nsid::new(nsid_base)
+                        .map_err(|_| ScopeExpansionError::InvalidNsid(nsid_base.to_string()))?;
+                    expand_permission_set(&nsid, aud).await
                 }
                 None => Ok(scope.to_string()),
             }
@@ -105,7 +108,7 @@ fn parse_include_scope(rest: &str) -> (&str, Option<&str>) {
 }
 
 async fn expand_permission_set(
-    nsid: &str,
+    nsid: &Nsid,
     aud: Option<&str>,
 ) -> Result<String, ScopeExpansionError> {
     let cache_key = match aud {
@@ -118,7 +121,7 @@ async fn expand_permission_set(
         if let Some(cached) = cache.get(&cache_key)
             && cached.cached_at.elapsed().as_secs() < CACHE_TTL_SECS
         {
-            debug!(nsid, "Using cached permission set expansion");
+            debug!(nsid = %nsid, "Using cached permission set expansion");
             return Ok(cached.expanded_scope.clone());
         }
     }
@@ -162,29 +165,25 @@ async fn expand_permission_set(
         );
     }
 
-    debug!(nsid, expanded = %expanded, "Successfully expanded permission set");
+    debug!(nsid = %nsid, expanded = %expanded, "Successfully expanded permission set");
     Ok(expanded)
 }
 
-async fn fetch_lexicon_via_atproto(nsid: &str) -> Result<LexiconDoc, ScopeExpansionError> {
+async fn fetch_lexicon_via_atproto(nsid: &Nsid) -> Result<LexiconDoc, ScopeExpansionError> {
     let parts: Vec<&str> = nsid.split('.').collect();
-    if parts.len() < 3 {
-        return Err(ScopeExpansionError::InvalidNsid(nsid.to_string()));
-    }
-
     let authority = parts[..parts.len() - 1]
         .iter()
         .rev()
         .cloned()
         .collect::<Vec<_>>()
         .join(".");
-    debug!(nsid, authority = %authority, "Resolving lexicon DID authority via DNS");
+    debug!(nsid = %nsid, authority = %authority, "Resolving lexicon DID authority via DNS");
 
     let did = resolve_lexicon_did_authority(&authority).await?;
-    debug!(nsid, did = %did, "Resolved lexicon DID authority");
+    debug!(nsid = %nsid, did = %did, "Resolved lexicon DID authority");
 
     let pds_endpoint = resolve_did_to_pds(&did).await?;
-    debug!(nsid, pds = %pds_endpoint, "Resolved DID to PDS endpoint");
+    debug!(nsid = %nsid, pds = %pds_endpoint, "Resolved DID to PDS endpoint");
 
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -194,10 +193,10 @@ async fn fetch_lexicon_via_atproto(nsid: &str) -> Result<LexiconDoc, ScopeExpans
     let url = format!(
         "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection=com.atproto.lexicon.schema&rkey={}",
         pds_endpoint,
-        urlencoding::encode(&did),
-        urlencoding::encode(nsid)
+        urlencoding::encode(did.as_str()),
+        urlencoding::encode(nsid.as_str())
     );
-    debug!(nsid, url = %url, "Fetching lexicon from PDS");
+    debug!(nsid = %nsid, url = %url, "Fetching lexicon from PDS");
 
     let response = client
         .get(&url)
@@ -296,13 +295,9 @@ async fn resolve_did_to_pds(did: &str) -> Result<String, ScopeExpansionError> {
         ))
 }
 
-fn extract_namespace_authority(nsid: &str) -> String {
+fn extract_namespace_authority(nsid: &Nsid) -> String {
     let parts: Vec<&str> = nsid.split('.').collect();
-    if parts.len() >= 2 {
-        parts[..parts.len() - 1].join(".")
-    } else {
-        nsid.to_string()
-    }
+    parts[..parts.len() - 1].join(".")
 }
 
 fn is_under_authority(target_nsid: &str, authority: &str) -> bool {
@@ -385,14 +380,18 @@ mod tests {
         assert_eq!(aud, Some("did:web:example.com"));
     }
 
+    fn nsid(s: &str) -> Nsid {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn test_extract_namespace_authority() {
         assert_eq!(
-            extract_namespace_authority("io.atcr.authFullApp"),
+            extract_namespace_authority(&nsid("io.atcr.authFullApp")),
             "io.atcr"
         );
         assert_eq!(
-            extract_namespace_authority("app.bsky.authFullApp"),
+            extract_namespace_authority(&nsid("app.bsky.authFullApp")),
             "app.bsky"
         );
     }
@@ -400,7 +399,7 @@ mod tests {
     #[test]
     fn test_extract_namespace_authority_deep_nesting() {
         assert_eq!(
-            extract_namespace_authority("io.atcr.sailor.star.collection"),
+            extract_namespace_authority(&nsid("io.atcr.sailor.star.collection")),
             "io.atcr.sailor.star"
         );
     }
@@ -601,7 +600,7 @@ mod tests {
             );
         }
 
-        let result = expand_permission_set(cache_key, None).await;
+        let result = expand_permission_set(&nsid(cache_key), None).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), cached_value);
 
@@ -629,7 +628,7 @@ mod tests {
             );
         }
 
-        let result = expand_permission_set(nsid, Some(aud)).await;
+        let result = expand_permission_set(&nsid.parse().unwrap(), Some(aud)).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), cached_value);
 
@@ -655,7 +654,7 @@ mod tests {
             );
         }
 
-        let result = expand_permission_set(cache_key, None).await;
+        let result = expand_permission_set(&nsid(cache_key), None).await;
         assert!(result.is_err());
 
         {

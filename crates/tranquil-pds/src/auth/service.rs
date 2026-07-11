@@ -170,7 +170,7 @@ impl ServiceTokenVerifier {
     pub async fn verify_service_token(
         &self,
         token: &str,
-        required_lxm: Option<&str>,
+        required_lxm: Option<&Nsid>,
     ) -> Result<ServiceTokenClaims, ServiceTokenError> {
         let jwt = JwtParts::parse(token)?;
 

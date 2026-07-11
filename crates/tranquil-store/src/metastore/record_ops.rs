@@ -78,7 +78,7 @@ impl RecordOps {
         records: &[RecordWrite<'_>],
     ) -> Result<(), MetastoreError> {
         records.iter().try_for_each(|rec| {
-            let key = record_key(user_hash, rec.collection.as_str(), rec.rkey.as_str());
+            let key = record_key(user_hash, rec.collection, rec.rkey);
             let cid_bytes = cid_link_to_bytes(rec.cid)?;
             let existing_takedown = self
                 .repo_data
@@ -102,7 +102,7 @@ impl RecordOps {
         records: &[RecordDelete<'_>],
     ) {
         records.iter().for_each(|rec| {
-            let key = record_key(user_hash, rec.collection.as_str(), rec.rkey.as_str());
+            let key = record_key(user_hash, rec.collection, rec.rkey);
             batch.remove(&self.repo_data, key.as_slice());
         });
     }
@@ -126,7 +126,7 @@ impl RecordOps {
             Some(h) => h,
             None => return Ok(None),
         };
-        let key = record_key(user_hash, collection.as_str(), rkey.as_str());
+        let key = record_key(user_hash, collection, rkey);
 
         point_lookup(
             &self.repo_data,
@@ -147,24 +147,23 @@ impl RecordOps {
             None => return Ok(Vec::new()),
         };
 
-        let coll_str = query.collection.as_str();
-        let coll_prefix = record_collection_prefix(user_hash, coll_str);
+        let coll_prefix = record_collection_prefix(user_hash, query.collection);
         let coll_upper = exclusive_upper_bound(coll_prefix.as_slice())
             .expect("collection prefix always contains non-0xFF bytes");
 
         let start_key = query
             .rkey_start
-            .map(|rs| record_key(user_hash, coll_str, rs.as_str()));
+            .map(|rs| record_key(user_hash, query.collection, rs));
         let end_key_upper = query
             .rkey_end
-            .map(|re| record_key(user_hash, coll_str, re.as_str()))
+            .map(|re| record_key(user_hash, query.collection, re))
             .map(|ek| {
                 exclusive_upper_bound(ek.as_slice())
                     .expect("record key always contains non-0xFF bytes")
             });
         let cursor_key = query
             .cursor
-            .map(|c| record_key(user_hash, coll_str, c.as_str()));
+            .map(|c| record_key(user_hash, query.collection, c));
 
         let mut range_lo: &[u8] = coll_prefix.as_slice();
         let mut range_hi: &[u8] = coll_upper.as_slice();
@@ -287,11 +286,12 @@ impl RecordOps {
             };
             let (key_bytes, _) = guard.into_inner().map_err(MetastoreError::Fjall)?;
             let collection = parse_record_key_collection(&key_bytes)
+                .map(Nsid::from)
                 .ok_or(MetastoreError::CorruptData("invalid record key"))?;
             let coll_prefix = record_collection_prefix(user_hash, &collection);
             seek_from = exclusive_upper_bound(coll_prefix.as_slice())
                 .expect("collection prefix always contains non-0xFF bytes");
-            collections.push(Nsid::from(collection));
+            collections.push(collection);
         }
 
         Ok(collections)

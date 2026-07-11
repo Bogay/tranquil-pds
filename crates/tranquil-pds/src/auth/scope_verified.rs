@@ -7,7 +7,7 @@ use crate::api::error::ApiError;
 use crate::oauth::scopes::{
     AccountAction, AccountAttr, IdentityAttr, RepoAction, ScopePermissions,
 };
-use crate::types::Did;
+use crate::types::{Did, Nsid};
 
 use super::AuthenticatedUser;
 
@@ -236,24 +236,24 @@ pub fn verify_batch_write_scopes<'a, T, C, F>(
     classify: C,
 ) -> Result<BatchWriteScopes<'a>, ScopeVerificationError>
 where
-    F: Fn(&T) -> &str,
+    F: Fn(&T) -> &Nsid,
     C: Fn(&T) -> WriteOpKind,
 {
     use std::collections::HashSet;
 
-    let create_collections: HashSet<&str> = writes
+    let create_collections: HashSet<&Nsid> = writes
         .iter()
         .filter(|w| matches!(classify(w), WriteOpKind::Create))
         .map(&get_collection)
         .collect();
 
-    let update_collections: HashSet<&str> = writes
+    let update_collections: HashSet<&Nsid> = writes
         .iter()
         .filter(|w| matches!(classify(w), WriteOpKind::Update))
         .map(&get_collection)
         .collect();
 
-    let delete_collections: HashSet<&str> = writes
+    let delete_collections: HashSet<&Nsid> = writes
         .iter()
         .filter(|w| matches!(classify(w), WriteOpKind::Delete))
         .map(&get_collection)
@@ -300,7 +300,7 @@ pub trait VerifyScope {
 
     fn verify_repo_create<'a>(
         &'a self,
-        collection: &str,
+        collection: &Nsid,
     ) -> Result<ScopeVerified<'a, RepoCreate>, ScopeVerificationError>
     where
         Self: AsRef<AuthenticatedUser>,
@@ -322,7 +322,7 @@ pub trait VerifyScope {
 
     fn verify_repo_update<'a>(
         &'a self,
-        collection: &str,
+        collection: &Nsid,
     ) -> Result<ScopeVerified<'a, RepoUpdate>, ScopeVerificationError>
     where
         Self: AsRef<AuthenticatedUser>,
@@ -344,7 +344,7 @@ pub trait VerifyScope {
 
     fn verify_repo_delete<'a>(
         &'a self,
-        collection: &str,
+        collection: &Nsid,
     ) -> Result<ScopeVerified<'a, RepoDelete>, ScopeVerificationError>
     where
         Self: AsRef<AuthenticatedUser>,
@@ -366,7 +366,7 @@ pub trait VerifyScope {
 
     fn verify_repo_upsert<'a>(
         &'a self,
-        collection: &str,
+        collection: &Nsid,
     ) -> Result<ScopeVerified<'a, RepoUpsert>, ScopeVerificationError>
     where
         Self: AsRef<AuthenticatedUser>,
@@ -414,7 +414,7 @@ pub trait VerifyScope {
     fn verify_rpc<'a>(
         &'a self,
         aud: &str,
-        lxm: &str,
+        lxm: &Nsid,
     ) -> Result<ScopeVerified<'a, RpcCall>, ScopeVerificationError>
     where
         Self: AsRef<AuthenticatedUser>,

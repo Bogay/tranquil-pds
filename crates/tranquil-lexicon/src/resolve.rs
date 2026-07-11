@@ -4,6 +4,7 @@ use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use reqwest::Client;
 use std::sync::OnceLock;
 use std::time::Duration;
+use tranquil_types::{Did, Nsid};
 
 static RESOLVER_CLIENT: OnceLock<Client> = OnceLock::new();
 
@@ -67,18 +68,15 @@ pub enum ResolveError {
     #[error("schema deserialization failed: {0}")]
     InvalidSchema(String),
     #[error("schema resolution recently failed for {nsid}, cached for {ttl_secs}s")]
-    NegativelyCached { nsid: String, ttl_secs: u64 },
+    NegativelyCached { nsid: Nsid, ttl_secs: u64 },
     #[error("network resolution disabled")]
     NetworkDisabled,
     #[error("leader task for {nsid} aborted before completion")]
-    LeaderAborted { nsid: String },
+    LeaderAborted { nsid: Nsid },
 }
 
-pub fn nsid_to_authority(nsid: &str) -> Result<String, ResolveError> {
+pub fn nsid_to_authority(nsid: &Nsid) -> String {
     let mut segments: Vec<&str> = nsid.split('.').collect();
-    if segments.len() < 3 {
-        return Err(ResolveError::InvalidNsid(nsid.to_string()));
-    }
     segments.pop();
     segments.reverse();
     Ok(segments.join("."))
@@ -191,13 +189,13 @@ fn extract_pds_endpoint(doc: &serde_json::Value) -> Option<String> {
 pub async fn fetch_schema_from_pds(
     pds_endpoint: &str,
     did: &str,
-    nsid: &str,
+    nsid: &Nsid,
 ) -> Result<LexiconDoc, ResolveError> {
     let url = format!(
         "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection=com.atproto.lexicon.schema&rkey={}",
         pds_endpoint.trim_end_matches('/'),
-        urlencoding::encode(did),
-        urlencoding::encode(nsid)
+        urlencoding::encode(did.as_str()),
+        urlencoding::encode(nsid.as_str())
     );
 
     let resp = client()
@@ -241,8 +239,8 @@ pub async fn fetch_schema_from_pds(
         .map_err(|e| ResolveError::InvalidSchema(e.to_string()))
 }
 
-fn validate_fetched_schema(doc: &LexiconDoc, nsid: &str) -> Result<(), ResolveError> {
-    if doc.id != nsid {
+fn validate_fetched_schema(doc: &LexiconDoc, nsid: &Nsid) -> Result<(), ResolveError> {
+    if doc.id != *nsid {
         return Err(ResolveError::InvalidSchema(format!(
             "schema id '{}' does not match requested NSID '{}'",
             doc.id, nsid
@@ -257,22 +255,22 @@ fn validate_fetched_schema(doc: &LexiconDoc, nsid: &str) -> Result<(), ResolveEr
     Ok(())
 }
 
-pub async fn resolve_lexicon(nsid: &str) -> Result<LexiconDoc, ResolveError> {
+pub async fn resolve_lexicon(nsid: &Nsid) -> Result<LexiconDoc, ResolveError> {
     resolve_lexicon_with_config(nsid, None).await
 }
 
 pub async fn resolve_lexicon_with_config(
-    nsid: &str,
+    nsid: &Nsid,
     plc_directory_url: Option<&str>,
 ) -> Result<LexiconDoc, ResolveError> {
-    let authority = nsid_to_authority(nsid)?;
-    tracing::debug!(nsid = nsid, authority = %authority, "resolving lexicon schema");
+    let authority = nsid_to_authority(nsid);
+    tracing::debug!(nsid = %nsid, authority = %authority, "resolving lexicon schema");
 
     let did = resolve_did_from_dns(&authority).await?;
-    tracing::debug!(nsid = nsid, did = %did, "resolved authority DID");
+    tracing::debug!(nsid = %nsid, did = %did, "resolved authority DID");
 
     let pds_endpoint = resolve_pds_endpoint(&did, plc_directory_url).await?;
-    tracing::debug!(nsid = nsid, pds = %pds_endpoint, "resolved PDS endpoint");
+    tracing::debug!(nsid = %nsid, pds = %pds_endpoint, "resolved PDS endpoint");
 
     let doc = fetch_schema_from_pds(&pds_endpoint, &did, nsid).await?;
     validate_fetched_schema(&doc, nsid)?;
@@ -281,7 +279,7 @@ pub async fn resolve_lexicon_with_config(
 }
 
 pub async fn resolve_lexicon_from_did(
-    nsid: &str,
+    nsid: &Nsid,
     did: &str,
     plc_directory_url: Option<&str>,
 ) -> Result<LexiconDoc, ResolveError> {
@@ -295,18 +293,22 @@ pub async fn resolve_lexicon_from_did(
 mod tests {
     use super::*;
 
+    fn nsid(s: &str) -> Nsid {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn test_nsid_to_authority() {
         assert_eq!(
-            nsid_to_authority("app.bsky.feed.post").unwrap(),
+            nsid_to_authority(&nsid("app.bsky.feed.post")),
             "feed.bsky.app"
         );
         assert_eq!(
-            nsid_to_authority("com.atproto.repo.strongRef").unwrap(),
+            nsid_to_authority(&nsid("com.atproto.repo.strongRef")),
             "repo.atproto.com"
         );
         assert_eq!(
-            nsid_to_authority("com.germnetwork.social.post").unwrap(),
+            nsid_to_authority(&nsid("com.germnetwork.social.post")),
             "social.germnetwork.com"
         );
         assert!(nsid_to_authority("tooShort").is_err());
@@ -315,7 +317,7 @@ mod tests {
     #[test]
     fn test_nsid_to_authority_three_segments() {
         assert_eq!(
-            nsid_to_authority("org.example.record").unwrap(),
+            nsid_to_authority(&nsid("org.example.record")),
             "example.org"
         );
     }
@@ -375,20 +377,20 @@ mod tests {
     fn test_validate_fetched_schema_ok() {
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "com.example.thing".to_string(),
+            id: nsid("com.example.thing"),
             defs: Default::default(),
         };
-        assert!(validate_fetched_schema(&doc, "com.example.thing").is_ok());
+        assert!(validate_fetched_schema(&doc, &nsid("com.example.thing")).is_ok());
     }
 
     #[test]
     fn test_validate_fetched_schema_id_mismatch() {
         let doc = LexiconDoc {
             lexicon: 1,
-            id: "com.example.other".to_string(),
+            id: nsid("com.example.other"),
             defs: Default::default(),
         };
-        let err = validate_fetched_schema(&doc, "com.example.thing").unwrap_err();
+        let err = validate_fetched_schema(&doc, &nsid("com.example.thing")).unwrap_err();
         assert!(matches!(err, ResolveError::InvalidSchema(_)));
     }
 
@@ -396,10 +398,10 @@ mod tests {
     fn test_validate_fetched_schema_bad_version() {
         let doc = LexiconDoc {
             lexicon: 99,
-            id: "com.example.thing".to_string(),
+            id: nsid("com.example.thing"),
             defs: Default::default(),
         };
-        let err = validate_fetched_schema(&doc, "com.example.thing").unwrap_err();
+        let err = validate_fetched_schema(&doc, &nsid("com.example.thing")).unwrap_err();
         assert!(matches!(err, ResolveError::InvalidSchema(_)));
     }
 }

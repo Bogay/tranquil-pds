@@ -210,6 +210,7 @@ pub async fn create_account(
         let token = extracted.token;
         if is_service_token(&token) {
             let verifier = ServiceTokenVerifier::new();
+            let create_account_lxm = Nsid::from("com.atproto.server.createAccount".to_string());
             match verifier
                 .verify_service_token(&token, Some("com.atproto.server.createAccount"))
                 .await

@@ -340,7 +340,11 @@ impl<P: AuthPolicy> Auth<P> {
         self.0.permissions()
     }
 
-    pub fn check_repo_scope(&self, action: RepoAction, collection: &str) -> Result<(), ApiError> {
+    pub fn check_repo_scope(
+        &self,
+        action: RepoAction,
+        collection: &crate::types::Nsid,
+    ) -> Result<(), ApiError> {
         if !self.needs_scope_check() {
             return Ok(());
         }
@@ -424,7 +428,7 @@ pub struct ServiceAuth {
 }
 
 impl ServiceAuth {
-    pub fn require_lxm(&self, expected_lxm: &str) -> Result<(), ApiError> {
+    pub fn require_lxm(&self, expected_lxm: &crate::types::Nsid) -> Result<(), ApiError> {
         match &self.claims.lxm {
             Some(lxm) if crate::auth::lxm_permits(lxm, expected_lxm) => Ok(()),
             Some(lxm) => Err(ApiError::AuthorizationError(format!(
@@ -505,7 +509,7 @@ impl<P: AuthPolicy> AuthAny<P> {
         matches!(self, Self::Service(_))
     }
 
-    pub fn require_lxm(&self, expected_lxm: &str) -> Result<(), ApiError> {
+    pub fn require_lxm(&self, expected_lxm: &crate::types::Nsid) -> Result<(), ApiError> {
         match self {
             Self::User(_) => Ok(()),
             Self::Service(auth) => auth.require_lxm(expected_lxm),
