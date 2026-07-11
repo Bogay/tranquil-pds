@@ -242,19 +242,9 @@ async fn process_record_blobs(
             Some(
                 blob_refs
                     .into_iter()
-                    .filter_map(|blob_ref| {
-                        let record_uri = AtUri::from_parts(
-                            did.as_str(),
-                            record.collection.as_str(),
-                            record.rkey.as_str(),
-                        );
-                        match CidLink::new(&blob_ref.cid) {
-                            Ok(cid_link) => Some((record_uri, cid_link)),
-                            Err(_) => {
-                                tracing::warn!(cid = %blob_ref.cid, "skipping unparseable blob CID in record blob backfill");
-                                None
-                            }
-                        }
+                    .map(|blob_ref| {
+                        let record_uri = AtUri::from_parts(&did, &record.collection, &record.rkey);
+                        (record_uri, blob_ref.cid)
                     })
                     .collect::<Vec<_>>(),
             )

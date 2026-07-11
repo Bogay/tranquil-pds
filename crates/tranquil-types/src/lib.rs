@@ -411,7 +411,7 @@ validated_string_newtype! {
 }
 
 impl AtUri {
-    pub fn from_parts(did: &str, collection: &str, rkey: &str) -> Self {
+    pub fn from_parts(did: &Did, collection: &Nsid, rkey: &Rkey) -> Self {
         Self(format!("at://{}/{}/{}", did, collection, rkey))
     }
 

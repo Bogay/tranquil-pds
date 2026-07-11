@@ -871,7 +871,11 @@ mod tests {
         let needing = ops.get_users_needing_record_blobs_backfill(100).unwrap();
         assert_eq!(needing.len(), 2);
 
-        let uri = AtUri::from_parts(did_a.as_str(), "app.bsky.feed.post", "3k2abc");
+        let uri = AtUri::from_parts(
+            &did_a,
+            &"app.bsky.feed.post".parse().unwrap(),
+            &"3k2abc".parse().unwrap(),
+        );
         let blob_cid = test_cid_link(62);
         ops.insert_record_blobs(user_id_a, &[uri], &[blob_cid])
             .unwrap();
@@ -967,7 +971,7 @@ mod tests {
         let collection = Nsid::from("app.bsky.feed.like".to_string());
         let rkey = Rkey::from("3k2like1".to_string());
         let record_cid = test_cid_link(91);
-        let record_uri = AtUri::from_parts(did.as_str(), collection.as_str(), rkey.as_str());
+        let record_uri = AtUri::from_parts(&did, &collection, &rkey);
 
         let mid_root = test_cid_link(92);
         let create_input = ApplyCommitInput {
@@ -1343,8 +1347,8 @@ mod tests {
         let target = "at://did:plc:someone/app.bsky.feed.post/p1";
 
         let mid_root = test_cid_link(96);
-        let uri_like = AtUri::from_parts(did.as_str(), col_like.as_str(), rkey.as_str());
-        let uri_repost = AtUri::from_parts(did.as_str(), col_repost.as_str(), rkey.as_str());
+        let uri_like = AtUri::from_parts(&did, &col_like, &rkey);
+        let uri_repost = AtUri::from_parts(&did, &col_repost, &rkey);
 
         let input = ApplyCommitInput {
             user_id,

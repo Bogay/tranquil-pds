@@ -978,7 +978,7 @@ pub async fn create_record_internal(
         cid: RecordCid::from(record_cid),
     };
     let blob_cids = extract_blob_cids(record);
-    let record_uri = AtUri::from_parts(did.as_str(), collection.as_str(), rkey.as_str());
+    let record_uri = AtUri::from_parts(did, collection, rkey);
     let backlinks = extract_backlinks(&record_uri, record);
 
     let result = finalize_repo_write(

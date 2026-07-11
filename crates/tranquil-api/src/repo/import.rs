@@ -167,17 +167,11 @@ pub async fn import_repo(
                 .records
                 .iter()
                 .flat_map(|record| {
-                    let record_uri =
-                        AtUri::from_parts(did.as_str(), &record.collection, &record.rkey);
-                    record.blob_refs.iter().filter_map(move |blob_ref| {
-                        match CidLink::new(&blob_ref.cid) {
-                            Ok(cid_link) => Some((record_uri.clone(), cid_link)),
-                            Err(_) => {
-                                tracing::warn!(cid = %blob_ref.cid, "skipping unparseable blob CID reference during import");
-                                None
-                            }
-                        }
-                    })
+                    let record_uri = AtUri::from_parts(did, &record.collection, &record.rkey);
+                    record
+                        .blob_refs
+                        .iter()
+                        .map(move |blob_ref| (record_uri.clone(), blob_ref.cid.clone()))
                 })
                 .collect();
 

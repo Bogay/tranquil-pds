@@ -208,6 +208,14 @@ mod tests {
     use tranquil_db_traits::{Backlink, BacklinkPath};
     use tranquil_types::{Did, Handle, Nsid};
 
+    fn test_uri(did: &str, collection: &str, rkey: &str) -> AtUri {
+        AtUri::from_parts(
+            &did.parse().unwrap(),
+            &collection.parse().unwrap(),
+            &rkey.parse().unwrap(),
+        )
+    }
+
     struct TestHarness {
         _dir: tempfile::TempDir,
         metastore: Metastore,
