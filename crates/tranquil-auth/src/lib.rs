@@ -25,6 +25,6 @@ pub use types::{
 
 pub use verify::{
     get_algorithm_from_token, get_did_from_token, get_jti_from_token, verify_access_token,
-    verify_access_token_hs256, verify_access_token_typed, verify_refresh_token,
-    verify_refresh_token_hs256, verify_token,
+    verify_access_token_hs256, verify_refresh_token, verify_refresh_token_hs256, verify_token,
+    verify_token_es256k,
 };

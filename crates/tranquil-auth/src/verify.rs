@@ -66,11 +66,11 @@ pub fn get_algorithm_from_token(token: &str) -> Result<SigningAlgorithm, TokenDe
 }
 
 pub fn verify_token(token: &str, key_bytes: &[u8]) -> Result<TokenData<Claims>> {
-    verify_token_internal(token, key_bytes, None, None)
+    verify_token_es256k(token, key_bytes, None, None).map_err(anyhow::Error::from)
 }
 
 pub fn verify_access_token(token: &str, key_bytes: &[u8]) -> Result<TokenData<Claims>> {
-    verify_token_internal(
+    verify_token_es256k(
         token,
         key_bytes,
         Some(TokenType::Access),
@@ -80,15 +80,17 @@ pub fn verify_access_token(token: &str, key_bytes: &[u8]) -> Result<TokenData<Cl
             TokenScope::AppPassPrivileged,
         ]),
     )
+    .map_err(anyhow::Error::from)
 }
 
 pub fn verify_refresh_token(token: &str, key_bytes: &[u8]) -> Result<TokenData<Claims>> {
-    verify_token_internal(
+    verify_token_es256k(
         token,
         key_bytes,
         Some(TokenType::Refresh),
         Some(&[TokenScope::Refresh]),
     )
+    .map_err(anyhow::Error::from)
 }
 
 pub fn verify_access_token_hs256(token: &str, secret: &[u8]) -> Result<TokenData<Claims>> {
@@ -113,15 +115,15 @@ pub fn verify_refresh_token_hs256(token: &str, secret: &[u8]) -> Result<TokenDat
     )
 }
 
-fn verify_token_internal(
+pub fn verify_token_es256k(
     token: &str,
     key_bytes: &[u8],
     expected_typ: Option<TokenType>,
     allowed_scopes: Option<&[TokenScope]>,
-) -> Result<TokenData<Claims>> {
+) -> Result<TokenData<Claims>, TokenVerifyError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
-        return Err(anyhow!("Invalid token format"));
+        return Err(TokenVerifyError::Invalid("Invalid token format"));
     }
 
     let header_b64 = parts[0];
@@ -130,46 +132,43 @@ fn verify_token_internal(
 
     let header_bytes = URL_SAFE_NO_PAD
         .decode(header_b64)
-        .context("Base64 decode of header failed")?;
+        .map_err(|_| TokenVerifyError::Invalid("Base64 decode of header failed"))?;
 
-    let header: Header =
-        serde_json::from_slice(&header_bytes).context("JSON decode of header failed")?;
+    let header: Header = serde_json::from_slice(&header_bytes)
+        .map_err(|_| TokenVerifyError::Invalid("JSON decode of header failed"))?;
 
     if let Some(expected) = expected_typ
         && header.typ != expected
     {
-        return Err(anyhow!(
-            "Invalid token type: expected {}, got {}",
-            expected,
-            header.typ
-        ));
+        return Err(TokenVerifyError::Invalid("Invalid token type"));
     }
 
     let signature_bytes = URL_SAFE_NO_PAD
         .decode(signature_b64)
-        .context("Base64 decode of signature failed")?;
+        .map_err(|_| TokenVerifyError::Invalid("Base64 decode of signature failed"))?;
 
     let signature = Signature::from_slice(&signature_bytes)
-        .map_err(|e| anyhow!("Invalid signature format: {}", e))?;
+        .map_err(|_| TokenVerifyError::Invalid("Invalid signature format"))?;
 
-    let signing_key = SigningKey::from_slice(key_bytes)?;
+    let signing_key = SigningKey::from_slice(key_bytes)
+        .map_err(|_| TokenVerifyError::Invalid("Invalid signing key"))?;
     let verifying_key = VerifyingKey::from(&signing_key);
 
     let message = format!("{}.{}", header_b64, claims_b64);
     verifying_key
         .verify(message.as_bytes(), &signature)
-        .map_err(|e| anyhow!("Signature verification failed: {}", e))?;
+        .map_err(|_| TokenVerifyError::Invalid("Signature verification failed"))?;
 
     let claims_bytes = URL_SAFE_NO_PAD
         .decode(claims_b64)
-        .context("Base64 decode of claims failed")?;
+        .map_err(|_| TokenVerifyError::Invalid("Base64 decode of claims failed"))?;
 
-    let claims: Claims =
-        serde_json::from_slice(&claims_bytes).context("JSON decode of claims failed")?;
+    let claims: Claims = serde_json::from_slice(&claims_bytes)
+        .map_err(|_| TokenVerifyError::Invalid("JSON decode of claims failed"))?;
 
     let now = Utc::now().timestamp();
     if claims.exp < now {
-        return Err(anyhow!("Token expired"));
+        return Err(TokenVerifyError::Expired);
     }
 
     if let Some(scopes) = allowed_scopes {
@@ -180,7 +179,7 @@ fn verify_token_internal(
             .parse()
             .unwrap_or_else(|e| match e {});
         if !scopes.contains(&token_scope) {
-            return Err(anyhow!("Invalid token scope: {}", token_scope));
+            return Err(TokenVerifyError::Invalid("Invalid token scope"));
         }
     }
 
@@ -261,91 +260,6 @@ fn verify_token_hs256_internal(
             .unwrap_or_else(|e| match e {});
         if !scopes.contains(&token_scope) {
             return Err(anyhow!("Invalid token scope: {}", token_scope));
-        }
-    }
-
-    Ok(TokenData { claims })
-}
-
-pub fn verify_access_token_typed(
-    token: &str,
-    key_bytes: &[u8],
-) -> Result<TokenData<Claims>, TokenVerifyError> {
-    verify_token_typed_internal(token, key_bytes, Some(TokenType::Access), None)
-}
-
-fn verify_token_typed_internal(
-    token: &str,
-    key_bytes: &[u8],
-    expected_typ: Option<TokenType>,
-    allowed_scopes: Option<&[TokenScope]>,
-) -> Result<TokenData<Claims>, TokenVerifyError> {
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        return Err(TokenVerifyError::Invalid);
-    }
-
-    let header_b64 = parts[0];
-    let claims_b64 = parts[1];
-    let signature_b64 = parts[2];
-
-    let Ok(header_bytes) = URL_SAFE_NO_PAD.decode(header_b64) else {
-        return Err(TokenVerifyError::Invalid);
-    };
-
-    let Ok(header) = serde_json::from_slice::<Header>(&header_bytes) else {
-        return Err(TokenVerifyError::Invalid);
-    };
-
-    if let Some(expected) = expected_typ
-        && header.typ != expected
-    {
-        return Err(TokenVerifyError::Invalid);
-    }
-
-    let Ok(signature_bytes) = URL_SAFE_NO_PAD.decode(signature_b64) else {
-        return Err(TokenVerifyError::Invalid);
-    };
-
-    let Ok(signature) = Signature::from_slice(&signature_bytes) else {
-        return Err(TokenVerifyError::Invalid);
-    };
-
-    let Ok(signing_key) = SigningKey::from_slice(key_bytes) else {
-        return Err(TokenVerifyError::Invalid);
-    };
-    let verifying_key = VerifyingKey::from(&signing_key);
-
-    let message = format!("{}.{}", header_b64, claims_b64);
-    if verifying_key
-        .verify(message.as_bytes(), &signature)
-        .is_err()
-    {
-        return Err(TokenVerifyError::Invalid);
-    }
-
-    let Ok(claims_bytes) = URL_SAFE_NO_PAD.decode(claims_b64) else {
-        return Err(TokenVerifyError::Invalid);
-    };
-
-    let Ok(claims) = serde_json::from_slice::<Claims>(&claims_bytes) else {
-        return Err(TokenVerifyError::Invalid);
-    };
-
-    let now = Utc::now().timestamp();
-    if claims.exp < now {
-        return Err(TokenVerifyError::Expired);
-    }
-
-    if let Some(scopes) = allowed_scopes {
-        let token_scope: TokenScope = claims
-            .scope
-            .as_deref()
-            .unwrap_or("")
-            .parse()
-            .unwrap_or_else(|e| match e {});
-        if !scopes.contains(&token_scope) {
-            return Err(TokenVerifyError::Invalid);
         }
     }
 

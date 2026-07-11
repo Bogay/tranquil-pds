@@ -53,8 +53,8 @@ pub use tranquil_auth::{
     create_service_token_hs256, generate_backup_codes, generate_qr_png_base64,
     generate_totp_secret, generate_totp_uri, get_algorithm_from_token, get_did_from_token,
     get_jti_from_token, hash_backup_code, is_backup_code_format, verify_access_token,
-    verify_access_token_hs256, verify_access_token_typed, verify_backup_code, verify_refresh_token,
-    verify_refresh_token_hs256, verify_token, verify_totp_code,
+    verify_access_token_hs256, verify_backup_code, verify_refresh_token,
+    verify_refresh_token_hs256, verify_token, verify_token_es256k, verify_totp_code,
 };
 
 pub fn lxm_permits(lxm: &str, expected: &str) -> bool {
@@ -408,7 +408,7 @@ async fn validate_bearer_token_with_options_internal(
                 return Err(TokenValidationError::AccountTakedown);
             }
 
-            match verify_access_token_typed(token, &decrypted_key) {
+            match verify_token_es256k(token, &decrypted_key, Some(TokenType::Access), None) {
                 Ok(token_data) => {
                     let jti = &token_data.claims.jti;
                     let session_cache_key = crate::cache_keys::session_key(&did, jti);
@@ -473,7 +473,7 @@ async fn validate_bearer_token_with_options_internal(
                 Err(TokenVerifyError::Expired) => {
                     return Err(TokenValidationError::TokenExpired);
                 }
-                Err(TokenVerifyError::Invalid) => {}
+                Err(TokenVerifyError::Invalid(_)) => {}
             }
         }
     }
