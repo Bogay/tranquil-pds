@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+tranquil-types = { path = "../tranquil-types", default-features = false }
 axum = { workspace = true }
 futures = { workspace = true }
 hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
