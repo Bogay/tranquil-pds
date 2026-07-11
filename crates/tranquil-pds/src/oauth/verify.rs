@@ -23,7 +23,6 @@ use crate::state::AppState;
 pub struct OAuthTokenInfo {
     pub did: Did,
     pub token_id: TokenId,
-    pub client_id: ClientId,
     pub scope: Option<String>,
     pub dpop_jkt: Option<String>,
     pub controller_did: Option<Did>,
@@ -101,7 +100,7 @@ pub async fn verify_oauth_access_token(
     Ok(VerifyResult {
         did,
         token_id,
-        client_id: ClientId::from(token_data.client_id),
+        client_id: token_data.client_id,
         scope: token_data.scope,
     })
 }
@@ -171,16 +170,6 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
         .get("scope")
         .and_then(|s| s.as_str())
         .map(|s| s.to_string());
-    let dpop_jkt = payload
-        .get("cnf")
-        .and_then(|c| c.get("jkt"))
-        .and_then(|j| j.as_str())
-        .map(|s| s.to_string());
-    let client_id_str = payload
-        .get("client_id")
-        .and_then(|c| c.as_str())
-        .unwrap_or_default();
-    let client_id = ClientId::new(client_id_str);
     let controller_did = payload
         .get("act")
         .and_then(|a| a.get("sub"))
@@ -193,7 +182,6 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
     Ok(OAuthTokenInfo {
         did,
         token_id,
-        client_id,
         scope,
         dpop_jkt,
         controller_did,

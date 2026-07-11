@@ -606,14 +606,13 @@ pub async fn authorize_post(
             }
         }
     }
-    let mut device_id: Option<DeviceIdType> = extract_device_cookie(&headers);
+    let mut device_id: Option<DeviceId> = extract_device_cookie(&headers);
     let mut new_cookie: Option<String> = None;
     if form.remember_device {
         let final_device_id = if let Some(existing_id) = &device_id {
             existing_id.clone()
         } else {
             let new_id = DeviceId::generate();
-            let new_device_id_typed = DeviceIdType::new(new_id.0.clone());
             let device_data = DeviceData {
                 session_id: SessionId::generate(),
                 user_agent: extract_user_agent(&headers),
@@ -623,14 +622,14 @@ pub async fn authorize_post(
             if state
                 .repos
                 .oauth
-                .create_device(&new_device_id_typed, &device_data)
+                .create_device(&new_id, &device_data)
                 .await
                 .is_ok()
             {
-                new_cookie = Some(make_device_cookie(&new_device_id_typed));
-                device_id = Some(new_device_id_typed.clone());
+                new_cookie = Some(make_device_cookie(&new_id));
+                device_id = Some(new_id.clone());
             }
-            new_device_id_typed
+            new_id
         };
         let _ = state
             .repos
@@ -657,11 +656,10 @@ pub async fn authorize_post(
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
-    let client_id_typed = ClientId::from(request_data.parameters.client_id.clone());
     let needs_consent = should_show_consent(
         state.repos.oauth.as_ref(),
         &user.did,
-        &client_id_typed,
+        &request_data.parameters.client_id,
         &requested_scopes,
     )
     .await
@@ -691,7 +689,7 @@ pub async fn authorize_post(
         }
         return redirect_see_other(&consent_url);
     }
-    let code = Code::generate();
+    let code = AuthorizationCode::generate();
     let auth_post_device_id = device_id.clone();
     let auth_post_code = AuthorizationCode::from(code.0.clone());
     if state
@@ -869,7 +867,6 @@ pub async fn authorize_select(
             .into_response();
     }
     let has_totp = tranquil_api::server::has_totp_enabled(&state, &did).await;
-    let select_early_device_typed = device_id.clone();
     if has_totp {
         let device_is_trusted =
             tranquil_api::server::is_device_trusted(state.repos.oauth.as_ref(), &device_id, &did)
@@ -878,7 +875,7 @@ pub async fn authorize_select(
             if state
                 .repos
                 .oauth
-                .set_authorization_did(&select_request_id, &did, Some(&select_early_device_typed))
+                .set_authorization_did(&select_request_id, &did, Some(&device_id))
                 .await
                 .is_err()
             {
@@ -942,17 +939,16 @@ pub async fn authorize_select(
             }
         }
     }
-    let select_device_typed = device_id.clone();
     let _ = state
         .repos
         .oauth
-        .upsert_account_device(&did, &select_device_typed)
+        .upsert_account_device(&did, &device_id)
         .await;
 
     if state
         .repos
         .oauth
-        .set_authorization_did(&select_request_id, &did, Some(&select_device_typed))
+        .set_authorization_did(&select_request_id, &did, Some(&device_id))
         .await
         .is_err()
     {

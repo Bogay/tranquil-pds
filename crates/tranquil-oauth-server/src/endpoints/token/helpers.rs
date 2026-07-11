@@ -30,10 +30,10 @@ pub fn verify_pkce(code_challenge: &str, code_verifier: &str) -> Result<(), OAut
     Ok(())
 }
 
-pub fn create_access_token(
-    session_id: &str,
-    sub: &str,
-    dpop_jkt: Option<&str>,
+pub fn create_access_token_with_delegation(
+    session_id: &tranquil_types::TokenId,
+    sub: &tranquil_types::Did,
+    dpop_jkt: Option<&tranquil_types::JwkThumbprint>,
     scope: Option<&str>,
 ) -> Result<String, OAuthError> {
     create_access_token_with_delegation(session_id, sub, dpop_jkt, scope, None)

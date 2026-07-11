@@ -162,7 +162,7 @@ pub async fn authorize_2fa_post(
             );
         }
         let _ = state.repos.oauth.delete_2fa_challenge(challenge.id).await;
-        let code = Code::generate();
+        let code = AuthorizationCode::generate();
         let device_id = extract_device_cookie(&headers);
         let twofa_totp_device_id = device_id.clone();
         let twofa_totp_code = AuthorizationCode::from(code.0.clone());
@@ -247,8 +247,7 @@ pub async fn authorize_2fa_post(
         let trust_device_id = match &device_id {
             Some(existing_id) => existing_id.clone(),
             None => {
-                let new_id = DeviceId::generate();
-                let new_device_id_typed = DeviceIdType::new(new_id.0.clone());
+                let new_device_id = DeviceId::generate();
                 let device_data = DeviceData {
                     session_id: SessionId::generate(),
                     user_agent: extract_user_agent(&headers),
@@ -258,14 +257,14 @@ pub async fn authorize_2fa_post(
                 if state
                     .repos
                     .oauth
-                    .create_device(&new_device_id_typed, &device_data)
+                    .create_device(&new_device_id, &device_data)
                     .await
                     .is_ok()
                 {
-                    new_cookie = Some(make_device_cookie(&new_device_id_typed));
-                    device_id = Some(new_device_id_typed.clone());
+                    new_cookie = Some(make_device_cookie(&new_device_id));
+                    device_id = Some(new_device_id.clone());
                 }
-                new_device_id_typed
+                new_device_id
             }
         };
         let _ = state
@@ -286,11 +285,10 @@ pub async fn authorize_2fa_post(
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
-    let twofa_post_client_id = ClientId::from(request_data.parameters.client_id.clone());
     let needs_consent = should_show_consent(
         state.repos.oauth.as_ref(),
         &did,
-        &twofa_post_client_id,
+        &request_data.parameters.client_id,
         &requested_scopes,
     )
     .await
@@ -310,7 +308,7 @@ pub async fn authorize_2fa_post(
         }
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
     }
-    let code = Code::generate();
+    let code = AuthorizationCode::generate();
     let twofa_final_device_id = device_id.clone();
     let twofa_final_code = AuthorizationCode::from(code.0.clone());
     if state

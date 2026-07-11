@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tranquil_pds::oauth::OAuthError;
+use tranquil_types::{AuthorizationCode, RefreshToken};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GrantType {
@@ -63,12 +64,12 @@ pub struct TokenRequest {
 #[derive(Debug, Clone)]
 pub enum TokenGrant {
     AuthorizationCode {
-        code: String,
+        code: AuthorizationCode,
         code_verifier: String,
         redirect_uri: Option<String>,
     },
     RefreshToken {
-        refresh_token: String,
+        refresh_token: RefreshToken,
     },
 }
 
@@ -123,7 +124,7 @@ impl TokenRequest {
                     )
                 })?;
                 TokenGrant::AuthorizationCode {
-                    code,
+                    code: AuthorizationCode::from(code),
                     code_verifier,
                     redirect_uri: self.redirect_uri,
                 }
@@ -134,7 +135,9 @@ impl TokenRequest {
                         "refresh_token is required for refresh_token grant".to_string(),
                     )
                 })?;
-                TokenGrant::RefreshToken { refresh_token }
+                TokenGrant::RefreshToken {
+                    refresh_token: RefreshToken::from(refresh_token),
+                }
             }
         };
 
@@ -177,7 +180,7 @@ pub struct TokenResponse {
     pub token_type: TokenType,
     pub expires_in: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<tranquil_types::RefreshToken>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -103,11 +103,11 @@ impl OAuthOps {
     fn token_value_to_data(&self, v: &OAuthTokenValue) -> Result<TokenData, MetastoreError> {
         let did = Did::new(v.did.clone())
             .map_err(|_| MetastoreError::CorruptData("invalid did in oauth token"))?;
-        let token_id = tranquil_oauth::TokenId(v.token_id.clone());
+        let token_id = tranquil_oauth::TokenId::from(v.token_id.clone());
         let refresh_token = if v.refresh_token.is_empty() {
             None
         } else {
-            Some(tranquil_oauth::RefreshToken(v.refresh_token.clone()))
+            Some(tranquil_oauth::RefreshToken::from(v.refresh_token.clone()))
         };
 
         Ok(TokenData {
@@ -116,7 +116,7 @@ impl OAuthOps {
             created_at: DateTime::from_timestamp_millis(v.created_at_ms).unwrap_or_default(),
             updated_at: DateTime::from_timestamp_millis(v.updated_at_ms).unwrap_or_default(),
             expires_at: DateTime::from_timestamp_millis(v.expires_at_ms).unwrap_or_default(),
-            client_id: v.client_id.clone(),
+            client_id: tranquil_types::ClientId::from(v.client_id.clone()),
             client_auth: tranquil_oauth::ClientAuth::None,
             device_id: None,
             parameters: serde_json::from_str(&v.parameters_json)
@@ -189,7 +189,7 @@ impl OAuthOps {
             .map_err(|_| MetastoreError::CorruptData("corrupt oauth client_auth"))?;
 
         Ok(RequestData {
-            client_id: v.client_id.clone(),
+            client_id: tranquil_types::ClientId::from(v.client_id.clone()),
             client_auth,
             parameters,
             expires_at: DateTime::from_timestamp_millis(v.expires_at_ms).unwrap_or_default(),
@@ -202,8 +202,11 @@ impl OAuthOps {
             device_id: v
                 .device_id
                 .as_ref()
-                .map(|d| tranquil_oauth::DeviceId(d.clone())),
-            code: v.code.as_ref().map(|c| tranquil_oauth::Code(c.clone())),
+                .map(|d| tranquil_oauth::DeviceId::from(d.clone())),
+            code: v
+                .code
+                .as_ref()
+                .map(|c| tranquil_oauth::AuthorizationCode::from(c.clone())),
             controller_did: v
                 .controller_did
                 .as_ref()
@@ -217,7 +220,7 @@ impl OAuthOps {
 
     fn data_to_request_value(&self, data: &RequestData) -> OAuthRequestValue {
         OAuthRequestValue {
-            client_id: data.client_id.clone(),
+            client_id: data.client_id.to_string(),
             client_auth_json: data
                 .client_auth
                 .as_ref()
@@ -225,8 +228,8 @@ impl OAuthOps {
             parameters_json: serde_json::to_string(&data.parameters).unwrap_or_default(),
             expires_at_ms: data.expires_at.timestamp_millis(),
             did: data.did.as_ref().map(|d| d.to_string()),
-            device_id: data.device_id.as_ref().map(|d| d.0.clone()),
-            code: data.code.as_ref().map(|c| c.0.clone()),
+            device_id: data.device_id.as_ref().map(|d| d.to_string()),
+            code: data.code.as_ref().map(|c| c.to_string()),
             controller_did: data.controller_did.as_ref().map(|d| d.to_string()),
         }
     }
@@ -239,8 +242,8 @@ impl OAuthOps {
         let value = OAuthTokenValue {
             family_id,
             did: data.did.to_string(),
-            client_id: data.client_id.clone(),
-            token_id: data.token_id.0.clone(),
+            client_id: data.client_id.to_string(),
+            token_id: data.token_id.to_string(),
             refresh_token: data
                 .current_refresh_token
                 .as_ref()
@@ -1100,7 +1103,7 @@ impl OAuthOps {
         Ok(TwoFactorChallenge {
             id,
             did: did.clone(),
-            request_uri: request_uri.as_str().to_owned(),
+            request_uri: request_uri.clone(),
             code,
             attempts: 0,
             created_at: now,
@@ -1140,7 +1143,7 @@ impl OAuthOps {
                 id: Uuid::from_bytes(v.id),
                 did: Did::new(v.did)
                     .map_err(|_| MetastoreError::CorruptData("invalid did in 2fa challenge"))?,
-                request_uri: v.request_uri,
+                request_uri: RequestId::from(v.request_uri),
                 code: v.code,
                 attempts: v.attempts,
                 created_at: DateTime::from_timestamp_millis(v.created_at_ms).unwrap_or_default(),
@@ -1358,7 +1361,7 @@ impl OAuthOps {
                 match DeviceTrustValue::deserialize(&val_bytes) {
                     Some(v) => {
                         acc.push(TrustedDeviceRow {
-                            id: v.device_id,
+                            id: DeviceId::from(v.device_id),
                             user_agent: v.user_agent,
                             friendly_name: v.friendly_name,
                             trusted_at: v.trusted_at_ms.and_then(DateTime::from_timestamp_millis),
@@ -1604,7 +1607,7 @@ impl OAuthOps {
 fn default_parameters(client_id: &str) -> tranquil_oauth::AuthorizationRequestParameters {
     tranquil_oauth::AuthorizationRequestParameters {
         response_type: tranquil_oauth::ResponseType::Code,
-        client_id: client_id.to_owned(),
+        client_id: tranquil_types::ClientId::new(client_id),
         redirect_uri: String::new(),
         scope: None,
         state: None,

@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tranquil_types::Did;
+use tranquil_types::{ClientId, Did};
+
+pub use tranquil_types::{AuthorizationCode, DeviceId, RefreshToken, RequestId, TokenId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(transparent)]
@@ -18,27 +20,8 @@ pub struct TokenId(pub String);
 #[sqlx(transparent)]
 pub struct DeviceId(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(transparent)]
-#[sqlx(transparent)]
-pub struct SessionId(pub String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(transparent)]
-#[sqlx(transparent)]
-pub struct Code(pub String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(transparent)]
-#[sqlx(transparent)]
-pub struct RefreshToken(pub String);
-
-impl RequestId {
-    pub fn generate() -> Self {
-        Self(format!(
-            "urn:ietf:params:oauth:request_uri:{}",
-            uuid::Uuid::new_v4()
-        ))
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -155,7 +138,7 @@ impl Prompt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizationRequestParameters {
     pub response_type: ResponseType,
-    pub client_id: String,
+    pub client_id: ClientId,
     pub redirect_uri: String,
     pub scope: Option<String>,
     pub state: Option<String>,
@@ -171,13 +154,13 @@ pub struct AuthorizationRequestParameters {
 
 #[derive(Debug, Clone)]
 pub struct RequestData {
-    pub client_id: String,
+    pub client_id: ClientId,
     pub client_auth: Option<ClientAuth>,
     pub parameters: AuthorizationRequestParameters,
     pub expires_at: DateTime<Utc>,
     pub did: Option<Did>,
     pub device_id: Option<DeviceId>,
-    pub code: Option<Code>,
+    pub code: Option<AuthorizationCode>,
     pub controller_did: Option<Did>,
 }
 
@@ -196,12 +179,12 @@ pub struct TokenData {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
-    pub client_id: String,
+    pub client_id: ClientId,
     pub client_auth: ClientAuth,
     pub device_id: Option<DeviceId>,
     pub parameters: AuthorizationRequestParameters,
     pub details: Option<JsonValue>,
-    pub code: Option<Code>,
+    pub code: Option<AuthorizationCode>,
     pub current_refresh_token: Option<RefreshToken>,
     pub scope: Option<String>,
     pub controller_did: Option<Did>,
@@ -215,7 +198,7 @@ pub struct AuthorizedClientData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthClientMetadata {
-    pub client_id: String,
+    pub client_id: ClientId,
     pub client_name: Option<String>,
     pub client_uri: Option<String>,
     pub logo_uri: Option<String>,
@@ -270,7 +253,7 @@ pub struct TokenResponse {
     pub token_type: String,
     pub expires_in: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<RefreshToken>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -280,11 +263,11 @@ pub struct TokenResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenRequest {
     pub grant_type: String,
-    pub code: Option<String>,
+    pub code: Option<AuthorizationCode>,
     pub redirect_uri: Option<String>,
     pub code_verifier: Option<String>,
-    pub refresh_token: Option<String>,
-    pub client_id: Option<String>,
+    pub refresh_token: Option<RefreshToken>,
+    pub client_id: Option<ClientId>,
     pub client_secret: Option<String>,
 }
 
@@ -320,7 +303,7 @@ pub struct Jwks {
 #[derive(Debug, Clone)]
 pub struct FlowPending {
     pub parameters: AuthorizationRequestParameters,
-    pub client_id: String,
+    pub client_id: ClientId,
     pub client_auth: Option<ClientAuth>,
     pub expires_at: DateTime<Utc>,
     pub controller_did: Option<Did>,
@@ -329,7 +312,7 @@ pub struct FlowPending {
 #[derive(Debug, Clone)]
 pub struct FlowAuthenticated {
     pub parameters: AuthorizationRequestParameters,
-    pub client_id: String,
+    pub client_id: ClientId,
     pub client_auth: Option<ClientAuth>,
     pub expires_at: DateTime<Utc>,
     pub did: Did,
@@ -340,12 +323,12 @@ pub struct FlowAuthenticated {
 #[derive(Debug, Clone)]
 pub struct FlowAuthorized {
     pub parameters: AuthorizationRequestParameters,
-    pub client_id: String,
+    pub client_id: ClientId,
     pub client_auth: Option<ClientAuth>,
     pub expires_at: DateTime<Utc>,
     pub did: Did,
     pub device_id: Option<DeviceId>,
-    pub code: Code,
+    pub code: AuthorizationCode,
     pub controller_did: Option<Did>,
 }
 
@@ -444,7 +427,7 @@ impl AuthFlowWithUser {
         }
     }
 
-    pub fn client_id(&self) -> &str {
+    pub fn client_id(&self) -> &ClientId {
         match self {
             AuthFlowWithUser::Authenticated(a) => &a.client_id,
             AuthFlowWithUser::Authorized(a) => &a.client_id,
@@ -522,16 +505,16 @@ mod tests {
 
     fn make_request_data(
         did: Option<Did>,
-        code: Option<Code>,
+        code: Option<AuthorizationCode>,
         expires_in: Duration,
     ) -> RequestData {
         RequestData {
-            client_id: "test-client".into(),
+            client_id: ClientId::new("test-client"),
             client_auth: None,
             parameters: AuthorizationRequestParameters {
                 response_type: ResponseType::Code,
-                client_id: "test-client".into(),
-                redirect_uri: "https://example.com/callback".into(),
+                client_id: ClientId::new("test-client"),
+                redirect_uri: "https://oyster.cafe/callback".into(),
                 scope: Some("atproto".into()),
                 state: None,
                 code_challenge: "test".into(),
@@ -554,8 +537,8 @@ mod tests {
         s.parse().expect("valid test DID")
     }
 
-    fn test_code(s: &str) -> Code {
-        Code(s.to_string())
+    fn test_code(s: &str) -> AuthorizationCode {
+        AuthorizationCode::new(s)
     }
 
     #[test]

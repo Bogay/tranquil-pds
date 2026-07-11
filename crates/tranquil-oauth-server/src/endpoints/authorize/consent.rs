@@ -13,7 +13,7 @@ pub struct ScopeInfo {
 #[derive(Debug, Serialize)]
 pub struct ConsentResponse {
     pub request_uri: String,
-    pub client_id: String,
+    pub client_id: ClientId,
     pub client_name: Option<String>,
     pub client_uri: Option<String>,
     pub logo_uri: Option<String>,
@@ -136,11 +136,10 @@ pub async fn consent_get(
         }
     };
     let requested_scopes: Vec<&str> = expanded_scope_str.split_whitespace().collect();
-    let consent_client_id = ClientId::from(request_data.parameters.client_id.clone());
     let preferences = state
         .repos
         .oauth
-        .get_scope_preferences(&did, &consent_client_id)
+        .get_scope_preferences(&did, &request_data.parameters.client_id)
         .await
         .unwrap_or_default();
     let pref_map: std::collections::HashMap<_, _> = preferences
@@ -152,7 +151,7 @@ pub async fn consent_get(
     let show_consent = should_show_consent(
         state.repos.oauth.as_ref(),
         &did,
-        &consent_client_id,
+        &request_data.parameters.client_id,
         &requested_scope_strings,
     )
     .await
@@ -385,11 +384,10 @@ pub async fn consent_post(
                 granted: form.approved_scopes.contains(&s.to_string()),
             })
             .collect();
-        let consent_post_client_id = ClientId::from(request_data.parameters.client_id.clone());
         let _ = state
             .repos
             .oauth
-            .upsert_scope_preferences(&did, &consent_post_client_id, &preferences)
+            .upsert_scope_preferences(&did, &request_data.parameters.client_id, &preferences)
             .await;
     }
     if let Err(e) = state
@@ -400,20 +398,15 @@ pub async fn consent_post(
     {
         tracing::warn!("Failed to update request scope: {:?}", e);
     }
-    let code = Code::generate();
-    let consent_post_device_id = request_data
-        .device_id
-        .as_ref()
-        .map(|d| DeviceIdType::new(d.0.clone()));
-    let consent_post_code = AuthorizationCode::from(code.0.clone());
+    let code = AuthorizationCode::generate();
     if state
         .repos
         .oauth
         .update_authorization_request(
             &consent_post_request_id,
             &did,
-            consent_post_device_id.as_ref(),
-            &consent_post_code,
+            request_data.device_id.as_ref(),
+            &code,
         )
         .await
         .is_err()

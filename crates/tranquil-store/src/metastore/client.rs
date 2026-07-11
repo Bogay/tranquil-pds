@@ -3343,7 +3343,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
 
     async fn get_oauth_token_with_user(
         &self,
-        token_id: &str,
+        token_id: &TokenId,
     ) -> Result<Option<OAuthTokenWithUser>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool

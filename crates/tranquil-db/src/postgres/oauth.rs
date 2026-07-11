@@ -65,13 +65,13 @@ impl OAuthRepository for PostgresOAuthRepository {
             data.created_at,
             data.updated_at,
             data.expires_at,
-            data.client_id,
+            data.client_id.as_str(),
             client_auth_json,
-            data.device_id.as_ref().map(|d| d.0.as_str()),
+            data.device_id.as_deref(),
             parameters_json,
             data.details,
-            data.code.as_ref().map(|c| c.0.as_str()),
-            data.current_refresh_token.as_ref().map(|r| r.0.as_str()),
+            data.code.as_deref(),
+            data.current_refresh_token.as_deref(),
             data.scope,
             data.controller_did.as_ref().map(|d| d.as_str()),
         )
@@ -100,17 +100,17 @@ impl OAuthRepository for PostgresOAuthRepository {
                     .did
                     .parse()
                     .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
-                token_id: OAuthTokenId(r.token_id),
+                token_id: TokenId::from(r.token_id),
                 created_at: r.created_at,
                 updated_at: r.updated_at,
                 expires_at: r.expires_at,
-                client_id: r.client_id,
+                client_id: ClientId::from(r.client_id),
                 client_auth: from_json(r.client_auth)?,
-                device_id: r.device_id.map(OAuthDeviceId),
+                device_id: r.device_id.map(DeviceId::from),
                 parameters: from_json(r.parameters)?,
                 details: r.details,
-                code: r.code.map(OAuthCode),
-                current_refresh_token: r.current_refresh_token.map(OAuthRefreshToken),
+                code: r.code.map(AuthorizationCode::from),
+                current_refresh_token: r.current_refresh_token.map(RefreshToken::from),
                 scope: r.scope,
                 controller_did: r
                     .controller_did
@@ -146,17 +146,17 @@ impl OAuthRepository for PostgresOAuthRepository {
                         .did
                         .parse()
                         .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
-                    token_id: OAuthTokenId(r.token_id),
+                    token_id: TokenId::from(r.token_id),
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                     expires_at: r.expires_at,
-                    client_id: r.client_id,
+                    client_id: ClientId::from(r.client_id),
                     client_auth: from_json(r.client_auth)?,
-                    device_id: r.device_id.map(OAuthDeviceId),
+                    device_id: r.device_id.map(DeviceId::from),
                     parameters: from_json(r.parameters)?,
                     details: r.details,
-                    code: r.code.map(OAuthCode),
-                    current_refresh_token: r.current_refresh_token.map(OAuthRefreshToken),
+                    code: r.code.map(AuthorizationCode::from),
+                    current_refresh_token: r.current_refresh_token.map(RefreshToken::from),
                     scope: r.scope,
                     controller_did: r
                         .controller_did
@@ -195,17 +195,17 @@ impl OAuthRepository for PostgresOAuthRepository {
                         .did
                         .parse()
                         .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
-                    token_id: OAuthTokenId(r.token_id),
+                    token_id: TokenId::from(r.token_id),
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                     expires_at: r.expires_at,
-                    client_id: r.client_id,
+                    client_id: ClientId::from(r.client_id),
                     client_auth: from_json(r.client_auth)?,
-                    device_id: r.device_id.map(OAuthDeviceId),
+                    device_id: r.device_id.map(DeviceId::from),
                     parameters: from_json(r.parameters)?,
                     details: r.details,
-                    code: r.code.map(OAuthCode),
-                    current_refresh_token: r.current_refresh_token.map(OAuthRefreshToken),
+                    code: r.code.map(AuthorizationCode::from),
+                    current_refresh_token: r.current_refresh_token.map(RefreshToken::from),
                     scope: r.scope,
                     controller_did: r
                         .controller_did
@@ -328,17 +328,17 @@ impl OAuthRepository for PostgresOAuthRepository {
                         .did
                         .parse()
                         .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
-                    token_id: OAuthTokenId(r.token_id),
+                    token_id: TokenId::from(r.token_id),
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                     expires_at: r.expires_at,
-                    client_id: r.client_id,
+                    client_id: ClientId::from(r.client_id),
                     client_auth: from_json(r.client_auth)?,
-                    device_id: r.device_id.map(OAuthDeviceId),
+                    device_id: r.device_id.map(DeviceId::from),
                     parameters: from_json(r.parameters)?,
                     details: r.details,
-                    code: r.code.map(OAuthCode),
-                    current_refresh_token: r.current_refresh_token.map(OAuthRefreshToken),
+                    code: r.code.map(AuthorizationCode::from),
+                    current_refresh_token: r.current_refresh_token.map(RefreshToken::from),
                     scope: r.scope,
                     controller_did: r
                         .controller_did
@@ -437,8 +437,8 @@ impl OAuthRepository for PostgresOAuthRepository {
             "#,
             request_id.as_str(),
             data.did.as_ref().map(|d| d.as_str()),
-            data.device_id.as_ref().map(|d| d.0.as_str()),
-            data.client_id,
+            data.device_id.as_deref(),
+            data.client_id.as_str(),
             client_auth_json,
             parameters_json,
             data.expires_at,
@@ -473,7 +473,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                 };
                 let parameters: AuthorizationRequestParameters = from_json(r.parameters)?;
                 Ok(Some(RequestData {
-                    client_id: r.client_id,
+                    client_id: ClientId::from(r.client_id),
                     client_auth,
                     parameters,
                     expires_at: r.expires_at,
@@ -482,8 +482,8 @@ impl OAuthRepository for PostgresOAuthRepository {
                         .map(|s| s.parse())
                         .transpose()
                         .map_err(|_| DbError::Other("Invalid DID in DB".into()))?,
-                    device_id: r.device_id.map(OAuthDeviceId),
-                    code: r.code.map(OAuthCode),
+                    device_id: r.device_id.map(DeviceId::from),
+                    code: r.code.map(AuthorizationCode::from),
                     controller_did: r
                         .controller_did
                         .map(|s| s.parse())
@@ -567,7 +567,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                 };
                 let parameters: AuthorizationRequestParameters = from_json(r.parameters)?;
                 Ok(Some(RequestData {
-                    client_id: r.client_id,
+                    client_id: ClientId::from(r.client_id),
                     client_auth,
                     parameters,
                     expires_at: r.expires_at,
@@ -576,8 +576,8 @@ impl OAuthRepository for PostgresOAuthRepository {
                         .map(|s| s.parse())
                         .transpose()
                         .map_err(|_| DbError::Other("Invalid DID in DB".into()))?,
-                    device_id: r.device_id.map(OAuthDeviceId),
-                    code: r.code.map(OAuthCode),
+                    device_id: r.device_id.map(DeviceId::from),
+                    code: r.code.map(AuthorizationCode::from),
                     controller_did: r
                         .controller_did
                         .map(|s| s.parse())
@@ -906,7 +906,7 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(TwoFactorChallenge {
             id: row.id,
             did: Did::from(row.did),
-            request_uri: row.request_uri,
+            request_uri: RequestId::from(row.request_uri),
             code: row.code,
             attempts: row.attempts,
             created_at: row.created_at,
@@ -932,7 +932,7 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(row.map(|r| TwoFactorChallenge {
             id: r.id,
             did: Did::from(r.did),
-            request_uri: r.request_uri,
+            request_uri: RequestId::from(r.request_uri),
             code: r.code,
             attempts: r.attempts,
             created_at: r.created_at,
@@ -1143,7 +1143,7 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(rows
             .into_iter()
             .map(|r| TrustedDeviceRow {
-                id: r.id,
+                id: DeviceId::from(r.id),
                 user_agent: r.user_agent,
                 friendly_name: r.friendly_name,
                 trusted_at: r.trusted_at,

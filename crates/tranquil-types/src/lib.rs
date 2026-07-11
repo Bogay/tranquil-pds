@@ -727,6 +727,12 @@ simple_string_newtype! {
     pub struct TokenId;
 }
 
+impl TokenId {
+    pub fn generate() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+}
+
 simple_string_newtype! {
     pub struct ClientId;
 }
@@ -735,8 +741,23 @@ simple_string_newtype! {
     pub struct DeviceId;
 }
 
+impl DeviceId {
+    pub fn generate() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+}
+
 simple_string_newtype! {
     pub struct RequestId;
+}
+
+impl RequestId {
+    pub fn generate() -> Self {
+        Self(format!(
+            "urn:ietf:params:oauth:request_uri:{}",
+            uuid::Uuid::new_v4()
+        ))
+    }
 }
 
 simple_string_newtype! {
@@ -747,8 +768,26 @@ simple_string_newtype! {
     pub struct AuthorizationCode;
 }
 
+impl AuthorizationCode {
+    pub fn generate() -> Self {
+        Self(generate_url_safe_secret())
+    }
+}
+
 simple_string_newtype! {
     pub struct RefreshToken;
+}
+
+impl RefreshToken {
+    pub fn generate() -> Self {
+        Self(generate_url_safe_secret())
+    }
+}
+
+fn generate_url_safe_secret() -> String {
+    use rand::Rng;
+    let bytes: [u8; 32] = rand::thread_rng().r#gen();
+    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes)
 }
 
 simple_string_newtype! {

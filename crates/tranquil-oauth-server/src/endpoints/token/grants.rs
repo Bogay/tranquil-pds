@@ -33,7 +33,7 @@ pub async fn handle_authorization_code_grant(
         client_id = ?request.client_auth.client_id(),
         "Authorization code grant requested"
     );
-    let (code, code_verifier, redirect_uri) = match request.grant {
+    let (auth_code, code_verifier, redirect_uri) = match request.grant {
         TokenGrant::AuthorizationCode {
             code,
             code_verifier,
@@ -45,7 +45,6 @@ pub async fn handle_authorization_code_grant(
             ));
         }
     };
-    let auth_code = AuthorizationCode::from(code);
     let auth_request = state
         .repos
         .oauth
@@ -249,7 +248,7 @@ pub async fn handle_authorization_code_grant(
                 None => TokenType::Bearer,
             },
             expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
-            refresh_token: Some(refresh_token.0),
+            refresh_token: Some(refresh_token),
             scope: final_scope,
             sub: Some(did),
         }),
@@ -262,7 +261,7 @@ pub async fn handle_refresh_token_grant(
     request: ValidatedTokenRequest,
     dpop_proof: Option<String>,
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
-    let refresh_token_str = match request.grant {
+    let refresh_token = match request.grant {
         TokenGrant::RefreshToken { refresh_token } => refresh_token,
         _ => {
             return Err(OAuthError::InvalidRequest(
@@ -270,6 +269,7 @@ pub async fn handle_refresh_token_grant(
             ));
         }
     };
+    let refresh_token_str = refresh_token.as_str();
     let token_prefix = &refresh_token_str[..std::cmp::min(16, refresh_token_str.len())];
     tracing::info!(
         refresh_token_prefix = %token_prefix,
@@ -277,8 +277,7 @@ pub async fn handle_refresh_token_grant(
         "Refresh token grant requested"
     );
 
-    let refresh_token_typed = RefreshTokenType::from(refresh_token_str.clone());
-    let lookup = lookup_refresh_token(state.repos.oauth.as_ref(), &refresh_token_typed).await?;
+    let lookup = lookup_refresh_token(state.repos.oauth.as_ref(), &refresh_token).await?;
     let token_state = lookup.state();
     tracing::debug!(state = %token_state, "Refresh token state");
 
@@ -319,7 +318,7 @@ pub async fn handle_refresh_token_grant(
                         None => TokenType::Bearer,
                     },
                     expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
-                    refresh_token: token_data.current_refresh_token.map(|r| r.0),
+                    refresh_token: token_data.current_refresh_token,
                     scope: token_data.scope,
                     sub: Some(token_data.did.to_string()),
                 }),
@@ -398,11 +397,10 @@ pub async fn handle_refresh_token_grant(
         REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL
     };
     let new_expires_at = Utc::now() + Duration::days(refresh_expiry_days);
-    let new_refresh_typed = RefreshTokenType::from(new_refresh_token.0.clone());
     state
         .repos
         .oauth
-        .rotate_token(db_id, &new_refresh_typed, new_expires_at)
+        .rotate_token(db_id, &new_refresh_token, new_expires_at)
         .await
         .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
     tracing::info!(
@@ -434,7 +432,7 @@ pub async fn handle_refresh_token_grant(
                 None => TokenType::Bearer,
             },
             expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
-            refresh_token: Some(new_refresh_token.0),
+            refresh_token: Some(new_refresh_token),
             scope: token_data.scope,
             sub: Some(token_data.did.to_string()),
         }),

@@ -6,10 +6,11 @@ use tokio::sync::RwLock;
 
 use crate::OAuthError;
 use crate::types::ClientAuth;
+use tranquil_types::ClientId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientMetadata {
-    pub client_id: String,
+    pub client_id: ClientId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -38,7 +39,7 @@ pub struct ClientMetadata {
 impl Default for ClientMetadata {
     fn default() -> Self {
         Self {
-            client_id: String::new(),
+            client_id: ClientId::new(""),
             client_name: None,
             client_uri: None,
             logo_uri: None,
@@ -97,7 +98,7 @@ impl ClientMetadataCache {
         }
     }
 
-    fn is_loopback_client(client_id: &str) -> bool {
+    fn is_loopback_client(client_id: &ClientId) -> bool {
         if let Ok(url) = reqwest::Url::parse(client_id) {
             url.scheme() == "http"
                 && url.host_str() == Some("localhost")
@@ -108,7 +109,7 @@ impl ClientMetadataCache {
         }
     }
 
-    fn build_loopback_metadata(client_id: &str) -> Result<ClientMetadata, OAuthError> {
+    fn build_loopback_metadata(client_id: &ClientId) -> Result<ClientMetadata, OAuthError> {
         let url = reqwest::Url::parse(client_id)
             .map_err(|_| OAuthError::InvalidClient("Invalid loopback client_id URL".into()))?;
         let mut redirect_uris = Vec::<String>::new();
@@ -129,7 +130,7 @@ impl ClientMetadataCache {
             scope = Some("atproto".into());
         }
         Ok(ClientMetadata {
-            client_id: client_id.into(),
+            client_id: client_id.clone(),
             client_name: Some("Loopback Client".into()),
             client_uri: None,
             logo_uri: None,
@@ -145,13 +146,13 @@ impl ClientMetadataCache {
         })
     }
 
-    pub async fn get(&self, client_id: &str) -> Result<ClientMetadata, OAuthError> {
+    pub async fn get(&self, client_id: &ClientId) -> Result<ClientMetadata, OAuthError> {
         if Self::is_loopback_client(client_id) {
             return Self::build_loopback_metadata(client_id);
         }
         {
             let cache = self.cache.read().await;
-            if let Some(cached) = cache.get(client_id)
+            if let Some(cached) = cache.get(client_id.as_str())
                 && cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs
             {
                 return Ok(cached.metadata.clone());
@@ -241,7 +242,7 @@ impl ClientMetadataCache {
         Ok(jwks)
     }
 
-    async fn fetch_metadata(&self, client_id: &str) -> Result<ClientMetadata, OAuthError> {
+    async fn fetch_metadata(&self, client_id: &ClientId) -> Result<ClientMetadata, OAuthError> {
         if !client_id.starts_with("http://") && !client_id.starts_with("https://") {
             return Err(OAuthError::InvalidClient(
                 "client_id must be a URL".to_string(),
@@ -257,7 +258,7 @@ impl ClientMetadataCache {
         }
         let response = self
             .http_client
-            .get(client_id)
+            .get(client_id.as_str())
             .header("Accept", "application/json")
             .send()
             .await
@@ -276,8 +277,8 @@ impl ClientMetadataCache {
             OAuthError::InvalidClient(format!("Invalid client metadata JSON: {}", e))
         })?;
         if metadata.client_id.is_empty() {
-            metadata.client_id = client_id.to_string();
-        } else if metadata.client_id != client_id {
+            metadata.client_id = client_id.clone();
+        } else if metadata.client_id != *client_id {
             return Err(OAuthError::InvalidClient(
                 "client_id in metadata does not match request".to_string(),
             ));

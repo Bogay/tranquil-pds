@@ -619,12 +619,12 @@ async fn test_sso_get_pending_registration_token_too_long() {
 
 fn test_request_data() -> RequestData {
     RequestData {
-        client_id: "https://test.example.com".to_string(),
+        client_id: tranquil_types::ClientId::from("https://squid.oyster.cafe".to_string()),
         client_auth: None,
         parameters: AuthorizationRequestParameters {
             response_type: ResponseType::Code,
-            client_id: "https://test.example.com".to_string(),
-            redirect_uri: "https://test.example.com/callback".to_string(),
+            client_id: tranquil_types::ClientId::from("https://squid.oyster.cafe".to_string()),
+            redirect_uri: "https://squid.oyster.cafe/callback".to_string(),
             scope: Some("atproto".to_string()),
             state: Some("teststate".to_string()),
             code_challenge: "testchallenge".to_string(),

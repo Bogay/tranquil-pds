@@ -1130,13 +1130,13 @@ pub async fn list_sessions(
     Ok(Json(ListSessionsOutput { sessions }))
 }
 
-fn extract_client_name(client_id: &str) -> String {
+fn extract_client_name(client_id: &tranquil_types::ClientId) -> String {
     if client_id.starts_with("http://localhost") || client_id.starts_with("http://127.0.0.1") {
         "Localhost App".to_string()
-    } else if let Ok(parsed) = reqwest::Url::parse(client_id) {
+    } else if let Ok(parsed) = reqwest::Url::parse(client_id.as_str()) {
         parsed.host_str().unwrap_or("Unknown App").to_string()
     } else {
-        client_id.to_string()
+        client_id.as_str().to_string()
     }
 }
 
@@ -1210,7 +1210,7 @@ pub async fn revoke_all_sessions(
             .delete_sessions_by_did(&auth.did)
             .await
             .log_db_err("revoking JWT sessions")?;
-        let jti_typed = TokenId::from(jti.clone());
+        let token_id = TokenId::from(jti.clone().into_inner());
         state
             .repos
             .oauth

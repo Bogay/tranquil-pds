@@ -192,7 +192,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_oauth_token_with_user(
         &self,
-        token_id: &str,
+        token_id: &TokenId,
     ) -> Result<Option<OAuthTokenWithUser>, DbError> {
         let row = sqlx::query!(
             r#"SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref, u.is_admin,

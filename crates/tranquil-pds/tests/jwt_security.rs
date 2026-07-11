@@ -145,7 +145,7 @@ fn test_token_type_confusion() {
     let key_bytes = generate_user_key();
     let did = "did:plc:test";
 
-    let refresh_token = create_refresh_token(did, &key_bytes).expect("create refresh token");
+    let refresh_token = create_refresh_token(&did, &key_bytes).expect("create refresh token");
     let result = verify_access_token(&refresh_token, &key_bytes);
     assert!(result.is_err(), "Refresh token as access must be rejected");
     assert!(

@@ -124,7 +124,7 @@ pub trait UserRepository: Send + Sync {
 
     async fn get_oauth_token_with_user(
         &self,
-        token_id: &str,
+        token_id: &TokenId,
     ) -> Result<Option<OAuthTokenWithUser>, DbError>;
 
     async fn get_user_info_by_did(&self, did: &Did) -> Result<Option<UserInfoForAuth>, DbError>;

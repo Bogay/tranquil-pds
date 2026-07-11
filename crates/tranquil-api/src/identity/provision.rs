@@ -264,19 +264,18 @@ pub async fn create_and_store_session(
     scope: &str,
     controller_did: Option<&Did>,
 ) -> Result<SessionResult, ApiError> {
-    let access_meta =
-        tranquil_pds::auth::create_access_token_with_metadata(did_str, signing_key_bytes).map_err(
+    let access_meta = tranquil_pds::auth::create_access_token_with_metadata(did, signing_key_bytes)
+        .map_err(|e| {
+            tracing::error!("Error creating access token: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
+    let refresh_meta =
+        tranquil_pds::auth::create_refresh_token_with_metadata(did, signing_key_bytes).map_err(
             |e| {
                 tracing::error!("Error creating access token: {:?}", e);
                 ApiError::InternalError(None)
             },
         )?;
-    let refresh_meta =
-        tranquil_pds::auth::create_refresh_token_with_metadata(did_str, signing_key_bytes)
-            .map_err(|e| {
-                tracing::error!("Error creating refresh token: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
     let session_data = tranquil_db_traits::SessionTokenCreate {
         did: did.clone(),
         access_jti: access_meta.jti.clone(),

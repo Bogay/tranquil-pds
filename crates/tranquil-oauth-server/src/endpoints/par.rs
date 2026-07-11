@@ -9,14 +9,14 @@ use tranquil_pds::oauth::{
 };
 use tranquil_pds::rate_limit::{OAuthParLimit, OAuthRateLimited};
 use tranquil_pds::state::AppState;
-use tranquil_types::RequestId as RequestIdType;
+use tranquil_types::{ClientId, JwkThumbprint};
 
 const PAR_EXPIRY_SECONDS: i64 = 600;
 
 #[derive(Debug, Deserialize)]
 pub struct ParRequest {
     pub response_type: String,
-    pub client_id: String,
+    pub client_id: ClientId,
     pub redirect_uri: String,
     #[serde(default)]
     pub scope: Option<String>,
@@ -113,11 +113,10 @@ pub async fn pushed_authorization_request(
         code: None,
         controller_did: None,
     };
-    let request_id_typed = RequestIdType::from(request_id.0.clone());
     state
         .repos
         .oauth
-        .create_authorization_request(&request_id_typed, &request_data)
+        .create_authorization_request(&request_id, &request_data)
         .await
         .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
     tokio::spawn({
@@ -131,7 +130,7 @@ pub async fn pushed_authorization_request(
     Ok((
         axum::http::StatusCode::CREATED,
         Json(ParResponse {
-            request_uri: request_id.0,
+            request_uri: request_id.into_inner(),
             expires_in: u64::try_from(PAR_EXPIRY_SECONDS).unwrap_or(600),
         }),
     ))

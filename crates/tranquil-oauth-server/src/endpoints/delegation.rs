@@ -450,7 +450,7 @@ pub async fn delegation_auth_token(
 
 #[derive(Debug, Deserialize)]
 pub struct CrossPdsCallbackParams {
-    pub code: String,
+    pub code: tranquil_types::AuthorizationCode,
     pub state: String,
     pub iss: Option<String>,
 }

@@ -9,14 +9,14 @@ pub fn db_err_to_oauth(err: tranquil_db_traits::DbError) -> OAuthError {
 }
 
 pub use tranquil_oauth::{
-    AuthFlow, AuthFlowWithUser, AuthorizationRequestParameters, AuthorizationServerMetadata,
-    AuthorizedClientData, ClientAuth, ClientMetadata, ClientMetadataCache, Code,
-    CodeChallengeMethod, DPoPClaims, DPoPJwk, DPoPProofHeader, DPoPProofPayload, DPoPVerifier,
-    DPoPVerifyResult, DeviceData, DeviceId, FlowAuthenticated, FlowAuthorized, FlowExpired,
-    FlowNotAuthenticated, FlowNotAuthorized, FlowPending, JwkPublicKey, Jwks, OAuthClientMetadata,
-    OAuthError, ParResponse, Prompt, ProtectedResourceMetadata, RefreshToken, RefreshTokenState,
-    RequestData, RequestId, ResponseMode, ResponseType, SessionId, TokenData, TokenId,
-    TokenRequest, TokenResponse, compute_access_token_hash, compute_jwk_thumbprint,
+    AuthFlow, AuthFlowWithUser, AuthorizationCode, AuthorizationRequestParameters,
+    AuthorizationServerMetadata, AuthorizedClientData, ClientAuth, ClientMetadata,
+    ClientMetadataCache, CodeChallengeMethod, DPoPJwk, DPoPProofHeader, DPoPProofPayload,
+    DPoPVerifier, DPoPVerifyResult, DeviceData, DeviceId, FlowAuthenticated, FlowAuthorized,
+    FlowExpired, FlowNotAuthenticated, FlowNotAuthorized, FlowPending, JwkPublicKey, Jwks,
+    OAuthClientMetadata, OAuthError, ParResponse, Prompt, ProtectedResourceMetadata, RefreshToken,
+    RefreshTokenState, RequestData, RequestId, ResponseMode, ResponseType, SessionId, TokenData,
+    TokenId, TokenRequest, TokenResponse, compute_access_token_hash, compute_jwk_thumbprint,
     compute_pkce_challenge, verify_client_auth,
 };
 

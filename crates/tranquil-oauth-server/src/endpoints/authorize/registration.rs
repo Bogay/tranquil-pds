@@ -237,11 +237,10 @@ pub async fn register_complete(
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
-    let client_id_typed = ClientId::from(request_data.parameters.client_id.clone());
     let needs_consent = should_show_consent(
         state.repos.oauth.as_ref(),
         &did,
-        &client_id_typed,
+        &request_data.parameters.client_id,
         &requested_scopes,
     )
     .await
@@ -260,12 +259,11 @@ pub async fn register_complete(
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
     }
 
-    let code = Code::generate();
-    let auth_code = AuthorizationCode::from(code.0.clone());
+    let code = AuthorizationCode::generate();
     if let Err(e) = state
         .repos
         .oauth
-        .update_authorization_request(&request_id, &did, None, &auth_code)
+        .update_authorization_request(&request_id, &did, None, &code)
         .await
     {
         tracing::error!(
@@ -315,8 +313,7 @@ pub async fn establish_session(
             (id, None)
         }
         None => {
-            let new_id = DeviceId::generate();
-            let device_typed = DeviceIdType::new(new_id.0.clone());
+            let device_id = DeviceId::generate();
             let device_data = DeviceData {
                 session_id: SessionId::generate(),
                 user_agent: extract_user_agent(&headers),
@@ -327,7 +324,7 @@ pub async fn establish_session(
             if let Err(e) = state
                 .repos
                 .oauth
-                .create_device(&device_typed, &device_data)
+                .create_device(&device_id, &device_data)
                 .await
             {
                 tracing::error!(error = ?e, "Failed to create device");
@@ -344,7 +341,7 @@ pub async fn establish_session(
             if let Err(e) = state
                 .repos
                 .oauth
-                .upsert_account_device(did, &device_typed)
+                .upsert_account_device(did, &device_id)
                 .await
             {
                 tracing::error!(error = ?e, "Failed to link device to account");
@@ -358,8 +355,8 @@ pub async fn establish_session(
                     .into_response();
             }
 
-            let cookie = make_device_cookie(&device_typed);
-            (device_typed, Some(cookie))
+            let cookie = make_device_cookie(&device_id);
+            (device_id, Some(cookie))
         }
     };
 

@@ -52,7 +52,7 @@ impl DeviceTrustState {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrustedDevice {
-    pub id: String,
+    pub id: DeviceId,
     pub user_agent: Option<String>,
     pub friendly_name: Option<String>,
     pub trusted_at: Option<DateTime<Utc>>,

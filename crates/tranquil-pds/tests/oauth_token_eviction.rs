@@ -39,10 +39,10 @@ async fn create_account_and_get_did(handle: &str, email: &str, password: &str) -
 }
 
 fn make_token_data(did: &Did, token_id: &str, created_at: DateTime<Utc>) -> TokenData {
-    let client_id = "https://squid.nel.pet/client".to_string();
+    let client_id = tranquil_types::ClientId::from("https://squid.nel.pet/client".to_string());
     TokenData {
         did: did.clone(),
-        token_id: TokenId(token_id.to_string()),
+        token_id: TokenId::from(token_id.to_string()),
         created_at,
         updated_at: created_at,
         expires_at: created_at + Duration::hours(1),

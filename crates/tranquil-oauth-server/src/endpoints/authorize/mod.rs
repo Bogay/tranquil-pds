@@ -14,7 +14,7 @@ use tranquil_db_traits::{ScopePreference, WebauthnChallengeType};
 use tranquil_pds::auth::{BareLoginIdentifier, NormalizedLoginIdentifier};
 use tranquil_pds::comms::comms_repo::enqueue_2fa_code;
 use tranquil_pds::oauth::{
-    AuthFlow, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, Prompt, SessionId,
+    AuthFlow, ClientMetadataCache, DeviceData, DeviceId, OAuthError, Prompt, SessionId,
     db::should_show_consent, scopes::expand_include_scopes,
 };
 use tranquil_pds::rate_limit::{
@@ -24,7 +24,7 @@ use tranquil_pds::rate_limit::{
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{Did, Handle, PlainPassword};
 use tranquil_pds::util::ClientIp;
-use tranquil_types::{AuthorizationCode, ClientId, DeviceId as DeviceIdType, RequestId};
+use tranquil_types::{AuthorizationCode, ClientId, RequestId};
 use urlencoding::encode as url_encode;
 
 const DEVICE_COOKIE_NAME: &str = "oauth_device_id";
@@ -111,8 +111,7 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
 }
 
 fn make_device_cookie(device_id: &tranquil_types::DeviceId) -> String {
-    let signed_value =
-        tranquil_pds::config::AuthConfig::get().sign_device_cookie(device_id.as_str());
+    let signed_value = tranquil_pds::config::AuthConfig::get().sign_device_cookie(device_id);
     format!(
         "{}={}; Path=/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=31536000",
         DEVICE_COOKIE_NAME, signed_value
@@ -128,7 +127,7 @@ pub struct AuthorizeQuery {
 
 #[derive(Debug, Serialize)]
 pub struct AuthorizeResponse {
-    pub client_id: String,
+    pub client_id: ClientId,
     pub client_name: Option<String>,
     pub scope: Option<String>,
     pub redirect_uri: String,

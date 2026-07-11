@@ -627,11 +627,10 @@ pub async fn passkey_finish(
         .map(|s| s.to_string())
         .collect();
 
-    let passkey_finish_client_id = ClientId::from(request_data.parameters.client_id.clone());
     let needs_consent = should_show_consent(
         state.repos.oauth.as_ref(),
         &did,
-        &passkey_finish_client_id,
+        &request_data.parameters.client_id,
         &requested_scopes,
     )
     .await
@@ -645,7 +644,7 @@ pub async fn passkey_finish(
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
     }
 
-    let code = Code::generate();
+    let code = AuthorizationCode::generate();
     let passkey_final_device_id = device_id.clone();
     let passkey_final_code = AuthorizationCode::from(code.0.clone());
     if state

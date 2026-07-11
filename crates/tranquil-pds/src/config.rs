@@ -126,7 +126,7 @@ impl AuthConfig {
         &self.dpop_secret
     }
 
-    pub fn sign_device_cookie(&self, device_id: &str) -> String {
+    pub fn sign_device_cookie(&self, device_id: &crate::types::DeviceId) -> String {
         use hmac::Mac;
         type HmacSha256 = hmac::Hmac<Sha256>;
 
@@ -144,7 +144,7 @@ impl AuthConfig {
         format!("{}.{}.{}", device_id, timestamp, signature)
     }
 
-    pub fn verify_device_cookie(&self, cookie_value: &str) -> Option<String> {
+    pub fn verify_device_cookie(&self, cookie_value: &str) -> Option<crate::types::DeviceId> {
         use hmac::Mac;
         type HmacSha256 = hmac::Hmac<Sha256>;
 
@@ -181,7 +181,7 @@ impl AuthConfig {
             .ct_eq(expected_signature.as_bytes())
             .into()
         {
-            Some(device_id.to_string())
+            Some(crate::types::DeviceId::new(device_id))
         } else {
             None
         }

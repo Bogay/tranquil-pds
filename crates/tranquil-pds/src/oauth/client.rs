@@ -10,7 +10,7 @@ use tranquil_oauth::{
     AuthorizationServerMetadata, ClientMetadata, compute_es256_jkt, compute_pkce_challenge,
     create_dpop_proof,
 };
-use tranquil_types::Did;
+use tranquil_types::{AuthorizationCode, ClientId, Did};
 
 use crate::cache::Cache;
 
@@ -46,13 +46,16 @@ pub struct ParResult {
 }
 
 pub struct DelegationOAuthUrls {
-    pub client_id: String,
+    pub client_id: ClientId,
     pub redirect_uri: String,
 }
 
 pub fn delegation_oauth_urls(hostname: &str) -> DelegationOAuthUrls {
     DelegationOAuthUrls {
-        client_id: format!("https://{}/oauth/delegation/client-metadata", hostname),
+        client_id: ClientId::new(format!(
+            "https://{}/oauth/delegation/client-metadata",
+            hostname
+        )),
         redirect_uri: format!("https://{}/oauth/delegation/callback", hostname),
     }
 }
@@ -278,7 +281,7 @@ impl CrossPdsOAuthClient {
 
         let mut params = vec![
             ("response_type", "code".to_string()),
-            ("client_id", urls.client_id.clone()),
+            ("client_id", urls.client_id.to_string()),
             ("redirect_uri", urls.redirect_uri.clone()),
             ("scope", "atproto".to_string()),
             ("state", state.clone()),
@@ -340,8 +343,8 @@ impl CrossPdsOAuthClient {
     pub async fn exchange_code(
         &self,
         auth_state: &CrossPdsAuthState,
-        code: &str,
-        client_id: &str,
+        code: &AuthorizationCode,
+        client_id: &ClientId,
         redirect_uri: &str,
     ) -> Result<String, CrossPdsError> {
         let meta = self

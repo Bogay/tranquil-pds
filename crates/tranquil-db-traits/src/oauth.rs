@@ -59,7 +59,7 @@ pub struct DeviceAccountRow {
 pub struct TwoFactorChallenge {
     pub id: Uuid,
     pub did: Did,
-    pub request_uri: String,
+    pub request_uri: RequestId,
     pub code: String,
     pub attempts: i32,
     pub created_at: DateTime<Utc>,
@@ -68,7 +68,7 @@ pub struct TwoFactorChallenge {
 
 #[derive(Debug, Clone)]
 pub struct TrustedDeviceRow {
-    pub id: String,
+    pub id: DeviceId,
     pub user_agent: Option<String>,
     pub friendly_name: Option<String>,
     pub trusted_at: Option<DateTime<Utc>>,

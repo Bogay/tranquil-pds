@@ -1256,7 +1256,7 @@ pub async fn complete_registration(
         if let Err(e) = state
             .repos
             .oauth
-            .set_authorization_did(&request_id, &did_typed, None)
+            .set_authorization_did(&request_id, &did, None)
             .await
         {
             tracing::error!("Failed to set authorization DID: {:?}", e);
