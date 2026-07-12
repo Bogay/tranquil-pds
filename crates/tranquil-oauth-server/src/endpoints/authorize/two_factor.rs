@@ -185,7 +185,7 @@ pub async fn authorize_2fa_post(
         }
         let redirect_url = build_intermediate_redirect_url(
             &request_data.parameters.redirect_uri,
-            &code.0,
+            code.as_str(),
             request_data.parameters.state.as_deref(),
             request_data.parameters.response_mode.map(|m| m.as_str()),
         );
@@ -329,7 +329,7 @@ pub async fn authorize_2fa_post(
     }
     let redirect_url = build_intermediate_redirect_url(
         &request_data.parameters.redirect_uri,
-        &code.0,
+        code.as_str(),
         request_data.parameters.state.as_deref(),
         request_data.parameters.response_mode.map(|m| m.as_str()),
     );

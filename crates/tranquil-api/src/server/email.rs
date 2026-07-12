@@ -395,7 +395,7 @@ pub async fn update_email(
 
 #[derive(Deserialize)]
 pub struct CheckEmailVerifiedInput {
-    pub identifier: String,
+    pub identifier: AtIdentifier,
 }
 
 pub async fn check_email_verified(

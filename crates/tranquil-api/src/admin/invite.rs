@@ -29,10 +29,8 @@ pub async fn disable_invite_codes(
     {
         error!("DB error disabling invite codes: {:?}", e);
     }
-    if let Some(accounts) = &input.accounts {
-        let accounts_typed: Vec<tranquil_types::Did> =
-            accounts.iter().filter_map(|a| a.parse().ok()).collect();
-        if let Err(e) = state
+    if let Some(accounts) = &input.accounts
+        && let Err(e) = state
             .repos
             .infra
             .disable_invite_codes_by_account(accounts)

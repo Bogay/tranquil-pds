@@ -51,14 +51,7 @@ impl AccountStatus {
         }
     }
 
-    pub fn for_firehose(&self) -> Option<&'static str> {
-        match self {
-            Self::Active => None,
-            other => Some(other.as_str()),
-        }
-    }
-
-    pub fn for_firehose_typed(&self) -> Option<Self> {
+    pub fn for_firehose(&self) -> Option<Self> {
         match self {
             Self::Active => None,
             other => Some(*other),

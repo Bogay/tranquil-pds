@@ -161,7 +161,7 @@ impl SessionRepository for PostgresSessionRepository {
         let result = sqlx::query!(
             "DELETE FROM session_tokens WHERE did = $1 AND access_jti != $2",
             did.as_str(),
-            except_jti
+            except_jti.as_str()
         )
         .execute(&self.pool)
         .await

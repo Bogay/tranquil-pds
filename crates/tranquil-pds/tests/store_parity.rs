@@ -1420,12 +1420,12 @@ async fn parity_repo_root_operations() {
     let new_root = test_cid(99);
     let rev1 = Tid::from("rev1".to_string());
     f.pg.repo
-        .update_repo_root(pg_uid, &new_root, "rev1")
+        .update_repo_root(pg_uid, &new_root, &rev1)
         .await
         .unwrap();
     f.store
         .repo
-        .update_repo_root(store_uid, &new_root, "rev1")
+        .update_repo_root(store_uid, &new_root, &rev1)
         .await
         .unwrap();
 

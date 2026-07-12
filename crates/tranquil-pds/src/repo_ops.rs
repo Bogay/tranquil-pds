@@ -25,7 +25,6 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub enum CommitError {
     InvalidDid(String),
-    InvalidTid(String),
     SigningFailed(String),
     SerializationFailed(String),
     KeyNotFound,
@@ -47,7 +46,6 @@ impl std::fmt::Display for CommitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidDid(e) => write!(f, "Invalid DID: {}", e),
-            Self::InvalidTid(e) => write!(f, "Invalid TID: {}", e),
             Self::SigningFailed(e) => write!(f, "Failed to sign commit: {}", e),
             Self::SerializationFailed(e) => write!(f, "Failed to serialize signed commit: {}", e),
             Self::KeyNotFound => write!(f, "Signing key not found"),

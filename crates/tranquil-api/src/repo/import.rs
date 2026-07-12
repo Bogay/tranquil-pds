@@ -237,7 +237,7 @@ pub async fn import_repo(
             state
                 .repos
                 .repo
-                .update_repo_root(user_id, &new_root_cid_link, &new_rev_str)
+                .update_repo_root(user_id, &new_root_cid_link, &new_rev_tid)
                 .await
                 .map_err(|e| {
                     error!("Failed to update repo root: {:?}", e);
@@ -248,7 +248,7 @@ pub async fn import_repo(
             state
                 .repos
                 .repo
-                .insert_user_blocks(user_id, &all_block_cids, &new_rev_str)
+                .insert_user_blocks(user_id, &all_block_cids, &new_rev_tid)
                 .await
                 .map_err(|e| {
                     error!("Failed to insert user_blocks: {:?}", e);

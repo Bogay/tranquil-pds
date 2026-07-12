@@ -140,13 +140,13 @@ pub async fn register_complete(
     };
 
     let mut password_valid = password_hashes.iter().fold(false, |acc, hash| {
-        acc | bcrypt::verify(&form.app_password, hash).unwrap_or(false)
+        acc | bcrypt::verify(&form.app_password, hash.as_str()).unwrap_or(false)
     });
 
     if !password_valid
         && let Ok(Some(account_hash)) = state.repos.user.get_password_hash_by_did(&did).await
     {
-        password_valid = bcrypt::verify(&form.app_password, &account_hash).unwrap_or(false);
+        password_valid = bcrypt::verify(&form.app_password, account_hash.as_str()).unwrap_or(false);
     }
 
     if !password_valid {
@@ -290,7 +290,7 @@ pub async fn register_complete(
 
     let redirect_url = build_intermediate_redirect_url(
         &request_data.parameters.redirect_uri,
-        &code.0,
+        code.as_str(),
         request_data.parameters.state.as_deref(),
         request_data.parameters.response_mode.map(|m| m.as_str()),
     );

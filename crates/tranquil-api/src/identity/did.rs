@@ -167,7 +167,7 @@ async fn serve_handle_did_doc(state: &AppState, handle: &str, hostname: &str) ->
     let user = match state
         .repos
         .user
-        .get_user_for_did_doc_build(&expected_did_typed)
+        .get_user_for_did_doc_build(&expected_did)
         .await
     {
         Ok(Some(u)) => u,
@@ -221,7 +221,7 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
     let user = match state
         .repos
         .user
-        .get_did_web_info_by_handle(&current_handle_typed)
+        .get_did_web_info_by_handle(&current_handle)
         .await
     {
         Ok(Some(u)) => u,
@@ -627,10 +627,6 @@ pub async fn update_handle(
             .parse()
             .map_err(|_| ApiError::InvalidHandle(Some("Invalid handle format".into())))?;
         if new_handle == current_handle {
-            let handle_typed: Handle = match new_handle.parse() {
-                Ok(h) => h,
-                Err(_) => return Err(ApiError::InvalidHandle(None)),
-            };
             if let Err(e) =
                 tranquil_pds::repo_ops::sequence_identity_event(&state, &did, Some(&handle)).await
             {

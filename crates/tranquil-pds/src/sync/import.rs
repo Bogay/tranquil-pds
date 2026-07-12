@@ -143,7 +143,7 @@ pub fn find_blob_refs(value: &JsonValue, depth: usize) -> Vec<BlobRef> {
                     .and_then(|v| v.as_str())
                     .map(String::from);
                 return vec![BlobRef {
-                    cid: link.clone(),
+                    cid,
                     mime_type: mime,
                 }];
             }
@@ -173,7 +173,7 @@ pub fn extract_links(value: &Ipld, links: &mut Vec<Cid>) {
 #[derive(Debug)]
 pub struct ImportedRecord {
     pub collection: Nsid,
-    pub rkey: String,
+    pub rkey: Rkey,
     pub cid: Cid,
     pub blob_refs: Vec<BlobRef>,
 }
@@ -229,7 +229,7 @@ fn walk_mst_node(
                     let parts: Vec<&str> = full_key.split('/').collect();
                     if parts.len() >= 2 {
                         let collection = Nsid::from(parts[..parts.len() - 1].join("/"));
-                        let rkey = parts[parts.len() - 1].to_string();
+                        let rkey = Rkey::from(parts[parts.len() - 1].to_string());
                         records.push(ImportedRecord {
                             collection,
                             rkey,

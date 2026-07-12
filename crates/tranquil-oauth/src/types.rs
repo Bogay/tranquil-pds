@@ -8,60 +8,31 @@ pub use tranquil_types::{AuthorizationCode, DeviceId, RefreshToken, RequestId, T
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(transparent)]
 #[sqlx(transparent)]
-pub struct RequestId(pub String);
+pub struct SessionId(String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(transparent)]
-#[sqlx(transparent)]
-pub struct TokenId(pub String);
+impl SessionId {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(transparent)]
-#[sqlx(transparent)]
-pub struct DeviceId(pub String);
+    pub fn generate() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-impl TokenId {
-    pub fn generate() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
+impl From<String> for SessionId {
+    fn from(s: String) -> Self {
+        Self(s)
     }
 }
 
-impl DeviceId {
-    pub fn generate() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
-    }
-}
-
-impl SessionId {
-    pub fn generate() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
-    }
-}
-
-impl Code {
-    pub fn generate() -> Self {
-        use rand::Rng;
-        let bytes: [u8; 32] = rand::thread_rng().r#gen();
-        Self(base64::Engine::encode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            bytes,
-        ))
-    }
-}
-
-impl RefreshToken {
-    pub fn generate() -> Self {
-        use rand::Rng;
-        let bytes: [u8; 32] = rand::thread_rng().r#gen();
-        Self(base64::Engine::encode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            bytes,
-        ))
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -146,7 +117,7 @@ pub struct AuthorizationRequestParameters {
     pub code_challenge_method: CodeChallengeMethod,
     pub response_mode: Option<ResponseMode>,
     pub login_hint: Option<String>,
-    pub dpop_jkt: Option<String>,
+    pub dpop_jkt: Option<tranquil_types::JwkThumbprint>,
     pub prompt: Option<Prompt>,
     #[serde(flatten)]
     pub extra: Option<JsonValue>,

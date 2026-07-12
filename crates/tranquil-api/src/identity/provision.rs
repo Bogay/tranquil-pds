@@ -255,7 +255,6 @@ pub struct SessionResult {
 
 pub async fn create_and_store_session(
     state: &AppState,
-    did_str: &str,
     did: &Did,
     signing_key_bytes: &[u8],
     scope: &str,
@@ -269,7 +268,7 @@ pub async fn create_and_store_session(
     let refresh_meta =
         tranquil_pds::auth::create_refresh_token_with_metadata(did, signing_key_bytes).map_err(
             |e| {
-                tracing::error!("Error creating access token: {:?}", e);
+                tracing::error!("Error creating refresh token: {:?}", e);
                 ApiError::InternalError(None)
             },
         )?;

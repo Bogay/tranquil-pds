@@ -350,7 +350,7 @@ mod tests {
     fn test_atproto_scope_is_identity_only() {
         let perms = ScopePermissions::from_scope_string(Some("atproto"));
         assert!(!perms.has_full_access());
-        assert!(!perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
+        assert!(!perms.allows_repo(RepoAction::Create, &c("app.bsky.feed.post")));
         assert!(!perms.allows_blob("image/png"));
         assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
         assert!(!perms.allows_account(AccountAttr::Email, AccountAction::Manage));
@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn test_transition_generic_allows_everything() {
         let perms = ScopePermissions::from_scope_string(Some("transition:generic"));
-        assert!(perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
+        assert!(perms.allows_repo(RepoAction::Create, &c("app.bsky.feed.post")));
         assert!(perms.allows_blob("image/png"));
     }
 
@@ -410,7 +410,7 @@ mod tests {
         assert!(perms.allows_email_read());
         assert!(perms.allows_account(AccountAttr::Email, AccountAction::Read));
         assert!(!perms.allows_account(AccountAttr::Email, AccountAction::Manage));
-        assert!(!perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
+        assert!(!perms.allows_repo(RepoAction::Create, &c("app.bsky.feed.post")));
     }
 
     #[test]
@@ -427,10 +427,10 @@ mod tests {
         let perms = ScopePermissions::from_scope_string(Some(
             "repo:app.bsky.feed.post?action=create&action=delete",
         ));
-        assert!(perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
-        assert!(perms.allows_repo(RepoAction::Delete, "app.bsky.feed.post"));
-        assert!(!perms.allows_repo(RepoAction::Update, "app.bsky.feed.post"));
-        assert!(!perms.allows_repo(RepoAction::Create, "app.bsky.feed.like"));
+        assert!(perms.allows_repo(RepoAction::Create, &c("app.bsky.feed.post")));
+        assert!(perms.allows_repo(RepoAction::Delete, &c("app.bsky.feed.post")));
+        assert!(!perms.allows_repo(RepoAction::Update, &c("app.bsky.feed.post")));
+        assert!(!perms.allows_repo(RepoAction::Create, &c("app.bsky.feed.like")));
     }
 
     #[test]
@@ -561,11 +561,11 @@ mod tests {
         assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
         assert!(perms.allows_rpc(
             "did:web:api.bsky.app#bsky_appview",
-            "app.bsky.feed.getAuthorFeed"
+            &c("app.bsky.feed.getAuthorFeed")
         ));
         assert!(perms.allows_rpc(
             "did:web:api.bsky.app#other_service",
-            "app.bsky.feed.getAuthorFeed"
+            &c("app.bsky.feed.getAuthorFeed")
         ));
         assert!(!perms.allows_rpc("did:web:other.app", &c("app.bsky.feed.getAuthorFeed")));
         assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
@@ -579,7 +579,7 @@ mod tests {
         assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
         assert!(perms.allows_rpc(
             "did:web:api.bsky.app#bsky_appview",
-            "app.bsky.feed.getAuthorFeed"
+            &c("app.bsky.feed.getAuthorFeed")
         ));
     }
 }

@@ -420,7 +420,7 @@ pub async fn consent_post(
     let redirect_uri = &request_data.parameters.redirect_uri;
     let intermediate_url = build_intermediate_redirect_url(
         redirect_uri,
-        &code.0,
+        code.as_str(),
         request_data.parameters.state.as_deref(),
         request_data.parameters.response_mode.map(|m| m.as_str()),
     );

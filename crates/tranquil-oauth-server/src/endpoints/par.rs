@@ -31,7 +31,7 @@ pub struct ParRequest {
     #[serde(default)]
     pub login_hint: Option<String>,
     #[serde(default)]
-    pub dpop_jkt: Option<String>,
+    pub dpop_jkt: Option<JwkThumbprint>,
     #[serde(default)]
     pub client_secret: Option<String>,
     #[serde(default)]

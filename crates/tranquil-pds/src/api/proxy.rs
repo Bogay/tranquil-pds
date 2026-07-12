@@ -291,7 +291,7 @@ async fn proxy_handler(
                     &auth_user.auth_source,
                     auth_user.scope.as_deref(),
                     &resolved.did,
-                    method,
+                    &method_nsid,
                 ) {
                     return e.into_response();
                 }
@@ -353,7 +353,7 @@ async fn proxy_handler(
                 match crate::auth::create_service_token(
                     &auth_user.did,
                     &token_aud,
-                    Some(token_lxm),
+                    Some(&token_lxm),
                     &key_bytes,
                 ) {
                     Ok(new_token) => {

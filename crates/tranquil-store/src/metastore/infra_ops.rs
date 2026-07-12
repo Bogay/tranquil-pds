@@ -374,7 +374,7 @@ impl InfraOps {
         }
 
         let value = InviteCodeValue {
-            code: code.to_owned(),
+            code: code.as_str().to_owned(),
             available_uses: use_count,
             disabled: false,
             for_account: for_account.map(|d| d.to_string()),
@@ -400,7 +400,7 @@ impl InfraOps {
 
         codes.iter().try_for_each(|code| {
             let value = InviteCodeValue {
-                code: code.clone(),
+                code: code.as_str().to_owned(),
                 available_uses: use_count,
                 disabled: false,
                 for_account: for_account.map(|d| d.to_string()),

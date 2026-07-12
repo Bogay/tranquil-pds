@@ -70,7 +70,7 @@ impl LexiconRegistry {
     pub fn resolve_ref(&self, reference: &str, context_nsid: &str) -> Option<ResolvedRef> {
         match parse_ref(reference) {
             ParsedRef::Local(local) => {
-                let doc = self.get_doc(context_nsid)?;
+                let doc = self.get_doc_by_key(context_nsid)?;
                 Self::def_to_resolved(&doc, local)
             }
             ParsedRef::Qualified { nsid, fragment } => {

@@ -406,11 +406,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_namespace_authority_single_segment() {
-        assert_eq!(extract_namespace_authority("single"), "single");
-    }
-
-    #[test]
     fn test_is_under_authority() {
         assert!(is_under_authority("io.atcr.manifest", "io.atcr"));
         assert!(is_under_authority("io.atcr.sailor.star", "io.atcr"));

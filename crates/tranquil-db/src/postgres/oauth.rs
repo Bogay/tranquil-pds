@@ -7,9 +7,8 @@ use tranquil_db_traits::{
     ScopePreference, TokenFamilyId, TrustedDeviceRow, TwoFactorChallenge,
 };
 use tranquil_oauth::{
-    AuthorizationRequestParameters, AuthorizedClientData, ClientAuth, Code as OAuthCode,
-    DeviceData, DeviceId as OAuthDeviceId, RefreshToken as OAuthRefreshToken, RequestData,
-    SessionId as OAuthSessionId, TokenData, TokenId as OAuthTokenId,
+    AuthorizationRequestParameters, AuthorizedClientData, ClientAuth, DeviceData, RequestData,
+    SessionId as OAuthSessionId, TokenData,
 };
 use tranquil_types::{
     AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId,
@@ -61,7 +60,7 @@ impl OAuthRepository for PostgresOAuthRepository {
             RETURNING id
             "#,
             data.did.as_str(),
-            &data.token_id.0,
+            data.token_id.as_str(),
             data.created_at,
             data.updated_at,
             data.expires_at,
@@ -442,7 +441,7 @@ impl OAuthRepository for PostgresOAuthRepository {
             client_auth_json,
             parameters_json,
             data.expires_at,
-            data.code.as_ref().map(|c| c.0.as_str()),
+            data.code.as_deref(),
         )
         .execute(&self.pool)
         .await
@@ -720,7 +719,7 @@ impl OAuthRepository for PostgresOAuthRepository {
             VALUES ($1, $2, $3, $4, $5)
             "#,
             device_id.as_str(),
-            &data.session_id.0,
+            data.session_id.as_str(),
             data.user_agent,
             data.ip_address,
             data.last_seen_at,
@@ -744,7 +743,7 @@ impl OAuthRepository for PostgresOAuthRepository {
         .await
         .map_err(map_sqlx_error)?;
         Ok(row.map(|r| DeviceData {
-            session_id: OAuthSessionId(r.session_id),
+            session_id: OAuthSessionId::from(r.session_id),
             user_agent: r.user_agent,
             ip_address: r.ip_address,
             last_seen_at: r.last_seen_at,

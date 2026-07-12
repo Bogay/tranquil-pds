@@ -219,7 +219,7 @@ pub async fn verify_credential(
     password_hash: Option<&PasswordHash>,
 ) -> Option<CredentialMatch> {
     let main_valid = password_hash
-        .map(|h| bcrypt::verify(password, h).unwrap_or(false))
+        .map(|h| bcrypt::verify(password, h.as_str()).unwrap_or(false))
         .unwrap_or(false);
     if main_valid {
         return Some(CredentialMatch::MainPassword);

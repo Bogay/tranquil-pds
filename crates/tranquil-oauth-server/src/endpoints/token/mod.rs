@@ -10,7 +10,7 @@ use tranquil_pds::rate_limit::{OAuthRateLimited, OAuthTokenLimit};
 use tranquil_pds::state::AppState;
 
 pub use grants::{handle_authorization_code_grant, handle_refresh_token_grant};
-pub use helpers::{TokenClaims, create_access_token, extract_token_claims, verify_pkce};
+pub use helpers::{TokenClaims, extract_token_claims, verify_pkce};
 pub use introspect::{
     IntrospectRequest, IntrospectResponse, RevokeRequest, introspect_token, revoke_token,
 };

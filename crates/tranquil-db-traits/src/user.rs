@@ -149,12 +149,12 @@ pub trait UserRepository: Send + Sync {
 
     async fn get_login_check_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<UserLoginCheck>, DbError>;
 
     async fn get_login_info_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<UserLoginInfo>, DbError>;
 
     async fn get_2fa_status_by_did(&self, did: &Did) -> Result<Option<User2faStatus>, DbError>;
@@ -211,7 +211,7 @@ pub trait UserRepository: Send + Sync {
 
     async fn check_email_verified_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<bool>, DbError>;
 
     async fn check_channel_verified_by_did(
@@ -428,7 +428,7 @@ pub trait UserRepository: Send + Sync {
 
     async fn get_login_full_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<UserLoginFull>, DbError>;
 
     async fn get_confirm_signup_by_did(

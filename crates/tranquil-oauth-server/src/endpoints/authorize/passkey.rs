@@ -19,11 +19,10 @@ pub async fn check_user_has_passkeys(
     let bare_identifier =
         BareLoginIdentifier::from_identifier(&query.identifier, hostname_for_handles);
 
-    let user = state
-        .repos
-        .user
-        .get_login_check_by_identifier(bare_identifier.as_str())
-        .await;
+    let user = match tranquil_types::AtIdentifier::new(bare_identifier.as_str()) {
+        Ok(ref id) => state.repos.user.get_login_check_by_identifier(id).await,
+        Err(_) => Ok(None),
+    };
 
     let has_passkeys = match user {
         Ok(Some(u)) => tranquil_api::server::has_passkeys_for_user(&state, &u.did).await,
@@ -52,11 +51,10 @@ pub async fn check_user_security_status(
     let normalized_identifier =
         NormalizedLoginIdentifier::normalize(&query.identifier, hostname_for_handles);
 
-    let user = state
-        .repos
-        .user
-        .get_login_check_by_identifier(normalized_identifier.as_str())
-        .await;
+    let user = match tranquil_types::AtIdentifier::new(normalized_identifier.as_str()) {
+        Ok(ref id) => state.repos.user.get_login_check_by_identifier(id).await,
+        Err(_) => Ok(None),
+    };
 
     let (has_passkeys, has_totp, has_password, is_delegated, did): (
         bool,
@@ -238,12 +236,11 @@ async fn passkey_start_named(
     let normalized_username =
         NormalizedLoginIdentifier::normalize(&identifier, hostname_for_handles);
 
-    let user = match state
-        .repos
-        .user
-        .get_login_info_by_identifier(normalized_username.as_str())
-        .await
-    {
+    let passkey_lookup = match tranquil_types::AtIdentifier::new(normalized_username.as_str()) {
+        Ok(ref id) => state.repos.user.get_login_info_by_identifier(id).await,
+        Err(_) => Ok(None),
+    };
+    let user = match passkey_lookup {
         Ok(Some(u)) => u,
         Ok(None) => {
             return (
@@ -670,7 +667,7 @@ pub async fn passkey_finish(
 
     let redirect_url = build_intermediate_redirect_url(
         &request_data.parameters.redirect_uri,
-        &code.0,
+        code.as_str(),
         request_data.parameters.state.as_deref(),
         request_data.parameters.response_mode.map(|m| m.as_str()),
     );

@@ -91,7 +91,7 @@ pub async fn create_session(
     let row = match state
         .repos
         .user
-        .get_login_full_by_identifier(normalized_identifier.as_str())
+        .get_login_full_by_identifier(&login_identifier)
         .await
     {
         Ok(Some(row)) => row,
@@ -277,7 +277,7 @@ pub async fn create_session(
         &row.did,
         &key_bytes,
         app_password_scopes.as_deref(),
-        app_password_controller.as_deref(),
+        app_password_controller.as_ref(),
         None,
     ) {
         Ok(m) => m,

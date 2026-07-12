@@ -770,7 +770,7 @@ impl RepoRepository for PostgresRepoRepository {
             "#,
         )
         .bind(user_id)
-        .bind(since_rev)
+        .bind(since_rev.as_str())
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -780,6 +780,10 @@ impl RepoRepository for PostgresRepoRepository {
 
     async fn insert_commit_event(&self, data: &CommitEventData) -> Result<(), DbError> {
         let (block_cids, block_data) = inline_to_paired_blocks(data.blocks.as_deref());
+        let blob_strs: Option<Vec<String>> = data
+            .blobs
+            .as_ref()
+            .map(|blobs| blobs.iter().map(|c| c.to_string()).collect());
         sqlx::query!(
             r#"
             INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, block_cids, block_data, prev_data_cid, rev)
@@ -790,7 +794,7 @@ impl RepoRepository for PostgresRepoRepository {
             data.commit_cid.as_ref().map(|c| c.as_str()),
             data.prev_cid.as_ref().map(|c| c.as_str()),
             data.ops,
-            data.blobs.as_deref(),
+            blob_strs.as_deref(),
             &block_cids as &[Vec<u8>],
             &block_data as &[Vec<u8>],
             data.prev_data_cid.as_ref().map(|c| c.as_str()),
@@ -828,7 +832,7 @@ impl RepoRepository for PostgresRepoRepository {
 
     async fn insert_account_event(&self, did: &Did, status: AccountStatus) -> Result<(), DbError> {
         let active = status.is_active();
-        let status_str = status.for_firehose();
+        let status_str = status.for_firehose().map(|s| s.as_str());
         sqlx::query!(
             r#"
             INSERT INTO repo_seq (did, event_type, active, status)
@@ -1467,6 +1471,10 @@ impl RepoRepository for PostgresRepoRepository {
 
         let event = input.commit_event;
         let (event_block_cids, event_block_data) = inline_into_paired_blocks(event.blocks);
+        let event_blob_strs: Option<Vec<String>> = event
+            .blobs
+            .as_ref()
+            .map(|blobs| blobs.iter().map(|c| c.to_string()).collect());
         sqlx::query!(
             r#"
             INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, block_cids, block_data, prev_data_cid, rev)
@@ -1477,7 +1485,7 @@ impl RepoRepository for PostgresRepoRepository {
             event.commit_cid.as_ref().map(|c| c.as_str()),
             event.prev_cid.as_ref().map(|c| c.as_str()),
             event.ops,
-            event.blobs.as_deref(),
+            event_blob_strs.as_deref(),
             &event_block_cids as &[Vec<u8>],
             &event_block_data as &[Vec<u8>],
             event.prev_data_cid.as_ref().map(|c| c.as_str()),

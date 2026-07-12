@@ -118,7 +118,7 @@ pub async fn get_service_auth(
             &auth.auth_source,
             auth.scope.as_deref(),
             params.aud.as_str(),
-            method.as_str(),
+            method,
         ) {
             return e.into_response();
         }

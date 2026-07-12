@@ -121,8 +121,10 @@ async fn delete_oldest_tokens_evicts_lowest_created_at() {
         .expect("list failed");
     assert_eq!(remaining.len(), 3, "three newest tokens should remain");
 
-    let remaining_ids: std::collections::HashSet<String> =
-        remaining.iter().map(|t| t.token_id.0.clone()).collect();
+    let remaining_ids: std::collections::HashSet<String> = remaining
+        .iter()
+        .map(|t| t.token_id.as_str().to_string())
+        .collect();
     let expected_ids: std::collections::HashSet<String> = token_ids[2..].iter().cloned().collect();
     assert_eq!(
         remaining_ids, expected_ids,

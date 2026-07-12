@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tranquil_pds::api::ApiError;
 use tranquil_pds::api::proxy_client::{is_ssrf_safe, proxy_client};
 use tranquil_pds::auth::{AnyUser, Auth};
@@ -149,7 +149,7 @@ async fn proxy_to_report_service(
     let service_token = match tranquil_pds::auth::create_service_token(
         &auth_user.did,
         service_did,
-        Some("com.atproto.moderation.createReport"),
+        Some(&report_lxm),
         &key_bytes,
     ) {
         Ok(t) => t,

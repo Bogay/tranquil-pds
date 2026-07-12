@@ -2,6 +2,7 @@ use crate::sync::firehose::SequencedEvent;
 use cid::Cid;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use tranquil_db_traits::SequenceNumber;
 use tranquil_scopes::RepoAction;
 use tranquil_types::{CidLink, Did, Handle, Tid};
 
@@ -27,7 +28,7 @@ pub struct FrameHeader {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CommitFrame {
-    pub seq: i64,
+    pub seq: SequenceNumber,
     pub rebase: bool,
     #[serde(rename = "tooBig")]
     pub too_big: bool,
@@ -76,7 +77,7 @@ pub struct AccountFrame {
     pub active: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<tranquil_db_traits::AccountStatus>,
-    pub seq: i64,
+    pub seq: SequenceNumber,
     pub time: String,
 }
 
@@ -86,7 +87,7 @@ pub struct SyncFrame {
     pub rev: Tid,
     #[serde(with = "serde_bytes")]
     pub blocks: Vec<u8>,
-    pub seq: i64,
+    pub seq: SequenceNumber,
     pub time: String,
 }
 
@@ -139,7 +140,7 @@ impl std::fmt::Display for CommitFrameError {
 impl std::error::Error for CommitFrameError {}
 
 pub struct CommitFrameBuilder {
-    seq: i64,
+    seq: SequenceNumber,
     did: Did,
     commit_cid: Cid,
     ops_json: serde_json::Value,
@@ -150,7 +151,7 @@ pub struct CommitFrameBuilder {
 
 impl CommitFrameBuilder {
     pub fn new(
-        seq: i64,
+        seq: SequenceNumber,
         did: Did,
         commit_cid: &CidLink,
         ops_json: serde_json::Value,
@@ -222,7 +223,7 @@ impl TryFrom<SequencedEvent> for CommitFrame {
             CommitFrameError::InvalidCommitCid("Missing commit_cid in event".to_string())
         })?;
         let builder = CommitFrameBuilder::new(
-            event.seq.as_i64(),
+            event.seq,
             event.did.clone(),
             &commit_cid,
             event.ops.unwrap_or_default(),

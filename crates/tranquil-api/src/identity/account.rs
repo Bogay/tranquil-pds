@@ -204,7 +204,7 @@ pub async fn create_account(
             let verifier = ServiceTokenVerifier::new();
             let create_account_lxm = Nsid::from("com.atproto.server.createAccount".to_string());
             match verifier
-                .verify_service_token(&token, Some("com.atproto.server.createAccount"))
+                .verify_service_token(&token, Some(&create_account_lxm))
                 .await
             {
                 Ok(claims) => {
@@ -301,7 +301,7 @@ pub async fn create_account(
     };
     let hostname = &cfg.server.hostname;
     let key_result =
-        match super::provision::resolve_signing_key(&state, input.signing_key.as_deref()).await {
+        match super::provision::resolve_signing_key(&state, input.signing_key.as_ref()).await {
             Ok(k) => k,
             Err(e) => return e.into_response(),
         };
@@ -339,13 +339,22 @@ pub async fn create_account(
                 return ApiError::InvalidDid(e.to_string()).into_response();
             }
             info!(did = %d, "Creating external did:web account");
-            d.clone()
+            match d.parse() {
+                Ok(d) => d,
+                Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
+            }
         }
         _ => {
             if let Some(d) = &input.did {
                 if d.starts_with("did:plc:") && is_migration {
                     info!(did = %d, "Migration with existing did:plc");
-                    d.clone()
+                    match d.parse() {
+                        Ok(d) => d,
+                        Err(_) => {
+                            return ApiError::InvalidDid("Invalid DID format".into())
+                                .into_response();
+                        }
+                    }
                 } else if d.starts_with("did:web:") {
                     if !is_did_web_byod
                         && let Err(e) =
@@ -354,7 +363,13 @@ pub async fn create_account(
                     {
                         return ApiError::InvalidDid(e.to_string()).into_response();
                     }
-                    d.clone()
+                    match d.parse() {
+                        Ok(d) => d,
+                        Err(_) => {
+                            return ApiError::InvalidDid("Invalid DID format".into())
+                                .into_response();
+                        }
+                    }
                 } else if !d.trim().is_empty() {
                     return ApiError::InvalidDid(
                         "Only did:web DIDs can be provided; leave empty for did:plc. For migration with existing did:plc, provide service auth.".into()
@@ -528,7 +543,6 @@ pub async fn create_account(
     let session = match super::provision::create_and_store_session(
         &state,
         &did,
-        &did_for_commit,
         &secret_key_bytes,
         "transition:generic transition:chat.bsky",
         None,

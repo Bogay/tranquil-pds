@@ -75,7 +75,7 @@ impl RecordValidator {
         &self,
         record: &Value,
         collection: &Nsid,
-        rkey: Option<&str>,
+        rkey: Option<&Rkey>,
     ) -> Result<ValidationStatus, ValidationError> {
         let (record_type, obj) = validate_preamble(record, collection)?;
         let registry = tranquil_lexicon::LexiconRegistry::global();
@@ -135,7 +135,7 @@ fn validate_preamble<'a>(
 fn check_banned_content(
     record_type: &str,
     obj: &serde_json::Map<String, Value>,
-    rkey: Option<&str>,
+    rkey: Option<&Rkey>,
 ) -> Result<(), ValidationError> {
     match record_type {
         "app.bsky.feed.post" => {

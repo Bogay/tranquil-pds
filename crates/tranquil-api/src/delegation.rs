@@ -471,8 +471,6 @@ pub async fn resolve_controller(
             Some(user) => user.did,
             None => tranquil_pds::handle::resolve_handle(&handle)
                 .await
-                .map_err(|_| ApiError::ControllerNotFound)?
-                .parse()
                 .map_err(|_| ApiError::ControllerNotFound)?,
         }
     };

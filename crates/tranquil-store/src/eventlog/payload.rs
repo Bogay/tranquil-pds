@@ -106,7 +106,10 @@ pub fn encode_payload_with_mutations(
         prev_cid: event.prev_cid.as_ref().and_then(cid_link_to_bytes),
         prev_data_cid: event.prev_data_cid.as_ref().and_then(cid_link_to_bytes),
         ops: ops_bytes,
-        blobs: event.blobs.clone(),
+        blobs: event
+            .blobs
+            .as_ref()
+            .map(|v| v.iter().map(|c| c.as_str().to_owned()).collect()),
         blocks: match event.blocks.as_ref() {
             Some(EventBlocks::Inline(v)) => Some(v.clone()),
             Some(EventBlocks::LegacyCids(_)) | None => None,

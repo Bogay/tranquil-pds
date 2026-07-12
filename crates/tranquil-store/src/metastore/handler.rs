@@ -736,9 +736,7 @@ impl DelegationRequest {
             | Self::RevokeDelegation { delegated_did, .. }
             | Self::UpdateDelegationScopes { delegated_did, .. }
             | Self::GetDelegation { delegated_did, .. }
-            | Self::LogDelegationAction { delegated_did, .. } => {
-                did_to_routing(delegated_did.as_str())
-            }
+            | Self::LogDelegationAction { delegated_did, .. } => did_to_routing(delegated_did),
             Self::GetAccountsControlledBy { controller_did, .. }
             | Self::ControlsAnyAccounts {
                 did: controller_did,

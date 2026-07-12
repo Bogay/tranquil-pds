@@ -214,7 +214,7 @@ pub fn resolve_handle_input(input: &str) -> Result<Handle, HandleValidationError
             "{}.{}",
             validated,
             matched_domain.unwrap_or(&available_domains[0])
-        ))
+        )))
     } else {
         validate_full_domain_handle(input)
     }

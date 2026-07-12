@@ -118,7 +118,7 @@ impl BlobRepository for PostgresBlobRepository {
                FROM repo_seq
                WHERE did = $1 AND rev > $2 AND blobs IS NOT NULL"#,
             did.as_str(),
-            since
+            since.as_str()
         )
         .fetch_all(&self.pool)
         .await

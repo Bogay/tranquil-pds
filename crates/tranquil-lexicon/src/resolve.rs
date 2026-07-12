@@ -53,8 +53,6 @@ async fn read_body_limited(resp: reqwest::Response, max_bytes: usize) -> Result<
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
-    #[error("failed to derive authority from NSID: {0}")]
-    InvalidNsid(String),
     #[error("DNS lookup failed for {domain}: {reason}")]
     DnsLookup { domain: String, reason: String },
     #[error("no DID found in DNS TXT records for {domain}")]
@@ -79,7 +77,7 @@ pub fn nsid_to_authority(nsid: &Nsid) -> String {
     let mut segments: Vec<&str> = nsid.split('.').collect();
     segments.pop();
     segments.reverse();
-    Ok(segments.join("."))
+    segments.join(".")
 }
 
 pub async fn resolve_did_from_dns(authority: &str) -> Result<Did, ResolveError> {
@@ -308,7 +306,6 @@ mod tests {
             nsid_to_authority(&nsid("com.germnetwork.social.post")),
             "social.germnetwork.com"
         );
-        assert!(nsid_to_authority("tooShort").is_err());
     }
 
     #[test]

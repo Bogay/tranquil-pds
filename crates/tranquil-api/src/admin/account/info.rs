@@ -204,7 +204,7 @@ pub async fn get_account_infos(
     let accounts = state
         .repos
         .infra
-        .get_admin_account_infos_by_dids(&dids_typed)
+        .get_admin_account_infos_by_dids(&dids)
         .await
         .log_db_err("fetching account infos")?;
 

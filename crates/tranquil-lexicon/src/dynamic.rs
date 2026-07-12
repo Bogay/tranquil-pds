@@ -341,8 +341,8 @@ mod tests {
             .unwrap_err();
 
         assert!(
-            !matches!(err, ResolveError::InvalidNsid(_)),
-            "negative cache hit should not return InvalidNsid - the NSID is valid, it just failed resolution recently. got: {}",
+            matches!(err, ResolveError::NegativelyCached { .. }),
+            "negative cache hit must surface as NegativelyCached, got: {}",
             err
         );
     }
@@ -438,7 +438,7 @@ mod tests {
         let result = registry
             .resolve_and_cache_with(&nsid("pet.nel.flaky"), |n| async move {
                 Err::<LexiconDoc, _>(ResolveError::DnsLookup {
-                    domain: n,
+                    domain: n.into_inner(),
                     reason: "simulated failure".to_string(),
                 })
             })
@@ -597,7 +597,7 @@ mod tests {
                                 calls.fetch_add(1, Ordering::SeqCst);
                                 tokio::time::sleep(Duration::from_millis(50)).await;
                                 Err::<LexiconDoc, _>(ResolveError::DnsLookup {
-                                    domain: n,
+                                    domain: n.into_inner(),
                                     reason: "simulated".to_string(),
                                 })
                             }

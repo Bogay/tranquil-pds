@@ -2931,7 +2931,7 @@ impl UserOps {
 
         let user_hash = UserHash::from_did(input.did.as_str());
         let recovery = RecoveryTokenValue {
-            token_hash: input.setup_token_hash.clone(),
+            token_hash: input.setup_token_hash.as_str().to_owned(),
             expires_at_ms: input.setup_expires_at.timestamp_millis(),
         };
         self.users

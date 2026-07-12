@@ -46,19 +46,19 @@ pub fn create_access_token_with_delegation(
     let actual_scope = scope.unwrap_or("atproto");
     let mut payload = json!({
         "iss": issuer,
-        "sub": sub,
+        "sub": sub.as_str(),
         "aud": issuer,
         "iat": now,
         "exp": exp,
         "jti": jti,
-        "sid": session_id,
+        "sid": session_id.as_str(),
         "scope": actual_scope
     });
     if let Some(jkt) = dpop_jkt {
-        payload["cnf"] = json!({ "jkt": jkt });
+        payload["cnf"] = json!({ "jkt": jkt.as_str() });
     }
     if let Some(controller) = controller_did {
-        payload["act"] = json!({ "sub": controller });
+        payload["act"] = json!({ "sub": controller.as_str() });
     }
     let header = json!({
         "alg": "HS256",

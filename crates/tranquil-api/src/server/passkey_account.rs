@@ -71,7 +71,7 @@ pub async fn create_passkey_account(
             let verifier = ServiceTokenVerifier::new();
             let create_account_lxm = Nsid::from("com.atproto.server.createAccount".to_string());
             match verifier
-                .verify_service_token(&token, Some("com.atproto.server.createAccount"))
+                .verify_service_token(&token, Some(&create_account_lxm))
                 .await
             {
                 Ok(claims) => {
@@ -144,7 +144,7 @@ pub async fn create_passkey_account(
     let did_type = input.did_type.as_deref().unwrap_or("plc");
 
     let key_result =
-        match crate::identity::provision::resolve_signing_key(&state, input.signing_key.as_deref())
+        match crate::identity::provision::resolve_signing_key(&state, input.signing_key.as_ref())
             .await
         {
             Ok(k) => k,
@@ -192,7 +192,7 @@ pub async fn create_passkey_account(
                     d,
                     hostname,
                     &input.handle,
-                    input.signing_key.as_deref(),
+                    input.signing_key.as_ref(),
                 )
                 .await
                 {
@@ -200,7 +200,8 @@ pub async fn create_passkey_account(
                 }
                 info!(did = %d, "Creating external did:web passkey account (reserved key)");
             }
-            d.to_string()
+            d.parse()
+                .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?
         }
         _ => {
             if let Some(ref auth_did) = byod_auth {
@@ -213,7 +214,9 @@ pub async fn create_passkey_account(
                             )));
                         }
                         info!(did = %provided_did, "Creating BYOD did:plc passkey account (migration)");
-                        provided_did.clone()
+                        provided_did
+                            .parse()
+                            .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?
                     } else {
                         return Err(ApiError::InvalidRequest(
                             "BYOD migration requires a did:plc or did:web DID".into(),
@@ -545,7 +548,7 @@ pub async fn complete_passkey_setup(
     Ok(Json(CompletePasskeySetupOutput {
         did: input.did.clone(),
         handle: user.handle,
-        app_password,
+        app_password: app_password.into_inner(),
         app_password_name,
     }))
 }

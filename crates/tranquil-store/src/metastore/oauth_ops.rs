@@ -247,7 +247,7 @@ impl OAuthOps {
             refresh_token: data
                 .current_refresh_token
                 .as_ref()
-                .map(|r| r.0.clone())
+                .map(|r| r.to_string())
                 .unwrap_or_default(),
             previous_refresh_token: None,
             scope: data.scope.clone().unwrap_or_default(),
@@ -877,7 +877,7 @@ impl OAuthOps {
     ) -> Result<(), MetastoreError> {
         let now_ms = Utc::now().timestamp_millis();
         let value = OAuthDeviceValue {
-            session_id: data.session_id.0.clone(),
+            session_id: data.session_id.as_str().to_owned(),
             user_agent: data.user_agent.clone(),
             ip_address: data.ip_address.clone(),
             last_seen_at_ms: data.last_seen_at.timestamp_millis(),
@@ -900,7 +900,7 @@ impl OAuthOps {
         )?;
 
         Ok(val.map(|v| DeviceData {
-            session_id: tranquil_oauth::SessionId(v.session_id),
+            session_id: tranquil_oauth::SessionId::from(v.session_id),
             user_agent: v.user_agent,
             ip_address: v.ip_address,
             last_seen_at: DateTime::from_timestamp_millis(v.last_seen_at_ms).unwrap_or_default(),

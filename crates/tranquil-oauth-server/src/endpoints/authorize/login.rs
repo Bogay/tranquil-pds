@@ -105,12 +105,12 @@ pub async fn authorize_get(
         let normalized = NormalizedLoginIdentifier::normalize(login_hint, hostname_for_handles);
         tracing::info!(normalized = %normalized, "Normalized login_hint");
 
-        match state
-            .repos
-            .user
-            .get_login_check_by_identifier(normalized.as_str())
-            .await
-        {
+        let hint_identifier = tranquil_types::AtIdentifier::new(normalized.as_str()).ok();
+        let hint_lookup = match hint_identifier {
+            Some(ref id) => state.repos.user.get_login_check_by_identifier(id).await,
+            None => Ok(None),
+        };
+        match hint_lookup {
             Ok(Some(user)) => {
                 tracing::info!(did = %user.did, has_password = user.password_hash.is_some(), "Found user for login_hint");
                 let is_delegated = state
@@ -399,12 +399,12 @@ pub async fn authorize_post(
         pds_hostname = %tranquil_config::get().server.hostname,
         "Normalized username for lookup"
     );
-    let user = match state
-        .repos
-        .user
-        .get_login_info_by_identifier(normalized_username.as_str())
-        .await
-    {
+    let login_identifier = tranquil_types::AtIdentifier::new(normalized_username.as_str()).ok();
+    let login_lookup = match login_identifier {
+        Some(ref id) => state.repos.user.get_login_info_by_identifier(id).await,
+        None => Ok(None),
+    };
+    let user = match login_lookup {
         Ok(Some(u)) => u,
         Ok(None) => {
             let _ = bcrypt::verify(
@@ -478,7 +478,7 @@ pub async fn authorize_post(
     }
 
     let password_valid = match &user.password_hash {
-        Some(hash) => match bcrypt::verify(&form.password, hash) {
+        Some(hash) => match bcrypt::verify(&form.password, hash.as_str()) {
             Ok(valid) => valid,
             Err(_) => {
                 return show_login_error("An error occurred. Please try again.", json_response);
@@ -708,7 +708,7 @@ pub async fn authorize_post(
     if json_response {
         let redirect_url = build_intermediate_redirect_url(
             &request_data.parameters.redirect_uri,
-            &code.0,
+            code.as_str(),
             request_data.parameters.state.as_deref(),
             request_data.parameters.response_mode.map(|m| m.as_str()),
         );
@@ -725,7 +725,7 @@ pub async fn authorize_post(
     } else {
         let redirect_url = build_success_redirect(
             &request_data.parameters.redirect_uri,
-            &code.0,
+            code.as_str(),
             request_data.parameters.state.as_deref(),
             request_data.parameters.response_mode.map(|m| m.as_str()),
         );

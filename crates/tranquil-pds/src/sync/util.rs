@@ -258,7 +258,7 @@ fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameErro
         did: event.did.clone(),
         active: event.active.unwrap_or(true),
         status: event.status.filter(|s| !s.is_active()),
-        seq: event.seq.as_i64(),
+        seq: event.seq,
         time: format_atproto_time(event.created_at),
     };
     let bytes = serialize_event_frame(FrameType::Account, &frame, 256)?;
@@ -355,7 +355,7 @@ async fn format_sync_event(
             did: event.did.clone(),
             rev,
             blocks: car_bytes,
-            seq: event.seq.as_i64(),
+            seq: event.seq,
             time: format_atproto_time(event.created_at),
         },
         512,

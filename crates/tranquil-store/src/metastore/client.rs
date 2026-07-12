@@ -916,7 +916,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::BlobRepository for MetastoreCli
         self.pool
             .send(MetastoreRequest::Blob(BlobRequest::ListBlobsSinceRev {
                 did: did.clone(),
-                since: since.to_owned(),
+                since: since.to_string(),
                 tx,
             }))?;
         recv(rx).await
@@ -1515,7 +1515,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
         self.pool.send(MetastoreRequest::Session(
             SessionRequest::DeleteSessionsByDidExceptJti {
                 did: did.clone(),
-                except_jti: except_jti.to_owned(),
+                except_jti: except_jti.to_string(),
                 tx,
             },
         ))?;
@@ -1841,7 +1841,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::CreateInviteCode {
-                code: code.to_owned(),
+                code: code.clone(),
                 use_count,
                 for_account: for_account.cloned(),
                 tx,
@@ -1876,7 +1876,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
             InfraRequest::GetInviteCodeAvailableUses {
-                code: code.to_owned(),
+                code: code.clone(),
                 tx,
             },
         ))?;
@@ -1890,7 +1890,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::ValidateInviteCode {
-                code: code.to_owned(),
+                code: code.clone(),
                 tx,
             }))
             .map_err(|e| InviteCodeError::DatabaseError(DbError::Connection(e.to_string())))?;
@@ -1916,7 +1916,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::GetInviteCodeUses {
-                code: code.to_owned(),
+                code: code.to_string(),
                 tx,
             }))?;
         recv(rx).await
@@ -1926,7 +1926,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
             InfraRequest::DisableInviteCodesByCode {
-                codes: codes.to_vec(),
+                codes: codes.iter().map(|c| c.to_string()).collect(),
                 tx,
             },
         ))?;
@@ -1978,7 +1978,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
             InfraRequest::GetInviteCodeUsesBatch {
-                codes: codes.to_vec(),
+                codes: codes.iter().map(|c| c.to_string()).collect(),
                 tx,
             },
         ))?;
@@ -2003,7 +2003,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::GetInviteCodeInfo {
-                code: code.to_owned(),
+                code: code.to_string(),
                 tx,
             }))?;
         recv(rx).await
@@ -2063,7 +2063,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::ReserveSigningKey {
                 did: did.cloned(),
-                public_key_did_key: public_key_did_key.to_owned(),
+                public_key_did_key: public_key_did_key.to_string(),
                 private_key_bytes: private_key_bytes.to_vec(),
                 expires_at,
                 tx,
@@ -2078,7 +2078,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
             InfraRequest::GetReservedSigningKey {
-                public_key_did_key: public_key_did_key.to_owned(),
+                public_key_did_key: public_key_did_key.to_string(),
                 tx,
             },
         ))?;
@@ -2489,7 +2489,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
             InfraRequest::GetReservedSigningKeyFull {
-                public_key_did_key: public_key_did_key.to_owned(),
+                public_key_did_key: public_key_did_key.to_string(),
                 tx,
             },
         ))?;
@@ -3370,7 +3370,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::GetOAuthTokenWithUser {
-                token_id: token_id.to_owned(),
+                token_id: token_id.to_string(),
                 tx,
             }))?;
         recv(rx).await
@@ -3447,12 +3447,12 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
 
     async fn get_login_check_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<UserLoginCheck>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::User(
             UserRequest::GetLoginCheckByIdentifier {
-                identifier: identifier.to_owned(),
+                identifier: identifier.to_string(),
                 tx,
             },
         ))?;
@@ -3461,12 +3461,12 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
 
     async fn get_login_info_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<UserLoginInfo>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::User(
             UserRequest::GetLoginInfoByIdentifier {
-                identifier: identifier.to_owned(),
+                identifier: identifier.to_string(),
                 tx,
             },
         ))?;
@@ -3698,12 +3698,12 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
 
     async fn check_email_verified_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<bool>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::User(
             UserRequest::CheckEmailVerifiedByIdentifier {
-                identifier: identifier.to_owned(),
+                identifier: identifier.to_string(),
                 tx,
             },
         ))?;
@@ -4442,12 +4442,12 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
 
     async fn get_login_full_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<UserLoginFull>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::User(
             UserRequest::GetLoginFullByIdentifier {
-                identifier: identifier.to_owned(),
+                identifier: identifier.to_string(),
                 tx,
             },
         ))?;

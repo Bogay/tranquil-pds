@@ -118,6 +118,7 @@ pub async fn list_repos(
                 let rev = get_rev_from_commit(&state, &cid_str)
                     .await
                     .or_else(|| row.repo_rev.clone())
+                    .map(|t| t.into_inner())
                     .unwrap_or_default();
                 let status = if row.takedown_ref.is_some() {
                     AccountStatus::Takendown
@@ -131,7 +132,7 @@ pub async fn list_repos(
                     head: cid_str,
                     rev,
                     active: status.is_active(),
-                    status: status.for_firehose_typed(),
+                    status: status.for_firehose(),
                 });
             }
             let next_cursor = if has_more {
@@ -203,7 +204,7 @@ pub async fn get_repo_status(
         Json(GetRepoStatusOutput {
             did: account.did,
             active: account.status.is_active(),
-            status: account.status.for_firehose_typed(),
+            status: account.status.for_firehose(),
             rev,
         }),
     )

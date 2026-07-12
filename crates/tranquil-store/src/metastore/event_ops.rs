@@ -304,7 +304,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
 
         let user_seqs = self.scan_did_events(user_hash, start_seq)?;
 
-        let mut seen = std::collections::BTreeSet::new();
+        let mut seen = std::collections::HashSet::new();
         user_seqs
             .into_iter()
             .try_fold(Vec::new(), |mut acc, seq_u64| {
@@ -318,12 +318,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
                 match self.bridge.get_event_by_seq(seq_sn)? {
                     Some(event) if event.rev.is_some() => {
                         if let Some(blobs) = event.blobs {
-                            acc.extend(
-                                blobs
-                                    .into_iter()
-                                    .filter(|b| seen.insert(b.clone()))
-                                    .map(CidLink::from),
-                            );
+                            acc.extend(blobs.into_iter().filter(|b| seen.insert(b.clone())));
                         }
                         Ok(acc)
                     }

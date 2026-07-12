@@ -82,7 +82,7 @@ pub fn decrypt_totp_secret(
     crate::config::decrypt_key(encrypted, Some(version))
 }
 
-pub fn generate_app_password() -> String {
+pub fn generate_app_password() -> crate::types::PlainPassword {
     use rand::Rng;
     let chars: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
     let mut rng = rand::thread_rng();
@@ -93,7 +93,7 @@ pub fn generate_app_password() -> String {
                 .collect()
         })
         .collect();
-    segments.join("-")
+    crate::types::PlainPassword::new(segments.join("-"))
 }
 
 const KEY_CACHE_TTL_SECS: u64 = 300;
@@ -631,26 +631,29 @@ mod tests {
     fn test_lxm_permits_exact_match() {
         assert!(lxm_permits(
             "com.atproto.repo.uploadBlob",
-            "com.atproto.repo.uploadBlob"
+            &n("com.atproto.repo.uploadBlob")
         ));
     }
 
     #[test]
     fn test_lxm_permits_wildcard() {
-        assert!(lxm_permits("*", "com.atproto.repo.uploadBlob"));
-        assert!(lxm_permits("*", "anything.at.all"));
+        assert!(lxm_permits("*", &n("com.atproto.repo.uploadBlob")));
+        assert!(lxm_permits("*", &n("anything.at.all")));
     }
 
     #[test]
     fn test_lxm_permits_mismatch() {
         assert!(!lxm_permits(
             "com.atproto.repo.uploadBlob",
-            "com.atproto.repo.createRecord"
+            &n("com.atproto.repo.createRecord")
         ));
     }
 
     #[test]
     fn test_lxm_permits_partial_not_wildcard() {
-        assert!(!lxm_permits("com.atproto.*", "com.atproto.repo.uploadBlob"));
+        assert!(!lxm_permits(
+            "com.atproto.*",
+            &n("com.atproto.repo.uploadBlob")
+        ));
     }
 }

@@ -18,7 +18,7 @@ pub struct CreateInviteCodeInput {
 
 #[derive(Serialize)]
 pub struct CreateInviteCodeOutput {
-    pub code: String,
+    pub code: InviteCodeValue,
 }
 
 pub async fn create_invite_code(
@@ -117,10 +117,7 @@ pub async fn create_invite_codes(
             infra_repo
                 .create_invite_codes_batch(&codes, use_count, admin_user_id, Some(&account))
                 .await
-                .map(|_| AccountCodes {
-                    account: account.to_string(),
-                    codes,
-                })
+                .map(|_| AccountCodes { account, codes })
         }
     }))
     .await;
@@ -146,7 +143,7 @@ pub struct GetAccountInviteCodesParams {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCode {
-    pub code: String,
+    pub code: InviteCodeValue,
     pub available: i32,
     pub disabled: bool,
     pub for_account: String,

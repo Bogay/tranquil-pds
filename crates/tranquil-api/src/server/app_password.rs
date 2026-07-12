@@ -191,7 +191,7 @@ pub async fn create_app_password(
     }
     Ok(Json(CreateAppPasswordOutput {
         name: name.to_string(),
-        password,
+        password: password.into_inner(),
         created_at: created_at.to_rfc3339(),
         privileged: privilege.is_privileged(),
         scopes: final_scopes,

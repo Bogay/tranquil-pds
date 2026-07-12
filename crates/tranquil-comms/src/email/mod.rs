@@ -129,10 +129,12 @@ fn build_smarthost(
 
 fn build_direct_mx(cfg: &tranquil_config::TranquilConfig) -> Result<SendMode, SendError> {
     let helo = resolve_helo(cfg)?;
-    let resolver = Arc::new(TokioAsyncResolver::tokio_from_system_conf().unwrap_or_else(|e| {
-        tracing::warn!("falling back to default DNS resolvers: {}", e);
-        TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
-    }));
+    let resolver = Arc::new(
+        TokioAsyncResolver::tokio_from_system_conf().unwrap_or_else(|e| {
+            tracing::warn!("falling back to default DNS resolvers: {}", e);
+            TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
+        }),
+    );
     let max_concurrent = cfg.email.direct_mx.max_concurrent_sends.max(1);
     Ok(SendMode::DirectMx {
         resolver,

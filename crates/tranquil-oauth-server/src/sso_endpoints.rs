@@ -1042,7 +1042,8 @@ pub async fn complete_registration(
                 ));
             }
             tracing::info!(did = %d, "Creating external did:web SSO account");
-            d.to_string()
+            d.parse()
+                .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?
         }
         _ => {
             let genesis_result = match tranquil_pds::plc::create_genesis_operation(
@@ -1345,7 +1346,7 @@ pub async fn complete_registration(
                 redirect_url: "/app/dashboard".to_string(),
                 access_jwt: Some(access_meta.token),
                 refresh_jwt: Some(refresh_meta.token),
-                app_password: Some(app_password),
+                app_password: Some(app_password.into_inner()),
                 app_password_name: Some(app_password_name),
             }));
         }
@@ -1359,7 +1360,7 @@ pub async fn complete_registration(
             ),
             access_jwt: None,
             refresh_jwt: None,
-            app_password: Some(app_password),
+            app_password: Some(app_password.into_inner()),
             app_password_name: Some(app_password_name),
         }));
     }
@@ -1403,7 +1404,7 @@ pub async fn complete_registration(
         redirect_url,
         access_jwt: None,
         refresh_jwt: None,
-        app_password: Some(app_password),
+        app_password: Some(app_password.into_inner()),
         app_password_name: Some(app_password_name),
     }))
 }

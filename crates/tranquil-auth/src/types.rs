@@ -248,14 +248,14 @@ pub struct TokenWithMetadata {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenVerifyError {
     Expired,
-    Invalid,
+    Invalid(&'static str),
 }
 
 impl fmt::Display for TokenVerifyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Expired => write!(f, "Token expired"),
-            Self::Invalid => write!(f, "Token invalid"),
+            Self::Invalid(reason) => write!(f, "{}", reason),
         }
     }
 }

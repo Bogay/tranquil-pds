@@ -166,10 +166,10 @@ fn test_permissions_whitespace_only() {
 #[test]
 fn test_permissions_repo_collection_wildcard_prefix() {
     let perms = ScopePermissions::from_scope_string(Some("repo:app.bsky.*?action=create"));
-    assert!(perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
-    assert!(perms.allows_repo(RepoAction::Create, "app.bsky.actor.profile"));
-    assert!(!perms.allows_repo(RepoAction::Create, "com.atproto.repo.blob"));
-    assert!(!perms.allows_repo(RepoAction::Update, "app.bsky.feed.post"));
+    assert!(perms.allows_repo(RepoAction::Create, &c("app.bsky.feed.post")));
+    assert!(perms.allows_repo(RepoAction::Create, &c("app.bsky.actor.profile")));
+    assert!(!perms.allows_repo(RepoAction::Create, &c("com.atproto.repo.blob")));
+    assert!(!perms.allows_repo(RepoAction::Update, &c("app.bsky.feed.post")));
 }
 
 #[test]

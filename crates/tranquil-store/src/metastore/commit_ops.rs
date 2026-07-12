@@ -203,7 +203,7 @@ impl<S: StorageIO + 'static> CommitOps<S> {
 
         let mutation_set = CommitMutationSet {
             new_root_cid: new_cid_bytes.clone(),
-            new_rev: input.new_rev.clone(),
+            new_rev: input.new_rev.to_string(),
             record_upserts: input
                 .record_upserts
                 .iter()

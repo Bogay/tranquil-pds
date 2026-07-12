@@ -98,10 +98,9 @@ pub async fn list_blobs(
             .list_blobs_since_rev(&did, &Tid::from(since.clone()))
             .await
             .map(|cids| {
-                let mut cid_strs: Vec<String> = cids.into_iter().map(|c| c.to_string()).collect();
-                cid_strs.sort();
-                cid_strs
-                    .into_iter()
+                let mut cids = cids;
+                cids.sort();
+                cids.into_iter()
                     .filter(|c| c.as_str() > cursor_cid)
                     .take(usize::try_from(limit + 1).unwrap_or(0))
                     .collect()
@@ -112,7 +111,6 @@ pub async fn list_blobs(
             .blob
             .list_blobs_by_user(user_id, Some(cursor_cid), limit + 1)
             .await
-            .map(|cids| cids.into_iter().map(|c| c.to_string()).collect())
     };
     match cids_result {
         Ok(cids) => {

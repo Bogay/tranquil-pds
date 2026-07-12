@@ -201,7 +201,7 @@ impl UserRepository for PostgresUserRepository {
                JOIN users u ON t.did = u.did
                LEFT JOIN user_keys k ON u.id = k.user_id
                WHERE t.token_id = $1"#,
-            token_id
+            token_id.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -588,11 +588,11 @@ impl UserRepository for PostgresUserRepository {
 
     async fn check_email_verified_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<bool>, DbError> {
         let row = sqlx::query_scalar!(
             "SELECT email_verified FROM users WHERE did = $1 OR email = $1 OR handle = $1",
-            identifier
+            identifier.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -1423,11 +1423,11 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_login_check_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<UserLoginCheck>, DbError> {
         sqlx::query!(
             "SELECT did, password_hash FROM users WHERE handle = $1 OR did = $1",
-            identifier
+            identifier.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -1442,7 +1442,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_login_info_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<UserLoginInfo>, DbError> {
         sqlx::query!(
             r#"
@@ -1454,7 +1454,7 @@ impl UserRepository for PostgresUserRepository {
             FROM users
             WHERE handle = $1 OR did = $1
             "#,
-            identifier
+            identifier.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -1602,7 +1602,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_login_full_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &AtIdentifier,
     ) -> Result<Option<UserLoginFull>, DbError> {
         sqlx::query!(
             r#"SELECT
@@ -1616,7 +1616,7 @@ impl UserRepository for PostgresUserRepository {
             FROM users u
             JOIN user_keys k ON u.id = k.user_id
             WHERE u.handle = $1 OR u.did = $1"#,
-            identifier
+            identifier.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -3236,7 +3236,7 @@ impl UserRepository for PostgresUserRepository {
                 "UPDATE users SET discord_id = $2, discord_verified = TRUE, updated_at = NOW() WHERE LOWER(discord_username) = LOWER($1) AND discord_username IS NOT NULL AND handle = $3 RETURNING id",
                 discord_username,
                 discord_id,
-                h
+                h.as_str()
             )
             .fetch_optional(&self.pool)
             .await
@@ -3298,7 +3298,7 @@ impl UserRepository for PostgresUserRepository {
                 "UPDATE users SET telegram_chat_id = $2, telegram_verified = TRUE, updated_at = NOW() WHERE LOWER(telegram_username) = LOWER($1) AND telegram_username IS NOT NULL AND handle = $3 RETURNING id",
                 telegram_username,
                 chat_id,
-                h
+                h.as_str()
             )
             .fetch_optional(&self.pool)
             .await

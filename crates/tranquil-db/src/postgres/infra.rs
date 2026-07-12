@@ -159,7 +159,7 @@ impl InfraRepository for PostgresInfraRepository {
         let result = sqlx::query!(
             r#"INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)
                SELECT $1, $2, id, $3 FROM users WHERE is_admin = true LIMIT 1"#,
-            code,
+            code.as_str(),
             use_count,
             for_account_str
         )
@@ -200,7 +200,7 @@ impl InfraRepository for PostgresInfraRepository {
     ) -> Result<Option<i32>, DbError> {
         let result = sqlx::query_scalar!(
             "SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE",
-            code
+            code.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -215,7 +215,7 @@ impl InfraRepository for PostgresInfraRepository {
     ) -> Result<ValidatedInviteCode<'a>, InviteCodeError> {
         let result = sqlx::query!(
             r#"SELECT available_uses, COALESCE(disabled, false) as "disabled!" FROM invite_codes WHERE code = $1"#,
-            code
+            code.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -270,7 +270,7 @@ impl InfraRepository for PostgresInfraRepository {
                JOIN users u ON icu.used_by_user = u.id
                WHERE icu.code = $1
                ORDER BY icu.used_at DESC"#,
-            code
+            code.as_str()
         )
         .fetch_all(&self.pool)
         .await
@@ -279,7 +279,7 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(results
             .into_iter()
             .map(|r| InviteCodeUse {
-                code: code.to_string(),
+                code: code.clone(),
                 used_by_did: Did::from(r.did),
                 used_by_handle: Some(Handle::from(r.handle)),
                 used_at: r.used_at,
@@ -348,9 +348,19 @@ impl InfraRepository for PostgresInfraRepository {
             )
             .fetch_all(&self.pool)
             .await
-            .map_err(map_sqlx_error)?,
-            (None, InviteCodeSortOrder::Recent) => sqlx::query_as!(
-                InviteCodeRow,
+            .map_err(map_sqlx_error)?
+            .into_iter()
+            .map(|r| {
+                to_row(
+                    r.code,
+                    r.available_uses,
+                    r.disabled,
+                    r.created_by_user,
+                    r.created_at,
+                )
+            })
+            .collect(),
+            (None, InviteCodeSortOrder::Recent) => sqlx::query!(
                 r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
                        FROM invite_codes ic
                        ORDER BY created_at DESC
@@ -382,9 +392,19 @@ impl InfraRepository for PostgresInfraRepository {
             )
             .fetch_all(&self.pool)
             .await
-            .map_err(map_sqlx_error)?,
-            (None, InviteCodeSortOrder::Usage) => sqlx::query_as!(
-                InviteCodeRow,
+            .map_err(map_sqlx_error)?
+            .into_iter()
+            .map(|r| {
+                to_row(
+                    r.code,
+                    r.available_uses,
+                    r.disabled,
+                    r.created_by_user,
+                    r.created_at,
+                )
+            })
+            .collect(),
+            (None, InviteCodeSortOrder::Usage) => sqlx::query!(
                 r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
                        FROM invite_codes ic
                        ORDER BY available_uses DESC
@@ -393,7 +413,18 @@ impl InfraRepository for PostgresInfraRepository {
             )
             .fetch_all(&self.pool)
             .await
-            .map_err(map_sqlx_error)?,
+            .map_err(map_sqlx_error)?
+            .into_iter()
+            .map(|r| {
+                to_row(
+                    r.code,
+                    r.available_uses,
+                    r.disabled,
+                    r.created_by_user,
+                    r.created_at,
+                )
+            })
+            .collect(),
         };
 
         Ok(results)
@@ -476,7 +507,7 @@ impl InfraRepository for PostgresInfraRepository {
                FROM invite_codes ic
                JOIN users u ON ic.created_by_user = u.id
                WHERE ic.code = $1"#,
-            code
+            code.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -578,7 +609,7 @@ impl InfraRepository for PostgresInfraRepository {
                VALUES ($1, $2, $3, $4)
                RETURNING id"#,
             did_str,
-            public_key_did_key,
+            public_key_did_key.as_str(),
             private_key_bytes,
             expires_at
         )
@@ -600,7 +631,7 @@ impl InfraRepository for PostgresInfraRepository {
                  AND used_at IS NULL
                  AND expires_at > NOW()
                FOR UPDATE"#,
-            public_key_did_key
+            public_key_did_key.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -1165,7 +1196,7 @@ impl InfraRepository for PostgresInfraRepository {
         let row = sqlx::query!(
             r#"SELECT id, did, public_key_did_key, private_key_bytes, expires_at, used_at
             FROM reserved_signing_keys WHERE public_key_did_key = $1"#,
-            public_key_did_key
+            public_key_did_key.as_str()
         )
         .fetch_optional(&self.pool)
         .await

@@ -24,7 +24,6 @@ pub struct OAuthTokenInfo {
     pub did: Did,
     pub token_id: TokenId,
     pub scope: Option<String>,
-    pub dpop_jkt: Option<String>,
     pub controller_did: Option<Did>,
 }
 
@@ -87,7 +86,7 @@ pub async fn verify_oauth_access_token(
                 "DPoP proof has already been used".to_string(),
             ));
         }
-        if result.jkt.as_str() != expected_jkt {
+        if result.jkt != *expected_jkt {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP key binding mismatch".to_string(),
             ));
@@ -179,7 +178,6 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
         did,
         token_id,
         scope,
-        dpop_jkt,
         controller_did,
     })
 }

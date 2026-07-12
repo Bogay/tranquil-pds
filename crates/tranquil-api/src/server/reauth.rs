@@ -85,7 +85,7 @@ pub async fn reauth_password(
             .unwrap_or_default();
 
         let app_password_valid = app_password_hashes.iter().fold(false, |acc, h| {
-            acc | bcrypt::verify(&input.password, h).unwrap_or(false)
+            acc | bcrypt::verify(&input.password, h.as_str()).unwrap_or(false)
         });
 
         if !app_password_valid {

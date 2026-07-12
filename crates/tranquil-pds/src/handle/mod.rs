@@ -75,11 +75,11 @@ pub async fn verify_handle_ownership(
     expected_did: &Did,
 ) -> Result<(), HandleResolutionError> {
     let resolved_did = resolve_handle(handle).await?;
-    if resolved_did == expected_did {
+    if resolved_did == *expected_did {
         Ok(())
     } else {
         Err(HandleResolutionError::DidMismatch {
-            expected: expected_did.to_string(),
+            expected: expected_did.clone(),
             actual: resolved_did,
         })
     }
@@ -103,10 +103,10 @@ mod tests {
 
     #[test]
     fn test_is_service_domain_handle() {
-        assert!(is_service_domain_handle("user.example.com", "example.com"));
-        assert!(is_service_domain_handle("example.com", "example.com"));
-        assert!(is_service_domain_handle("myhandle", "example.com"));
-        assert!(!is_service_domain_handle("user.other.com", "example.com"));
-        assert!(!is_service_domain_handle("myhandle.xyz", "example.com"));
+        assert!(is_service_domain_handle("nel.oyster.cafe", "oyster.cafe"));
+        assert!(is_service_domain_handle("oyster.cafe", "oyster.cafe"));
+        assert!(is_service_domain_handle("myhandle", "oyster.cafe"));
+        assert!(!is_service_domain_handle("lyna.nel.pet", "oyster.cafe"));
+        assert!(!is_service_domain_handle("myhandle.xyz", "oyster.cafe"));
     }
 }

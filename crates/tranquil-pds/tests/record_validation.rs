@@ -17,13 +17,13 @@ fn c(s: &str) -> Nsid {
 fn test_type_mismatch() {
     let validator = RecordValidator::new();
     let record = json!({
-        "$type": "com.example.other",
+        "$type": "cafe.oyster.other",
         "createdAt": now()
     });
     assert!(matches!(
-        validator.validate(&record, "com.example.expected"),
+        validator.validate(&record, &c("cafe.oyster.expected")),
         Err(ValidationError::TypeMismatch { expected, actual })
-            if expected == "com.example.expected" && actual == "com.example.other"
+            if expected == "cafe.oyster.expected" && actual == "cafe.oyster.other"
     ));
 }
 
@@ -32,7 +32,7 @@ fn test_missing_type() {
     let validator = RecordValidator::new();
     let record = json!({"text": "Hello"});
     assert!(matches!(
-        validator.validate(&record, "com.example.test"),
+        validator.validate(&record, &c("cafe.oyster.record")),
         Err(ValidationError::MissingType)
     ));
 }
@@ -42,7 +42,7 @@ fn test_not_object() {
     let validator = RecordValidator::new();
     let record = json!("just a string");
     assert!(matches!(
-        validator.validate(&record, "com.example.test"),
+        validator.validate(&record, &c("cafe.oyster.record")),
         Err(ValidationError::InvalidRecord(_))
     ));
 }
@@ -52,7 +52,9 @@ fn test_unknown_type_lenient() {
     let validator = RecordValidator::new();
     let record = json!({"$type": "com.custom.record", "data": "test"});
     assert_eq!(
-        validator.validate(&record, "com.custom.record").unwrap(),
+        validator
+            .validate(&record, &c("com.custom.record"))
+            .unwrap(),
         ValidationStatus::Unknown
     );
 }
@@ -62,7 +64,7 @@ fn test_unknown_type_strict() {
     let validator = RecordValidator::new().require_lexicon(true);
     let record = json!({"$type": "com.custom.record", "data": "test"});
     assert!(matches!(
-        validator.validate(&record, "com.custom.record"),
+        validator.validate(&record, &c("com.custom.record")),
         Err(ValidationError::UnknownType(_))
     ));
 }
@@ -73,7 +75,7 @@ fn test_datetime_validation() {
 
     let valid = json!({"$type": "com.custom.record", "createdAt": "2024-01-15T10:30:00.000Z"});
     assert_eq!(
-        validator.validate(&valid, "com.custom.record").unwrap(),
+        validator.validate(&valid, &c("com.custom.record")).unwrap(),
         ValidationStatus::Unknown
     );
 
@@ -81,14 +83,14 @@ fn test_datetime_validation() {
         json!({"$type": "com.custom.record", "createdAt": "2024-01-15T10:30:00+05:30"});
     assert_eq!(
         validator
-            .validate(&with_offset, "com.custom.record")
+            .validate(&with_offset, &c("com.custom.record"))
             .unwrap(),
         ValidationStatus::Unknown
     );
 
     let invalid = json!({"$type": "com.custom.record", "createdAt": "2024/01/15"});
     assert!(matches!(
-        validator.validate(&invalid, "com.custom.record"),
+        validator.validate(&invalid, &c("com.custom.record")),
         Err(ValidationError::InvalidDatetime { .. })
     ));
 }

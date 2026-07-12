@@ -16,7 +16,6 @@ use tranquil_pds::oauth::{
     verify_client_auth,
 };
 use tranquil_pds::state::AppState;
-use tranquil_types::{AuthorizationCode, Did, RefreshToken as RefreshTokenType};
 
 const ACCESS_TOKEN_EXPIRY_SECONDS: u64 = 300;
 const REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL: i64 = 60;
@@ -115,13 +114,13 @@ pub async fn handle_authorization_code_grant(
             ));
         }
         if let Some(expected_jkt) = &authorized.parameters.dpop_jkt
-            && result.jkt.as_str() != expected_jkt
+            && result.jkt != *expected_jkt
         {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP key binding mismatch".to_string(),
             ));
         }
-        Some(result.jkt.as_str().to_string())
+        Some(result.jkt.clone())
     } else if authorized.parameters.dpop_jkt.is_some() || client_metadata.requires_dpop() {
         return Err(OAuthError::UseDpopNonce(
             DPoPVerifier::new(AuthConfig::get().dpop_secret().as_bytes()).generate_nonce(),
@@ -169,9 +168,9 @@ pub async fn handle_authorization_code_grant(
     };
 
     let access_token = create_access_token_with_delegation(
-        &token_id.0,
+        &token_id,
         &did,
-        dpop_jkt.as_deref(),
+        dpop_jkt.as_ref(),
         final_scope.as_deref(),
         controller_did.as_ref(),
     )?;
@@ -207,7 +206,7 @@ pub async fn handle_authorization_code_grant(
         .map_err(tranquil_pds::oauth::db_err_to_oauth)?;
     tracing::info!(
         did = %did,
-        token_id = %token_id.0,
+        token_id = %token_id,
         client_id = %authorized.client_id,
         "Authorization code grant completed, token created"
     );
@@ -215,9 +214,7 @@ pub async fn handle_authorization_code_grant(
         let oauth_repo = state.repos.oauth.clone();
         let did_clone = did.clone();
         async move {
-            if let Ok(did_typed) = did_clone.parse::<tranquil_types::Did>()
-                && let Err(e) = enforce_token_limit_for_user(oauth_repo.as_ref(), &did_typed).await
-            {
+            if let Err(e) = enforce_token_limit_for_user(oauth_repo.as_ref(), &did_clone).await {
                 tracing::warn!("Failed to enforce token limit for user: {:?}", e);
             }
         }
@@ -284,7 +281,7 @@ pub async fn handle_refresh_token_grant(
                 rotated_at = %rotated_at,
                 "Refresh token reuse within grace period, returning existing tokens"
             );
-            let dpop_jkt = token_data.parameters.dpop_jkt.as_deref();
+            let dpop_jkt = token_data.parameters.dpop_jkt.as_ref();
             let access_token = create_access_token_with_delegation(
                 &token_data.token_id,
                 &token_data.did,
@@ -367,13 +364,13 @@ pub async fn handle_refresh_token_grant(
             ));
         }
         if let Some(expected_jkt) = &token_data.parameters.dpop_jkt
-            && result.jkt.as_str() != expected_jkt
+            && result.jkt != *expected_jkt
         {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP key binding mismatch".to_string(),
             ));
         }
-        Some(result.jkt.as_str().to_string())
+        Some(result.jkt.clone())
     } else if token_data.parameters.dpop_jkt.is_some() {
         return Err(OAuthError::InvalidRequest(
             "DPoP proof required".to_string(),
