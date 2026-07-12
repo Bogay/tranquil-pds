@@ -4,8 +4,9 @@ use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::api::invite::{InviteRegistration, check_registration_invite};
+use tranquil_types::InviteCode;
 
-async fn create_invite_code(client: &Client, admin_jwt: &str, use_count: u32) -> String {
+async fn create_invite_code(client: &Client, admin_jwt: &str, use_count: u32) -> InviteCode {
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createInviteCode",
@@ -18,7 +19,7 @@ async fn create_invite_code(client: &Client, admin_jwt: &str, use_count: u32) ->
         .expect("failed to create invite code");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("invite code response not json");
-    body["code"].as_str().expect("missing code").to_string()
+    InviteCode::from(body["code"].as_str().expect("missing code").to_string())
 }
 
 #[tokio::test]
@@ -30,7 +31,9 @@ async fn check_registration_invite_validates_without_consuming() {
     let code = create_invite_code(&client, &admin_jwt, 1).await;
 
     assert_eq!(
-        check_registration_invite(state, Some(&code)).await.unwrap(),
+        check_registration_invite(state, Some(code.as_str()))
+            .await
+            .unwrap(),
         InviteRegistration::Standard(Some(code.clone()))
     );
     assert_eq!(

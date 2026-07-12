@@ -148,7 +148,7 @@ pub struct QueuedComms {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteCodeInfo {
-    pub code: String,
+    pub code: InviteCode,
     pub available_uses: i32,
     pub state: InviteCodeState,
     pub for_account: Option<Did>,
@@ -158,7 +158,7 @@ pub struct InviteCodeInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteCodeUse {
-    pub code: String,
+    pub code: InviteCode,
     pub used_by_did: Did,
     pub used_by_handle: Option<Handle>,
     pub used_at: DateTime<Utc>,
@@ -166,7 +166,7 @@ pub struct InviteCodeUse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteCodeRow {
-    pub code: String,
+    pub code: InviteCode,
     pub available_uses: i32,
     pub disabled: Option<bool>,
     pub created_by_user: Uuid,
@@ -248,24 +248,27 @@ pub trait InfraRepository: Send + Sync {
 
     async fn create_invite_code(
         &self,
-        code: &str,
+        code: &InviteCode,
         use_count: i32,
         for_account: Option<&Did>,
     ) -> Result<bool, DbError>;
 
     async fn create_invite_codes_batch(
         &self,
-        codes: &[String],
+        codes: &[InviteCode],
         use_count: i32,
         created_by_user: Uuid,
         for_account: Option<&Did>,
     ) -> Result<(), DbError>;
 
-    async fn get_invite_code_available_uses(&self, code: &str) -> Result<Option<i32>, DbError>;
+    async fn get_invite_code_available_uses(
+        &self,
+        code: &InviteCode,
+    ) -> Result<Option<i32>, DbError>;
 
     async fn validate_invite_code<'a>(
         &self,
-        code: &'a str,
+        code: &'a InviteCode,
     ) -> Result<ValidatedInviteCode<'a>, InviteCodeError>;
 
     async fn get_invite_codes_for_account(
@@ -273,9 +276,9 @@ pub trait InfraRepository: Send + Sync {
         for_account: &Did,
     ) -> Result<Vec<InviteCodeInfo>, DbError>;
 
-    async fn get_invite_code_uses(&self, code: &str) -> Result<Vec<InviteCodeUse>, DbError>;
+    async fn get_invite_code_uses(&self, code: &InviteCode) -> Result<Vec<InviteCodeUse>, DbError>;
 
-    async fn disable_invite_codes_by_code(&self, codes: &[String]) -> Result<(), DbError>;
+    async fn disable_invite_codes_by_code(&self, codes: &[InviteCode]) -> Result<(), DbError>;
 
     async fn disable_invite_codes_by_account(&self, accounts: &[Did]) -> Result<(), DbError>;
 
@@ -290,7 +293,7 @@ pub trait InfraRepository: Send + Sync {
 
     async fn get_invite_code_uses_batch(
         &self,
-        codes: &[String],
+        codes: &[InviteCode],
     ) -> Result<Vec<InviteCodeUse>, DbError>;
 
     async fn get_invites_created_by_user(
@@ -298,14 +301,20 @@ pub trait InfraRepository: Send + Sync {
         user_id: Uuid,
     ) -> Result<Vec<InviteCodeInfo>, DbError>;
 
-    async fn get_invite_code_info(&self, code: &str) -> Result<Option<InviteCodeInfo>, DbError>;
+    async fn get_invite_code_info(
+        &self,
+        code: &InviteCode,
+    ) -> Result<Option<InviteCodeInfo>, DbError>;
 
     async fn get_invite_codes_by_users(
         &self,
         user_ids: &[Uuid],
     ) -> Result<Vec<(Uuid, InviteCodeInfo)>, DbError>;
 
-    async fn get_invite_code_used_by_user(&self, user_id: Uuid) -> Result<Option<String>, DbError>;
+    async fn get_invite_code_used_by_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<InviteCode>, DbError>;
 
     async fn delete_invite_code_uses_by_user(&self, user_id: Uuid) -> Result<(), DbError>;
 
@@ -425,7 +434,7 @@ pub trait InfraRepository: Send + Sync {
     async fn get_invite_code_uses_by_users(
         &self,
         user_ids: &[Uuid],
-    ) -> Result<Vec<(Uuid, String)>, DbError>;
+    ) -> Result<Vec<(Uuid, InviteCode)>, DbError>;
 
     async fn get_deletion_request_by_did(
         &self,

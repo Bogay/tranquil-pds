@@ -46,7 +46,7 @@ pub struct AppState {
     pub webauthn_config: Arc<WebAuthnConfig>,
     pub cross_pds_oauth: Arc<CrossPdsOAuthClient>,
     pub shutdown: CancellationToken,
-    pub bootstrap_invite_code: Option<String>,
+    pub bootstrap_invite_code: Option<crate::types::InviteCode>,
     pub signal_sender: Option<Arc<tranquil_signal::SignalSlot>>,
     pub signal_store_provider: Option<Arc<dyn tranquil_signal::SignalStoreProvider>>,
     pub eventlog_segments_dir: Option<PathBuf>,

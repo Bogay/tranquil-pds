@@ -1010,7 +1010,7 @@ pub struct CreatePasswordAccountInput {
     pub commit_cid: CidLink,
     pub repo_rev: Tid,
     pub genesis_block_cids: Vec<Vec<u8>>,
-    pub invite_code: Option<String>,
+    pub invite_code: Option<InviteCode>,
     pub birthdate_pref: Option<serde_json::Value>,
 }
 
@@ -1062,7 +1062,7 @@ pub struct CreatePasskeyAccountInput {
     pub commit_cid: CidLink,
     pub repo_rev: Tid,
     pub genesis_block_cids: Vec<Vec<u8>>,
-    pub invite_code: Option<String>,
+    pub invite_code: Option<InviteCode>,
     pub birthdate_pref: Option<serde_json::Value>,
 }
 
@@ -1080,7 +1080,7 @@ pub struct CreateSsoAccountInput {
     pub commit_cid: CidLink,
     pub repo_rev: Tid,
     pub genesis_block_cids: Vec<Vec<u8>>,
-    pub invite_code: Option<String>,
+    pub invite_code: Option<InviteCode>,
     pub birthdate_pref: Option<serde_json::Value>,
     pub sso_provider: SsoProviderType,
     pub sso_provider_user_id: String,

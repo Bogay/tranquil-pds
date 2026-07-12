@@ -305,10 +305,10 @@ pub(crate) fn gen_invite_random_token() -> String {
     format!("{}-{}", gen_segment(&mut rng, 5), gen_segment(&mut rng, 5))
 }
 
-pub fn gen_invite_code() -> String {
+pub fn gen_invite_code() -> crate::types::InviteCode {
     let hostname = &tranquil_config::get().server.hostname;
     let hostname_prefix = hostname.replace('.', "-");
-    format!("{}-{}", hostname_prefix, gen_invite_random_token())
+    crate::types::InviteCode::from(format!("{}-{}", hostname_prefix, gen_invite_random_token()))
 }
 
 pub fn is_self_hosted_did_web_enabled() -> bool {

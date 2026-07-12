@@ -1834,7 +1834,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
 
     async fn create_invite_code(
         &self,
-        code: &str,
+        code: &InviteCode,
         use_count: i32,
         for_account: Option<&Did>,
     ) -> Result<bool, DbError> {
@@ -1851,7 +1851,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
 
     async fn create_invite_codes_batch(
         &self,
-        codes: &[String],
+        codes: &[InviteCode],
         use_count: i32,
         created_by_user: Uuid,
         for_account: Option<&Did>,
@@ -1869,7 +1869,10 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         recv(rx).await
     }
 
-    async fn get_invite_code_available_uses(&self, code: &str) -> Result<Option<i32>, DbError> {
+    async fn get_invite_code_available_uses(
+        &self,
+        code: &InviteCode,
+    ) -> Result<Option<i32>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
             InfraRequest::GetInviteCodeAvailableUses {
@@ -1882,7 +1885,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
 
     async fn validate_invite_code<'a>(
         &self,
-        code: &'a str,
+        code: &'a InviteCode,
     ) -> Result<ValidatedInviteCode<'a>, InviteCodeError> {
         let (tx, rx) = oneshot::channel();
         self.pool
@@ -1909,7 +1912,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         recv(rx).await
     }
 
-    async fn get_invite_code_uses(&self, code: &str) -> Result<Vec<InviteCodeUse>, DbError> {
+    async fn get_invite_code_uses(&self, code: &InviteCode) -> Result<Vec<InviteCodeUse>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::GetInviteCodeUses {
@@ -1919,7 +1922,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         recv(rx).await
     }
 
-    async fn disable_invite_codes_by_code(&self, codes: &[String]) -> Result<(), DbError> {
+    async fn disable_invite_codes_by_code(&self, codes: &[InviteCode]) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
             InfraRequest::DisableInviteCodesByCode {
@@ -1970,7 +1973,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
 
     async fn get_invite_code_uses_batch(
         &self,
-        codes: &[String],
+        codes: &[InviteCode],
     ) -> Result<Vec<InviteCodeUse>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
@@ -1993,7 +1996,10 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         recv(rx).await
     }
 
-    async fn get_invite_code_info(&self, code: &str) -> Result<Option<InviteCodeInfo>, DbError> {
+    async fn get_invite_code_info(
+        &self,
+        code: &InviteCode,
+    ) -> Result<Option<InviteCodeInfo>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::GetInviteCodeInfo {
@@ -2017,12 +2023,17 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         recv(rx).await
     }
 
-    async fn get_invite_code_used_by_user(&self, user_id: Uuid) -> Result<Option<String>, DbError> {
+    async fn get_invite_code_used_by_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<InviteCode>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
             InfraRequest::GetInviteCodeUsedByUser { user_id, tx },
         ))?;
-        recv(rx).await
+        recv(rx)
+            .await
+            .map(|code: Option<String>| code.map(InviteCode::from))
     }
 
     async fn delete_invite_code_uses_by_user(&self, user_id: Uuid) -> Result<(), DbError> {
@@ -2382,7 +2393,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
     async fn get_invite_code_uses_by_users(
         &self,
         user_ids: &[Uuid],
-    ) -> Result<Vec<(Uuid, String)>, DbError> {
+    ) -> Result<Vec<(Uuid, InviteCode)>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
             InfraRequest::GetInviteCodeUsesByUsers {
@@ -2390,7 +2401,11 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
                 tx,
             },
         ))?;
-        recv(rx).await
+        recv(rx).await.map(|uses: Vec<(Uuid, String)>| {
+            uses.into_iter()
+                .map(|(id, code)| (id, InviteCode::from(code)))
+                .collect()
+        })
     }
 
     async fn get_deletion_request_by_did(

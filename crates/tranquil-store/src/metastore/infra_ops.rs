@@ -118,7 +118,7 @@ impl InfraOps {
 
     fn value_to_invite_info(&self, v: &InviteCodeValue) -> Result<InviteCodeInfo, MetastoreError> {
         Ok(InviteCodeInfo {
-            code: v.code.clone(),
+            code: InviteCode::from(v.code.clone()),
             available_uses: v.available_uses,
             state: InviteCodeState::from_disabled_flag(v.disabled),
             for_account: v
@@ -360,7 +360,7 @@ impl InfraOps {
 
     pub fn create_invite_code(
         &self,
-        code: &str,
+        code: &InviteCode,
         use_count: i32,
         for_account: Option<&Did>,
     ) -> Result<bool, MetastoreError> {
@@ -390,7 +390,7 @@ impl InfraOps {
 
     pub fn create_invite_codes_batch(
         &self,
-        codes: &[String],
+        codes: &[InviteCode],
         use_count: i32,
         created_by_user: Uuid,
         for_account: Option<&Did>,
@@ -418,7 +418,7 @@ impl InfraOps {
 
     pub fn get_invite_code_available_uses(
         &self,
-        code: &str,
+        code: &InviteCode,
     ) -> Result<Option<i32>, MetastoreError> {
         let key = invite_code_key(code);
         let val: Option<InviteCodeValue> = point_lookup(
@@ -432,7 +432,7 @@ impl InfraOps {
 
     pub fn validate_invite_code<'a>(
         &self,
-        code: &'a str,
+        code: &'a InviteCode,
     ) -> Result<ValidatedInviteCode<'a>, InviteCodeError> {
         let key = invite_code_key(code);
         let val: Option<InviteCodeValue> = point_lookup(
@@ -453,7 +453,7 @@ impl InfraOps {
         }
     }
 
-    pub fn reserve_invite_code(&self, code: &str) -> Result<(), InviteCodeError> {
+    pub fn reserve_invite_code(&self, code: &InviteCode) -> Result<(), InviteCodeError> {
         let _guard = self.counter_lock.lock();
         let validated = self.validate_invite_code(code)?;
         self.decrement_invite_code_uses(&validated).map_err(|e| {
@@ -461,7 +461,7 @@ impl InfraOps {
         })
     }
 
-    pub fn refund_invite_code(&self, code: &str) -> Result<(), InviteCodeError> {
+    pub fn refund_invite_code(&self, code: &InviteCode) -> Result<(), InviteCodeError> {
         let _guard = self.counter_lock.lock();
         let key = invite_code_key(code);
         let mut val: InviteCodeValue = point_lookup(
@@ -557,7 +557,7 @@ impl InfraOps {
                     .unwrap_or_else(|| Did::new("did:plc:unknown".to_owned()).unwrap());
                 let used_by_handle = self.resolve_handle_for_uuid(val.used_by);
                 acc.push(InviteCodeUse {
-                    code: code.to_owned(),
+                    code: InviteCode::new(code),
                     used_by_did,
                     used_by_handle,
                     used_at: DateTime::from_timestamp_millis(val.used_at_ms).unwrap_or_default(),
@@ -628,7 +628,7 @@ impl InfraOps {
                         .ok_or(MetastoreError::CorruptData("corrupt invite code"))?;
                     let created_by_user = val.created_by.unwrap_or(Uuid::nil());
                     acc.push(InviteCodeRow {
-                        code: val.code,
+                        code: InviteCode::from(val.code),
                         available_uses: val.available_uses,
                         disabled: Some(val.disabled),
                         created_by_user,

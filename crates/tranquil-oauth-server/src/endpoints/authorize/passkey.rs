@@ -646,7 +646,6 @@ pub async fn passkey_finish(
 
     let code = AuthorizationCode::generate();
     let passkey_final_device_id = device_id.clone();
-    let passkey_final_code = AuthorizationCode::from(code.0.clone());
     if state
         .repos
         .oauth
@@ -654,7 +653,7 @@ pub async fn passkey_finish(
             &passkey_finish_request_id,
             &did,
             passkey_final_device_id.as_ref(),
-            &passkey_final_code,
+            &code,
         )
         .await
         .is_err()

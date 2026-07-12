@@ -1,22 +1,18 @@
-use std::marker::PhantomData;
+use tranquil_types::InviteCode;
 
 use crate::DbError;
 
 #[derive(Debug)]
 pub struct ValidatedInviteCode<'a> {
-    code: &'a str,
-    _marker: PhantomData<&'a ()>,
+    code: &'a InviteCode,
 }
 
 impl<'a> ValidatedInviteCode<'a> {
-    pub fn new_validated(code: &'a str) -> Self {
-        Self {
-            code,
-            _marker: PhantomData,
-        }
+    pub fn new_validated(code: &'a InviteCode) -> Self {
+        Self { code }
     }
 
-    pub fn code(&self) -> &str {
+    pub fn code(&self) -> &'a InviteCode {
         self.code
     }
 }

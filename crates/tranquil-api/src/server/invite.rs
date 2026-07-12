@@ -7,6 +7,7 @@ use tranquil_pds::auth::{Admin, Auth, NotTakendown};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::Did;
 use tranquil_pds::util::gen_invite_code;
+use tranquil_types::InviteCode as InviteCodeValue;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +113,7 @@ pub async fn create_invite_codes(
         let infra_repo = state.repos.infra.clone();
         let use_count = input.use_count;
         async move {
-            let codes: Vec<String> = (0..code_count).map(|_| gen_invite_code()).collect();
+            let codes: Vec<InviteCodeValue> = (0..code_count).map(|_| gen_invite_code()).collect();
             infra_repo
                 .create_invite_codes_batch(&codes, use_count, admin_user_id, Some(&account))
                 .await

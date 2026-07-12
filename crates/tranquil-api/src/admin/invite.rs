@@ -10,11 +10,12 @@ use tranquil_pds::api::EmptyResponse;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Admin, Auth};
 use tranquil_pds::state::AppState;
+use tranquil_types::{Did, InviteCode};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisableInviteCodesInput {
-    pub codes: Option<Vec<String>>,
+    pub codes: Option<Vec<InviteCode>>,
     pub accounts: Option<Vec<Did>>,
 }
 
@@ -34,11 +35,10 @@ pub async fn disable_invite_codes(
         if let Err(e) = state
             .repos
             .infra
-            .disable_invite_codes_by_account(&accounts_typed)
+            .disable_invite_codes_by_account(accounts)
             .await
-        {
-            error!("DB error disabling invite codes by account: {:?}", e);
-        }
+    {
+        error!("DB error disabling invite codes by account: {:?}", e);
     }
     Ok(Json(EmptyResponse {}))
 }
@@ -53,7 +53,7 @@ pub struct GetInviteCodesParams {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeInfo {
-    pub code: String,
+    pub code: InviteCode,
     pub available: i32,
     pub disabled: bool,
     pub for_account: String,
@@ -72,7 +72,7 @@ pub struct InviteCodeUseInfo {
 #[derive(Serialize)]
 pub struct GetInviteCodesOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
+    pub cursor: Option<InviteCode>,
     pub codes: Vec<InviteCodeInfo>,
 }
 
@@ -95,7 +95,7 @@ pub async fn get_invite_codes(
         .log_db_err("fetching invite codes")?;
 
     let user_ids: Vec<uuid::Uuid> = codes_rows.iter().map(|r| r.created_by_user).collect();
-    let code_strings: Vec<String> = codes_rows.iter().map(|r| r.code.clone()).collect();
+    let code_values: Vec<InviteCode> = codes_rows.iter().map(|r| r.code.clone()).collect();
 
     let creator_dids: std::collections::HashMap<uuid::Uuid, Did> = state
         .repos
@@ -106,14 +106,14 @@ pub async fn get_invite_codes(
         .into_iter()
         .collect();
 
-    let uses_by_code = if code_strings.is_empty() {
+    let uses_by_code = if code_values.is_empty() {
         std::collections::HashMap::new()
     } else {
         common::group_invite_uses_by_code(
             state
                 .repos
                 .infra
-                .get_invite_code_uses_batch(&code_strings)
+                .get_invite_code_uses_batch(&code_values)
                 .await
                 .unwrap_or_default(),
             |u| InviteCodeUseInfo {

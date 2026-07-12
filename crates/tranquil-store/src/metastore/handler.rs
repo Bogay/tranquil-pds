@@ -50,7 +50,7 @@ use crate::metastore::Metastore;
 
 type Tx<T> = oneshot::Sender<Result<T, DbError>>;
 
-fn reserve_invite(infra: &InfraOps, code: Option<&str>) -> Result<(), CreateAccountError> {
+fn reserve_invite(infra: &InfraOps, code: Option<&InviteCode>) -> Result<(), CreateAccountError> {
     match code {
         Some(code) => infra.reserve_invite_code(code).map_err(|e| match e {
             InviteCodeError::DatabaseError(e) => CreateAccountError::Database(e.to_string()),
@@ -62,7 +62,7 @@ fn reserve_invite(infra: &InfraOps, code: Option<&str>) -> Result<(), CreateAcco
 
 fn record_invite_use(
     infra: &InfraOps,
-    code: Option<&str>,
+    code: Option<&InviteCode>,
     user_id: Uuid,
 ) -> Result<(), CreateAccountError> {
     match code {
@@ -76,7 +76,7 @@ fn record_invite_use(
     }
 }
 
-fn refund_invite(infra: &InfraOps, code: Option<&str>) {
+fn refund_invite(infra: &InfraOps, code: Option<&InviteCode>) {
     if let Some(code) = code
         && let Err(e) = infra.refund_invite_code(code)
     {
@@ -86,7 +86,7 @@ fn refund_invite(infra: &InfraOps, code: Option<&str>) {
 
 fn finalize_account<T>(
     infra: &InfraOps,
-    code: Option<&str>,
+    code: Option<&InviteCode>,
     created: Result<T, CreateAccountError>,
     after: impl FnOnce(&T) -> Result<Uuid, CreateAccountError>,
 ) -> Result<T, CreateAccountError> {
@@ -1828,24 +1828,24 @@ pub enum InfraRequest {
         tx: Tx<()>,
     },
     CreateInviteCode {
-        code: String,
+        code: InviteCode,
         use_count: i32,
         for_account: Option<Did>,
         tx: Tx<bool>,
     },
     CreateInviteCodesBatch {
-        codes: Vec<String>,
+        codes: Vec<InviteCode>,
         use_count: i32,
         created_by_user: Uuid,
         for_account: Option<Did>,
         tx: Tx<()>,
     },
     GetInviteCodeAvailableUses {
-        code: String,
+        code: InviteCode,
         tx: Tx<Option<i32>>,
     },
     ValidateInviteCode {
-        code: String,
+        code: InviteCode,
         tx: oneshot::Sender<Result<(), InviteCodeError>>,
     },
     GetInviteCodesForAccount {
@@ -5777,7 +5777,7 @@ fn dispatch_user<S: StorageIO + 'static>(state: &HandlerState<S>, req: UserReque
         }
         UserRequest::CreatePasswordAccount { input, tx } => {
             let infra = state.metastore.infra_ops();
-            let code = input.invite_code.as_deref();
+            let code = input.invite_code.as_ref();
             let result = reserve_invite(&infra, code).and_then(|()| {
                 finalize_account(
                     &infra,
@@ -5823,7 +5823,7 @@ fn dispatch_user<S: StorageIO + 'static>(state: &HandlerState<S>, req: UserReque
         }
         UserRequest::CreatePasskeyAccount { input, tx } => {
             let infra = state.metastore.infra_ops();
-            let code = input.invite_code.as_deref();
+            let code = input.invite_code.as_ref();
             let result = reserve_invite(&infra, code).and_then(|()| {
                 finalize_account(
                     &infra,
@@ -5844,7 +5844,7 @@ fn dispatch_user<S: StorageIO + 'static>(state: &HandlerState<S>, req: UserReque
         UserRequest::CreateSsoAccount { input, tx } => {
             let sso_ops = state.metastore.sso_ops();
             let infra = state.metastore.infra_ops();
-            let code = input.invite_code.as_deref();
+            let code = input.invite_code.as_ref();
             let result = sso_ops
                 .consume_pending_registration(&input.pending_registration_token)
                 .map_err(|e| CreateAccountError::Database(e.to_string()))
@@ -6182,31 +6182,29 @@ mod tests {
         )
         .unwrap();
         let infra = metastore.infra_ops();
+        let squid = InviteCode::new("squid-invite");
+        let whelk = InviteCode::new("whelk");
 
-        assert!(infra.create_invite_code("squid-invite", 1, None).unwrap());
+        assert!(infra.create_invite_code(&squid, 1, None).unwrap());
 
-        infra.reserve_invite_code("squid-invite").unwrap();
+        infra.reserve_invite_code(&squid).unwrap();
         assert_eq!(
-            infra
-                .get_invite_code_available_uses("squid-invite")
-                .unwrap(),
+            infra.get_invite_code_available_uses(&squid).unwrap(),
             Some(0)
         );
 
         assert!(matches!(
-            infra.reserve_invite_code("squid-invite"),
+            infra.reserve_invite_code(&squid),
             Err(InviteCodeError::ExhaustedUses)
         ));
         assert_eq!(
-            infra
-                .get_invite_code_available_uses("squid-invite")
-                .unwrap(),
+            infra.get_invite_code_available_uses(&squid).unwrap(),
             Some(0),
             "a rejected reservation must not decrement below zero"
         );
 
         assert!(matches!(
-            infra.reserve_invite_code("whelk"),
+            infra.reserve_invite_code(&whelk),
             Err(InviteCodeError::NotFound)
         ));
     }
@@ -6222,29 +6220,27 @@ mod tests {
         )
         .unwrap();
         let infra = metastore.infra_ops();
+        let squid = InviteCode::new("squid-invite");
+        let whelk = InviteCode::new("whelk");
 
-        assert!(infra.create_invite_code("squid-invite", 1, None).unwrap());
+        assert!(infra.create_invite_code(&squid, 1, None).unwrap());
 
-        infra.reserve_invite_code("squid-invite").unwrap();
-        infra.refund_invite_code("squid-invite").unwrap();
+        infra.reserve_invite_code(&squid).unwrap();
+        infra.refund_invite_code(&squid).unwrap();
         assert_eq!(
-            infra
-                .get_invite_code_available_uses("squid-invite")
-                .unwrap(),
+            infra.get_invite_code_available_uses(&squid).unwrap(),
             Some(1),
             "refund must return the reserved use so a failed signup does not burn it"
         );
 
-        infra.reserve_invite_code("squid-invite").unwrap();
+        infra.reserve_invite_code(&squid).unwrap();
         assert_eq!(
-            infra
-                .get_invite_code_available_uses("squid-invite")
-                .unwrap(),
+            infra.get_invite_code_available_uses(&squid).unwrap(),
             Some(0)
         );
 
         assert!(matches!(
-            infra.refund_invite_code("whelk"),
+            infra.refund_invite_code(&whelk),
             Err(InviteCodeError::NotFound)
         ));
     }

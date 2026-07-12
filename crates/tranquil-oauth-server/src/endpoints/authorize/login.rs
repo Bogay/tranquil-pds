@@ -691,7 +691,6 @@ pub async fn authorize_post(
     }
     let code = AuthorizationCode::generate();
     let auth_post_device_id = device_id.clone();
-    let auth_post_code = AuthorizationCode::from(code.0.clone());
     if state
         .repos
         .oauth
@@ -699,7 +698,7 @@ pub async fn authorize_post(
             &form_request_id,
             &user.did,
             auth_post_device_id.as_ref(),
-            &auth_post_code,
+            &code,
         )
         .await
         .is_err()

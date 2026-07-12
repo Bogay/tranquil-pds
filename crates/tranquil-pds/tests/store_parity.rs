@@ -1107,7 +1107,7 @@ async fn parity_invite_codes() {
     let did = test_did("invite");
     let handle = test_handle("invite");
     let _ = seed_repos(&f, &did, &handle).await;
-    let code = format!("parity-invite-{}", Uuid::new_v4());
+    let code = tranquil_types::InviteCode::from(format!("parity-invite-{}", Uuid::new_v4()));
 
     let pg_created =
         f.pg.infra

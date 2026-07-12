@@ -151,7 +151,7 @@ impl InfraRepository for PostgresInfraRepository {
 
     async fn create_invite_code(
         &self,
-        code: &str,
+        code: &InviteCode,
         use_count: i32,
         for_account: Option<&Did>,
     ) -> Result<bool, DbError> {
@@ -172,16 +172,17 @@ impl InfraRepository for PostgresInfraRepository {
 
     async fn create_invite_codes_batch(
         &self,
-        codes: &[String],
+        codes: &[InviteCode],
         use_count: i32,
         created_by_user: Uuid,
         for_account: Option<&Did>,
     ) -> Result<(), DbError> {
         let for_account_str = for_account.map(|d| d.as_str());
+        let code_strs: Vec<String> = codes.iter().map(|c| c.to_string()).collect();
         sqlx::query!(
             r#"INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)
                SELECT code, $2, $3, $4 FROM UNNEST($1::text[]) AS t(code)"#,
-            codes,
+            &code_strs,
             use_count,
             created_by_user,
             for_account_str
@@ -193,7 +194,10 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(())
     }
 
-    async fn get_invite_code_available_uses(&self, code: &str) -> Result<Option<i32>, DbError> {
+    async fn get_invite_code_available_uses(
+        &self,
+        code: &InviteCode,
+    ) -> Result<Option<i32>, DbError> {
         let result = sqlx::query_scalar!(
             "SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE",
             code
@@ -207,7 +211,7 @@ impl InfraRepository for PostgresInfraRepository {
 
     async fn validate_invite_code<'a>(
         &self,
-        code: &'a str,
+        code: &'a InviteCode,
     ) -> Result<ValidatedInviteCode<'a>, InviteCodeError> {
         let result = sqlx::query!(
             r#"SELECT available_uses, COALESCE(disabled, false) as "disabled!" FROM invite_codes WHERE code = $1"#,
@@ -249,7 +253,7 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(results
             .into_iter()
             .map(|r| InviteCodeInfo {
-                code: r.code,
+                code: InviteCode::from(r.code),
                 available_uses: r.available_uses,
                 state: InviteCodeState::from_optional_disabled_flag(r.disabled),
                 for_account: Some(Did::from(r.for_account)),
@@ -259,7 +263,7 @@ impl InfraRepository for PostgresInfraRepository {
             .collect())
     }
 
-    async fn get_invite_code_uses(&self, code: &str) -> Result<Vec<InviteCodeUse>, DbError> {
+    async fn get_invite_code_uses(&self, code: &InviteCode) -> Result<Vec<InviteCodeUse>, DbError> {
         let results = sqlx::query!(
             r#"SELECT u.did, u.handle, icu.used_at
                FROM invite_code_uses icu
@@ -283,10 +287,11 @@ impl InfraRepository for PostgresInfraRepository {
             .collect())
     }
 
-    async fn disable_invite_codes_by_code(&self, codes: &[String]) -> Result<(), DbError> {
+    async fn disable_invite_codes_by_code(&self, codes: &[InviteCode]) -> Result<(), DbError> {
+        let code_strs: Vec<String> = codes.iter().map(|c| c.to_string()).collect();
         sqlx::query!(
             "UPDATE invite_codes SET disabled = TRUE WHERE code = ANY($1)",
-            codes
+            &code_strs
         )
         .execute(&self.pool)
         .await
@@ -315,9 +320,24 @@ impl InfraRepository for PostgresInfraRepository {
         limit: i64,
         sort: InviteCodeSortOrder,
     ) -> Result<Vec<InviteCodeRow>, DbError> {
+        fn to_row(
+            code: String,
+            available_uses: i32,
+            disabled: Option<bool>,
+            created_by_user: Uuid,
+            created_at: DateTime<Utc>,
+        ) -> InviteCodeRow {
+            InviteCodeRow {
+                code: InviteCode::from(code),
+                available_uses,
+                disabled,
+                created_by_user,
+                created_at,
+            }
+        }
+
         let results = match (cursor, sort) {
-            (Some(cursor_code), InviteCodeSortOrder::Recent) => sqlx::query_as!(
-                InviteCodeRow,
+            (Some(cursor_code), InviteCodeSortOrder::Recent) => sqlx::query!(
                 r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
                        FROM invite_codes ic
                        WHERE ic.created_at < (SELECT created_at FROM invite_codes WHERE code = $1)
@@ -339,9 +359,19 @@ impl InfraRepository for PostgresInfraRepository {
             )
             .fetch_all(&self.pool)
             .await
-            .map_err(map_sqlx_error)?,
-            (Some(cursor_code), InviteCodeSortOrder::Usage) => sqlx::query_as!(
-                InviteCodeRow,
+            .map_err(map_sqlx_error)?
+            .into_iter()
+            .map(|r| {
+                to_row(
+                    r.code,
+                    r.available_uses,
+                    r.disabled,
+                    r.created_by_user,
+                    r.created_at,
+                )
+            })
+            .collect(),
+            (Some(cursor_code), InviteCodeSortOrder::Usage) => sqlx::query!(
                 r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
                        FROM invite_codes ic
                        WHERE ic.created_at < (SELECT created_at FROM invite_codes WHERE code = $1)
@@ -383,15 +413,16 @@ impl InfraRepository for PostgresInfraRepository {
 
     async fn get_invite_code_uses_batch(
         &self,
-        codes: &[String],
+        codes: &[InviteCode],
     ) -> Result<Vec<InviteCodeUse>, DbError> {
+        let code_strs: Vec<String> = codes.iter().map(|c| c.to_string()).collect();
         let results = sqlx::query!(
             r#"SELECT icu.code, u.did, icu.used_at
                FROM invite_code_uses icu
                JOIN users u ON icu.used_by_user = u.id
                WHERE icu.code = ANY($1)
                ORDER BY icu.used_at DESC"#,
-            codes
+            &code_strs
         )
         .fetch_all(&self.pool)
         .await
@@ -400,7 +431,7 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(results
             .into_iter()
             .map(|r| InviteCodeUse {
-                code: r.code,
+                code: InviteCode::from(r.code),
                 used_by_did: Did::from(r.did),
                 used_by_handle: None,
                 used_at: r.used_at,
@@ -426,7 +457,7 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(results
             .into_iter()
             .map(|r| InviteCodeInfo {
-                code: r.code,
+                code: InviteCode::from(r.code),
                 available_uses: r.available_uses,
                 state: InviteCodeState::from_optional_disabled_flag(r.disabled),
                 for_account: Some(Did::from(r.for_account)),
@@ -436,7 +467,10 @@ impl InfraRepository for PostgresInfraRepository {
             .collect())
     }
 
-    async fn get_invite_code_info(&self, code: &str) -> Result<Option<InviteCodeInfo>, DbError> {
+    async fn get_invite_code_info(
+        &self,
+        code: &InviteCode,
+    ) -> Result<Option<InviteCodeInfo>, DbError> {
         let result = sqlx::query!(
             r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.for_account, ic.created_at, u.did as created_by
                FROM invite_codes ic
@@ -449,7 +483,7 @@ impl InfraRepository for PostgresInfraRepository {
         .map_err(map_sqlx_error)?;
 
         Ok(result.map(|r| InviteCodeInfo {
-            code: r.code,
+            code: InviteCode::from(r.code),
             available_uses: r.available_uses,
             state: InviteCodeState::from_optional_disabled_flag(r.disabled),
             for_account: Some(Did::from(r.for_account)),
@@ -480,7 +514,7 @@ impl InfraRepository for PostgresInfraRepository {
                 (
                     r.created_by_user,
                     InviteCodeInfo {
-                        code: r.code,
+                        code: InviteCode::from(r.code),
                         available_uses: r.available_uses,
                         state: InviteCodeState::from_optional_disabled_flag(r.disabled),
                         for_account: Some(Did::from(r.for_account)),
@@ -492,7 +526,10 @@ impl InfraRepository for PostgresInfraRepository {
             .collect())
     }
 
-    async fn get_invite_code_used_by_user(&self, user_id: Uuid) -> Result<Option<String>, DbError> {
+    async fn get_invite_code_used_by_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<InviteCode>, DbError> {
         let result = sqlx::query_scalar!(
             "SELECT code FROM invite_code_uses WHERE used_by_user = $1",
             user_id
@@ -501,7 +538,7 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(result)
+        Ok(result.map(InviteCode::from))
     }
 
     async fn delete_invite_code_uses_by_user(&self, user_id: Uuid) -> Result<(), DbError> {
@@ -1006,7 +1043,7 @@ impl InfraRepository for PostgresInfraRepository {
     async fn get_invite_code_uses_by_users(
         &self,
         user_ids: &[Uuid],
-    ) -> Result<Vec<(Uuid, String)>, DbError> {
+    ) -> Result<Vec<(Uuid, InviteCode)>, DbError> {
         let results = sqlx::query!(
             r#"
             SELECT used_by_user, code
@@ -1021,7 +1058,7 @@ impl InfraRepository for PostgresInfraRepository {
 
         Ok(results
             .into_iter()
-            .map(|r| (r.used_by_user, r.code))
+            .map(|r| (r.used_by_user, InviteCode::from(r.code)))
             .collect())
     }
 

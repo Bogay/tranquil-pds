@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Admin, Auth};
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle};
+use tranquil_pds::types::{Did, Handle, InviteCode};
 
 #[derive(Deserialize)]
 pub struct GetAccountInfoParams {
@@ -39,7 +39,7 @@ pub struct AccountInfo {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeInfo {
-    pub code: String,
+    pub code: InviteCode,
     pub available: i32,
     pub disabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -123,12 +123,12 @@ async fn get_invites_for_user(
         return None;
     }
 
-    let code_strings: Vec<String> = invite_codes.iter().map(|ic| ic.code.clone()).collect();
+    let codes: Vec<InviteCode> = invite_codes.iter().map(|ic| ic.code.clone()).collect();
 
     let uses = state
         .repos
         .infra
-        .get_invite_code_uses_batch(&code_strings)
+        .get_invite_code_uses_batch(&codes)
         .await
         .ok()?;
 
@@ -157,7 +157,7 @@ async fn get_invites_for_user(
     }
 }
 
-async fn get_invite_code_info(state: &AppState, code: &str) -> Option<InviteCodeInfo> {
+async fn get_invite_code_info(state: &AppState, code: &InviteCode) -> Option<InviteCodeInfo> {
     let info = state.repos.infra.get_invite_code_info(code).await.ok()??;
 
     let uses = state
@@ -217,7 +217,7 @@ pub async fn get_account_infos(
         .await
         .unwrap_or_default();
 
-    let all_codes: Vec<String> = all_invite_codes
+    let all_codes: Vec<InviteCode> = all_invite_codes
         .iter()
         .map(|(_, c)| c.code.clone())
         .collect();
@@ -233,7 +233,7 @@ pub async fn get_account_infos(
         Vec::new()
     };
 
-    let invited_by_map: HashMap<uuid::Uuid, String> = state
+    let invited_by_map: HashMap<uuid::Uuid, InviteCode> = state
         .repos
         .infra
         .get_invite_code_uses_by_users(&user_ids)
@@ -249,7 +249,7 @@ pub async fn get_account_infos(
 
     let (codes_by_user, code_info_map): (
         HashMap<uuid::Uuid, Vec<InviteCodeInfo>>,
-        HashMap<String, InviteCodeInfo>,
+        HashMap<InviteCode, InviteCodeInfo>,
     ) = all_invite_codes.into_iter().fold(
         (HashMap::new(), HashMap::new()),
         |(mut by_user, mut by_code), (user_id, ic)| {

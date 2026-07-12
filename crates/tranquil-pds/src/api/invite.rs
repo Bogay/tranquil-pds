@@ -2,15 +2,16 @@ use tranquil_db_traits::InviteCodeError;
 
 use crate::api::error::ApiError;
 use crate::state::AppState;
+use crate::types::InviteCode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InviteRegistration {
     Bootstrap,
-    Standard(Option<String>),
+    Standard(Option<InviteCode>),
 }
 
 impl InviteRegistration {
-    pub fn into_invite_code(self) -> Option<String> {
+    pub fn into_invite_code(self) -> Option<InviteCode> {
         match self {
             InviteRegistration::Bootstrap => None,
             InviteRegistration::Standard(code) => code,
@@ -43,9 +44,13 @@ pub async fn check_registration_invite(
         }
     }
 
-    match invite_code.map(str::trim).filter(|code| !code.is_empty()) {
-        Some(code) => match state.repos.infra.validate_invite_code(code).await {
-            Ok(_) => Ok(InviteRegistration::Standard(Some(code.to_owned()))),
+    match invite_code
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .map(InviteCode::new)
+    {
+        Some(code) => match state.repos.infra.validate_invite_code(&code).await {
+            Ok(_) => Ok(InviteRegistration::Standard(Some(code))),
             Err(InviteCodeError::DatabaseError(e)) => {
                 tracing::error!("failed to validate invite code: {e:?}");
                 Err(ApiError::InternalError(None))

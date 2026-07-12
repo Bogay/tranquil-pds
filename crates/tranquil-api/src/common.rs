@@ -76,7 +76,7 @@ pub async fn resolve_repo_user_id(
 pub fn group_invite_uses_by_code<U, F>(
     uses: Vec<tranquil_db_traits::InviteCodeUse>,
     map_use: F,
-) -> HashMap<String, Vec<U>>
+) -> HashMap<tranquil_types::InviteCode, Vec<U>>
 where
     F: Fn(tranquil_db_traits::InviteCodeUse) -> U,
 {

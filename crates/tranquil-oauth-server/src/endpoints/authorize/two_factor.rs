@@ -165,7 +165,6 @@ pub async fn authorize_2fa_post(
         let code = AuthorizationCode::generate();
         let device_id = extract_device_cookie(&headers);
         let twofa_totp_device_id = device_id.clone();
-        let twofa_totp_code = AuthorizationCode::from(code.0.clone());
         if state
             .repos
             .oauth
@@ -173,7 +172,7 @@ pub async fn authorize_2fa_post(
                 &twofa_post_request_id,
                 &challenge.did,
                 twofa_totp_device_id.as_ref(),
-                &twofa_totp_code,
+                &code,
             )
             .await
             .is_err()
@@ -310,7 +309,6 @@ pub async fn authorize_2fa_post(
     }
     let code = AuthorizationCode::generate();
     let twofa_final_device_id = device_id.clone();
-    let twofa_final_code = AuthorizationCode::from(code.0.clone());
     if state
         .repos
         .oauth
@@ -318,7 +316,7 @@ pub async fn authorize_2fa_post(
             &twofa_post_request_id,
             &did,
             twofa_final_device_id.as_ref(),
-            &twofa_final_code,
+            &code,
         )
         .await
         .is_err()
