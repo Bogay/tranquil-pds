@@ -74,7 +74,7 @@ pub async fn reauth_password(
         .log_db_err("fetching password hash")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
+    let password_valid = bcrypt::verify(&input.password, password_hash.as_str()).unwrap_or(false);
 
     if !password_valid {
         let app_password_hashes = state

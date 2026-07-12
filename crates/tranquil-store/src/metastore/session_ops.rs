@@ -24,7 +24,7 @@ use tranquil_db_traits::{
     RefreshGraceReplay, RefreshSessionResult, SessionForRefresh, SessionId, SessionListItem,
     SessionMfaStatus, SessionRefreshData, SessionToken, SessionTokenCreate,
 };
-use tranquil_types::Did;
+use tranquil_types::{Did, Jti, PasswordHash};
 
 pub struct SessionOps {
     db: Database,
@@ -112,7 +112,7 @@ impl SessionOps {
             id: v.id,
             user_id: v.user_id,
             name: v.name.clone(),
-            password_hash: v.password_hash.clone(),
+            password_hash: PasswordHash::new(v.password_hash.clone()),
             created_at: DateTime::from_timestamp_millis(v.created_at_ms).unwrap_or_default(),
             privilege: u8_to_privilege(v.privilege)
                 .unwrap_or(tranquil_db_traits::AppPasswordPrivilege::Standard),
@@ -620,7 +620,7 @@ impl SessionOps {
             id,
             user_id: data.user_id,
             name: data.name.clone(),
-            password_hash: data.password_hash.clone(),
+            password_hash: data.password_hash.as_str().to_owned(),
             created_at_ms: now_ms,
             privilege: privilege_to_u8(data.privilege),
             scopes: data.scopes.clone(),

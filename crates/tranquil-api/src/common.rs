@@ -5,7 +5,7 @@ use tracing::error;
 use tranquil_db_traits::{CommsChannel, DidWebOverrides, SessionRepository, UserRepository};
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::api::error::DbResultExt;
-use tranquil_pds::types::{AtIdentifier, Did, Handle};
+use tranquil_pds::types::{AtIdentifier, Did, Handle, PasswordHash};
 
 pub struct ResolvedRepo {
     pub user_id: uuid::Uuid,
@@ -216,7 +216,7 @@ pub async fn verify_credential(
     session_repo: &dyn SessionRepository,
     user_id: uuid::Uuid,
     password: &str,
-    password_hash: Option<&str>,
+    password_hash: Option<&PasswordHash>,
 ) -> Option<CredentialMatch> {
     let main_valid = password_hash
         .map(|h| bcrypt::verify(password, h).unwrap_or(false))
@@ -230,7 +230,7 @@ pub async fn verify_credential(
         .unwrap_or_default();
     app_passwords
         .into_iter()
-        .find(|app| bcrypt::verify(password, &app.password_hash).unwrap_or(false))
+        .find(|app| bcrypt::verify(password, app.password_hash.as_str()).unwrap_or(false))
         .map(|app| {
             let scopes = app.scopes.unwrap_or_else(|| {
                 if app.privilege.is_privileged() {
@@ -247,14 +247,16 @@ pub async fn verify_credential(
         })
 }
 
-pub fn hash_or_internal_error(value: &str) -> Result<String, ApiError> {
-    bcrypt::hash(value, DEFAULT_COST).map_err(|e| {
-        error!("Bcrypt hash error: {:?}", e);
-        ApiError::InternalError(None)
-    })
+pub fn hash_or_internal_error(value: &str) -> Result<PasswordHash, ApiError> {
+    bcrypt::hash(value, DEFAULT_COST)
+        .map(PasswordHash::new)
+        .map_err(|e| {
+            error!("Bcrypt hash error: {:?}", e);
+            ApiError::InternalError(None)
+        })
 }
 
-pub async fn hash_password_async(password: &str) -> Result<String, ApiError> {
+pub async fn hash_password_async(password: &str) -> Result<PasswordHash, ApiError> {
     let password = password.to_string();
     tokio::task::spawn_blocking(move || hash(password, DEFAULT_COST))
         .await
@@ -262,6 +264,7 @@ pub async fn hash_password_async(password: &str) -> Result<String, ApiError> {
             error!("Failed to spawn blocking task: {:?}", e);
             ApiError::InternalError(None)
         })?
+        .map(PasswordHash::new)
         .map_err(|e| {
             error!("Failed to hash password: {:?}", e);
             ApiError::InternalError(None)

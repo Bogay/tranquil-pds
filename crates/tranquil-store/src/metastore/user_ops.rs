@@ -38,7 +38,7 @@ use tranquil_db_traits::{
     UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus, UserVerificationInfo, UserWithKey,
     WebauthnChallengeType,
 };
-use tranquil_types::{CidLink, Did, Handle};
+use tranquil_types::{CidLink, Did, Handle, Jti, PasswordHash};
 
 pub struct UserOps {
     db: Database,
@@ -440,7 +440,7 @@ impl UserOps {
                     id: v.id,
                     did: Did::new(v.did.clone())
                         .map_err(|_| MetastoreError::CorruptData("invalid user did"))?,
-                    password_hash: v.password_hash.clone(),
+                    password_hash: v.password_hash.clone().map(PasswordHash::new),
                     deactivated_at: v
                         .deactivated_at_ms
                         .and_then(DateTime::from_timestamp_millis),
@@ -476,7 +476,7 @@ impl UserOps {
                 Ok(UserLoginCheck {
                     did: Did::new(v.did.clone())
                         .map_err(|_| MetastoreError::CorruptData("invalid user did"))?,
-                    password_hash: v.password_hash.clone(),
+                    password_hash: v.password_hash.clone().map(PasswordHash::new),
                 })
             })
             .transpose()
@@ -493,7 +493,7 @@ impl UserOps {
                     did: Did::new(v.did.clone())
                         .map_err(|_| MetastoreError::CorruptData("invalid user did"))?,
                     email: v.email.clone(),
-                    password_hash: v.password_hash.clone(),
+                    password_hash: v.password_hash.clone().map(PasswordHash::new),
                     password_required: v.password_required,
                     two_factor_enabled: v.two_factor_enabled,
                     preferred_comms_channel: Self::comms_channel(&v),
@@ -625,7 +625,7 @@ impl UserOps {
             .map(|v| {
                 Ok(UserForDeletion {
                     id: v.id,
-                    password_hash: v.password_hash.clone(),
+                    password_hash: v.password_hash.clone().map(PasswordHash::new),
                     handle: Handle::new(v.handle.clone())
                         .map_err(|_| MetastoreError::CorruptData("invalid user handle"))?,
                 })
@@ -1956,7 +1956,7 @@ impl UserOps {
                         .map_err(|_| MetastoreError::CorruptData("invalid user did"))?,
                     handle: Handle::new(v.handle.clone())
                         .map_err(|_| MetastoreError::CorruptData("invalid user handle"))?,
-                    password_hash: v.password_hash.clone(),
+                    password_hash: v.password_hash.clone().map(PasswordHash::new),
                     email: v.email.clone(),
                     deactivated_at: v
                         .deactivated_at_ms
@@ -2160,7 +2160,7 @@ impl UserOps {
             .map(|(id, ph)| {
                 Ok(UserIdAndPasswordHash {
                     id,
-                    password_hash: ph,
+                    password_hash: PasswordHash::new(ph),
                 })
             })
             .transpose()
@@ -2279,7 +2279,7 @@ impl UserOps {
             .load_user_by_did(did.as_str())?
             .map(|v| UserPasswordInfo {
                 id: v.id,
-                password_hash: v.password_hash.clone(),
+                password_hash: v.password_hash.clone().map(PasswordHash::new),
             }))
     }
 
@@ -2854,7 +2854,7 @@ impl UserOps {
             &input.did,
             &input.handle,
             input.email.as_deref(),
-            Some(&input.password_hash),
+            Some(input.password_hash.as_str()),
             input.preferred_comms_channel,
             input.discord_username.as_deref(),
             input.telegram_username.as_deref(),
@@ -3135,7 +3135,7 @@ impl UserOps {
         let user_hash = self.resolve_hash(input.did.as_str());
 
         self.mutate_user(user_hash, |u| {
-            u.password_hash = Some(input.app_password_hash.clone());
+            u.password_hash = Some(input.app_password_hash.as_str().to_owned());
             u.password_required = false;
         })?;
 
@@ -3173,7 +3173,7 @@ impl UserOps {
         batch.remove(&self.users, recovery_token_key(user_hash).as_slice());
 
         if let Some(mut user) = self.load_user(user_hash)? {
-            user.password_hash = Some(input.password_hash.clone());
+            user.password_hash = Some(input.password_hash.as_str().to_owned());
             user.password_required = true;
             batch.insert(
                 &self.users,

@@ -455,7 +455,7 @@ mod tests {
             handle: tranquil_types::Handle::new(handle.to_string()).unwrap(),
             email: None,
             did: tranquil_types::Did::new(did.to_string()).unwrap(),
-            password_hash: "test-hash".to_string(),
+            password_hash: tranquil_types::PasswordHash::new("test-hash"),
             preferred_comms_channel: tranquil_db_traits::CommsChannel::Email,
             discord_username: None,
             telegram_username: None,

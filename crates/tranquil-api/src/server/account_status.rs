@@ -637,7 +637,7 @@ pub async fn delete_account(
         state.repos.session.as_ref(),
         user_id,
         password,
-        password_hash.as_deref(),
+        password_hash.as_ref(),
     )
     .await
     .is_none()

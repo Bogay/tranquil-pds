@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
-use tranquil_types::{Did, Handle};
+use tranquil_types::{AtIdentifier, Did, Handle, Jti, PasswordHash, TokenId};
 use uuid::Uuid;
 
 use tranquil_db_traits::{
@@ -314,7 +314,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(row.map(|r| UserAuthInfo {
             id: r.id,
             did: Did::from(r.did),
-            password_hash: r.password_hash,
+            password_hash: r.password_hash.map(PasswordHash::new),
             deactivated_at: r.deactivated_at,
             takedown_ref: r.takedown_ref,
             channel_verification: ChannelVerificationStatus::from_db_row(
@@ -654,7 +654,7 @@ impl UserRepository for PostgresUserRepository {
     async fn admin_update_password(&self, did: &Did, password_hash: &str) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "UPDATE users SET password_hash = $1 WHERE did = $2",
-            password_hash,
+            password_hash.as_str(),
             did.as_str()
         )
         .execute(&self.pool)
@@ -927,7 +927,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(count.unwrap_or(0) > 0)
     }
 
-    async fn get_password_hash_by_did(&self, did: &Did) -> Result<Option<String>, DbError> {
+    async fn get_password_hash_by_did(&self, did: &Did) -> Result<Option<PasswordHash>, DbError> {
         let row = sqlx::query_scalar!(
             "SELECT password_hash FROM users WHERE did = $1",
             did.as_str()
@@ -936,7 +936,7 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.flatten())
+        Ok(row.flatten().map(PasswordHash::new))
     }
 
     async fn get_passkeys_for_user(&self, did: &Did) -> Result<Vec<StoredPasskey>, DbError> {
@@ -1431,7 +1431,7 @@ impl UserRepository for PostgresUserRepository {
         .map(|opt| {
             opt.map(|r| UserLoginCheck {
                 did: Did::from(r.did),
-                password_hash: r.password_hash,
+                password_hash: r.password_hash.map(PasswordHash::new),
             })
         })
     }
@@ -1460,7 +1460,7 @@ impl UserRepository for PostgresUserRepository {
                 id: row.id,
                 did: Did::from(row.did),
                 email: row.email,
-                password_hash: row.password_hash,
+                password_hash: row.password_hash.map(PasswordHash::new),
                 password_required: row.password_required,
                 two_factor_enabled: row.two_factor_enabled,
                 preferred_comms_channel: row.preferred_comms_channel,
@@ -1622,7 +1622,7 @@ impl UserRepository for PostgresUserRepository {
                 id: row.id,
                 did: Did::from(row.did),
                 handle: Handle::from(row.handle),
-                password_hash: row.password_hash,
+                password_hash: row.password_hash.map(PasswordHash::new),
                 email: row.email,
                 deactivated_at: row.deactivated_at,
                 takedown_ref: row.takedown_ref,
@@ -1831,7 +1831,7 @@ impl UserRepository for PostgresUserRepository {
             opt.and_then(|row| {
                 row.password_hash.map(|hash| UserIdAndPasswordHash {
                     id: row.id,
-                    password_hash: hash,
+                    password_hash: PasswordHash::new(hash),
                 })
             })
         })
@@ -1840,11 +1840,11 @@ impl UserRepository for PostgresUserRepository {
     async fn update_password_hash(
         &self,
         user_id: Uuid,
-        password_hash: &str,
+        password_hash: &PasswordHash,
     ) -> Result<(), DbError> {
         sqlx::query!(
             "UPDATE users SET password_hash = $1 WHERE id = $2",
-            password_hash,
+            password_hash.as_str(),
             user_id
         )
         .execute(&self.pool)
@@ -1856,13 +1856,13 @@ impl UserRepository for PostgresUserRepository {
     async fn reset_password_with_sessions(
         &self,
         user_id: Uuid,
-        password_hash: &str,
+        password_hash: &PasswordHash,
     ) -> Result<PasswordResetResult, DbError> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         sqlx::query!(
             "UPDATE users SET password_hash = $1, password_reset_code = NULL, password_reset_code_expires_at = NULL, password_required = TRUE WHERE id = $2",
-            password_hash,
+            password_hash.as_str(),
             user_id
         )
         .execute(&mut *tx)
@@ -1950,7 +1950,7 @@ impl UserRepository for PostgresUserRepository {
         .map(|opt| {
             opt.map(|row| UserPasswordInfo {
                 id: row.id,
-                password_hash: row.password_hash,
+                password_hash: row.password_hash.map(PasswordHash::new),
             })
         })
     }
@@ -1969,11 +1969,11 @@ impl UserRepository for PostgresUserRepository {
     async fn set_new_user_password(
         &self,
         user_id: Uuid,
-        password_hash: &str,
+        password_hash: &PasswordHash,
     ) -> Result<(), DbError> {
         sqlx::query!(
             "UPDATE users SET password_hash = $1, password_required = TRUE WHERE id = $2",
-            password_hash,
+            password_hash.as_str(),
             user_id
         )
         .execute(&self.pool)
@@ -2004,7 +2004,7 @@ impl UserRepository for PostgresUserRepository {
         .map(|opt| {
             opt.map(|row| UserForDeletion {
                 id: row.id,
-                password_hash: row.password_hash,
+                password_hash: row.password_hash.map(PasswordHash::new),
                 handle: Handle::from(row.handle),
             })
         })
@@ -3113,7 +3113,7 @@ impl UserRepository for PostgresUserRepository {
             "INSERT INTO app_passwords (user_id, name, password_hash, privileged) VALUES ($1, $2, $3, FALSE)",
             input.user_id,
             input.app_password_name,
-            input.app_password_hash
+            input.app_password_hash.as_str()
         )
         .execute(&mut *tx)
         .await
@@ -3140,7 +3140,7 @@ impl UserRepository for PostgresUserRepository {
 
         sqlx::query!(
             "UPDATE users SET password_hash = $1, password_required = TRUE, recovery_token = NULL, recovery_token_expires_at = NULL WHERE did = $2",
-            input.password_hash,
+            input.password_hash.as_str(),
             input.did.as_str()
         )
         .execute(&mut *tx)

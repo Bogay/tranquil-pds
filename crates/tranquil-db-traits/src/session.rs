@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use tranquil_types::Did;
+use tranquil_types::{Did, Jti, PasswordHash};
 use uuid::Uuid;
 
 use crate::DbError;
@@ -134,7 +134,7 @@ pub struct AppPasswordRecord {
     pub id: Uuid,
     pub user_id: Uuid,
     pub name: String,
-    pub password_hash: String,
+    pub password_hash: PasswordHash,
     pub created_at: DateTime<Utc>,
     pub privilege: AppPasswordPrivilege,
     pub scopes: Option<String>,
@@ -145,7 +145,7 @@ pub struct AppPasswordRecord {
 pub struct AppPasswordCreate {
     pub user_id: Uuid,
     pub name: String,
-    pub password_hash: String,
+    pub password_hash: PasswordHash,
     pub privilege: AppPasswordPrivilege,
     pub scopes: Option<String>,
     pub created_by_controller_did: Option<Did>,

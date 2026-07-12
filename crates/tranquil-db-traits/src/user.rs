@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tranquil_types::{Did, Handle};
+use tranquil_types::{
+    AtIdentifier, CidLink, Did, Handle, InviteCode, Jti, PasswordHash, Tid, TokenId,
+};
 use uuid::Uuid;
 
 use crate::{ChannelVerificationStatus, CommsChannel, DbError, SsoProviderType};
@@ -78,7 +80,7 @@ pub struct UserEmailInfo {
 #[derive(Debug, Clone)]
 pub struct UserLoginCheck {
     pub did: Did,
-    pub password_hash: Option<String>,
+    pub password_hash: Option<PasswordHash>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +88,7 @@ pub struct UserLoginInfo {
     pub id: Uuid,
     pub did: Did,
     pub email: Option<String>,
-    pub password_hash: Option<String>,
+    pub password_hash: Option<PasswordHash>,
     pub password_required: bool,
     pub two_factor_enabled: bool,
     pub preferred_comms_channel: CommsChannel,
@@ -313,7 +315,7 @@ pub trait UserRepository: Send + Sync {
 
     async fn has_passkeys(&self, did: &Did) -> Result<bool, DbError>;
 
-    async fn get_password_hash_by_did(&self, did: &Did) -> Result<Option<String>, DbError>;
+    async fn get_password_hash_by_did(&self, did: &Did) -> Result<Option<PasswordHash>, DbError>;
 
     async fn get_passkeys_for_user(&self, did: &Did) -> Result<Vec<StoredPasskey>, DbError>;
 
@@ -466,13 +468,16 @@ pub trait UserRepository: Send + Sync {
         did: &Did,
     ) -> Result<Option<UserIdAndPasswordHash>, DbError>;
 
-    async fn update_password_hash(&self, user_id: Uuid, password_hash: &str)
-    -> Result<(), DbError>;
+    async fn update_password_hash(
+        &self,
+        user_id: Uuid,
+        password_hash: &PasswordHash,
+    ) -> Result<(), DbError>;
 
     async fn reset_password_with_sessions(
         &self,
         user_id: Uuid,
-        password_hash: &str,
+        password_hash: &PasswordHash,
     ) -> Result<PasswordResetResult, DbError>;
 
     async fn activate_account(&self, did: &Did) -> Result<bool, DbError>;
@@ -495,7 +500,7 @@ pub trait UserRepository: Send + Sync {
     async fn set_new_user_password(
         &self,
         user_id: Uuid,
-        password_hash: &str,
+        password_hash: &PasswordHash,
     ) -> Result<(), DbError>;
 
     async fn get_user_key_by_did(&self, did: &Did) -> Result<Option<UserKeyInfo>, DbError>;
@@ -699,7 +704,7 @@ pub struct AccountSearchResult {
 pub struct UserAuthInfo {
     pub id: Uuid,
     pub did: Did,
-    pub password_hash: Option<String>,
+    pub password_hash: Option<PasswordHash>,
     pub deactivated_at: Option<DateTime<Utc>>,
     pub takedown_ref: Option<String>,
     pub channel_verification: ChannelVerificationStatus,
@@ -863,7 +868,7 @@ pub struct UserLoginFull {
     pub id: Uuid,
     pub did: Did,
     pub handle: Handle,
-    pub password_hash: Option<String>,
+    pub password_hash: Option<PasswordHash>,
     pub email: Option<String>,
     pub deactivated_at: Option<DateTime<Utc>>,
     pub takedown_ref: Option<String>,
@@ -914,13 +919,13 @@ pub struct UserResetCodeInfo {
 #[derive(Debug, Clone)]
 pub struct UserPasswordInfo {
     pub id: Uuid,
-    pub password_hash: Option<String>,
+    pub password_hash: Option<PasswordHash>,
 }
 
 #[derive(Debug, Clone)]
 pub struct UserIdAndPasswordHash {
     pub id: Uuid,
-    pub password_hash: String,
+    pub password_hash: PasswordHash,
 }
 
 #[derive(Debug, Clone)]
@@ -932,7 +937,7 @@ pub struct PasswordResetResult {
 #[derive(Debug, Clone)]
 pub struct UserForDeletion {
     pub id: Uuid,
-    pub password_hash: Option<String>,
+    pub password_hash: Option<PasswordHash>,
     pub handle: Handle,
 }
 
@@ -988,7 +993,7 @@ pub struct CreatePasswordAccountInput {
     pub handle: Handle,
     pub email: Option<String>,
     pub did: Did,
-    pub password_hash: String,
+    pub password_hash: PasswordHash,
     pub preferred_comms_channel: CommsChannel,
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
@@ -1044,7 +1049,7 @@ pub struct CreatePasskeyAccountInput {
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
     pub signal_username: Option<String>,
-    pub setup_token_hash: String,
+    pub setup_token_hash: PasswordHash,
     pub setup_expires_at: DateTime<Utc>,
     pub deactivated_at: Option<DateTime<Utc>>,
     pub encrypted_key_bytes: Vec<u8>,
@@ -1086,13 +1091,13 @@ pub struct CompletePasskeySetupInput {
     pub user_id: Uuid,
     pub did: Did,
     pub app_password_name: String,
-    pub app_password_hash: String,
+    pub app_password_hash: PasswordHash,
 }
 
 #[derive(Debug, Clone)]
 pub struct RecoverPasskeyAccountInput {
     pub did: Did,
-    pub password_hash: String,
+    pub password_hash: PasswordHash,
 }
 
 #[derive(Debug, Clone)]

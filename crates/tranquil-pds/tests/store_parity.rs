@@ -144,7 +144,7 @@ async fn seed_user(repos: &PostgresRepositories, did: &Did, handle: &Handle) -> 
         handle: handle.clone(),
         email: None,
         did: did.clone(),
-        password_hash: "parity-test-hash".to_string(),
+        password_hash: tranquil_types::PasswordHash::new("parity-test-hash"),
         preferred_comms_channel: CommsChannel::Email,
         discord_username: None,
         telegram_username: None,

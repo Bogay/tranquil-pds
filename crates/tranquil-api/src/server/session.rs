@@ -112,7 +112,7 @@ pub async fn create_session(
         state.repos.session.as_ref(),
         row.id,
         &input.password,
-        row.password_hash.as_deref(),
+        row.password_hash.as_ref(),
     )
     .await;
     let (app_password_name, app_password_scopes, app_password_controller) = match credential {

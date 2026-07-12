@@ -7,7 +7,7 @@ use tranquil_db_traits::{
     SessionForRefresh, SessionId, SessionListItem, SessionMfaStatus, SessionRefreshData,
     SessionRepository, SessionToken, SessionTokenCreate,
 };
-use tranquil_types::Did;
+use tranquil_types::{Did, Jti, PasswordHash};
 use uuid::Uuid;
 
 use super::user::map_sqlx_error;
@@ -318,7 +318,7 @@ impl SessionRepository for PostgresSessionRepository {
                 id: r.id,
                 user_id: r.user_id,
                 name: r.name,
-                password_hash: r.password_hash,
+                password_hash: PasswordHash::new(r.password_hash),
                 created_at: r.created_at,
                 privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
                 scopes: r.scopes,
@@ -351,7 +351,7 @@ impl SessionRepository for PostgresSessionRepository {
                 id: r.id,
                 user_id: r.user_id,
                 name: r.name,
-                password_hash: r.password_hash,
+                password_hash: PasswordHash::new(r.password_hash),
                 created_at: r.created_at,
                 privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
                 scopes: r.scopes,
@@ -382,7 +382,7 @@ impl SessionRepository for PostgresSessionRepository {
             id: r.id,
             user_id: r.user_id,
             name: r.name,
-            password_hash: r.password_hash,
+            password_hash: PasswordHash::new(r.password_hash),
             created_at: r.created_at,
             privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
             scopes: r.scopes,
@@ -399,7 +399,7 @@ impl SessionRepository for PostgresSessionRepository {
             "#,
             data.user_id,
             data.name,
-            data.password_hash,
+            data.password_hash.as_str(),
             data.privilege.is_privileged(),
             data.scopes,
             data.created_by_controller_did.as_ref().map(|d| d.as_str())
@@ -510,7 +510,7 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows)
+        Ok(rows.into_iter().map(PasswordHash::new).collect())
     }
 
     async fn refresh_session_atomic(

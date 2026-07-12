@@ -29,7 +29,7 @@ use tranquil_db_traits::{
 use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
     AtUri, AuthorizationCode, CidLink, ClientId, DPoPProofId, DeviceId, Did, Handle, Nsid,
-    RefreshToken, RequestId, Rkey, TokenId,
+    InviteCode, Jti, Nsid, PasswordHash, RefreshToken, RequestId, Rkey, Tid, TokenId,
 };
 use uuid::Uuid;
 
@@ -1734,7 +1734,9 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
                 tx,
             },
         ))?;
-        recv(rx).await
+        recv(rx)
+            .await
+            .map(|hashes: Vec<String>| hashes.into_iter().map(PasswordHash::new).collect())
     }
 
     async fn refresh_session_atomic(
@@ -3733,7 +3735,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
         self.pool
             .send(MetastoreRequest::User(UserRequest::AdminUpdatePassword {
                 did: did.clone(),
-                password_hash: password_hash.to_owned(),
+                password_hash: password_hash.as_str().to_owned(),
                 tx,
             }))?;
         recv(rx).await
@@ -4032,14 +4034,16 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
         recv(rx).await
     }
 
-    async fn get_password_hash_by_did(&self, did: &Did) -> Result<Option<String>, DbError> {
+    async fn get_password_hash_by_did(&self, did: &Did) -> Result<Option<PasswordHash>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::GetPasswordHashByDid {
                 did: did.clone(),
                 tx,
             }))?;
-        recv(rx).await
+        recv(rx)
+            .await
+            .map(|hash: Option<String>| hash.map(PasswordHash::new))
     }
 
     async fn get_passkeys_for_user(&self, did: &Did) -> Result<Vec<StoredPasskey>, DbError> {
@@ -4556,13 +4560,13 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
     async fn update_password_hash(
         &self,
         user_id: Uuid,
-        password_hash: &str,
+        password_hash: &PasswordHash,
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::UpdatePasswordHash {
                 user_id,
-                password_hash: password_hash.to_owned(),
+                password_hash: password_hash.as_str().to_owned(),
                 tx,
             }))?;
         recv(rx).await
@@ -4571,13 +4575,13 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
     async fn reset_password_with_sessions(
         &self,
         user_id: Uuid,
-        password_hash: &str,
+        password_hash: &PasswordHash,
     ) -> Result<PasswordResetResult, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::User(
             UserRequest::ResetPasswordWithSessions {
                 user_id,
-                password_hash: password_hash.to_owned(),
+                password_hash: password_hash.as_str().to_owned(),
                 tx,
             },
         ))?;
@@ -4645,13 +4649,13 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
     async fn set_new_user_password(
         &self,
         user_id: Uuid,
-        password_hash: &str,
+        password_hash: &PasswordHash,
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::SetNewUserPassword {
                 user_id,
-                password_hash: password_hash.to_owned(),
+                password_hash: password_hash.as_str().to_owned(),
                 tx,
             }))?;
         recv(rx).await
