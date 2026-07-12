@@ -12,20 +12,20 @@ use tranquil_types::{Did, Jti, Nsid};
 
 type HmacSha256 = Hmac<Sha256>;
 
-pub fn create_access_token(did: &str, key_bytes: &[u8]) -> Result<String> {
+pub fn create_access_token(did: &Did, key_bytes: &[u8]) -> Result<String> {
     Ok(create_access_token_with_metadata(did, key_bytes)?.token)
 }
 
-pub fn create_refresh_token(did: &str, key_bytes: &[u8]) -> Result<String> {
+pub fn create_refresh_token(did: &Did, key_bytes: &[u8]) -> Result<String> {
     Ok(create_refresh_token_with_metadata(did, key_bytes)?.token)
 }
 
-pub fn create_access_token_with_metadata(did: &str, key_bytes: &[u8]) -> Result<TokenWithMetadata> {
+pub fn create_access_token_with_metadata(did: &Did, key_bytes: &[u8]) -> Result<TokenWithMetadata> {
     create_access_token_with_scope_metadata(did, key_bytes, None, None)
 }
 
 pub fn create_access_token_with_scope_metadata(
-    did: &str,
+    did: &Did,
     key_bytes: &[u8],
     scopes: Option<&str>,
     hostname: Option<&str>,
@@ -42,14 +42,14 @@ pub fn create_access_token_with_scope_metadata(
 }
 
 pub fn create_access_token_with_delegation(
-    did: &str,
+    did: &Did,
     key_bytes: &[u8],
     scopes: Option<&str>,
-    controller_did: Option<&str>,
+    controller_did: Option<&Did>,
     hostname: Option<&str>,
 ) -> Result<TokenWithMetadata> {
     let scope = scopes.unwrap_or(TokenScope::Access.as_str());
-    let act = controller_did.map(|c| ActClaim { sub: c.to_string() });
+    let act = controller_did.map(|c| ActClaim { sub: c.clone() });
     create_signed_token_with_act(
         did,
         scope,
@@ -62,7 +62,7 @@ pub fn create_access_token_with_delegation(
 }
 
 pub fn create_refresh_token_with_metadata(
-    did: &str,
+    did: &Did,
     key_bytes: &[u8],
 ) -> Result<TokenWithMetadata> {
     create_signed_token_with_metadata(
@@ -79,16 +79,16 @@ pub fn create_refresh_token_with_metadata(
 /// refresh grace window to reproduce a session's current access token without
 /// persisting the signed JWT itself.
 pub fn create_access_token_with_jti(
-    did: &str,
+    did: &Did,
     key_bytes: &[u8],
     scopes: Option<&str>,
-    controller_did: Option<&str>,
+    controller_did: Option<&Did>,
     hostname: Option<&str>,
     jti: &Jti,
     expires_at: DateTime<Utc>,
 ) -> Result<String> {
     let scope = scopes.unwrap_or(TokenScope::Access.as_str());
-    let act = controller_did.map(|c| ActClaim { sub: c.to_string() });
+    let act = controller_did.map(|c| ActClaim { sub: c.clone() });
     Ok(create_signed_token_pinned(
         did,
         scope,
@@ -105,7 +105,7 @@ pub fn create_access_token_with_jti(
 /// Re-mint a refresh token carrying a specific `jti` and expiry. Counterpart to
 /// [`create_access_token_with_jti`] for the refresh grace window.
 pub fn create_refresh_token_with_jti(
-    did: &str,
+    did: &Did,
     key_bytes: &[u8],
     jti: &Jti,
     expires_at: DateTime<Utc>,
@@ -124,8 +124,8 @@ pub fn create_refresh_token_with_jti(
 }
 
 pub fn create_service_token(
-    did: &str,
-    aud: &str,
+    did: &Did,
+    aud: &Did,
     lxm: Option<&Nsid>,
     key_bytes: &[u8],
 ) -> Result<String> {
@@ -137,9 +137,9 @@ pub fn create_service_token(
         .timestamp();
 
     let claims = Claims {
-        iss: did.to_owned(),
-        sub: did.to_owned(),
-        aud: aud.to_owned(),
+        iss: did.clone(),
+        sub: did.clone(),
+        aud: aud.to_string(),
         exp: expiration,
         iat: Utc::now().timestamp(),
         scope: None,
@@ -152,7 +152,7 @@ pub fn create_service_token(
 }
 
 fn create_signed_token_with_metadata(
-    did: &str,
+    did: &Did,
     scope: &str,
     typ: TokenType,
     key_bytes: &[u8],
@@ -163,7 +163,7 @@ fn create_signed_token_with_metadata(
 }
 
 fn create_signed_token_with_act(
-    did: &str,
+    did: &Did,
     scope: &str,
     typ: TokenType,
     key_bytes: &[u8],
@@ -180,7 +180,7 @@ fn create_signed_token_with_act(
 
 #[allow(clippy::too_many_arguments)]
 fn create_signed_token_pinned(
-    did: &str,
+    did: &Did,
     scope: &str,
     typ: TokenType,
     key_bytes: &[u8],
@@ -200,8 +200,8 @@ fn create_signed_token_pinned(
     });
 
     let claims = Claims {
-        iss: did.to_owned(),
-        sub: did.to_owned(),
+        iss: did.clone(),
+        sub: did.clone(),
         aud: format!("did:web:{}", aud_hostname),
         exp: expiration,
         iat: Utc::now().timestamp(),
@@ -243,16 +243,16 @@ fn sign_claims_with_type(claims: Claims, key: &SigningKey, typ: TokenType) -> Re
     Ok(format!("{}.{}", message, signature_b64))
 }
 
-pub fn create_access_token_hs256(did: &str, secret: &[u8]) -> Result<String> {
+pub fn create_access_token_hs256(did: &Did, secret: &[u8]) -> Result<String> {
     Ok(create_access_token_hs256_with_metadata(did, secret)?.token)
 }
 
-pub fn create_refresh_token_hs256(did: &str, secret: &[u8]) -> Result<String> {
+pub fn create_refresh_token_hs256(did: &Did, secret: &[u8]) -> Result<String> {
     Ok(create_refresh_token_hs256_with_metadata(did, secret)?.token)
 }
 
 pub fn create_access_token_hs256_with_metadata(
-    did: &str,
+    did: &Did,
     secret: &[u8],
 ) -> Result<TokenWithMetadata> {
     create_hs256_token_with_metadata(
@@ -265,7 +265,7 @@ pub fn create_access_token_hs256_with_metadata(
 }
 
 pub fn create_refresh_token_hs256_with_metadata(
-    did: &str,
+    did: &Did,
     secret: &[u8],
 ) -> Result<TokenWithMetadata> {
     create_hs256_token_with_metadata(
@@ -278,8 +278,8 @@ pub fn create_refresh_token_hs256_with_metadata(
 }
 
 pub fn create_service_token_hs256(
-    did: &str,
-    aud: &str,
+    did: &Did,
+    aud: &Did,
     lxm: &Nsid,
     secret: &[u8],
 ) -> Result<String> {
@@ -289,9 +289,9 @@ pub fn create_service_token_hs256(
         .timestamp();
 
     let claims = Claims {
-        iss: did.to_owned(),
-        sub: did.to_owned(),
-        aud: aud.to_owned(),
+        iss: did.clone(),
+        sub: did.clone(),
+        aud: aud.to_string(),
         exp: expiration,
         iat: Utc::now().timestamp(),
         scope: None,
@@ -304,7 +304,7 @@ pub fn create_service_token_hs256(
 }
 
 fn create_hs256_token_with_metadata(
-    did: &str,
+    did: &Did,
     scope: &str,
     typ: TokenType,
     secret: &[u8],
@@ -318,8 +318,8 @@ fn create_hs256_token_with_metadata(
     let jti = Jti::new(uuid::Uuid::new_v4().to_string());
 
     let claims = Claims {
-        iss: did.to_owned(),
-        sub: did.to_owned(),
+        iss: did.clone(),
+        sub: did.clone(),
         aud: format!(
             "did:web:{}",
             tranquil_config::try_get()

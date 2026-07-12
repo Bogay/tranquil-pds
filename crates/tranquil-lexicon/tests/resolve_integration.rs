@@ -71,7 +71,7 @@ async fn test_resolve_pds_endpoint_from_plc() {
         .mount(&plc_server)
         .await;
 
-    let endpoint = resolve_pds_endpoint(did, Some(&plc_server.uri()))
+    let endpoint = resolve_pds_endpoint(&did.parse().unwrap(), Some(&plc_server.uri()))
         .await
         .unwrap();
     assert_eq!(endpoint, "https://pds.example.com");
@@ -94,7 +94,7 @@ async fn test_resolve_pds_endpoint_no_pds_service() {
         .mount(&plc_server)
         .await;
 
-    let result = resolve_pds_endpoint(did, Some(&plc_server.uri())).await;
+    let result = resolve_pds_endpoint(&did.parse().unwrap(), Some(&plc_server.uri())).await;
     assert!(matches!(result, Err(ResolveError::NoPdsEndpoint { .. })));
 }
 
@@ -109,13 +109,13 @@ async fn test_resolve_pds_endpoint_plc_not_found() {
         .mount(&plc_server)
         .await;
 
-    let result = resolve_pds_endpoint(did, Some(&plc_server.uri())).await;
+    let result = resolve_pds_endpoint(&did.parse().unwrap(), Some(&plc_server.uri())).await;
     assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn test_resolve_pds_endpoint_unsupported_did_method() {
-    let result = resolve_pds_endpoint("did:key:z6MkTest", None).await;
+    let result = resolve_pds_endpoint(&"did:key:z6MkTest".parse().unwrap(), None).await;
     assert!(matches!(result, Err(ResolveError::DidResolution { .. })));
 }
 
@@ -146,7 +146,7 @@ async fn test_resolve_pds_endpoint_multiple_services_picks_pds() {
         .mount(&plc_server)
         .await;
 
-    let endpoint = resolve_pds_endpoint(did, Some(&plc_server.uri()))
+    let endpoint = resolve_pds_endpoint(&did.parse().unwrap(), Some(&plc_server.uri()))
         .await
         .unwrap();
     assert_eq!(endpoint, "https://pds.example.com");
@@ -402,6 +402,6 @@ async fn test_plc_server_timeout() {
         .mount(&plc_server)
         .await;
 
-    let result = resolve_pds_endpoint(did, Some(&plc_server.uri())).await;
+    let result = resolve_pds_endpoint(&did.parse().unwrap(), Some(&plc_server.uri())).await;
     assert!(result.is_err());
 }

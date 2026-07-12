@@ -111,7 +111,7 @@ fn is_protected_method(method: &str) -> bool {
 }
 
 /// Fetch the `feed` generator record from the AppView and return its `did`.
-async fn resolve_feed_generator_did(appview_url: &str, query: Option<&str>) -> Option<String> {
+async fn resolve_feed_generator_did(appview_url: &str, query: Option<&str>) -> Option<Did> {
     #[derive(serde::Deserialize)]
     struct GetFeedQuery {
         feed: String,
@@ -136,7 +136,10 @@ async fn resolve_feed_generator_did(appview_url: &str, query: Option<&str>) -> O
         return None;
     }
     let body: serde_json::Value = resp.json().await.ok()?;
-    body.get("value")?.get("did")?.as_str().map(str::to_string)
+    body.get("value")?
+        .get("did")?
+        .as_str()
+        .and_then(|s| Did::new(s).ok())
 }
 
 pub struct XrpcProxyLayer {
@@ -241,7 +244,11 @@ async fn proxy_handler(
         )
         .into_response();
     };
-    let Ok(resolved) = state.did_resolver.resolve_service(did, service_id).await else {
+    let Ok(did) = did.parse::<Did>() else {
+        return ApiError::InvalidRequest("Invalid DID in atproto-proxy header".into())
+            .into_response();
+    };
+    let Ok(resolved) = state.did_resolver.resolve_service(&did, service_id).await else {
         error!(did = %did, service_id = %service_id, "Could not resolve service DID");
         return ApiError::UpstreamFailure.into_response();
     };
@@ -340,7 +347,7 @@ async fn proxy_handler(
                         }
                     }
                 } else {
-                    (resolved.did.clone(), method)
+                    (resolved.did.clone(), method_nsid.clone())
                 };
 
                 match crate::auth::create_service_token(

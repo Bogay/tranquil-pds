@@ -200,7 +200,7 @@ pub async fn get_account_infos(
         return Err(ApiError::InvalidRequest("dids is required".into()));
     }
 
-    let dids_typed: Vec<Did> = dids.iter().filter_map(|d| d.parse().ok()).collect();
+    let dids: Vec<Did> = dids.iter().filter_map(|d| d.parse().ok()).collect();
     let accounts = state
         .repos
         .infra

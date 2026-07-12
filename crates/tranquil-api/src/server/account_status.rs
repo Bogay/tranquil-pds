@@ -133,7 +133,7 @@ async fn assert_valid_did_document_for_service(
     if did.as_str().starts_with("did:plc:") {
         let max_attempts = if with_retry { 5 } else { 1 };
         let cache_for_retry = cache.clone();
-        let did_owned = did.as_str().to_string();
+        let did_owned = did.clone();
         let expected_owned = expected_endpoint.clone();
         let attempt_counter = Arc::new(AtomicUsize::new(0));
 
@@ -387,7 +387,7 @@ pub async fn activate_account(
                 .cache
                 .delete(&tranquil_pds::cache_keys::plc_data_key(&did))
                 .await;
-            if state.did_resolver.refresh_did(did.as_str()).await.is_err() {
+            if state.did_resolver.refresh_did(&did).await.is_err() {
                 warn!(
                     "[MIGRATION] activateAccount: Failed to refresh DID cache for {}",
                     did

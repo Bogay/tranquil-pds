@@ -60,9 +60,9 @@ pub enum ResolveError {
     #[error("no DID found in DNS TXT records for {domain}")]
     NoDid { domain: String },
     #[error("DID document fetch failed for {did}: {reason}")]
-    DidResolution { did: String, reason: String },
+    DidResolution { did: Did, reason: String },
     #[error("no PDS endpoint found in DID document for {did}")]
-    NoPdsEndpoint { did: String },
+    NoPdsEndpoint { did: Did },
     #[error("schema fetch failed from {url}: {reason}")]
     SchemaFetch { url: String, reason: String },
     #[error("schema deserialization failed: {0}")]
@@ -82,22 +82,21 @@ pub fn nsid_to_authority(nsid: &Nsid) -> String {
     Ok(segments.join("."))
 }
 
-pub async fn resolve_did_from_dns(authority: &str) -> Result<String, ResolveError> {
+pub async fn resolve_did_from_dns(authority: &str) -> Result<Did, ResolveError> {
     let resolver = TokioAsyncResolver::tokio_from_system_conf().unwrap_or_else(|e| {
         tracing::warn!("falling back to default DNS resolvers: {}", e);
         TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
     });
 
-    let extract_did = |lookup: hickory_resolver::lookup::TxtLookup| -> Option<String> {
+    let extract_did = |lookup: hickory_resolver::lookup::TxtLookup| -> Option<Did> {
         lookup
             .iter()
             .flat_map(|record| record.txt_data())
             .find_map(|txt| {
                 let txt_str = String::from_utf8_lossy(txt);
-                txt_str.strip_prefix("did=").and_then(|did| {
-                    let did = did.trim();
-                    did.starts_with("did:").then(|| did.to_string())
-                })
+                txt_str
+                    .strip_prefix("did=")
+                    .and_then(|did| Did::new(did.trim()).ok())
             })
     };
 
@@ -124,7 +123,7 @@ pub async fn resolve_did_from_dns(authority: &str) -> Result<String, ResolveErro
 }
 
 pub async fn resolve_pds_endpoint(
-    did: &str,
+    did: &Did,
     plc_directory_url: Option<&str>,
 ) -> Result<String, ResolveError> {
     let plc_base = plc_directory_url.unwrap_or(DEFAULT_PLC_DIRECTORY);
@@ -137,7 +136,7 @@ pub async fn resolve_pds_endpoint(
         Some(("web", domain)) => format!("https://{}/.well-known/did.json", domain),
         _ => {
             return Err(ResolveError::DidResolution {
-                did: did.to_string(),
+                did: did.clone(),
                 reason: "unsupported DID method".to_string(),
             });
         }
@@ -148,26 +147,24 @@ pub async fn resolve_pds_endpoint(
         .send()
         .await
         .map_err(|e| ResolveError::DidResolution {
-            did: did.to_string(),
+            did: did.clone(),
             reason: e.to_string(),
         })?;
 
     let body = read_body_limited(resp, MAX_RESPONSE_BYTES)
         .await
         .map_err(|reason| ResolveError::DidResolution {
-            did: did.to_string(),
+            did: did.clone(),
             reason,
         })?;
 
     let doc: serde_json::Value =
         serde_json::from_slice(&body).map_err(|e| ResolveError::DidResolution {
-            did: did.to_string(),
+            did: did.clone(),
             reason: e.to_string(),
         })?;
 
-    extract_pds_endpoint(&doc).ok_or(ResolveError::NoPdsEndpoint {
-        did: did.to_string(),
-    })
+    extract_pds_endpoint(&doc).ok_or_else(|| ResolveError::NoPdsEndpoint { did: did.clone() })
 }
 
 fn extract_pds_endpoint(doc: &serde_json::Value) -> Option<String> {
@@ -188,7 +185,7 @@ fn extract_pds_endpoint(doc: &serde_json::Value) -> Option<String> {
 
 pub async fn fetch_schema_from_pds(
     pds_endpoint: &str,
-    did: &str,
+    did: &Did,
     nsid: &Nsid,
 ) -> Result<LexiconDoc, ResolveError> {
     let url = format!(
@@ -280,7 +277,7 @@ pub async fn resolve_lexicon_with_config(
 
 pub async fn resolve_lexicon_from_did(
     nsid: &Nsid,
-    did: &str,
+    did: &Did,
     plc_directory_url: Option<&str>,
 ) -> Result<LexiconDoc, ResolveError> {
     let pds_endpoint = resolve_pds_endpoint(did, plc_directory_url).await?;

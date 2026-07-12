@@ -651,7 +651,11 @@ impl UserRepository for PostgresUserRepository {
         Ok(result.rows_affected())
     }
 
-    async fn admin_update_password(&self, did: &Did, password_hash: &str) -> Result<u64, DbError> {
+    async fn admin_update_password(
+        &self,
+        did: &Did,
+        password_hash: &PasswordHash,
+    ) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "UPDATE users SET password_hash = $1 WHERE did = $2",
             password_hash.as_str(),

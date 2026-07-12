@@ -15,7 +15,7 @@ use tranquil_pds::state::AppState;
 #[serde(rename_all = "camelCase")]
 pub struct DisableInviteCodesInput {
     pub codes: Option<Vec<String>>,
-    pub accounts: Option<Vec<String>>,
+    pub accounts: Option<Vec<Did>>,
 }
 
 pub async fn disable_invite_codes(
@@ -97,7 +97,7 @@ pub async fn get_invite_codes(
     let user_ids: Vec<uuid::Uuid> = codes_rows.iter().map(|r| r.created_by_user).collect();
     let code_strings: Vec<String> = codes_rows.iter().map(|r| r.code.clone()).collect();
 
-    let creator_dids: std::collections::HashMap<uuid::Uuid, tranquil_types::Did> = state
+    let creator_dids: std::collections::HashMap<uuid::Uuid, Did> = state
         .repos
         .infra
         .get_user_dids_by_ids(&user_ids)
@@ -167,7 +167,7 @@ pub async fn disable_account_invites(
     if account.is_empty() {
         return Err(ApiError::InvalidRequest("account is required".into()));
     }
-    let account_did: tranquil_types::Did = account
+    let account_did: Did = account
         .parse()
         .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
 
@@ -200,7 +200,7 @@ pub async fn enable_account_invites(
     if account.is_empty() {
         return Err(ApiError::InvalidRequest("account is required".into()));
     }
-    let account_did: tranquil_types::Did = account
+    let account_did: Did = account
         .parse()
         .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
 

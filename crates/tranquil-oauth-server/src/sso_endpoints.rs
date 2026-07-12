@@ -839,7 +839,7 @@ pub struct CompleteRegistrationInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompleteRegistrationResponse {
-    pub did: String,
+    pub did: tranquil_pds::types::Did,
     pub handle: tranquil_pds::types::Handle,
     pub redirect_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1016,13 +1016,14 @@ pub async fn complete_registration(
     let pds_endpoint = format!("https://{}", hostname);
     let did_type = input.did_type.as_deref().unwrap_or("plc");
 
-    let did = match did_type {
+    let did: tranquil_pds::types::Did = match did_type {
         "web" => {
             if !tranquil_pds::util::is_self_hosted_did_web_enabled() {
                 return Err(ApiError::SelfHostedDidWebDisabled);
             }
             let encoded_handle = handle.replace(':', "%3A");
-            let self_hosted_did = format!("did:web:{}", encoded_handle);
+            let self_hosted_did =
+                tranquil_pds::types::Did::from(format!("did:web:{}", encoded_handle));
             tracing::info!(did = %self_hosted_did, "Creating self-hosted did:web SSO account");
             self_hosted_did
         }
@@ -1094,11 +1095,8 @@ pub async fn complete_registration(
     };
 
     let rev = Tid::now(LimitedU32::MIN);
-    let did_typed: tranquil_pds::types::Did = did
-        .parse()
-        .map_err(|_| ApiError::InternalError(Some("Invalid DID".into())))?;
     let (commit_bytes, _sig) = match tranquil_pds::repo_ops::create_signed_commit(
-        &did_typed,
+        &did,
         mst_root,
         &rev,
         None,
@@ -1133,7 +1131,7 @@ pub async fn complete_registration(
     let create_input = tranquil_db_traits::CreateSsoAccountInput {
         handle: handle.clone(),
         email: email.clone(),
-        did: did_typed.clone(),
+        did: did.clone(),
         preferred_comms_channel: verification_channel,
         discord_username: input
             .discord_username
@@ -1200,7 +1198,7 @@ pub async fn complete_registration(
     }
     if let Err(e) = tranquil_pds::repo_ops::sequence_account_event(
         &state,
-        &did_typed,
+        &did,
         tranquil_db_traits::AccountStatus::Active,
     )
     .await
@@ -1214,7 +1212,7 @@ pub async fn complete_registration(
     });
     if let Err(e) = tranquil_pds::repo_ops::create_record_internal(
         &state,
-        &did_typed,
+        &did,
         &tranquil_pds::types::PROFILE_COLLECTION,
         &tranquil_pds::types::PROFILE_RKEY,
         &profile_record,
@@ -1269,12 +1267,7 @@ pub async fn complete_registration(
         "SSO registration completed successfully"
     );
 
-    let user_id = state
-        .repos
-        .user
-        .get_id_by_did(&did_typed)
-        .await
-        .unwrap_or(None);
+    let user_id = state.repos.user.get_id_by_did(&did).await.unwrap_or(None);
 
     let channel_auto_verified = verification_channel == tranquil_db_traits::CommsChannel::Email
         && pending_preview.provider_email_verified
@@ -1284,7 +1277,7 @@ pub async fn complete_registration(
         let _ = state
             .repos
             .user
-            .set_channel_verified(&did_typed, tranquil_db_traits::CommsChannel::Email)
+            .set_channel_verified(&did, tranquil_db_traits::CommsChannel::Email)
             .await;
         tracing::info!(did = %did, "Auto-verified email from SSO provider");
 
@@ -1318,7 +1311,7 @@ pub async fn complete_registration(
                 };
 
             let session_data = tranquil_db_traits::SessionTokenCreate {
-                did: did_typed.clone(),
+                did: did.clone(),
                 access_jti: access_meta.jti.clone(),
                 refresh_jti: refresh_meta.jti.clone(),
                 access_expires_at: access_meta.expires_at,
@@ -1373,7 +1366,7 @@ pub async fn complete_registration(
 
     if let Some(uid) = user_id {
         let verification_token = tranquil_pds::auth::verification_token::generate_signup_token(
-            &did_typed,
+            &did,
             verification_channel,
             &verification_recipient,
         );

@@ -66,17 +66,26 @@ pub struct CreateReportOutput {
 
 struct ReportServiceConfig {
     url: String,
-    did: String,
+    did: Did,
 }
 
 fn get_report_service_config() -> Option<ReportServiceConfig> {
     let cfg = tranquil_config::get();
     let url = cfg.moderation.report_service_url.clone()?;
-    let did = cfg.moderation.report_service_did.clone()?;
-    if url.is_empty() || did.is_empty() {
+    let did_str = cfg.moderation.report_service_did.as_deref()?;
+    if url.is_empty() || did_str.is_empty() {
         return None;
     }
-    Some(ReportServiceConfig { url, did })
+    match did_str.parse::<Did>() {
+        Ok(did) => Some(ReportServiceConfig { url, did }),
+        Err(_) => {
+            warn!(
+                report_service_did = did_str,
+                "invalid report_service_did, handling reports locally"
+            );
+            None
+        }
+    }
 }
 
 pub async fn create_report(
@@ -97,7 +106,7 @@ async fn proxy_to_report_service(
     state: &AppState,
     auth_user: &tranquil_pds::auth::AuthenticatedUser,
     service_url: &str,
-    service_did: &str,
+    service_did: &Did,
     input: &CreateReportInput,
 ) -> Response {
     if let Err(e) = is_ssrf_safe(service_url) {

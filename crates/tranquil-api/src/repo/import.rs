@@ -221,17 +221,12 @@ pub async fn import_repo(
             })?;
             let new_rev = Tid::now(LimitedU32::MIN);
             let new_rev_str = new_rev.to_string();
-            let (commit_bytes, _sig) = create_signed_commit(
-                did,
-                import_result.data_cid,
-                &new_rev_str,
-                None,
-                &signing_key,
-            )
-            .map_err(|e| {
-                error!("Failed to create new commit: {}", e);
-                ApiError::InternalError(None)
-            })?;
+            let (commit_bytes, _sig) =
+                create_signed_commit(did, import_result.data_cid, &new_rev, None, &signing_key)
+                    .map_err(|e| {
+                        error!("Failed to create new commit: {}", e);
+                        ApiError::InternalError(None)
+                    })?;
             let new_root_cid: cid::Cid =
                 state.block_store.put(&commit_bytes).await.map_err(|e| {
                     error!("Failed to store new commit block: {:?}", e);

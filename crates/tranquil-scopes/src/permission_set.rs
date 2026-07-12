@@ -220,7 +220,7 @@ async fn fetch_lexicon_via_atproto(nsid: &Nsid) -> Result<LexiconDoc, ScopeExpan
     Ok(record.value)
 }
 
-async fn resolve_lexicon_did_authority(authority: &str) -> Result<String, ScopeExpansionError> {
+async fn resolve_lexicon_did_authority(authority: &str) -> Result<Did, ScopeExpansionError> {
     let resolver = TokioAsyncResolver::tokio_from_system_conf().unwrap_or_else(|e| {
         tracing::warn!("falling back to default DNS resolvers: {}", e);
         TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
@@ -239,7 +239,8 @@ async fn resolve_lexicon_did_authority(authority: &str) -> Result<String, ScopeE
         .flat_map(|record| record.iter())
         .find_map(|data| {
             let txt = String::from_utf8_lossy(data);
-            txt.strip_prefix("did=").map(|did| did.to_string())
+            txt.strip_prefix("did=")
+                .and_then(|did| Did::new(did.trim()).ok())
         })
         .ok_or_else(|| {
             ScopeExpansionError::DnsResolution(format!(
@@ -249,7 +250,7 @@ async fn resolve_lexicon_did_authority(authority: &str) -> Result<String, ScopeE
         })
 }
 
-async fn resolve_did_to_pds(did: &str) -> Result<String, ScopeExpansionError> {
+async fn resolve_did_to_pds(did: &Did) -> Result<String, ScopeExpansionError> {
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()

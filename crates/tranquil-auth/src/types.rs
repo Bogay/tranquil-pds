@@ -204,13 +204,13 @@ impl std::error::Error for TokenDecodeError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActClaim {
-    pub sub: String,
+    pub sub: Did,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub iss: String,
-    pub sub: String,
+    pub iss: Did,
+    pub sub: Did,
     pub aud: String,
     pub exp: i64,
     pub iat: i64,
@@ -231,8 +231,8 @@ pub struct Header {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UnsafeClaims {
-    pub iss: String,
-    pub sub: Option<String>,
+    pub iss: Did,
+    pub sub: Option<Did>,
 }
 
 pub struct TokenData<T> {

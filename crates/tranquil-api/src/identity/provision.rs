@@ -38,7 +38,7 @@ pub async fn submit_plc_genesis(
     state: &AppState,
     signing_key: &SigningKey,
     handle: &Handle,
-) -> Result<String, ApiError> {
+) -> Result<Did, ApiError> {
     let hostname = &tranquil_config::get().server.hostname;
     let pds_endpoint = format!("https://{}", hostname);
 
@@ -122,7 +122,7 @@ pub struct SigningKeyResult {
 
 pub async fn resolve_signing_key(
     state: &AppState,
-    signing_key_did: Option<&str>,
+    signing_key_did: Option<&Did>,
 ) -> Result<SigningKeyResult, ApiError> {
     match signing_key_did {
         Some(key_did) => {

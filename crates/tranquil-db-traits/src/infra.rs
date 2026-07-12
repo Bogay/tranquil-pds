@@ -189,7 +189,7 @@ pub struct ReservedSigningKey {
 pub struct ReservedSigningKeyFull {
     pub id: Uuid,
     pub did: Option<Did>,
-    pub public_key_did_key: String,
+    pub public_key_did_key: Did,
     pub private_key_bytes: Vec<u8>,
     pub expires_at: DateTime<Utc>,
     pub used_at: Option<DateTime<Utc>>,
@@ -314,14 +314,14 @@ pub trait InfraRepository: Send + Sync {
     async fn reserve_signing_key(
         &self,
         did: Option<&Did>,
-        public_key_did_key: &str,
+        public_key_did_key: &Did,
         private_key_bytes: &[u8],
         expires_at: DateTime<Utc>,
     ) -> Result<Uuid, DbError>;
 
     async fn get_reserved_signing_key(
         &self,
-        public_key_did_key: &str,
+        public_key_did_key: &Did,
     ) -> Result<Option<ReservedSigningKey>, DbError>;
 
     async fn mark_signing_key_used(&self, key_id: Uuid) -> Result<(), DbError>;
@@ -455,7 +455,7 @@ pub trait InfraRepository: Send + Sync {
 
     async fn get_reserved_signing_key_full(
         &self,
-        public_key_did_key: &str,
+        public_key_did_key: &Did,
     ) -> Result<Option<ReservedSigningKeyFull>, DbError>;
 
     async fn get_plc_tokens_by_did(&self, did: &Did) -> Result<Vec<PlcTokenInfo>, DbError>;

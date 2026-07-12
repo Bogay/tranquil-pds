@@ -202,11 +202,11 @@ impl PlcClient {
         }
     }
 
-    fn encode_did(did: &str) -> String {
-        urlencoding::encode(did).to_string()
+    fn encode_did(did: &Did) -> String {
+        urlencoding::encode(did.as_str()).to_string()
     }
 
-    pub async fn get_document(&self, did: &str) -> Result<Value, PlcError> {
+    pub async fn get_document(&self, did: &Did) -> Result<Value, PlcError> {
         let cache_key = crate::cache_keys::plc_doc_key(did);
         if let Some(ref cache) = self.cache
             && let Some(cached) = cache.get(&cache_key).await
@@ -245,7 +245,7 @@ impl PlcClient {
         Ok(value)
     }
 
-    pub async fn get_document_data(&self, did: &str) -> Result<Value, PlcError> {
+    pub async fn get_document_data(&self, did: &Did) -> Result<Value, PlcError> {
         let cache_key = crate::cache_keys::plc_data_key(did);
         if let Some(ref cache) = self.cache
             && let Some(cached) = cache.get(&cache_key).await
@@ -284,7 +284,7 @@ impl PlcClient {
         Ok(value)
     }
 
-    pub async fn get_last_op(&self, did: &str) -> Result<PlcOpOrTombstone, PlcError> {
+    pub async fn get_last_op(&self, did: &Did) -> Result<PlcOpOrTombstone, PlcError> {
         let url = format!("{}/{}/log/last", self.base_url, Self::encode_did(did));
         let response = self.client.get(&url).send().await?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -304,7 +304,7 @@ impl PlcClient {
             .map_err(|e| PlcError::InvalidResponse(e.to_string()))
     }
 
-    pub async fn get_audit_log(&self, did: &str) -> Result<Vec<Value>, PlcError> {
+    pub async fn get_audit_log(&self, did: &Did) -> Result<Vec<Value>, PlcError> {
         let url = format!("{}/{}/log/audit", self.base_url, Self::encode_did(did));
         let response = self.client.get(&url).send().await?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -324,7 +324,7 @@ impl PlcClient {
             .map_err(|e| PlcError::InvalidResponse(e.to_string()))
     }
 
-    pub async fn send_operation(&self, did: &str, operation: &Value) -> Result<(), PlcError> {
+    pub async fn send_operation(&self, did: &Did, operation: &Value) -> Result<(), PlcError> {
         let url = format!("{}/{}", self.base_url, Self::encode_did(did));
         let response = self.client.post(&url).json(operation).send().await?;
         if !response.status().is_success() {
@@ -512,7 +512,7 @@ pub fn validate_rotation_did_key(did_key: &str) -> Result<(), String> {
 }
 
 pub struct GenesisResult {
-    pub did: String,
+    pub did: Did,
     pub signed_operation: Value,
 }
 
@@ -553,7 +553,7 @@ pub fn create_genesis_operation(
     })
 }
 
-pub fn did_for_genesis_op(signed_op: &Value) -> Result<String, PlcError> {
+pub fn did_for_genesis_op(signed_op: &Value) -> Result<Did, PlcError> {
     let cbor_bytes = serde_ipld_dagcbor::to_vec(signed_op)
         .map_err(|e| PlcError::Serialization(e.to_string()))?;
     let mut hasher = Sha256::new();
@@ -561,7 +561,7 @@ pub fn did_for_genesis_op(signed_op: &Value) -> Result<String, PlcError> {
     let hash = hasher.finalize();
     let encoded = base32::encode(Alphabet::Rfc4648Lower { padding: false }, &hash);
     let truncated = &encoded[..24];
-    Ok(format!("did:plc:{}", truncated))
+    Ok(Did::from(format!("did:plc:{}", truncated)))
 }
 
 pub fn validate_plc_operation(op: &Value) -> Result<PlcOpType, PlcError> {

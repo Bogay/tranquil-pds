@@ -195,12 +195,12 @@ pub fn extract_verification_recipient(
     }
 }
 
-pub fn create_self_hosted_did_web(handle: &str) -> Result<String, ApiError> {
+pub fn create_self_hosted_did_web(handle: &str) -> Result<Did, ApiError> {
     if !tranquil_pds::util::is_self_hosted_did_web_enabled() {
         return Err(ApiError::SelfHostedDidWebDisabled);
     }
     let encoded_handle = handle.replace(':', "%3A");
-    Ok(format!("did:web:{}", encoded_handle))
+    Ok(Did::from(format!("did:web:{}", encoded_handle)))
 }
 
 pub enum CredentialMatch {

@@ -507,7 +507,7 @@ async fn bench_pg_upsert_records(
     futures::stream::iter(user_ids.iter().zip(dids.iter()))
         .fold((), |(), (uid, did)| async {
             pg_create_user(pg, *uid, did).await;
-            let did_typed = Did::from(did.clone());
+            let did = Did::from(did.clone());
             let handle = Handle::from(format!("bench.{}.invalid", uid.as_simple()));
             repo.create_repo(
                 *uid,
@@ -612,7 +612,7 @@ async fn bench_pg_get_record_cid(pg: &sqlx::PgPool, concurrency: usize, ops_per_
     let collection = Nsid::from("app.bsky.feed.post".to_string());
     pg_create_user(pg, user_id, &did).await;
     let repo = tranquil_db::postgres::PostgresRepoRepository::new(pg.clone());
-    let did_typed = Did::from(did.clone());
+    let did = Did::from(did);
     let handle = Handle::from(format!("bench.{}.invalid", user_id.as_simple()));
     repo.create_repo(
         user_id,
@@ -668,7 +668,7 @@ async fn bench_pg_list_records(pg: &sqlx::PgPool, concurrency: usize, ops_per_ta
     let collection = Nsid::from("app.bsky.feed.post".to_string());
     pg_create_user(pg, user_id, &did).await;
     let repo = tranquil_db::postgres::PostgresRepoRepository::new(pg.clone());
-    let did_typed = Did::from(did.clone());
+    let did = Did::from(did);
     let handle = Handle::from(format!("bench.{}.invalid", user_id.as_simple()));
     repo.create_repo(
         user_id,

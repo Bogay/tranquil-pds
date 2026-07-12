@@ -93,12 +93,8 @@ pub async fn verify_oauth_access_token(
             ));
         }
     }
-    let did: Did = token_data
-        .did
-        .parse()
-        .map_err(|_| OAuthError::InvalidToken("Invalid DID in token".to_string()))?;
     Ok(VerifyResult {
-        did,
+        did: token_data.did,
         token_id,
         client_id: token_data.client_id,
         scope: token_data.scope,

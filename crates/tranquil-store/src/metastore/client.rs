@@ -1726,7 +1726,10 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
         recv(rx).await
     }
 
-    async fn get_app_password_hashes_by_did(&self, did: &Did) -> Result<Vec<String>, DbError> {
+    async fn get_app_password_hashes_by_did(
+        &self,
+        did: &Did,
+    ) -> Result<Vec<PasswordHash>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Session(
             SessionRequest::GetAppPasswordHashesByDid {
@@ -2041,7 +2044,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
     async fn reserve_signing_key(
         &self,
         did: Option<&Did>,
-        public_key_did_key: &str,
+        public_key_did_key: &Did,
         private_key_bytes: &[u8],
         expires_at: DateTime<Utc>,
     ) -> Result<Uuid, DbError> {
@@ -2059,7 +2062,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
 
     async fn get_reserved_signing_key(
         &self,
-        public_key_did_key: &str,
+        public_key_did_key: &Did,
     ) -> Result<Option<ReservedSigningKey>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
@@ -2466,7 +2469,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
 
     async fn get_reserved_signing_key_full(
         &self,
-        public_key_did_key: &str,
+        public_key_did_key: &Did,
     ) -> Result<Option<ReservedSigningKeyFull>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
@@ -3730,7 +3733,11 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
         recv(rx).await
     }
 
-    async fn admin_update_password(&self, did: &Did, password_hash: &str) -> Result<u64, DbError> {
+    async fn admin_update_password(
+        &self,
+        did: &Did,
+        password_hash: &PasswordHash,
+    ) -> Result<u64, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::AdminUpdatePassword {

@@ -1461,7 +1461,7 @@ impl InfraOps {
         Ok(val.map(|v| ReservedSigningKeyFull {
             id: v.id,
             did: v.did.and_then(|d| Did::new(d).ok()),
-            public_key_did_key: v.public_key_did_key,
+            public_key_did_key: Did::from(v.public_key_did_key),
             private_key_bytes: v.private_key_bytes,
             expires_at: DateTime::from_timestamp_millis(v.expires_at_ms).unwrap_or_default(),
             used_at: v.used_at_ms.and_then(DateTime::from_timestamp_millis),

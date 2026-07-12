@@ -19,7 +19,7 @@ pub struct ConsentResponse {
     pub logo_uri: Option<String>,
     pub scopes: Vec<ScopeInfo>,
     pub show_consent: bool,
-    pub did: String,
+    pub did: Did,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -256,7 +256,7 @@ pub async fn consent_get(
         logo_uri: client_metadata.as_ref().and_then(|m| m.logo_uri.clone()),
         scopes,
         show_consent,
-        did: did.to_string(),
+        did: did.clone(),
         handle: account_handle,
         is_delegation,
         controller_did: controller_did_resp,

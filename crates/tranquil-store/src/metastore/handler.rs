@@ -253,7 +253,7 @@ pub enum RepoRequest {
 impl RepoRequest {
     fn routing(&self, user_hashes: &UserHashMap) -> Routing {
         match self {
-            Self::CreateRepoFull { did, .. } => did_to_routing(did.as_str()),
+            Self::CreateRepoFull { did, .. } => did_to_routing(did),
             Self::UpdateRepoRoot { user_id, .. }
             | Self::UpdateRepoRev { user_id, .. }
             | Self::DeleteRepo { user_id, .. }
@@ -262,7 +262,7 @@ impl RepoRequest {
             | Self::GetRepoRootCidByUserId { user_id, .. } => uuid_to_routing(user_hashes, user_id),
             Self::GetRepoRootByDid { did, .. }
             | Self::GetAccountWithRepo { did, .. }
-            | Self::UpdateRepoStatus { did, .. } => did_to_routing(did.as_str()),
+            | Self::UpdateRepoStatus { did, .. } => did_to_routing(did),
             Self::CountRepos { .. }
             | Self::GetReposWithoutRev { .. }
             | Self::ListReposPaginated { .. } => Routing::Global,
@@ -503,7 +503,7 @@ pub enum CommitRequest {
 impl CommitRequest {
     fn routing(&self, user_hashes: &UserHashMap) -> Routing {
         match self {
-            Self::ApplyCommit { input, .. } => did_to_routing(input.did.as_str()),
+            Self::ApplyCommit { input, .. } => did_to_routing(&input.did),
             Self::ImportRepoData { user_id, .. }
             | Self::InsertRecordBlobs {
                 repo_id: user_id, ..
@@ -644,7 +644,7 @@ impl BlobRequest {
             Self::ListMissingBlobs { repo_id, .. }
             | Self::CountDistinctRecordBlobs { repo_id, .. }
             | Self::GetBlobsForExport { repo_id, .. } => uuid_to_routing(user_hashes, repo_id),
-            Self::ListBlobsSinceRev { did, .. } => did_to_routing(did.as_str()),
+            Self::ListBlobsSinceRev { did, .. } => did_to_routing(did),
         }
     }
 }
@@ -731,7 +731,7 @@ impl DelegationRequest {
             }
             | Self::CountAuditLogEntries {
                 delegated_did: did, ..
-            } => did_to_routing(did.as_str()),
+            } => did_to_routing(did),
             Self::CreateDelegation { delegated_did, .. }
             | Self::RevokeDelegation { delegated_did, .. }
             | Self::UpdateDelegationScopes { delegated_did, .. }
@@ -743,7 +743,7 @@ impl DelegationRequest {
             | Self::ControlsAnyAccounts {
                 did: controller_did,
                 ..
-            } => did_to_routing(controller_did.as_str()),
+            } => did_to_routing(controller_did),
         }
     }
 }
@@ -822,7 +822,7 @@ impl SsoRequest {
         match self {
             Self::CreateExternalIdentity { did, .. }
             | Self::GetExternalIdentitiesByDid { did, .. }
-            | Self::DeleteExternalIdentity { did, .. } => did_to_routing(did.as_str()),
+            | Self::DeleteExternalIdentity { did, .. } => did_to_routing(did),
             Self::GetExternalIdentityByProvider { .. }
             | Self::UpdateExternalIdentityLogin { .. }
             | Self::ConsumeSsoAuthState { .. }
@@ -964,7 +964,7 @@ impl SessionRequest {
             | Self::UpdateLastReauth { did, .. }
             | Self::GetSessionMfaStatus { did, .. }
             | Self::UpdateMfaVerified { did, .. }
-            | Self::GetAppPasswordHashesByDid { did, .. } => did_to_routing(did.as_str()),
+            | Self::GetAppPasswordHashesByDid { did, .. } => did_to_routing(did),
             Self::RefreshSessionAtomic { data, .. } => did_to_routing(data.did.as_str()),
             Self::ListAppPasswords { user_id, .. }
             | Self::GetAppPasswordsForLogin { user_id, .. }
@@ -1721,7 +1721,7 @@ impl UserRequest {
             }
             | Self::SetRecoveryToken { did, .. }
             | Self::EnableTotpVerified { did, .. }
-            | Self::SetTwoFactorEnabled { did, .. } => did_to_routing(did.as_str()),
+            | Self::SetTwoFactorEnabled { did, .. } => did_to_routing(did),
 
             Self::GetCommsPrefs { user_id, .. }
             | Self::GetUserKeyById { user_id, .. }
@@ -2101,7 +2101,7 @@ impl InfraRequest {
             | Self::GetAdminAccountInfoByDid { did, .. }
             | Self::GetDeletionRequestByDid { did, .. }
             | Self::GetPlcTokensByDid { did, .. }
-            | Self::CountPlcTokensByDid { did, .. } => did_to_routing(did.as_str()),
+            | Self::CountPlcTokensByDid { did, .. } => did_to_routing(did),
             Self::GetBlobStorageKeyByCid { cid, .. } | Self::DeleteBlobByCid { cid, .. } => {
                 cid_to_routing(cid)
             }
@@ -2405,14 +2405,12 @@ impl OAuthRequest {
             | Self::ListSessionsByDid { did, .. }
             | Self::DeleteSessionsByDid { did, .. }
             | Self::DeleteSessionsByDidExcept { did, .. }
-            | Self::DeleteSessionById { did, .. } => did_to_routing(did.as_str()),
-            Self::RevokeTokensForController { delegated_did, .. } => {
-                did_to_routing(delegated_did.as_str())
-            }
+            | Self::DeleteSessionById { did, .. } => did_to_routing(did),
+            Self::RevokeTokensForController { delegated_did, .. } => did_to_routing(delegated_did),
             Self::SetAuthorizationDid { did, .. }
             | Self::UpdateAuthorizationRequest { did, .. }
             | Self::MarkRequestAuthenticated { did, .. }
-            | Self::SetRequestDid { did, .. } => did_to_routing(did.as_str()),
+            | Self::SetRequestDid { did, .. } => did_to_routing(did),
             Self::CreateToken { .. }
             | Self::GetTokenById { .. }
             | Self::GetTokenByRefreshToken { .. }
@@ -6284,7 +6282,7 @@ mod tests {
         .unwrap();
         let user_hashes = ms.user_hashes().as_ref();
         let did = Did::from("did:plc:limpet".to_string());
-        let expected = did_to_routing(did.as_str());
+        let expected = did_to_routing(&did);
         let sid = SessionId::new(7);
 
         let (tx, _rx) = oneshot::channel();

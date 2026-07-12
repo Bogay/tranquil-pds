@@ -1,3 +1,4 @@
+use crate::types::Did;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -30,7 +31,7 @@ pub enum ServiceResolutionError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DidDocument {
-    pub id: String,
+    pub id: Did,
     #[serde(default)]
     #[serde(rename = "service")]
     pub services: Vec<DidService>,
@@ -51,7 +52,7 @@ pub struct DidService {
 #[derive(Debug, Clone)]
 pub struct ResolvedService {
     pub url: String,
-    pub did: String,
+    pub did: Did,
     pub service_id: String,
 }
 
@@ -94,7 +95,7 @@ impl DidResolver {
 
     pub async fn resolve_service(
         &self,
-        did: &str,
+        did: &Did,
         service_id: &str,
     ) -> Result<Arc<ResolvedService>, ServiceResolutionError> {
         {
@@ -117,7 +118,7 @@ impl DidResolver {
 
         let resolved = Arc::new(ResolvedService {
             url: service.service_endpoint.clone(),
-            did: did.into(),
+            did: did.clone(),
             service_id: service_id.into(),
         });
 
@@ -132,10 +133,10 @@ impl DidResolver {
         Ok(resolved)
     }
 
-    pub async fn resolve_did(&self, did: &str) -> Result<Arc<DidDocument>, DidResolutionError> {
+    pub async fn resolve_did(&self, did: &Did) -> Result<Arc<DidDocument>, DidResolutionError> {
         {
             let cache = self.parsed_did_doc_cache.read().await;
-            if let Some(cached) = cache.get(did)
+            if let Some(cached) = cache.get(did.as_str())
                 && cached.0.elapsed() < self.cache_ttl
             {
                 return Ok(cached.1.clone());
@@ -146,34 +147,34 @@ impl DidResolver {
 
         {
             let mut cache = self.parsed_did_doc_cache.write().await;
-            cache.insert(did.into(), (Instant::now(), resolved.clone()));
+            cache.insert(did.as_str().into(), (Instant::now(), resolved.clone()));
         }
 
         Ok(resolved)
     }
 
-    pub async fn refresh_did(&self, did: &str) -> Result<Arc<DidDocument>, DidResolutionError> {
+    pub async fn refresh_did(&self, did: &Did) -> Result<Arc<DidDocument>, DidResolutionError> {
         {
             let mut cache = self.parsed_did_doc_cache.write().await;
-            cache.remove(did);
+            cache.remove(did.as_str());
             let mut cache = self.service_cache.write().await;
-            cache.retain(|k, _| !k.starts_with(did));
+            cache.retain(|k, _| !k.starts_with(did.as_str()));
         }
         self.resolve_did(did).await
     }
 
-    async fn resolve_did_uncached(&self, did: &str) -> Result<DidDocument, DidResolutionError> {
-        if did.starts_with("did:web:") {
+    async fn resolve_did_uncached(&self, did: &Did) -> Result<DidDocument, DidResolutionError> {
+        if did.is_web() {
             self.resolve_did_web(did).await
-        } else if did.starts_with("did:plc:") {
+        } else if did.is_plc() {
             self.resolve_did_plc(did).await
         } else {
             warn!("Unsupported DID method: {}", did);
-            Err(DidResolutionError::UnsupportedDidMethod(did.into()))
+            Err(DidResolutionError::UnsupportedDidMethod(did.to_string()))
         }
     }
 
-    async fn resolve_did_web(&self, did: &str) -> Result<DidDocument, DidResolutionError> {
+    async fn resolve_did_web(&self, did: &Did) -> Result<DidDocument, DidResolutionError> {
         let url = build_did_web_url(did)?;
 
         debug!("Resolving did:web {} via {}", did, url);
@@ -197,8 +198,12 @@ impl DidResolver {
             .map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
     }
 
-    async fn resolve_did_plc(&self, did: &str) -> Result<DidDocument, DidResolutionError> {
-        let url = format!("{}/{}", self.plc_directory_url, urlencoding::encode(did));
+    async fn resolve_did_plc(&self, did: &Did) -> Result<DidDocument, DidResolutionError> {
+        let url = format!(
+            "{}/{}",
+            self.plc_directory_url,
+            urlencoding::encode(did.as_str())
+        );
 
         debug!("Resolving did:plc {} via {}", did, url);
 
@@ -227,11 +232,11 @@ impl DidResolver {
 
     pub async fn fetch_did_document(
         &self,
-        did: &str,
+        did: &Did,
     ) -> Result<Arc<serde_json::Value>, DidResolutionError> {
         {
             let cache = self.did_doc_cache.read().await;
-            if let Some(cached) = cache.get(did)
+            if let Some(cached) = cache.get(did.as_str())
                 && cached.0.elapsed() < self.cache_ttl
             {
                 return Ok(cached.1.clone());
@@ -242,7 +247,7 @@ impl DidResolver {
 
         {
             let mut cache = self.did_doc_cache.write().await;
-            cache.insert(did.into(), (Instant::now(), resolved.clone()));
+            cache.insert(did.as_str().into(), (Instant::now(), resolved.clone()));
         }
 
         Ok(resolved)
@@ -251,21 +256,21 @@ impl DidResolver {
     // TODO: make cached version
     async fn fetch_did_document_uncached(
         &self,
-        did: &str,
+        did: &Did,
     ) -> Result<serde_json::Value, DidResolutionError> {
-        if did.starts_with("did:web:") {
+        if did.is_web() {
             self.fetch_did_document_web(did).await
-        } else if did.starts_with("did:plc:") {
+        } else if did.is_plc() {
             self.fetch_did_document_plc(did).await
         } else {
             warn!("Unsupported DID method: {}", did);
-            Err(DidResolutionError::UnsupportedDidMethod(did.into()))
+            Err(DidResolutionError::UnsupportedDidMethod(did.to_string()))
         }
     }
 
     async fn fetch_did_document_web(
         &self,
-        did: &str,
+        did: &Did,
     ) -> Result<serde_json::Value, DidResolutionError> {
         let url = build_did_web_url(did)?;
 
@@ -290,9 +295,13 @@ impl DidResolver {
 
     async fn fetch_did_document_plc(
         &self,
-        did: &str,
+        did: &Did,
     ) -> Result<serde_json::Value, DidResolutionError> {
-        let url = format!("{}/{}", self.plc_directory_url, urlencoding::encode(did));
+        let url = format!(
+            "{}/{}",
+            self.plc_directory_url,
+            urlencoding::encode(did.as_str())
+        );
 
         let resp = self
             .client
@@ -317,9 +326,9 @@ impl DidResolver {
             .map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
     }
 
-    pub async fn invalidate_cache(&self, did: &str) {
+    pub async fn invalidate_cache(&self, did: &Did) {
         let mut doc_cache = self.parsed_did_doc_cache.write().await;
-        doc_cache.remove(did);
+        doc_cache.remove(did.as_str());
     }
 }
 
@@ -333,7 +342,7 @@ pub fn create_did_resolver() -> Arc<DidResolver> {
     Arc::new(DidResolver::new())
 }
 
-fn build_did_web_url(did: &str) -> Result<String, DidResolutionError> {
+fn build_did_web_url(did: &Did) -> Result<String, DidResolutionError> {
     let host = did
         .strip_prefix("did:web:")
         .ok_or(DidResolutionError::InvalidDidWeb)?;

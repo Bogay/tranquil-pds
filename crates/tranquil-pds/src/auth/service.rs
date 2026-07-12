@@ -219,7 +219,7 @@ impl ServiceTokenVerifier {
             }
         }
 
-        let did = claims.iss.as_str();
+        let did = &claims.iss;
         let public_key = self.resolve_signing_key(did).await?;
 
         let signature_bytes = URL_SAFE_NO_PAD
@@ -240,7 +240,7 @@ impl ServiceTokenVerifier {
         Ok(claims)
     }
 
-    async fn resolve_signing_key(&self, did: &str) -> Result<VerifyingKey, ServiceTokenError> {
+    async fn resolve_signing_key(&self, did: &Did) -> Result<VerifyingKey, ServiceTokenError> {
         let did_doc = self.resolve_did_document(did).await?;
 
         let atproto_key = did_doc
@@ -257,18 +257,22 @@ impl ServiceTokenVerifier {
         parse_did_key_multibase(multibase)
     }
 
-    async fn resolve_did_document(&self, did: &str) -> Result<FullDidDocument, ServiceTokenError> {
-        if did.starts_with("did:plc:") {
+    async fn resolve_did_document(&self, did: &Did) -> Result<FullDidDocument, ServiceTokenError> {
+        if did.is_plc() {
             self.resolve_did_plc(did).await
-        } else if did.starts_with("did:web:") {
+        } else if did.is_web() {
             self.resolve_did_web(did).await
         } else {
             Err(ServiceTokenError::UnsupportedDidMethod)
         }
     }
 
-    async fn resolve_did_plc(&self, did: &str) -> Result<FullDidDocument, ServiceTokenError> {
-        let url = format!("{}/{}", self.plc_directory_url, urlencoding::encode(did));
+    async fn resolve_did_plc(&self, did: &Did) -> Result<FullDidDocument, ServiceTokenError> {
+        let url = format!(
+            "{}/{}",
+            self.plc_directory_url,
+            urlencoding::encode(did.as_str())
+        );
         debug!("Resolving did:plc {} via {}", did, url);
 
         let resp = self
@@ -291,7 +295,7 @@ impl ServiceTokenVerifier {
             .map_err(ServiceTokenError::InvalidDidDocument)
     }
 
-    async fn resolve_did_web(&self, did: &str) -> Result<FullDidDocument, ServiceTokenError> {
+    async fn resolve_did_web(&self, did: &Did) -> Result<FullDidDocument, ServiceTokenError> {
         let host = did
             .strip_prefix("did:web:")
             .ok_or(ServiceTokenError::InvalidFormat)?;

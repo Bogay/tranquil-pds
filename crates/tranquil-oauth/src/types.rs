@@ -257,7 +257,7 @@ pub struct TokenResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sub: Option<String>,
+    pub sub: Option<Did>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

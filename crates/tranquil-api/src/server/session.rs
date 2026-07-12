@@ -575,7 +575,7 @@ pub async fn refresh_session(
         &session_row.did,
         &key_bytes,
         session_row.scope.as_deref(),
-        session_row.controller_did.as_deref(),
+        session_row.controller_did.as_ref(),
         None,
     ) {
         Ok(m) => m,
@@ -747,7 +747,7 @@ fn remint_grace_tokens(
         &replay.did,
         key_bytes,
         replay.scope.as_deref(),
-        replay.controller_did.as_deref(),
+        replay.controller_did.as_ref(),
         None,
         &replay.access_jti,
         replay.access_expires_at,
@@ -915,7 +915,6 @@ pub async fn confirm_signup(
     let session = match crate::identity::provision::create_and_store_session(
         &state,
         &row.did,
-        &row.did,
         &key_bytes,
         "transition:generic transition:chat.bsky",
         None,
@@ -957,7 +956,7 @@ pub struct AutoResendResult {
 }
 
 pub async fn auto_resend_verification(state: &AppState, did: &Did) -> Option<AutoResendResult> {
-    let debounce_key = tranquil_pds::cache_keys::auto_verify_sent_key(did.as_str());
+    let debounce_key = tranquil_pds::cache_keys::auto_verify_sent_key(did);
     let debounced = state.cache.get(&debounce_key).await.is_some();
     let row = match state.repos.user.get_resend_verification_by_did(did).await {
         Ok(Some(row)) => row,
@@ -1224,7 +1223,7 @@ pub async fn revoke_all_sessions(
         state
             .repos
             .oauth
-            .delete_sessions_by_did_except(&auth.did, &jti_typed)
+            .delete_sessions_by_did_except(&auth.did, &token_id)
             .await
             .log_db_err("revoking OAuth sessions")?;
     } else {

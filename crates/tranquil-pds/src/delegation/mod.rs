@@ -38,7 +38,7 @@ pub async fn resolve_identity(
         .flatten()
         .is_some();
 
-    let did_doc = state.did_resolver.resolve_did(did.as_str()).await?;
+    let did_doc = state.did_resolver.resolve_did(did).await?;
 
     let pds_url = did_doc.services.iter().find_map(|svc| {
         if (svc.id == "#atproto_pds" || svc.id.ends_with("#atproto_pds"))

@@ -1359,7 +1359,7 @@ async fn parity_signing_key_reservation() {
     let f = ParityFixture::new().await;
     let did = test_did("sigkey");
     let expires = chrono::Utc::now() + chrono::Duration::hours(1);
-    let pub_key = format!("did:key:z6Mk{}", Uuid::new_v4().simple());
+    let pub_key = Did::from(format!("did:key:z6Mk{}", Uuid::new_v4().simple()));
     let priv_bytes = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
 
     f.pg.infra

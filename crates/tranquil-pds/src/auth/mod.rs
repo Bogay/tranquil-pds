@@ -372,7 +372,7 @@ async fn validate_bearer_token_with_options_internal(
                     )
                     .await;
 
-                let status_cache_key = crate::cache_keys::user_status_key(did.as_ref());
+                let status_cache_key = crate::cache_keys::user_status_key(&did);
                 let cached = CachedUserStatus {
                     deactivated: user.deactivated_at.is_some(),
                     takendown: user.takedown_ref.is_some(),
@@ -504,22 +504,13 @@ async fn validate_bearer_token_with_options_internal(
                 oauth_token.key_bytes.as_deref(),
                 oauth_token.encryption_version,
             );
-            let did: Did = oauth_token
-                .did
-                .parse()
-                .map_err(|_| TokenValidationError::InvalidToken)?;
-            let controller_did: Option<Did> = oauth_info
-                .controller_did
-                .map(|d| d.parse())
-                .transpose()
-                .map_err(|_| TokenValidationError::InvalidToken)?;
             return Ok(AuthenticatedUser {
-                did,
+                did: oauth_token.did,
                 key_bytes,
                 is_admin: oauth_token.is_admin,
                 status,
                 scope: oauth_info.scope,
-                controller_did,
+                controller_did: oauth_info.controller_did,
                 auth_source: AuthSource::OAuth,
             });
         } else {
@@ -530,7 +521,7 @@ async fn validate_bearer_token_with_options_internal(
     Err(TokenValidationError::AuthenticationFailed)
 }
 
-pub async fn invalidate_auth_cache(cache: &dyn Cache, did: &str) {
+pub async fn invalidate_auth_cache(cache: &dyn Cache, did: &Did) {
     let key_cache_key = crate::cache_keys::signing_key_key(did);
     let status_cache_key = crate::cache_keys::user_status_key(did);
     let _ = cache.delete(&key_cache_key).await;

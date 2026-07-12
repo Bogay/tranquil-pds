@@ -39,7 +39,7 @@ pub struct CreatePasskeyAccountInput {
     pub invite_code: Option<String>,
     pub did: Option<String>,
     pub did_type: Option<String>,
-    pub signing_key: Option<String>,
+    pub signing_key: Option<Did>,
     pub verification_channel: Option<tranquil_db_traits::CommsChannel>,
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
@@ -154,7 +154,7 @@ pub async fn create_passkey_account(
     let secret_key = key_result.signing_key;
     let reserved_key_id = key_result.reserved_key_id;
 
-    let did = match did_type {
+    let did: Did = match did_type {
         "web" => {
             let self_hosted_did = match common::create_self_hosted_did_web(&handle) {
                 Ok(d) => d,
@@ -269,13 +269,9 @@ pub async fn create_passkey_account(
         None
     };
 
-    let did_typed: Did = match did.parse() {
-        Ok(d) => d,
-        Err(_) => return Err(ApiError::InternalError(Some("Invalid DID".into()))),
-    };
     let repo = match crate::identity::provision::init_genesis_repo(
         &state,
-        &did_typed,
+        &did,
         &secret_key,
         &secret_key_bytes,
     )
@@ -303,7 +299,7 @@ pub async fn create_passkey_account(
     let create_input = tranquil_db_traits::CreatePasskeyAccountInput {
         handle: handle.clone(),
         email: email.clone().unwrap_or_default(),
-        did: did_typed.clone(),
+        did: did.clone(),
         preferred_comms_channel: verification_channel,
         discord_username: comms.discord,
         telegram_username: comms.telegram,
@@ -353,7 +349,7 @@ pub async fn create_passkey_account(
     crate::identity::provision::enqueue_signup_verification(
         &state,
         user_id,
-        &did_typed,
+        &did,
         verification_channel,
         &verification_recipient,
     )
@@ -367,7 +363,7 @@ pub async fn create_passkey_account(
                 let refresh_jti = Jti::from(uuid::Uuid::new_v4().to_string());
                 let refresh_expires = chrono::Utc::now() + chrono::Duration::hours(24);
                 let session_data = tranquil_db_traits::SessionTokenCreate {
-                    did: did_typed.clone(),
+                    did: did.clone(),
                     access_jti: token_meta.jti.clone(),
                     refresh_jti,
                     access_expires_at: token_meta.expires_at,
@@ -688,7 +684,7 @@ pub async fn request_passkey_recovery(
     if let Err(e) = state
         .repos
         .user
-        .set_recovery_token(&user.did, &recovery_token_hash, expires_at)
+        .set_recovery_token(&user.did, recovery_token_hash.as_str(), expires_at)
         .await
     {
         error!("Error updating recovery token: {:?}", e);

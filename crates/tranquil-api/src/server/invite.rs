@@ -72,8 +72,8 @@ pub struct CreateInviteCodesOutput {
 
 #[derive(Serialize)]
 pub struct AccountCodes {
-    pub account: String,
-    pub codes: Vec<String>,
+    pub account: Did,
+    pub codes: Vec<InviteCodeValue>,
 }
 
 pub async fn create_invite_codes(

@@ -44,10 +44,6 @@ pub async fn resolve_handle(
     if handle_str.is_empty() {
         return ApiError::InvalidRequest("handle is required".into()).into_response();
     }
-    let cache_key = tranquil_pds::cache_keys::handle_key(handle_str);
-    if let Some(did) = state.cache.get(&cache_key).await {
-        return DidResponse::response(did).into_response();
-    }
     let handle: Handle = match handle_str.parse() {
         Ok(h) => h,
         Err(_) => {
@@ -163,8 +159,8 @@ pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -
 
 async fn serve_handle_did_doc(state: &AppState, handle: &str, hostname: &str) -> Response {
     let encoded_handle = handle.replace(':', "%3A");
-    let expected_did = format!("did:web:{}", encoded_handle);
-    let expected_did_typed: tranquil_pds::types::Did = match expected_did.parse() {
+    let expected_did: tranquil_pds::types::Did = match format!("did:web:{}", encoded_handle).parse()
+    {
         Ok(d) => d,
         Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
     };
@@ -350,7 +346,7 @@ pub async fn verify_did_web(
     did: &str,
     hostname: &str,
     handle: &str,
-    expected_signing_key: Option<&str>,
+    expected_signing_key: Option<&Did>,
 ) -> Result<(), DidWebVerifyError> {
     let hostname_for_handles = hostname.split(':').next().unwrap_or(hostname);
     let subdomain_host = format!("{}.{}", handle, hostname_for_handles);

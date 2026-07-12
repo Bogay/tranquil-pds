@@ -19,6 +19,7 @@ use tranquil_pds::auth::{Auth, NotTakendown};
 use tranquil_pds::oauth::scopes::{AccountAction, AccountAttr};
 use tranquil_pds::rate_limit::{EmailUpdateLimit, RateLimited, VerificationCheckLimit};
 use tranquil_pds::state::AppState;
+use tranquil_pds::types::{AtIdentifier, Did};
 
 const EMAIL_UPDATE_TTL: Duration = Duration::from_secs(30 * 60);
 
@@ -37,7 +38,7 @@ struct PendingEmailUpdate {
 
 async fn get_pending_email_update(
     cache: &dyn tranquil_pds::cache::Cache,
-    did: &str,
+    did: &Did,
 ) -> Option<PendingEmailUpdate> {
     cache
         .get(&tranquil_pds::cache_keys::email_update_key(did))
@@ -79,7 +80,7 @@ pub async fn request_email_update(
     if token_required {
         let token = tranquil_pds::auth::email_token::create_email_token(
             state.cache.as_ref(),
-            auth.did.as_str(),
+            &auth.did,
             tranquil_pds::auth::email_token::EmailTokenPurpose::UpdateEmail,
         )
         .await
@@ -249,7 +250,7 @@ pub async fn update_email(
 
                 tranquil_pds::auth::email_token::validate_email_token(
                     state.cache.as_ref(),
-                    did.as_str(),
+                    did,
                     tranquil_pds::auth::email_token::EmailTokenPurpose::UpdateEmail,
                     token,
                 )
@@ -298,7 +299,7 @@ pub async fn update_email(
 
             let short_token_result = tranquil_pds::auth::email_token::validate_email_token(
                 state.cache.as_ref(),
-                did.as_str(),
+                did,
                 tranquil_pds::auth::email_token::EmailTokenPurpose::UpdateEmail,
                 token,
             )

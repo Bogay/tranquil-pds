@@ -38,7 +38,7 @@ pub async fn list_controllers(
         async move {
             if c.handle.is_none() {
                 c.handle = did_resolver
-                    .fetch_did_document(c.did.as_str())
+                    .fetch_did_document(&c.did)
                     .await
                     .ok()
                     .and_then(|doc| tranquil_types::did_doc::extract_handle(&doc));
@@ -77,7 +77,7 @@ pub async fn add_controller(
         }
         match state
             .cross_pds_oauth
-            .check_remote_is_delegated(pds_url, input.controller_did.as_str())
+            .check_remote_is_delegated(pds_url, &input.controller_did)
             .await
         {
             Some(true) => {

@@ -58,13 +58,13 @@ pub async fn create_challenge(
 }
 
 pub async fn clear_challenge(cache: &dyn Cache, did: &Did) {
-    let _ = cache.delete(&challenge_key(did.as_str())).await;
-    let _ = cache.delete(&cooldown_key(did.as_str())).await;
+    let _ = cache.delete(&challenge_key(did)).await;
+    let _ = cache.delete(&cooldown_key(did)).await;
 }
 
 async fn validate_challenge_internal(
     cache: &dyn Cache,
-    did: &str,
+    did: &Did,
     code: &str,
 ) -> Result<(), ValidationError> {
     if !cache.is_available() {
@@ -119,11 +119,11 @@ async fn validate_challenge_internal(
     Ok(())
 }
 
-fn challenge_key(did: &str) -> String {
+fn challenge_key(did: &Did) -> String {
     format!("legacy_2fa:{}", did)
 }
 
-fn cooldown_key(did: &str) -> String {
+fn cooldown_key(did: &Did) -> String {
     format!("legacy_2fa_cooldown:{}", did)
 }
 
@@ -215,7 +215,7 @@ pub async fn validate_challenge(
     did: &Did,
     code: &str,
 ) -> Result<(), ValidationError> {
-    validate_challenge_internal(cache, did.as_str(), code).await
+    validate_challenge_internal(cache, did, code).await
 }
 
 async fn create_challenge_code(
@@ -226,7 +226,7 @@ async fn create_challenge_code(
         return Err(ChallengeError::CacheUnavailable);
     }
 
-    let cooldown = cooldown_key(did.as_str());
+    let cooldown = cooldown_key(did);
     if cache.get(&cooldown).await.is_some() {
         return Err(ChallengeError::RateLimited);
     }
@@ -244,7 +244,7 @@ async fn create_challenge_code(
 
     cache
         .set(
-            &challenge_key(did.as_str()),
+            &challenge_key(did),
             &json,
             Duration::from_secs(CHALLENGE_TTL_SECS),
         )

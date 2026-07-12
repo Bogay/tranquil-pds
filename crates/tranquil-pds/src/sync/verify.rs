@@ -124,23 +124,22 @@ impl CarVerifier {
         &self,
         did: &Did,
     ) -> Result<DidDocument<'static>, VerifyError> {
-        let did_str = did.as_str();
-        if did_str.starts_with("did:plc:") {
-            self.resolve_plc_did(did_str).await
-        } else if did_str.starts_with("did:web:") {
-            self.resolve_web_did(did_str).await
+        if did.is_plc() {
+            self.resolve_plc_did(did).await
+        } else if did.is_web() {
+            self.resolve_web_did(did).await
         } else {
             Err(VerifyError::DidResolutionFailed(format!(
                 "Unsupported DID method: {}",
-                did_str
+                did
             )))
         }
     }
 
-    async fn resolve_plc_did(&self, did: &str) -> Result<DidDocument<'static>, VerifyError> {
+    async fn resolve_plc_did(&self, did: &Did) -> Result<DidDocument<'static>, VerifyError> {
         let plc_url = std::env::var("PLC_DIRECTORY_URL")
             .unwrap_or_else(|_| tranquil_config::get().plc.directory_url.clone());
-        let url = format!("{}/{}", plc_url, urlencoding::encode(did));
+        let url = format!("{}/{}", plc_url, urlencoding::encode(did.as_str()));
         let response = self
             .http_client
             .get(&url)
@@ -162,7 +161,7 @@ impl CarVerifier {
         Ok(doc.into_static())
     }
 
-    async fn resolve_web_did(&self, did: &str) -> Result<DidDocument<'static>, VerifyError> {
+    async fn resolve_web_did(&self, did: &Did) -> Result<DidDocument<'static>, VerifyError> {
         let domain = did.strip_prefix("did:web:").ok_or_else(|| {
             VerifyError::DidResolutionFailed("Invalid did:web format".to_string())
         })?;

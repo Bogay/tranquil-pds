@@ -10,17 +10,18 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::state::AppState;
+use tranquil_pds::types::Did;
 
 const SECP256K1_MULTICODEC_PREFIX: [u8; 2] = [0xe7, 0x01];
 
-fn public_key_to_did_key(signing_key: &SigningKey) -> String {
+fn public_key_to_did_key(signing_key: &SigningKey) -> Did {
     let verifying_key = signing_key.verifying_key();
     let compressed_pubkey = verifying_key.to_sec1_bytes();
     let mut multicodec_key = Vec::with_capacity(2 + compressed_pubkey.len());
     multicodec_key.extend_from_slice(&SECP256K1_MULTICODEC_PREFIX);
     multicodec_key.extend_from_slice(&compressed_pubkey);
     let encoded = multibase::encode(multibase::Base::Base58Btc, &multicodec_key);
-    format!("did:key:{}", encoded)
+    Did::from(format!("did:key:{}", encoded))
 }
 
 #[derive(Deserialize)]
@@ -31,7 +32,7 @@ pub struct ReserveSigningKeyInput {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReserveSigningKeyOutput {
-    pub signing_key: String,
+    pub signing_key: Did,
 }
 
 pub async fn reserve_signing_key(

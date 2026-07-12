@@ -110,11 +110,11 @@ impl CrossPdsOAuthClient {
         })
     }
 
-    pub async fn check_remote_is_delegated(&self, pds_url: &str, did: &str) -> Option<bool> {
+    pub async fn check_remote_is_delegated(&self, pds_url: &str, did: &Did) -> Option<bool> {
         let url = format!(
             "{}/oauth/security-status?identifier={}",
             pds_url.trim_end_matches('/'),
-            urlencoding::encode(did)
+            urlencoding::encode(did.as_str())
         );
         let resp = self.http.get(&url).send().await.ok()?;
         if !resp.status().is_success() {

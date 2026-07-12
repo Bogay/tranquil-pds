@@ -176,9 +176,9 @@ fn test_permissions_repo_collection_wildcard_prefix() {
 fn test_permissions_rpc_lxm_wildcard_prefix() {
     let perms =
         ScopePermissions::from_scope_string(Some("rpc:app.bsky.feed.*?aud=did:web:api.bsky.app"));
-    assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
-    assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getAuthorFeed"));
-    assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.actor.getProfile"));
+    assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
+    assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
+    assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.actor.getProfile")));
 }
 
 #[test]

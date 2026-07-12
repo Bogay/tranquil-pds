@@ -268,7 +268,7 @@ mod tests {
         let ops = h.metastore.backlink_ops();
         let (_user_id, user_hash) = create_repo(&h, "olaren", 1);
 
-        let uri = AtUri::from_parts("did:plc:olaren", "app.bsky.feed.like", "3k2abc");
+        let uri = test_uri("did:plc:olaren", "app.bsky.feed.like", "3k2abc");
         let backlinks = vec![Backlink {
             uri: uri.clone(),
             path: BacklinkPath::SubjectUri,
@@ -295,7 +295,7 @@ mod tests {
         let ops = h.metastore.backlink_ops();
         let (_user_id, user_hash) = create_repo(&h, "teq", 2);
 
-        let uri = AtUri::from_parts("did:plc:teq", "app.bsky.graph.follow", "3k2fol");
+        let uri = test_uri("did:plc:teq", "app.bsky.graph.follow", "3k2fol");
         let backlinks = vec![Backlink {
             uri: uri.clone(),
             path: BacklinkPath::Subject,
@@ -342,7 +342,7 @@ mod tests {
 
         let backlinks: Vec<Backlink> = (0..5)
             .map(|i| Backlink {
-                uri: AtUri::from_parts("did:plc:nel", "app.bsky.feed.like", &format!("3k2r{i}")),
+                uri: test_uri("did:plc:nel", "app.bsky.feed.like", &format!("3k2r{i}")),
                 path: BacklinkPath::SubjectUri,
                 link_to: format!("at://did:plc:target{i}/app.bsky.feed.post/3k2p{i}"),
             })
@@ -382,7 +382,7 @@ mod tests {
         let (user_id, user_hash) = create_repo(&h, "lyna", 4);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:lyna", "app.bsky.feed.like", "3k2old"),
+            uri: test_uri("did:plc:lyna", "app.bsky.feed.like", "3k2old"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         };
@@ -393,7 +393,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:lyna", "app.bsky.feed.like", "3k2new"),
+            uri: test_uri("did:plc:lyna", "app.bsky.feed.like", "3k2new"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         }];
@@ -417,7 +417,7 @@ mod tests {
         let (user_id, user_hash) = create_repo(&h, "bailey", 5);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:bailey", "app.bsky.feed.like", "3k2old"),
+            uri: test_uri("did:plc:bailey", "app.bsky.feed.like", "3k2old"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         };
@@ -428,7 +428,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:bailey", "app.bsky.feed.repost", "3k2new"),
+            uri: test_uri("did:plc:bailey", "app.bsky.feed.repost", "3k2new"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         }];
@@ -448,7 +448,7 @@ mod tests {
         let (user_id, user_hash) = create_repo(&h, "olaren", 6);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:olaren", "app.bsky.graph.follow", "3k2old"),
+            uri: test_uri("did:plc:olaren", "app.bsky.graph.follow", "3k2old"),
             path: BacklinkPath::Subject,
             link_to: "did:plc:target".to_string(),
         };
@@ -459,7 +459,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:olaren", "app.bsky.graph.follow", "3k2new"),
+            uri: test_uri("did:plc:olaren", "app.bsky.graph.follow", "3k2new"),
             path: BacklinkPath::SubjectUri,
             link_to: "did:plc:target".to_string(),
         }];
@@ -480,7 +480,7 @@ mod tests {
         let (user_id_b, _user_hash_b) = create_repo(&h, "nel", 8);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:teq", "app.bsky.feed.like", "3k2old"),
+            uri: test_uri("did:plc:teq", "app.bsky.feed.like", "3k2old"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:target/app.bsky.feed.post/3k2p1".to_string(),
         };
@@ -491,7 +491,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:nel", "app.bsky.feed.like", "3k2new"),
+            uri: test_uri("did:plc:nel", "app.bsky.feed.like", "3k2new"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:target/app.bsky.feed.post/3k2p1".to_string(),
         }];
@@ -511,7 +511,7 @@ mod tests {
         let (user_id, user_hash) = create_repo(&h, "lyna", 12);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:lyna", "app.bsky.feed.like", "3k2same"),
+            uri: test_uri("did:plc:lyna", "app.bsky.feed.like", "3k2same"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         };
@@ -522,7 +522,7 @@ mod tests {
         batch.commit().unwrap();
 
         let proposed = vec![Backlink {
-            uri: AtUri::from_parts("did:plc:lyna", "app.bsky.feed.like", "3k2same"),
+            uri: test_uri("did:plc:lyna", "app.bsky.feed.like", "3k2same"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         }];
@@ -555,12 +555,12 @@ mod tests {
         let (_user_id, user_hash) = create_repo(&h, "bailey", 10);
 
         let bl1 = Backlink {
-            uri: AtUri::from_parts("did:plc:bailey", "app.bsky.feed.like", "3k2aaa"),
+            uri: test_uri("did:plc:bailey", "app.bsky.feed.like", "3k2aaa"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:t1/app.bsky.feed.post/p1".to_string(),
         };
         let bl2 = Backlink {
-            uri: AtUri::from_parts("did:plc:bailey", "app.bsky.feed.like", "3k2bbb"),
+            uri: test_uri("did:plc:bailey", "app.bsky.feed.like", "3k2bbb"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:t2/app.bsky.feed.post/p2".to_string(),
         };
@@ -608,7 +608,7 @@ mod tests {
         let (user_id, user_hash) = create_repo(&h, "kate", 11);
 
         let existing = Backlink {
-            uri: AtUri::from_parts("did:plc:kate", "app.bsky.feed.like", "3k2old"),
+            uri: test_uri("did:plc:kate", "app.bsky.feed.like", "3k2old"),
             path: BacklinkPath::SubjectUri,
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         };
@@ -620,12 +620,12 @@ mod tests {
 
         let proposed = vec![
             Backlink {
-                uri: AtUri::from_parts("did:plc:kate", "app.bsky.feed.like", "3k2new1"),
+                uri: test_uri("did:plc:kate", "app.bsky.feed.like", "3k2new1"),
                 path: BacklinkPath::SubjectUri,
                 link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
             },
             Backlink {
-                uri: AtUri::from_parts("did:plc:kate", "app.bsky.feed.like", "3k2new2"),
+                uri: test_uri("did:plc:kate", "app.bsky.feed.like", "3k2new2"),
                 path: BacklinkPath::SubjectUri,
                 link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
             },

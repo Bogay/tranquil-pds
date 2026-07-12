@@ -224,7 +224,11 @@ pub trait UserRepository: Send + Sync {
 
     async fn admin_update_handle(&self, did: &Did, handle: &Handle) -> Result<u64, DbError>;
 
-    async fn admin_update_password(&self, did: &Did, password_hash: &str) -> Result<u64, DbError>;
+    async fn admin_update_password(
+        &self,
+        did: &Did,
+        password_hash: &PasswordHash,
+    ) -> Result<u64, DbError>;
 
     async fn set_admin_status(&self, did: &Did, is_admin: bool) -> Result<(), DbError>;
 

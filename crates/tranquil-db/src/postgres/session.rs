@@ -131,11 +131,7 @@ impl SessionRepository for PostgresSessionRepository {
         Ok(result.rows_affected())
     }
 
-    async fn delete_session_by_id(
-        &self,
-        session_id: SessionId,
-        did: &Did,
-    ) -> Result<u64, DbError> {
+    async fn delete_session_by_id(&self, session_id: SessionId, did: &Did) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "DELETE FROM session_tokens WHERE id = $1 AND did = $2",
             session_id.as_i32(),
@@ -499,7 +495,10 @@ impl SessionRepository for PostgresSessionRepository {
         Ok(())
     }
 
-    async fn get_app_password_hashes_by_did(&self, did: &Did) -> Result<Vec<String>, DbError> {
+    async fn get_app_password_hashes_by_did(
+        &self,
+        did: &Did,
+    ) -> Result<Vec<PasswordHash>, DbError> {
         let rows = sqlx::query_scalar!(
             r#"SELECT ap.password_hash FROM app_passwords ap
                JOIN users u ON ap.user_id = u.id

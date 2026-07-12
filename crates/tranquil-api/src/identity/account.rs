@@ -25,7 +25,7 @@ pub struct CreateAccountInput {
     pub invite_code: Option<String>,
     pub did: Option<String>,
     pub did_type: Option<String>,
-    pub signing_key: Option<String>,
+    pub signing_key: Option<Did>,
     pub verification_channel: Option<tranquil_db_traits::CommsChannel>,
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
@@ -47,7 +47,7 @@ pub struct CreateAccountOutput {
 
 async fn try_reactivate_migration(
     state: &AppState,
-    did: &str,
+    did: &Did,
     handle: &Handle,
     email: &Option<String>,
     verification_channel: tranquil_db_traits::CommsChannel,
@@ -112,7 +112,7 @@ async fn try_reactivate_migration(
                 }
             };
             let session_data = tranquil_db_traits::SessionTokenCreate {
-                did: did_typed.clone(),
+                did: did.clone(),
                 access_jti: access_meta.jti.clone(),
                 refresh_jti: refresh_meta.jti.clone(),
                 access_expires_at: access_meta.expires_at,
@@ -132,7 +132,7 @@ async fn try_reactivate_migration(
                     super::provision::enqueue_migration_verification(
                         state,
                         reactivated.user_id,
-                        &did_typed,
+                        did,
                         verification_channel,
                         recipient,
                     )
@@ -309,7 +309,7 @@ pub async fn create_account(
     let signing_key = key_result.signing_key;
     let reserved_key_id = key_result.reserved_key_id;
     let did_type = input.did_type.as_deref().unwrap_or("plc");
-    let did = match did_type {
+    let did: Did = match did_type {
         "web" => {
             let self_hosted_did = match common::create_self_hosted_did_web(&handle) {
                 Ok(d) => d,
@@ -456,7 +456,7 @@ pub async fn create_account(
     let create_input = tranquil_db_traits::CreatePasswordAccountInput {
         handle: handle.clone(),
         email: email.clone(),
-        did: did_for_commit.clone(),
+        did: did.clone(),
         password_hash,
         preferred_comms_channel,
         discord_username: comms.discord,
@@ -508,7 +508,7 @@ pub async fn create_account(
             super::provision::enqueue_signup_verification(
                 &state,
                 user_id,
-                &did_for_commit,
+                &did,
                 verification_channel,
                 recipient,
             )
@@ -518,7 +518,7 @@ pub async fn create_account(
         super::provision::enqueue_migration_verification(
             &state,
             user_id,
-            &did_for_commit,
+            &did,
             verification_channel,
             recipient,
         )

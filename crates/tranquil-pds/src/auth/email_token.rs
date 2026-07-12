@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::cache::Cache;
+use crate::types::Did;
 use crate::util::{generate_token_code, normalize_token_code};
 
 const TOKEN_TTL_SECS: u64 = 900;
@@ -41,7 +42,7 @@ pub enum TokenError {
     ExpiredToken,
 }
 
-fn cache_key(did: &str, purpose: EmailTokenPurpose) -> String {
+fn cache_key(did: &Did, purpose: EmailTokenPurpose) -> String {
     format!("email_token:{}:{}", purpose.as_str(), did)
 }
 
@@ -51,7 +52,7 @@ fn current_timestamp() -> u64 {
 
 pub async fn create_email_token(
     cache: &dyn Cache,
-    did: &str,
+    did: &Did,
     purpose: EmailTokenPurpose,
 ) -> Result<String, TokenError> {
     if !cache.is_available() {
@@ -80,7 +81,7 @@ pub async fn create_email_token(
 
 pub async fn validate_email_token(
     cache: &dyn Cache,
-    did: &str,
+    did: &Did,
     purpose: EmailTokenPurpose,
     token: &str,
 ) -> Result<(), TokenError> {
@@ -110,7 +111,7 @@ pub async fn validate_email_token(
     Ok(())
 }
 
-pub async fn delete_email_token(cache: &dyn Cache, did: &str, purpose: EmailTokenPurpose) {
+pub async fn delete_email_token(cache: &dyn Cache, did: &Did, purpose: EmailTokenPurpose) {
     let _ = cache.delete(&cache_key(did, purpose)).await;
 }
 
@@ -188,9 +189,9 @@ mod tests {
     #[tokio::test]
     async fn test_create_and_validate_token() {
         let cache = MockCache::new();
-        let did = "did:plc:test123";
+        let did = Did::from("did:plc:teq".to_string());
 
-        let token = create_email_token(&cache, did, EmailTokenPurpose::UpdateEmail)
+        let token = create_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail)
             .await
             .unwrap();
 
@@ -198,53 +199,53 @@ mod tests {
         assert!(token.contains('-'));
 
         let result =
-            validate_email_token(&cache, did, EmailTokenPurpose::UpdateEmail, &token).await;
+            validate_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail, &token).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_token_consumed_after_use() {
         let cache = MockCache::new();
-        let did = "did:plc:test123";
+        let did = Did::from("did:plc:teq".to_string());
 
-        let token = create_email_token(&cache, did, EmailTokenPurpose::UpdateEmail)
+        let token = create_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail)
             .await
             .unwrap();
 
-        validate_email_token(&cache, did, EmailTokenPurpose::UpdateEmail, &token)
+        validate_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail, &token)
             .await
             .unwrap();
 
         let result =
-            validate_email_token(&cache, did, EmailTokenPurpose::UpdateEmail, &token).await;
+            validate_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail, &token).await;
         assert_eq!(result.unwrap_err(), TokenError::InvalidToken);
     }
 
     #[tokio::test]
     async fn test_invalid_token_rejected() {
         let cache = MockCache::new();
-        let did = "did:plc:test123";
+        let did = Did::from("did:plc:teq".to_string());
 
-        let _token = create_email_token(&cache, did, EmailTokenPurpose::UpdateEmail)
+        let _token = create_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail)
             .await
             .unwrap();
 
         let result =
-            validate_email_token(&cache, did, EmailTokenPurpose::UpdateEmail, "XXXXX-XXXXX").await;
+            validate_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail, "XXXXX-XXXXX").await;
         assert_eq!(result.unwrap_err(), TokenError::InvalidToken);
     }
 
     #[tokio::test]
     async fn test_wrong_purpose_rejected() {
         let cache = MockCache::new();
-        let did = "did:plc:test123";
+        let did = Did::from("did:plc:teq".to_string());
 
-        let token = create_email_token(&cache, did, EmailTokenPurpose::UpdateEmail)
+        let token = create_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail)
             .await
             .unwrap();
 
         let result =
-            validate_email_token(&cache, did, EmailTokenPurpose::ConfirmEmail, &token).await;
+            validate_email_token(&cache, &did, EmailTokenPurpose::ConfirmEmail, &token).await;
         assert_eq!(result.unwrap_err(), TokenError::InvalidToken);
     }
 
@@ -252,11 +253,11 @@ mod tests {
     async fn test_token_format() {
         // The emitted token is the display form: uppercase `XXXXX-XXXXX`.
         let cache = MockCache::new();
-        let did = "did:plc:test123";
+        let did = Did::from("did:plc:teq".to_string());
         (0..50).for_each(|_| {
             let token = futures::executor::block_on(create_email_token(
                 &cache,
-                did,
+                &did,
                 EmailTokenPurpose::UpdateEmail,
             ))
             .unwrap();
@@ -269,39 +270,39 @@ mod tests {
     #[tokio::test]
     async fn test_case_insensitive_validation() {
         let cache = MockCache::new();
-        let did = "did:plc:test123";
+        let did = Did::from("did:plc:teq".to_string());
 
-        let token = create_email_token(&cache, did, EmailTokenPurpose::UpdateEmail)
+        let token = create_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail)
             .await
             .unwrap();
 
         let lowercase = token.to_lowercase();
         let result =
-            validate_email_token(&cache, did, EmailTokenPurpose::UpdateEmail, &lowercase).await;
+            validate_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail, &lowercase).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_hyphen_insensitive_validation() {
         let cache = MockCache::new();
-        let did = "did:plc:test123";
+        let did = Did::from("did:plc:teq".to_string());
 
-        let token = create_email_token(&cache, did, EmailTokenPurpose::UpdateEmail)
+        let token = create_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail)
             .await
             .unwrap();
 
         let no_hyphen = token.replace('-', "");
         let result =
-            validate_email_token(&cache, did, EmailTokenPurpose::UpdateEmail, &no_hyphen).await;
+            validate_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail, &no_hyphen).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_noop_cache_returns_unavailable() {
         let cache = crate::cache::NoOpCache;
-        let did = "did:plc:test";
+        let did = Did::from("did:plc:whelk".to_string());
 
-        let result = create_email_token(&cache, did, EmailTokenPurpose::UpdateEmail).await;
+        let result = create_email_token(&cache, &did, EmailTokenPurpose::UpdateEmail).await;
         assert_eq!(result.unwrap_err(), TokenError::CacheUnavailable);
     }
 }

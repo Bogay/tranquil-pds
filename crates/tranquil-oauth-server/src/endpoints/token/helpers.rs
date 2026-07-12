@@ -35,16 +35,7 @@ pub fn create_access_token_with_delegation(
     sub: &tranquil_types::Did,
     dpop_jkt: Option<&tranquil_types::JwkThumbprint>,
     scope: Option<&str>,
-) -> Result<String, OAuthError> {
-    create_access_token_with_delegation(session_id, sub, dpop_jkt, scope, None)
-}
-
-pub fn create_access_token_with_delegation(
-    session_id: &str,
-    sub: &str,
-    dpop_jkt: Option<&str>,
-    scope: Option<&str>,
-    controller_did: Option<&str>,
+    controller_did: Option<&tranquil_types::Did>,
 ) -> Result<String, OAuthError> {
     use serde_json::json;
     let jti = uuid::Uuid::new_v4().to_string();

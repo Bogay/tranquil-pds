@@ -352,7 +352,7 @@ mod tests {
         assert!(!perms.has_full_access());
         assert!(!perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
         assert!(!perms.allows_blob("image/png"));
-        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
         assert!(!perms.allows_account(AccountAttr::Email, AccountAction::Manage));
     }
 
@@ -366,26 +366,26 @@ mod tests {
     #[test]
     fn test_transition_generic_without_chat_blocks_chat() {
         let perms = ScopePermissions::from_scope_string(Some("transition:generic"));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
-        assert!(!perms.allows_rpc("did:web:api.bsky.app", "chat.bsky.convo.listConvos"));
-        assert!(!perms.allows_rpc("did:web:api.bsky.app", "chat.bsky.convo.getMessages"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("chat.bsky.convo.listConvos")));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("chat.bsky.convo.getMessages")));
     }
 
     #[test]
     fn test_transition_generic_with_chat_allows_chat() {
         let perms =
             ScopePermissions::from_scope_string(Some("transition:generic transition:chat.bsky"));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "chat.bsky.convo.listConvos"));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "chat.bsky.convo.getMessages"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("chat.bsky.convo.listConvos")));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("chat.bsky.convo.getMessages")));
     }
 
     #[test]
     fn test_transition_chat_only_allows_chat() {
         let perms = ScopePermissions::from_scope_string(Some("transition:chat.bsky"));
-        assert!(!perms.allows_repo(RepoAction::Create, "app.bsky.feed.post"));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "chat.bsky.convo.getMessages"));
-        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+        assert!(!perms.allows_repo(RepoAction::Create, &c("app.bsky.feed.post")));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("chat.bsky.convo.getMessages")));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
     }
 
     #[test]
@@ -448,18 +448,18 @@ mod tests {
         let perms = ScopePermissions::from_scope_string(Some(
             "rpc:app.bsky.feed.getTimeline?aud=did:web:api.bsky.app",
         ));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
-        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getAuthorFeed"));
-        assert!(!perms.allows_rpc("did:web:other.service", "app.bsky.feed.getTimeline"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
+        assert!(!perms.allows_rpc("did:web:other.service", &c("app.bsky.feed.getTimeline")));
     }
 
     #[test]
     fn test_granular_rpc_wildcard_aud() {
         let perms =
             ScopePermissions::from_scope_string(Some("rpc:app.bsky.feed.getTimeline?aud=*"));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
-        assert!(perms.allows_rpc("did:web:any.service", "app.bsky.feed.getTimeline"));
-        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getAuthorFeed"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
+        assert!(perms.allows_rpc("did:web:any.service", &c("app.bsky.feed.getTimeline")));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
     }
 
     #[test]
@@ -539,7 +539,7 @@ mod tests {
         assert!(!perms.allows_repo(RepoAction::Delete, &c("cafe.oyster.record")));
         assert!(!perms.allows_repo(RepoAction::Update, &c("cafe.oyster.record")));
         assert!(perms.allows_blob("image/png"));
-        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
     }
 
     #[test]
@@ -550,7 +550,7 @@ mod tests {
         assert!(!perms.allows_repo(RepoAction::Delete, &c("cafe.oyster.record")));
         assert!(!perms.allows_repo(RepoAction::Update, &c("cafe.oyster.record")));
         assert!(!perms.allows_blob("image/png"));
-        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
     }
 
     #[test]
@@ -558,7 +558,7 @@ mod tests {
         let perms = ScopePermissions::from_scope_string(Some(
             "rpc:app.bsky.feed.getAuthorFeed?aud=did:web:api.bsky.app#bsky_appview",
         ));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getAuthorFeed"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
         assert!(perms.allows_rpc(
             "did:web:api.bsky.app#bsky_appview",
             "app.bsky.feed.getAuthorFeed"
@@ -567,8 +567,8 @@ mod tests {
             "did:web:api.bsky.app#other_service",
             "app.bsky.feed.getAuthorFeed"
         ));
-        assert!(!perms.allows_rpc("did:web:other.app", "app.bsky.feed.getAuthorFeed"));
-        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+        assert!(!perms.allows_rpc("did:web:other.app", &c("app.bsky.feed.getAuthorFeed")));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
     }
 
     #[test]
@@ -576,7 +576,7 @@ mod tests {
         let perms = ScopePermissions::from_scope_string(Some(
             "rpc:app.bsky.feed.getAuthorFeed?aud=did:web:api.bsky.app",
         ));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getAuthorFeed"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
         assert!(perms.allows_rpc(
             "did:web:api.bsky.app#bsky_appview",
             "app.bsky.feed.getAuthorFeed"

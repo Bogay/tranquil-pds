@@ -233,11 +233,7 @@ pub trait SessionRepository: Send + Sync {
         did: &Did,
     ) -> Result<u64, DbError>;
 
-    async fn delete_session_by_id(
-        &self,
-        session_id: SessionId,
-        did: &Did,
-    ) -> Result<u64, DbError>;
+    async fn delete_session_by_id(&self, session_id: SessionId, did: &Did) -> Result<u64, DbError>;
 
     async fn delete_sessions_by_did(&self, did: &Did) -> Result<u64, DbError>;
 
@@ -300,7 +296,8 @@ pub trait SessionRepository: Send + Sync {
 
     async fn update_mfa_verified(&self, did: &Did) -> Result<(), DbError>;
 
-    async fn get_app_password_hashes_by_did(&self, did: &Did) -> Result<Vec<String>, DbError>;
+    async fn get_app_password_hashes_by_did(&self, did: &Did)
+    -> Result<Vec<PasswordHash>, DbError>;
 
     async fn refresh_session_atomic(
         &self,

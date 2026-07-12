@@ -14,7 +14,7 @@ use tranquil_types::{Did, Jti};
 
 type HmacSha256 = Hmac<Sha256>;
 
-pub fn get_did_from_token(token: &str) -> Result<String, TokenDecodeError> {
+pub fn get_did_from_token(token: &str) -> Result<Did, TokenDecodeError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Err(TokenDecodeError::InvalidFormat);

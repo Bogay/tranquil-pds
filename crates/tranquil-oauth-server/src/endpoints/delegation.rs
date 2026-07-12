@@ -224,11 +224,7 @@ pub async fn delegation_auth(
         .flatten();
 
     if is_cross_pds || controller_local.is_none() {
-        let did_doc = match state
-            .plc_client()
-            .get_document(controller_did.as_str())
-            .await
-        {
+        let did_doc = match state.plc_client().get_document(&controller_did).await {
             Ok(doc) => doc,
             Err(_) => {
                 return DelegationAuthResponse::err("Failed to resolve controller DID");

@@ -65,7 +65,7 @@ pub async fn handle_authorization_code_grant(
     {
         return Err(OAuthError::InvalidGrant("client_id mismatch".to_string()));
     }
-    let did = authorized.did.to_string();
+    let did = authorized.did.clone();
     let client_metadata_cache = ClientMetadataCache::new(3600);
     let client_metadata = client_metadata_cache.get(&authorized.client_id).await?;
     let client_auth = match &request.client_auth {
@@ -134,16 +134,10 @@ pub async fn handle_authorization_code_grant(
     let now = Utc::now();
 
     let (raw_scope, controller_did) = if let Some(ref controller) = authorized.controller_did {
-        let did_parsed: Did = did
-            .parse()
-            .map_err(|_| OAuthError::InvalidRequest("Invalid DID format".to_string()))?;
-        let controller_parsed: Did = controller
-            .parse()
-            .map_err(|_| OAuthError::InvalidRequest("Invalid controller DID format".to_string()))?;
         let grant = state
             .repos
             .delegation
-            .get_delegation(&did_parsed, &controller_parsed)
+            .get_delegation(&did, controller)
             .await
             .ok()
             .flatten();
@@ -179,7 +173,7 @@ pub async fn handle_authorization_code_grant(
         &did,
         dpop_jkt.as_deref(),
         final_scope.as_deref(),
-        controller_did.as_deref(),
+        controller_did.as_ref(),
     )?;
     let stored_client_auth = authorized.client_auth.unwrap_or(ClientAuth::None);
     let refresh_expiry_days = if matches!(stored_client_auth, ClientAuth::None) {
@@ -189,11 +183,8 @@ pub async fn handle_authorization_code_grant(
     };
     let mut stored_parameters = authorized.parameters.clone();
     stored_parameters.dpop_jkt = dpop_jkt.clone();
-    let did_typed: Did = did
-        .parse()
-        .map_err(|_| OAuthError::InvalidRequest("Invalid DID format".to_string()))?;
     let token_data = TokenData {
-        did: did_typed,
+        did: did.clone(),
         token_id: token_id.clone(),
         created_at: now,
         updated_at: now,
@@ -295,11 +286,11 @@ pub async fn handle_refresh_token_grant(
             );
             let dpop_jkt = token_data.parameters.dpop_jkt.as_deref();
             let access_token = create_access_token_with_delegation(
-                &token_data.token_id.0,
-                token_data.did.as_str(),
+                &token_data.token_id,
+                &token_data.did,
                 dpop_jkt,
                 token_data.scope.as_deref(),
-                token_data.controller_did.as_ref().map(|d| d.as_str()),
+                token_data.controller_did.as_ref(),
             )?;
             let mut response_headers = HeaderMap::new();
             let config = AuthConfig::get();
@@ -320,7 +311,7 @@ pub async fn handle_refresh_token_grant(
                     expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
                     refresh_token: token_data.current_refresh_token,
                     scope: token_data.scope,
-                    sub: Some(token_data.did.to_string()),
+                    sub: Some(token_data.did),
                 }),
             ));
         }
@@ -409,11 +400,11 @@ pub async fn handle_refresh_token_grant(
         "Refresh token rotated successfully"
     );
     let access_token = create_access_token_with_delegation(
-        &token_data.token_id.0,
-        token_data.did.as_str(),
-        dpop_jkt.as_deref(),
+        &token_data.token_id,
+        &token_data.did,
+        dpop_jkt.as_ref(),
         token_data.scope.as_deref(),
-        token_data.controller_did.as_ref().map(|d| d.as_str()),
+        token_data.controller_did.as_ref(),
     )?;
     let mut response_headers = HeaderMap::new();
     let config = AuthConfig::get();
@@ -434,7 +425,7 @@ pub async fn handle_refresh_token_grant(
             expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
             refresh_token: Some(new_refresh_token),
             scope: token_data.scope,
-            sub: Some(token_data.did.to_string()),
+            sub: Some(token_data.did),
         }),
     ))
 }

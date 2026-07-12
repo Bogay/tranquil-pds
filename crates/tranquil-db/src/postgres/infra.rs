@@ -531,7 +531,7 @@ impl InfraRepository for PostgresInfraRepository {
     async fn reserve_signing_key(
         &self,
         did: Option<&Did>,
-        public_key_did_key: &str,
+        public_key_did_key: &Did,
         private_key_bytes: &[u8],
         expires_at: DateTime<Utc>,
     ) -> Result<Uuid, DbError> {
@@ -554,7 +554,7 @@ impl InfraRepository for PostgresInfraRepository {
 
     async fn get_reserved_signing_key(
         &self,
-        public_key_did_key: &str,
+        public_key_did_key: &Did,
     ) -> Result<Option<ReservedSigningKey>, DbError> {
         let result = sqlx::query!(
             r#"SELECT id, private_key_bytes
@@ -1123,7 +1123,7 @@ impl InfraRepository for PostgresInfraRepository {
 
     async fn get_reserved_signing_key_full(
         &self,
-        public_key_did_key: &str,
+        public_key_did_key: &Did,
     ) -> Result<Option<ReservedSigningKeyFull>, DbError> {
         let row = sqlx::query!(
             r#"SELECT id, did, public_key_did_key, private_key_bytes, expires_at, used_at
@@ -1137,7 +1137,7 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(row.map(|r| ReservedSigningKeyFull {
             id: r.id,
             did: r.did.map(|d| Did::new(d).expect("valid DID in database")),
-            public_key_did_key: r.public_key_did_key,
+            public_key_did_key: Did::from(r.public_key_did_key),
             private_key_bytes: r.private_key_bytes,
             expires_at: r.expires_at,
             used_at: r.used_at,

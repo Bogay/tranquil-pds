@@ -16,7 +16,7 @@ pub enum HandleResolutionError {
     #[error("Invalid DID format in record")]
     InvalidDid,
     #[error("DID mismatch: expected {expected}, got {actual}")]
-    DidMismatch { expected: String, actual: String },
+    DidMismatch { expected: Did, actual: Did },
 }
 
 pub async fn resolve_handle_dns(handle: &Handle) -> Result<Did, HandleResolutionError> {
@@ -34,10 +34,9 @@ pub async fn resolve_handle_dns(handle: &Handle) -> Result<Did, HandleResolution
         .flat_map(|record| record.txt_data())
         .find_map(|txt| {
             let txt_str = String::from_utf8_lossy(txt);
-            txt_str.strip_prefix("did=").and_then(|did| {
-                let did = did.trim();
-                did.starts_with("did:").then(|| did.to_string())
-            })
+            txt_str
+                .strip_prefix("did=")
+                .and_then(|did| Did::new(did.trim()).ok())
         })
         .ok_or(HandleResolutionError::NotFound)
 }
@@ -58,12 +57,7 @@ pub async fn resolve_handle_http(handle: &Handle) -> Result<Did, HandleResolutio
         .text()
         .await
         .map_err(|e| HandleResolutionError::HttpError(e.to_string()))?;
-    let did = body.trim();
-    if did.starts_with("did:") {
-        Ok(did.to_string())
-    } else {
-        Err(HandleResolutionError::InvalidDid)
-    }
+    Did::new(body.trim()).map_err(|_| HandleResolutionError::InvalidDid)
 }
 
 pub async fn resolve_handle(handle: &Handle) -> Result<Did, HandleResolutionError> {
@@ -78,7 +72,7 @@ pub async fn resolve_handle(handle: &Handle) -> Result<Did, HandleResolutionErro
 
 pub async fn verify_handle_ownership(
     handle: &Handle,
-    expected_did: &str,
+    expected_did: &Did,
 ) -> Result<(), HandleResolutionError> {
     let resolved_did = resolve_handle(handle).await?;
     if resolved_did == expected_did {

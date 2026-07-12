@@ -14,8 +14,8 @@ fn test_commit_signing_produces_valid_signature() {
         Cid::from_str("bafyreib2rxk3ryblouj3fxza5jvx6psmwewwessc4m6g6e7pqhhkwqomfi").unwrap();
     let rev = Tid::now(LimitedU32::MIN);
 
-    let did_typed = jacquard_common::types::string::Did::new(did).unwrap();
-    let unsigned = Commit::new_unsigned(did_typed, data_cid, rev, None);
+    let did = jacquard_common::types::string::Did::new(did).unwrap();
+    let unsigned = Commit::new_unsigned(did, data_cid, rev, None);
     let signed = unsigned.sign(&signing_key).unwrap();
 
     let pubkey_bytes = signing_key.verifying_key().to_encoded_point(true);
@@ -38,8 +38,8 @@ fn test_commit_signing_with_prev() {
         Cid::from_str("bafyreigxmvutyl3k5m4guzwxv3xf34gfxjlykgfdqkjmf32vwb5vcjxlui").unwrap();
     let rev = Tid::now(LimitedU32::MIN);
 
-    let did_typed = jacquard_common::types::string::Did::new(did).unwrap();
-    let unsigned = Commit::new_unsigned(did_typed, data_cid, rev, Some(prev_cid));
+    let did = jacquard_common::types::string::Did::new(did).unwrap();
+    let unsigned = Commit::new_unsigned(did, data_cid, rev, Some(prev_cid));
     let signed = unsigned.sign(&signing_key).unwrap();
 
     let pubkey_bytes = signing_key.verifying_key().to_encoded_point(true);
@@ -58,8 +58,8 @@ fn test_unsigned_commit_has_5_fields() {
         Cid::from_str("bafyreib2rxk3ryblouj3fxza5jvx6psmwewwessc4m6g6e7pqhhkwqomfi").unwrap();
     let rev = Tid::from_str("3masrxv55po22").unwrap();
 
-    let did_typed = jacquard_common::types::string::Did::new(did).unwrap();
-    let unsigned = Commit::new_unsigned(did_typed, data_cid, rev, None);
+    let did = jacquard_common::types::string::Did::new(did).unwrap();
+    let unsigned = Commit::new_unsigned(did, data_cid, rev, None);
 
     let unsigned_bytes = serde_ipld_dagcbor::to_vec(&unsigned).unwrap();
 
