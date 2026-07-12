@@ -438,8 +438,8 @@ mod tests {
         let now = chrono::Utc::now();
         tranquil_db_traits::SessionTokenCreate {
             did: tranquil_types::Did::new(did.to_string()).unwrap(),
-            access_jti: access_jti.to_string(),
-            refresh_jti: refresh_jti.to_string(),
+            access_jti: tranquil_types::Jti::new(access_jti),
+            refresh_jti: tranquil_types::Jti::new(refresh_jti),
             access_expires_at: now + chrono::Duration::minutes(120),
             refresh_expires_at: now + chrono::Duration::days(90),
             login_type: tranquil_db_traits::LoginType::Legacy,
@@ -484,10 +484,10 @@ mod tests {
         let now = chrono::Utc::now();
         tranquil_db_traits::SessionRefreshData {
             did: did.clone(),
-            old_refresh_jti: old_refresh_jti.to_string(),
+            old_refresh_jti: tranquil_types::Jti::new(old_refresh_jti),
             session_id,
-            new_access_jti: new_access_jti.to_string(),
-            new_refresh_jti: new_refresh_jti.to_string(),
+            new_access_jti: tranquil_types::Jti::new(new_access_jti),
+            new_refresh_jti: tranquil_types::Jti::new(new_refresh_jti),
             new_access_expires_at: now + chrono::Duration::minutes(120),
             new_refresh_expires_at: now + chrono::Duration::days(90),
         }

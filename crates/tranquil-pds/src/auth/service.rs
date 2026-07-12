@@ -6,7 +6,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::debug;
-use tranquil_types::Did;
+use tranquil_types::{Did, Jti, Nsid};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceTokenError {
@@ -122,7 +122,7 @@ pub struct ServiceTokenClaims {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lxm: Option<String>,
     #[serde(default)]
-    pub jti: Option<String>,
+    pub jti: Option<Jti>,
 }
 
 impl ServiceTokenClaims {

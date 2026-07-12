@@ -85,8 +85,8 @@ impl SessionOps {
             id: SessionId::new(v.id),
             did: Did::new(v.did.clone())
                 .map_err(|_| MetastoreError::CorruptData("invalid session did"))?,
-            access_jti: v.access_jti.clone(),
-            refresh_jti: v.refresh_jti.clone(),
+            access_jti: Jti::from(v.access_jti.clone()),
+            refresh_jti: Jti::from(v.refresh_jti.clone()),
             access_expires_at: DateTime::from_timestamp_millis(v.access_expires_at_ms)
                 .unwrap_or_default(),
             refresh_expires_at: DateTime::from_timestamp_millis(v.refresh_expires_at_ms)
@@ -241,8 +241,8 @@ impl SessionOps {
                 .controller_did
                 .clone()
                 .and_then(|d| Did::new(d).ok()),
-            access_jti: session.access_jti.clone(),
-            refresh_jti: session.refresh_jti.clone(),
+            access_jti: Jti::from(session.access_jti.clone()),
+            refresh_jti: Jti::from(session.refresh_jti.clone()),
             access_expires_at,
             refresh_expires_at,
             key_bytes,
@@ -285,8 +285,8 @@ impl SessionOps {
         let value = SessionTokenValue {
             id: session_id,
             did: data.did.to_string(),
-            access_jti: data.access_jti.clone(),
-            refresh_jti: data.refresh_jti.clone(),
+            access_jti: data.access_jti.to_string(),
+            refresh_jti: data.refresh_jti.to_string(),
             access_expires_at_ms: data.access_expires_at.timestamp_millis(),
             refresh_expires_at_ms: data.refresh_expires_at.timestamp_millis(),
             login_type: login_type_to_u8(data.login_type),
@@ -501,7 +501,7 @@ impl SessionOps {
             .iter()
             .map(|s| SessionListItem {
                 id: SessionId::new(s.id),
-                access_jti: s.access_jti.clone(),
+                access_jti: Jti::from(s.access_jti.clone()),
                 created_at: DateTime::from_timestamp_millis(s.created_at_ms).unwrap_or_default(),
                 refresh_expires_at: DateTime::from_timestamp_millis(s.refresh_expires_at_ms)
                     .unwrap_or_default(),
@@ -848,8 +848,8 @@ impl SessionOps {
         let old_refresh_jti = session.refresh_jti.clone();
         let rotated_at_ms = Utc::now().timestamp_millis();
 
-        session.access_jti = data.new_access_jti.clone();
-        session.refresh_jti = data.new_refresh_jti.clone();
+        session.access_jti = data.new_access_jti.to_string();
+        session.refresh_jti = data.new_refresh_jti.to_string();
         session.access_expires_at_ms = data.new_access_expires_at.timestamp_millis();
         session.refresh_expires_at_ms = data.new_refresh_expires_at.timestamp_millis();
         session.updated_at_ms = rotated_at_ms;

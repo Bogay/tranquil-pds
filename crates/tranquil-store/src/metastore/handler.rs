@@ -6094,7 +6094,7 @@ mod tests {
     use super::*;
     use crate::eventlog::{EventLog, EventLogConfig};
     use crate::metastore::MetastoreConfig;
-    use tranquil_types::{Did, Handle};
+    use tranquil_types::{Did, Handle, InviteCode, Jti};
 
     struct TestHarness {
         _metastore_dir: tempfile::TempDir,
@@ -6308,10 +6308,10 @@ mod tests {
         let refresh = SessionRequest::RefreshSessionAtomic {
             data: tranquil_db_traits::SessionRefreshData {
                 did: did.clone(),
-                old_refresh_jti: "r0".to_string(),
+                old_refresh_jti: Jti::new("r0"),
                 session_id: sid,
-                new_access_jti: "a1".to_string(),
-                new_refresh_jti: "r1".to_string(),
+                new_access_jti: Jti::new("a1"),
+                new_refresh_jti: Jti::new("r1"),
                 new_access_expires_at: Utc::now(),
                 new_refresh_expires_at: Utc::now(),
             },

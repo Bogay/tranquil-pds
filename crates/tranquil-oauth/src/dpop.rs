@@ -36,7 +36,7 @@ pub struct DPoPJwk {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DPoPProofPayload {
-    pub jti: String,
+    pub jti: DPoPProofId,
     pub htm: String,
     pub htu: String,
     pub iat: i64,
@@ -181,7 +181,7 @@ impl DPoPVerifier {
         let jkt = compute_jwk_thumbprint(&header.jwk)?;
         Ok(DPoPVerifyResult {
             jkt: jkt.into(),
-            jti: payload.jti.clone().into(),
+            jti: payload.jti.clone(),
         })
     }
 }

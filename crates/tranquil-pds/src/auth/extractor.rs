@@ -105,7 +105,7 @@ pub fn extract_auth_token_from_header(auth_header: Option<&str>) -> Option<Extra
     None
 }
 
-pub fn extract_jti_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
+pub fn extract_jti_from_headers(headers: &axum::http::HeaderMap) -> Option<crate::types::Jti> {
     let auth_header = headers.get(AUTHORIZATION)?.to_str().ok()?;
     let token = extract_bearer_token_from_header(Some(auth_header))?;
     tranquil_auth::get_jti_from_token(&token).ok()

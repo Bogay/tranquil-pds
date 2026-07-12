@@ -1437,12 +1437,12 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
 
     async fn get_session_by_access_jti(
         &self,
-        access_jti: &str,
+        access_jti: &Jti,
     ) -> Result<Option<tranquil_db_traits::SessionToken>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Session(
             SessionRequest::GetSessionByAccessJti {
-                access_jti: access_jti.to_owned(),
+                access_jti: access_jti.to_string(),
                 tx,
             },
         ))?;
@@ -1451,12 +1451,12 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
 
     async fn get_session_for_refresh(
         &self,
-        refresh_jti: &str,
+        refresh_jti: &Jti,
     ) -> Result<Option<tranquil_db_traits::SessionForRefresh>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Session(
             SessionRequest::GetSessionForRefresh {
-                refresh_jti: refresh_jti.to_owned(),
+                refresh_jti: refresh_jti.to_string(),
                 tx,
             },
         ))?;
@@ -1465,13 +1465,13 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
 
     async fn delete_session_by_access_jti(
         &self,
-        access_jti: &str,
+        access_jti: &Jti,
         did: &Did,
     ) -> Result<u64, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Session(
             SessionRequest::DeleteSessionByAccessJti {
-                access_jti: access_jti.to_owned(),
+                access_jti: access_jti.to_string(),
                 did: did.clone(),
                 tx,
             },
@@ -1509,7 +1509,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
     async fn delete_sessions_by_did_except_jti(
         &self,
         did: &Did,
-        except_jti: &str,
+        except_jti: &Jti,
     ) -> Result<u64, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Session(
@@ -1540,7 +1540,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
         &self,
         session_id: tranquil_db_traits::SessionId,
         did: &Did,
-    ) -> Result<Option<String>, DbError> {
+    ) -> Result<Option<Jti>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Session(
             SessionRequest::GetSessionAccessJtiById {
@@ -1549,7 +1549,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
                 tx,
             },
         ))?;
-        recv(rx).await
+        recv(rx).await.map(|jti: Option<String>| jti.map(Jti::from))
     }
 
     async fn delete_sessions_by_app_password(
@@ -1572,7 +1572,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
         &self,
         did: &Did,
         app_password_name: &str,
-    ) -> Result<Vec<String>, DbError> {
+    ) -> Result<Vec<Jti>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Session(
             SessionRequest::GetSessionJtisByAppPassword {
@@ -1581,17 +1581,19 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
                 tx,
             },
         ))?;
-        recv(rx).await
+        recv(rx)
+            .await
+            .map(|jtis: Vec<String>| jtis.into_iter().map(Jti::from).collect())
     }
 
     async fn lookup_refresh_grace(
         &self,
-        refresh_jti: &str,
+        refresh_jti: &Jti,
     ) -> Result<tranquil_db_traits::RefreshGraceLookup, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Session(
             SessionRequest::LookupRefreshGrace {
-                refresh_jti: refresh_jti.to_owned(),
+                refresh_jti: refresh_jti.to_string(),
                 tx,
             },
         ))?;
@@ -3328,13 +3330,13 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
     async fn get_session_access_expiry(
         &self,
         did: &Did,
-        access_jti: &str,
+        access_jti: &Jti,
     ) -> Result<Option<DateTime<Utc>>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::User(
             UserRequest::GetSessionAccessExpiry {
                 did: did.clone(),
-                access_jti: access_jti.to_owned(),
+                access_jti: access_jti.to_string(),
                 tx,
             },
         ))?;

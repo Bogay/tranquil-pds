@@ -2210,7 +2210,10 @@ impl UserOps {
             })
             .collect();
 
-        let session_jtis: Vec<String> = sessions.iter().map(|(_, _, jti)| jti.clone()).collect();
+        let session_jtis: Vec<Jti> = sessions
+            .iter()
+            .map(|(_, _, jti)| Jti::from(jti.clone()))
+            .collect();
 
         let mut batch = self.db.batch();
 

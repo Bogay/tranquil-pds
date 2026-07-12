@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, de, ser};
 use std::fmt;
 use std::str::FromStr;
+use tranquil_types::{Did, Jti, Nsid};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenType {
@@ -217,7 +218,7 @@ pub struct Claims {
     pub scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lxm: Option<Nsid>,
-    pub jti: String,
+    pub jti: Jti,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub act: Option<ActClaim>,
 }
@@ -240,7 +241,7 @@ pub struct TokenData<T> {
 
 pub struct TokenWithMetadata {
     pub token: String,
-    pub jti: String,
+    pub jti: Jti,
     pub expires_at: DateTime<Utc>,
 }
 

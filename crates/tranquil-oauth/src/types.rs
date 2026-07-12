@@ -272,18 +272,6 @@ pub struct TokenRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DPoPClaims {
-    pub jti: String,
-    pub htm: String,
-    pub htu: String,
-    pub iat: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ath: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwkPublicKey {
     pub kty: String,
     pub crv: Option<String>,

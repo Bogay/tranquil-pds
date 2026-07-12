@@ -84,8 +84,8 @@ impl std::fmt::Display for SessionId {
 pub struct SessionToken {
     pub id: SessionId,
     pub did: Did,
-    pub access_jti: String,
-    pub refresh_jti: String,
+    pub access_jti: Jti,
+    pub refresh_jti: Jti,
     pub access_expires_at: DateTime<Utc>,
     pub refresh_expires_at: DateTime<Utc>,
     pub login_type: LoginType,
@@ -100,8 +100,8 @@ pub struct SessionToken {
 #[derive(Debug, Clone)]
 pub struct SessionTokenCreate {
     pub did: Did,
-    pub access_jti: String,
-    pub refresh_jti: String,
+    pub access_jti: Jti,
+    pub refresh_jti: Jti,
     pub access_expires_at: DateTime<Utc>,
     pub refresh_expires_at: DateTime<Utc>,
     pub login_type: LoginType,
@@ -124,7 +124,7 @@ pub struct SessionForRefresh {
 #[derive(Debug, Clone)]
 pub struct SessionListItem {
     pub id: SessionId,
-    pub access_jti: String,
+    pub access_jti: Jti,
     pub created_at: DateTime<Utc>,
     pub refresh_expires_at: DateTime<Utc>,
 }
@@ -175,8 +175,8 @@ pub struct RefreshGraceReplay {
     pub did: Did,
     pub scope: Option<String>,
     pub controller_did: Option<Did>,
-    pub access_jti: String,
-    pub refresh_jti: String,
+    pub access_jti: Jti,
+    pub refresh_jti: Jti,
     pub access_expires_at: DateTime<Utc>,
     pub refresh_expires_at: DateTime<Utc>,
     pub key_bytes: Vec<u8>,
@@ -205,10 +205,10 @@ pub enum RefreshGraceLookup {
 #[derive(Debug, Clone)]
 pub struct SessionRefreshData {
     pub did: Did,
-    pub old_refresh_jti: String,
+    pub old_refresh_jti: Jti,
     pub session_id: SessionId,
-    pub new_access_jti: String,
-    pub new_refresh_jti: String,
+    pub new_access_jti: Jti,
+    pub new_refresh_jti: Jti,
     pub new_access_expires_at: DateTime<Utc>,
     pub new_refresh_expires_at: DateTime<Utc>,
 }
@@ -219,17 +219,17 @@ pub trait SessionRepository: Send + Sync {
 
     async fn get_session_by_access_jti(
         &self,
-        access_jti: &str,
+        access_jti: &Jti,
     ) -> Result<Option<SessionToken>, DbError>;
 
     async fn get_session_for_refresh(
         &self,
-        refresh_jti: &str,
+        refresh_jti: &Jti,
     ) -> Result<Option<SessionForRefresh>, DbError>;
 
     async fn delete_session_by_access_jti(
         &self,
-        access_jti: &str,
+        access_jti: &Jti,
         did: &Did,
     ) -> Result<u64, DbError>;
 
@@ -244,7 +244,7 @@ pub trait SessionRepository: Send + Sync {
     async fn delete_sessions_by_did_except_jti(
         &self,
         did: &Did,
-        except_jti: &str,
+        except_jti: &Jti,
     ) -> Result<u64, DbError>;
 
     async fn list_sessions_by_did(&self, did: &Did) -> Result<Vec<SessionListItem>, DbError>;
@@ -253,7 +253,7 @@ pub trait SessionRepository: Send + Sync {
         &self,
         session_id: SessionId,
         did: &Did,
-    ) -> Result<Option<String>, DbError>;
+    ) -> Result<Option<Jti>, DbError>;
 
     async fn delete_sessions_by_app_password(
         &self,
@@ -265,9 +265,9 @@ pub trait SessionRepository: Send + Sync {
         &self,
         did: &Did,
         app_password_name: &str,
-    ) -> Result<Vec<String>, DbError>;
+    ) -> Result<Vec<Jti>, DbError>;
 
-    async fn lookup_refresh_grace(&self, refresh_jti: &str) -> Result<RefreshGraceLookup, DbError>;
+    async fn lookup_refresh_grace(&self, refresh_jti: &Jti) -> Result<RefreshGraceLookup, DbError>;
 
     async fn list_app_passwords(&self, user_id: Uuid) -> Result<Vec<AppPasswordRecord>, DbError>;
 

@@ -14,7 +14,7 @@ use tranquil_pds::auth::NormalizedLoginIdentifier;
 use tranquil_pds::auth::{ServiceTokenVerifier, generate_app_password, is_service_token};
 use tranquil_pds::rate_limit::{AccountCreationLimit, PasswordResetLimit, RateLimited};
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle, PlainPassword};
+use tranquil_pds::types::{Did, Handle, Jti, Nsid, PlainPassword};
 use tranquil_pds::validation::validate_password;
 
 fn generate_setup_token() -> String {
@@ -368,7 +368,7 @@ pub async fn create_passkey_account(
     let access_jwt = if byod_auth.is_some() {
         match tranquil_pds::auth::create_access_token_with_metadata(&did, &secret_key_bytes) {
             Ok(token_meta) => {
-                let refresh_jti = uuid::Uuid::new_v4().to_string();
+                let refresh_jti = Jti::from(uuid::Uuid::new_v4().to_string());
                 let refresh_expires = chrono::Utc::now() + chrono::Duration::hours(24);
                 let session_data = tranquil_db_traits::SessionTokenCreate {
                     did: did_typed.clone(),

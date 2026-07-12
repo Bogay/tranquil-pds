@@ -10,6 +10,7 @@ use hmac::{Hmac, Mac};
 use k256::ecdsa::{Signature, SigningKey, VerifyingKey, signature::Verifier};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
+use tranquil_types::{Did, Jti};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -29,7 +30,7 @@ pub fn get_did_from_token(token: &str) -> Result<String, TokenDecodeError> {
     Ok(claims.sub.unwrap_or(claims.iss))
 }
 
-pub fn get_jti_from_token(token: &str) -> Result<String, TokenDecodeError> {
+pub fn get_jti_from_token(token: &str) -> Result<Jti, TokenDecodeError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Err(TokenDecodeError::InvalidFormat);
@@ -45,7 +46,7 @@ pub fn get_jti_from_token(token: &str) -> Result<String, TokenDecodeError> {
     claims
         .get("jti")
         .and_then(|j| j.as_str())
-        .map(|s| s.to_string())
+        .map(Jti::new)
         .ok_or(TokenDecodeError::MissingClaim)
 }
 

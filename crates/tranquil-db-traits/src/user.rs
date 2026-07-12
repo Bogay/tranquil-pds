@@ -119,7 +119,7 @@ pub trait UserRepository: Send + Sync {
     async fn get_session_access_expiry(
         &self,
         did: &Did,
-        access_jti: &str,
+        access_jti: &Jti,
     ) -> Result<Option<DateTime<Utc>>, DbError>;
 
     async fn get_oauth_token_with_user(
@@ -926,7 +926,7 @@ pub struct UserIdAndPasswordHash {
 #[derive(Debug, Clone)]
 pub struct PasswordResetResult {
     pub did: Did,
-    pub session_jtis: Vec<String>,
+    pub session_jtis: Vec<Jti>,
 }
 
 #[derive(Debug, Clone)]

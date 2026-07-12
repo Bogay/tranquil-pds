@@ -8,6 +8,7 @@ use chrono::{DateTime, Duration, Utc};
 use hmac::{Hmac, Mac};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use sha2::Sha256;
+use tranquil_types::{Did, Jti, Nsid};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -83,7 +84,7 @@ pub fn create_access_token_with_jti(
     scopes: Option<&str>,
     controller_did: Option<&str>,
     hostname: Option<&str>,
-    jti: &str,
+    jti: &Jti,
     expires_at: DateTime<Utc>,
 ) -> Result<String> {
     let scope = scopes.unwrap_or(TokenScope::Access.as_str());
@@ -94,7 +95,7 @@ pub fn create_access_token_with_jti(
         TokenType::Access,
         key_bytes,
         expires_at,
-        jti.to_string(),
+        jti.clone(),
         act,
         hostname,
     )?
@@ -106,7 +107,7 @@ pub fn create_access_token_with_jti(
 pub fn create_refresh_token_with_jti(
     did: &str,
     key_bytes: &[u8],
-    jti: &str,
+    jti: &Jti,
     expires_at: DateTime<Utc>,
 ) -> Result<String> {
     Ok(create_signed_token_pinned(
@@ -115,7 +116,7 @@ pub fn create_refresh_token_with_jti(
         TokenType::Refresh,
         key_bytes,
         expires_at,
-        jti.to_string(),
+        jti.clone(),
         None,
         None,
     )?
@@ -142,8 +143,8 @@ pub fn create_service_token(
         exp: expiration,
         iat: Utc::now().timestamp(),
         scope: None,
-        lxm: lxm.map(ToOwned::to_owned),
-        jti: uuid::Uuid::new_v4().to_string(),
+        lxm: lxm.cloned(),
+        jti: Jti::new(uuid::Uuid::new_v4().to_string()),
         act: None,
     };
 
@@ -173,7 +174,7 @@ fn create_signed_token_with_act(
     let expires_at = Utc::now()
         .checked_add_signed(duration)
         .expect("valid timestamp");
-    let jti = uuid::Uuid::new_v4().to_string();
+    let jti = Jti::new(uuid::Uuid::new_v4().to_string());
     create_signed_token_pinned(did, scope, typ, key_bytes, expires_at, jti, act, hostname)
 }
 
@@ -184,7 +185,7 @@ fn create_signed_token_pinned(
     typ: TokenType,
     key_bytes: &[u8],
     expires_at: DateTime<Utc>,
-    jti: String,
+    jti: Jti,
     act: Option<ActClaim>,
     hostname: Option<&str>,
 ) -> Result<TokenWithMetadata> {
@@ -294,8 +295,8 @@ pub fn create_service_token_hs256(
         exp: expiration,
         iat: Utc::now().timestamp(),
         scope: None,
-        lxm: Some(lxm.to_string()),
-        jti: uuid::Uuid::new_v4().to_string(),
+        lxm: Some(lxm.clone()),
+        jti: Jti::new(uuid::Uuid::new_v4().to_string()),
         act: None,
     };
 
@@ -314,7 +315,7 @@ fn create_hs256_token_with_metadata(
         .expect("valid timestamp");
 
     let expiration = expires_at.timestamp();
-    let jti = uuid::Uuid::new_v4().to_string();
+    let jti = Jti::new(uuid::Uuid::new_v4().to_string());
 
     let claims = Claims {
         iss: did.to_owned(),

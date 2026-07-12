@@ -34,8 +34,8 @@ impl SessionRepository for PostgresSessionRepository {
             RETURNING id
             "#,
             data.did.as_str(),
-            data.access_jti,
-            data.refresh_jti,
+            data.access_jti.as_str(),
+            data.refresh_jti.as_str(),
             data.access_expires_at,
             data.refresh_expires_at,
             data.login_type.is_legacy(),
@@ -53,7 +53,7 @@ impl SessionRepository for PostgresSessionRepository {
 
     async fn get_session_by_access_jti(
         &self,
-        access_jti: &str,
+        access_jti: &Jti,
     ) -> Result<Option<SessionToken>, DbError> {
         let row = sqlx::query!(
             r#"
@@ -63,7 +63,7 @@ impl SessionRepository for PostgresSessionRepository {
             FROM session_tokens
             WHERE access_jti = $1
             "#,
-            access_jti
+            access_jti.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -72,8 +72,8 @@ impl SessionRepository for PostgresSessionRepository {
         Ok(row.map(|r| SessionToken {
             id: SessionId::new(r.id),
             did: Did::from(r.did),
-            access_jti: r.access_jti,
-            refresh_jti: r.refresh_jti,
+            access_jti: Jti::from(r.access_jti),
+            refresh_jti: Jti::from(r.refresh_jti),
             access_expires_at: r.access_expires_at,
             refresh_expires_at: r.refresh_expires_at,
             login_type: LoginType::from_legacy_flag(r.legacy_login),
@@ -88,7 +88,7 @@ impl SessionRepository for PostgresSessionRepository {
 
     async fn get_session_for_refresh(
         &self,
-        refresh_jti: &str,
+        refresh_jti: &Jti,
     ) -> Result<Option<SessionForRefresh>, DbError> {
         let row = sqlx::query!(
             r#"
@@ -98,7 +98,7 @@ impl SessionRepository for PostgresSessionRepository {
             JOIN user_keys k ON u.id = k.user_id
             WHERE st.refresh_jti = $1 AND st.refresh_expires_at > NOW()
             "#,
-            refresh_jti
+            refresh_jti.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -116,12 +116,12 @@ impl SessionRepository for PostgresSessionRepository {
 
     async fn delete_session_by_access_jti(
         &self,
-        access_jti: &str,
+        access_jti: &Jti,
         did: &Did,
     ) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "DELETE FROM session_tokens WHERE access_jti = $1 AND did = $2",
-            access_jti,
+            access_jti.as_str(),
             did.as_str()
         )
         .execute(&self.pool)
@@ -160,7 +160,7 @@ impl SessionRepository for PostgresSessionRepository {
     async fn delete_sessions_by_did_except_jti(
         &self,
         did: &Did,
-        except_jti: &str,
+        except_jti: &Jti,
     ) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "DELETE FROM session_tokens WHERE did = $1 AND access_jti != $2",
@@ -192,7 +192,7 @@ impl SessionRepository for PostgresSessionRepository {
             .into_iter()
             .map(|r| SessionListItem {
                 id: SessionId::new(r.id),
-                access_jti: r.access_jti,
+                access_jti: Jti::from(r.access_jti),
                 created_at: r.created_at,
                 refresh_expires_at: r.refresh_expires_at,
             })
@@ -203,7 +203,7 @@ impl SessionRepository for PostgresSessionRepository {
         &self,
         session_id: SessionId,
         did: &Did,
-    ) -> Result<Option<String>, DbError> {
+    ) -> Result<Option<Jti>, DbError> {
         let row = sqlx::query_scalar!(
             "SELECT access_jti FROM session_tokens WHERE id = $1 AND did = $2",
             session_id.as_i32(),
@@ -213,7 +213,7 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row)
+        Ok(row.map(Jti::from))
     }
 
     async fn delete_sessions_by_app_password(
@@ -237,7 +237,7 @@ impl SessionRepository for PostgresSessionRepository {
         &self,
         did: &Did,
         app_password_name: &str,
-    ) -> Result<Vec<String>, DbError> {
+    ) -> Result<Vec<Jti>, DbError> {
         let rows = sqlx::query_scalar!(
             "SELECT access_jti FROM session_tokens WHERE did = $1 AND app_password_name = $2",
             did.as_str(),
@@ -247,10 +247,10 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows)
+        Ok(rows.into_iter().map(Jti::from).collect())
     }
 
-    async fn lookup_refresh_grace(&self, refresh_jti: &str) -> Result<RefreshGraceLookup, DbError> {
+    async fn lookup_refresh_grace(&self, refresh_jti: &Jti) -> Result<RefreshGraceLookup, DbError> {
         let row = sqlx::query!(
             r#"
             SELECT u.used_at, st.id AS session_id, st.did, st.scope, st.controller_did,
@@ -262,7 +262,7 @@ impl SessionRepository for PostgresSessionRepository {
             JOIN user_keys k ON us.id = k.user_id
             WHERE u.refresh_jti = $1
             "#,
-            refresh_jti
+            refresh_jti.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -281,8 +281,8 @@ impl SessionRepository for PostgresSessionRepository {
                 did: Did::from(r.did),
                 scope: r.scope,
                 controller_did: r.controller_did.map(Did::from),
-                access_jti: r.access_jti,
-                refresh_jti: r.refresh_jti,
+                access_jti: Jti::from(r.access_jti),
+                refresh_jti: Jti::from(r.refresh_jti),
                 access_expires_at: r.access_expires_at,
                 refresh_expires_at: r.refresh_expires_at,
                 key_bytes: r.key_bytes,
@@ -524,7 +524,7 @@ impl SessionRepository for PostgresSessionRepository {
         // rest see `rows_affected == 0`.
         let claimed = sqlx::query!(
             "INSERT INTO used_refresh_tokens (refresh_jti, session_id) VALUES ($1, $2) ON CONFLICT (refresh_jti) DO NOTHING",
-            data.old_refresh_jti,
+            data.old_refresh_jti.as_str(),
             data.session_id.as_i32()
         )
         .execute(&mut *tx)
@@ -567,8 +567,8 @@ impl SessionRepository for PostgresSessionRepository {
                 refresh_expires_at = $4, updated_at = NOW()
             WHERE id = $5
             "#,
-            data.new_access_jti,
-            data.new_refresh_jti,
+            data.new_access_jti.as_str(),
+            data.new_refresh_jti.as_str(),
             data.new_access_expires_at,
             data.new_refresh_expires_at,
             data.session_id.as_i32()

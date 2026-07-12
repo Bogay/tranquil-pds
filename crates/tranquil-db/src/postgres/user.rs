@@ -176,12 +176,12 @@ impl UserRepository for PostgresUserRepository {
     async fn get_session_access_expiry(
         &self,
         did: &Did,
-        access_jti: &str,
+        access_jti: &Jti,
     ) -> Result<Option<DateTime<Utc>>, DbError> {
         let row = sqlx::query!(
             "SELECT access_expires_at FROM session_tokens WHERE did = $1 AND access_jti = $2",
             did.as_str(),
-            access_jti
+            access_jti.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -1874,13 +1874,16 @@ impl UserRepository for PostgresUserRepository {
             .await
             .map_err(map_sqlx_error)?;
 
-        let session_jtis: Vec<String> = sqlx::query_scalar!(
+        let session_jtis: Vec<Jti> = sqlx::query_scalar!(
             "SELECT access_jti FROM session_tokens WHERE did = $1",
             user_did
         )
         .fetch_all(&mut *tx)
         .await
-        .map_err(map_sqlx_error)?;
+        .map_err(map_sqlx_error)?
+        .into_iter()
+        .map(Jti::from)
+        .collect();
 
         sqlx::query!("DELETE FROM session_tokens WHERE did = $1", user_did)
             .execute(&mut *tx)
