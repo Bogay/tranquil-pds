@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 use tranquil_db_traits::{
     ApplyCommitInput, CommitEventData, RecordUpsert, RepoEventType, RepoRepository,
 };
-use tranquil_types::{CidLink, Did, Handle, Nsid, Rkey};
+use tranquil_types::{CidLink, Did, Handle, Nsid, Rkey, Tid};
 use uuid::Uuid;
 
 use tranquil_store::RealIO;
@@ -85,8 +85,8 @@ fn test_cid_bytes(seed: u8) -> Vec<u8> {
     cid::Cid::new_v1(0x71, mh).to_bytes()
 }
 
-fn make_rev(n: u64) -> String {
-    format!("rev{n:010}")
+fn make_rev(n: u64) -> Tid {
+    Tid::from(format!("rev{n:010}"))
 }
 
 struct BenchHarness {
@@ -197,7 +197,7 @@ async fn seed_users(pool: &HandlerPool, count: usize) -> Vec<UserInfo> {
                             user.user_id.as_simple()
                         )),
                         repo_root_cid: test_cid(1),
-                        repo_rev: "rev0000000000".to_string(),
+                        repo_rev: Tid::from("rev0000000000".to_string()),
                         tx,
                     }))
                     .unwrap();
@@ -612,9 +612,15 @@ async fn pg_seed_users(pg: &sqlx::PgPool, count: usize) -> Vec<UserInfo> {
                         "u{}.pgscale.invalid",
                         user.user_id.as_simple()
                     ));
-                    repo.create_repo(user.user_id, &user.did, &handle, &test_cid(1), "rev0000000000")
-                        .await
-                        .unwrap();
+                    repo.create_repo(
+                        user.user_id,
+                        &user.did,
+                        &handle,
+                        &test_cid(1),
+                        &Tid::from("rev0000000000".to_string()),
+                    )
+                    .await
+                    .unwrap();
                 })
                 .await;
             if (batch_idx + 1) % 20 == 0 || batch_idx + 1 == total_batches {
@@ -669,7 +675,7 @@ async fn pg_seed_all_records(pg: &sqlx::PgPool, users: &[UserInfo], records_per_
                                 &collections,
                                 &rkeys,
                                 &cids,
-                                "rev0000000001",
+                                &Tid::from("rev0000000001".to_string()),
                             )
                             .await
                             .unwrap();

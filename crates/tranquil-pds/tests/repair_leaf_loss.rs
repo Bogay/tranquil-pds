@@ -144,7 +144,7 @@ async fn repair_fails_loud_on_missing_leaf_block() {
 
     let recorded = repos
         .repo
-        .get_user_block_cids_since_rev(user_id, "")
+        .get_user_block_cids_since_rev(user_id, &tranquil_types::Tid::from(String::new()))
         .await
         .expect("read user_blocks");
     assert!(

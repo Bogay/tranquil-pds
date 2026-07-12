@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 use tranquil_db_traits::{
     ApplyCommitInput, CommitEventData, RecordUpsert, RepoEventType, RepoRepository,
 };
-use tranquil_types::{CidLink, Did, Handle, Nsid, Rkey};
+use tranquil_types::{CidLink, Did, Handle, Nsid, Rkey, Tid};
 use uuid::Uuid;
 
 use tranquil_store::RealIO;
@@ -85,8 +85,8 @@ fn test_cid_bytes(seed: u8) -> Vec<u8> {
     cid::Cid::new_v1(0x71, mh).to_bytes()
 }
 
-fn make_rev(n: u64) -> String {
-    format!("rev{n:010}")
+fn make_rev(n: u64) -> Tid {
+    Tid::from(format!("rev{n:010}"))
 }
 
 struct BenchHarness {
@@ -143,7 +143,7 @@ async fn create_user(pool: &HandlerPool, user_id: Uuid, did: &Did, cid: &CidLink
         did: did.clone(),
         handle: Handle::from(format!("bench.{}.invalid", user_id.as_simple())),
         repo_root_cid: cid.clone(),
-        repo_rev: "rev0000000000".to_string(),
+        repo_rev: Tid::from("rev0000000000".to_string()),
         tx,
     }))
     .unwrap();
@@ -509,9 +509,15 @@ async fn bench_pg_upsert_records(
             pg_create_user(pg, *uid, did).await;
             let did_typed = Did::from(did.clone());
             let handle = Handle::from(format!("bench.{}.invalid", uid.as_simple()));
-            repo.create_repo(*uid, &did_typed, &handle, &test_cid(1), "rev0000000000")
-                .await
-                .unwrap();
+            repo.create_repo(
+                *uid,
+                &did,
+                &handle,
+                &test_cid(1),
+                &Tid::from("rev0000000000".to_string()),
+            )
+            .await
+            .unwrap();
         })
         .await;
 
@@ -608,9 +614,15 @@ async fn bench_pg_get_record_cid(pg: &sqlx::PgPool, concurrency: usize, ops_per_
     let repo = tranquil_db::postgres::PostgresRepoRepository::new(pg.clone());
     let did_typed = Did::from(did.clone());
     let handle = Handle::from(format!("bench.{}.invalid", user_id.as_simple()));
-    repo.create_repo(user_id, &did_typed, &handle, &test_cid(1), "rev0000000000")
-        .await
-        .unwrap();
+    repo.create_repo(
+        user_id,
+        &did,
+        &handle,
+        &test_cid(1),
+        &Tid::from("rev0000000000".to_string()),
+    )
+    .await
+    .unwrap();
     pg_seed_records(&repo, user_id, &collection, 1000).await;
 
     let total_records = 1000usize;
@@ -658,9 +670,15 @@ async fn bench_pg_list_records(pg: &sqlx::PgPool, concurrency: usize, ops_per_ta
     let repo = tranquil_db::postgres::PostgresRepoRepository::new(pg.clone());
     let did_typed = Did::from(did.clone());
     let handle = Handle::from(format!("bench.{}.invalid", user_id.as_simple()));
-    repo.create_repo(user_id, &did_typed, &handle, &test_cid(1), "rev0000000000")
-        .await
-        .unwrap();
+    repo.create_repo(
+        user_id,
+        &did,
+        &handle,
+        &test_cid(1),
+        &Tid::from("rev0000000000".to_string()),
+    )
+    .await
+    .unwrap();
     pg_seed_records(&repo, user_id, &collection, 1000).await;
 
     let start = Instant::now();

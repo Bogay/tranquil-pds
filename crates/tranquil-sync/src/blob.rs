@@ -11,7 +11,7 @@ use tracing::error;
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::state::AppState;
 use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
-use tranquil_types::{CidLink, Did};
+use tranquil_types::{CidLink, Did, Tid};
 
 #[derive(Deserialize)]
 pub struct GetBlobParams {
@@ -69,8 +69,8 @@ pub struct ListBlobsParams {
 #[derive(Serialize)]
 pub struct ListBlobsOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
-    pub cids: Vec<String>,
+    pub cursor: Option<CidLink>,
+    pub cids: Vec<CidLink>,
 }
 
 pub async fn list_blobs(
@@ -91,11 +91,11 @@ pub async fn list_blobs(
     let cursor_cid = params.cursor.as_deref().unwrap_or("");
     let user_id = account.user_id;
 
-    let cids_result: Result<Vec<String>, _> = if let Some(since) = &params.since {
+    let cids_result: Result<Vec<CidLink>, _> = if let Some(since) = &params.since {
         state
             .repos
             .blob
-            .list_blobs_since_rev(&did, since)
+            .list_blobs_since_rev(&did, &Tid::from(since.clone()))
             .await
             .map(|cids| {
                 let mut cid_strs: Vec<String> = cids.into_iter().map(|c| c.to_string()).collect();
@@ -118,7 +118,7 @@ pub async fn list_blobs(
         Ok(cids) => {
             let limit_usize = usize::try_from(limit).unwrap_or(0);
             let has_more = cids.len() > limit_usize;
-            let cids: Vec<String> = cids.into_iter().take(limit_usize).collect();
+            let cids: Vec<CidLink> = cids.into_iter().take(limit_usize).collect();
             let next_cursor = if has_more { cids.last().cloned() } else { None };
             (
                 StatusCode::OK,

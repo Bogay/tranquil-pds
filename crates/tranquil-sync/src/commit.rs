@@ -16,13 +16,13 @@ use tranquil_pds::state::AppState;
 use tranquil_pds::sync::util::{
     RepoAccessLevel, assert_repo_availability, get_account_with_status,
 };
-use tranquil_types::Did;
+use tranquil_types::{Did, Tid};
 
-async fn get_rev_from_commit(state: &AppState, cid_str: &str) -> Option<String> {
+async fn get_rev_from_commit(state: &AppState, cid_str: &str) -> Option<Tid> {
     let cid = Cid::from_str(cid_str).ok()?;
     let block = state.block_store.get(&cid).await.ok()??;
     let commit = Commit::from_cbor(&block).ok()?;
-    Some(commit.rev().to_string())
+    Some(Tid::from(commit.rev().to_string()))
 }
 
 #[derive(Deserialize)]
@@ -33,7 +33,7 @@ pub struct GetLatestCommitParams {
 #[derive(Serialize)]
 pub struct GetLatestCommitOutput {
     pub cid: String,
-    pub rev: String,
+    pub rev: Tid,
 }
 
 pub async fn get_latest_commit(
@@ -167,7 +167,7 @@ pub struct GetRepoStatusOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<AccountStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rev: Option<String>,
+    pub rev: Option<Tid>,
 }
 
 pub async fn get_repo_status(

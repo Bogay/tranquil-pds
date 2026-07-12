@@ -1,4 +1,4 @@
-use jacquard_common::types::{integer::LimitedU32, string::Tid};
+use jacquard_common::types::{integer::LimitedU32, string::Tid as JacquardTid};
 use jacquard_repo::{mst::Mst, storage::BlockStore};
 use k256::ecdsa::SigningKey;
 use std::sync::Arc;
@@ -6,7 +6,7 @@ use tranquil_db_traits::CommsChannel;
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::repo_ops::create_signed_commit;
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle};
+use tranquil_pds::types::{CidLink, Did, Handle, Tid};
 
 pub struct PlcDidResult {
     pub did: Did,
@@ -74,7 +74,7 @@ pub struct GenesisRepo {
     pub encrypted_key_bytes: Vec<u8>,
     pub commit_cid: cid::Cid,
     pub mst_root_cid: cid::Cid,
-    pub repo_rev: String,
+    pub repo_rev: Tid,
     pub genesis_block_cids: Vec<Vec<u8>>,
 }
 
@@ -96,8 +96,8 @@ pub async fn init_genesis_repo(
         ApiError::InternalError(None)
     })?;
 
-    let rev = Tid::now(LimitedU32::MIN);
-    let (commit_bytes, _sig) = create_signed_commit(did, mst_root, rev.as_ref(), None, signing_key)
+    let rev = JacquardTid::now(LimitedU32::MIN);
+    let (commit_bytes, _sig) = create_signed_commit(did, mst_root, &rev, None, signing_key)
         .map_err(|e| {
             tracing::error!("Error creating genesis commit: {:?}", e);
             ApiError::InternalError(None)
@@ -112,7 +112,7 @@ pub async fn init_genesis_repo(
         encrypted_key_bytes,
         commit_cid,
         mst_root_cid: mst_root,
-        repo_rev: rev.as_ref().to_string(),
+        repo_rev: Tid::from(rev.as_ref().to_string()),
         genesis_block_cids: vec![mst_root.to_bytes(), commit_cid.to_bytes()],
     })
 }
@@ -201,7 +201,7 @@ pub async fn sequence_new_account(
     if let Err(e) = tranquil_pds::repo_ops::sequence_sync_event(
         state,
         did,
-        &repo.commit_cid.to_string(),
+        &CidLink::from(repo.commit_cid.to_string()),
         Some(&repo.repo_rev),
     )
     .await

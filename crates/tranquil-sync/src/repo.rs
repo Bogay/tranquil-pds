@@ -13,7 +13,7 @@ use tranquil_pds::scheduled::generate_repo_car_from_user_blocks;
 use tranquil_pds::state::AppState;
 use tranquil_pds::sync::car::{encode_car_block, encode_car_header};
 use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
-use tranquil_types::Did;
+use tranquil_types::{Did, Tid};
 
 struct GetBlocksParams {
     did: Did,
@@ -139,7 +139,7 @@ pub async fn get_repo(
     };
 
     if let Some(since) = &query.since {
-        return get_repo_since(&state, &did, &head_cid, since).await;
+        return get_repo_since(&state, &did, &head_cid, &Tid::from(since.clone())).await;
     }
 
     let _permit = match state.repo_export_semaphore.try_acquire() {
@@ -179,7 +179,7 @@ pub async fn get_repo(
         .into_response()
 }
 
-async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str) -> Response {
+async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &Tid) -> Response {
     let user_id = match state.repos.user.get_id_by_did(did).await {
         Ok(Some(id)) => id,
         Ok(None) => {

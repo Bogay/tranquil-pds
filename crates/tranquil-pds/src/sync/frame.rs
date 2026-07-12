@@ -3,7 +3,7 @@ use cid::Cid;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tranquil_scopes::RepoAction;
-use tranquil_types::Did;
+use tranquil_types::{CidLink, Did, Handle, Tid};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FrameType {
@@ -33,8 +33,8 @@ pub struct CommitFrame {
     pub too_big: bool,
     pub repo: Did,
     pub commit: Cid,
-    pub rev: String,
-    pub since: Option<String>,
+    pub rev: Tid,
+    pub since: Option<Tid>,
     #[serde(with = "serde_bytes")]
     pub blocks: Vec<u8>,
     pub ops: Vec<RepoOp>,
@@ -83,7 +83,7 @@ pub struct AccountFrame {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SyncFrame {
     pub did: Did,
-    pub rev: String,
+    pub rev: Tid,
     #[serde(with = "serde_bytes")]
     pub blocks: Vec<u8>,
     pub seq: i64,
@@ -145,25 +145,23 @@ pub struct CommitFrameBuilder {
     ops_json: serde_json::Value,
     blob_cids: Vec<Cid>,
     time: chrono::DateTime<chrono::Utc>,
-    rev: Option<String>,
+    rev: Option<Tid>,
 }
 
 impl CommitFrameBuilder {
     pub fn new(
         seq: i64,
         did: Did,
-        commit_cid_str: &str,
+        commit_cid: &CidLink,
         ops_json: serde_json::Value,
-        blob_strs: Vec<String>,
+        blob_links: Vec<CidLink>,
         time: chrono::DateTime<chrono::Utc>,
-        rev: Option<String>,
+        rev: Option<Tid>,
     ) -> Result<Self, CommitFrameError> {
-        let commit_cid = Cid::from_str(commit_cid_str)
-            .map_err(|_| CommitFrameError::InvalidCommitCid(commit_cid_str.to_string()))?;
-        let blob_cids: Vec<Cid> = blob_strs
-            .iter()
-            .filter_map(|s| Cid::from_str(s).ok())
-            .collect();
+        let commit_cid = commit_cid
+            .to_cid()
+            .ok_or_else(|| CommitFrameError::InvalidCommitCid(commit_cid.to_string()))?;
+        let blob_cids: Vec<Cid> = blob_links.iter().filter_map(|s| s.to_cid()).collect();
         Ok(Self {
             seq,
             did,
@@ -208,9 +206,8 @@ impl CommitFrameBuilder {
     }
 }
 
-fn placeholder_rev() -> String {
-    use jacquard_common::types::{integer::LimitedU32, string::Tid};
-    Tid::now(LimitedU32::MIN).to_string()
+fn placeholder_rev() -> Tid {
+    Tid::now()
 }
 
 fn format_atproto_time(dt: chrono::DateTime<chrono::Utc>) -> String {
@@ -227,7 +224,7 @@ impl TryFrom<SequencedEvent> for CommitFrame {
         let builder = CommitFrameBuilder::new(
             event.seq.as_i64(),
             event.did.clone(),
-            commit_cid.as_str(),
+            &commit_cid,
             event.ops.unwrap_or_default(),
             event.blobs.unwrap_or_default(),
             event.created_at,

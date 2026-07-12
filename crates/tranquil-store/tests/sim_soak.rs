@@ -257,7 +257,7 @@ fn sim_soak_continuous_operations_with_crash_recovery() {
                     handle: None,
                     active: None,
                     status: None,
-                    rev: Some(format!("soak-rev-{event_idx}")),
+                    rev: Some(tranquil_types::Tid::from(format!("soak-rev-{event_idx}"))),
                 };
                 s.eventlog
                     .append_event(&did, RepoEventType::Commit, &event)

@@ -7,7 +7,7 @@ use tranquil_db_traits::{
     InviteCodeSortOrder, InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo,
     QueuedComms, ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
-use tranquil_types::{CidLink, Did, Handle};
+use tranquil_types::{CidLink, Did, Handle, InviteCode};
 use uuid::Uuid;
 
 use super::user::map_sqlx_error;

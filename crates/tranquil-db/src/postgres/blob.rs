@@ -3,7 +3,7 @@ use sqlx::PgPool;
 use tranquil_db_traits::{
     BlobForExport, BlobMetadata, BlobRepository, BlobWithTakedown, DbError, MissingBlobInfo,
 };
-use tranquil_types::{AtUri, CidLink, Did};
+use tranquil_types::{AtUri, CidLink, Did, Tid};
 use uuid::Uuid;
 
 use super::user::map_sqlx_error;
@@ -112,7 +112,7 @@ impl BlobRepository for PostgresBlobRepository {
         Ok(results.into_iter().map(CidLink::from).collect())
     }
 
-    async fn list_blobs_since_rev(&self, did: &Did, since: &str) -> Result<Vec<CidLink>, DbError> {
+    async fn list_blobs_since_rev(&self, did: &Did, since: &Tid) -> Result<Vec<CidLink>, DbError> {
         let results = sqlx::query_scalar!(
             r#"SELECT DISTINCT unnest(blobs) as "cid!"
                FROM repo_seq

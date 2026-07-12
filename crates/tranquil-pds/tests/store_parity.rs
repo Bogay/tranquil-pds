@@ -4,7 +4,7 @@ mod helpers;
 use std::sync::Arc;
 use tranquil_db::PostgresRepositories;
 use tranquil_db_traits::{Backlink, BacklinkPath, CommsChannel, CommsType};
-use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey};
+use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey, Tid};
 use uuid::Uuid;
 
 async fn create_store_repos() -> Arc<PostgresRepositories> {
@@ -139,7 +139,7 @@ fn test_at_uri(did: &Did, collection: &Nsid, rkey: &Rkey) -> AtUri {
 }
 
 async fn seed_user(repos: &PostgresRepositories, did: &Did, handle: &Handle) -> Uuid {
-    let commit_cid = helpers::make_cid(did.as_str().as_bytes()).to_string();
+    let commit_cid = CidLink::from(helpers::make_cid(did.as_str().as_bytes()).to_string());
     let input = tranquil_db_traits::CreatePasswordAccountInput {
         handle: handle.clone(),
         email: None,
@@ -155,7 +155,7 @@ async fn seed_user(repos: &PostgresRepositories, did: &Did, handle: &Handle) -> 
         encryption_version: 0,
         reserved_key_id: None,
         commit_cid,
-        repo_rev: "rev0".to_string(),
+        repo_rev: Tid::from("rev0".to_string()),
         genesis_block_cids: vec![],
         invite_code: None,
         birthdate_pref: None,
@@ -185,7 +185,13 @@ async fn seed_records(
     let cids: Vec<CidLink> = records.iter().map(|(_, c)| c.clone()).collect();
     repos
         .repo
-        .upsert_records(repo_id, &collections, &rkeys, &cids, "rev1")
+        .upsert_records(
+            repo_id,
+            &collections,
+            &rkeys,
+            &cids,
+            &Tid::from("rev1".to_string()),
+        )
         .await
         .unwrap();
 }
@@ -1412,6 +1418,7 @@ async fn parity_repo_root_operations() {
     assert_eq!(pg_root, store_root);
 
     let new_root = test_cid(99);
+    let rev1 = Tid::from("rev1".to_string());
     f.pg.repo
         .update_repo_root(pg_uid, &new_root, "rev1")
         .await
@@ -1625,7 +1632,7 @@ async fn parity_prune_events_older_than() {
         blobs: None,
         blocks: None,
         prev_data_cid: None,
-        rev: Some("rev0".to_string()),
+        rev: Some(Tid::from("rev0".to_string())),
     };
 
     let baseline = f.pg.repo.get_max_seq().await.unwrap();

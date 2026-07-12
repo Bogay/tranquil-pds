@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use futures::StreamExt;
 use tokio::sync::oneshot;
 use tranquil_db_traits::{ApplyCommitInput, CommitEventData, RecordUpsert, RepoEventType};
-use tranquil_types::{CidLink, Did, Handle, Nsid, Rkey};
+use tranquil_types::{CidLink, Did, Handle, Nsid, Rkey, Tid};
 use uuid::Uuid;
 
 use tranquil_store::RealIO;
@@ -56,7 +56,7 @@ async fn seed_users(pool: &HandlerPool, count: usize) -> Vec<UserInfo> {
                         did: user.did.clone(),
                         handle: Handle::from(format!("u{}.prof.invalid", user.user_id.as_simple())),
                         repo_root_cid: test_cid(1),
-                        repo_rev: "rev0000000000".to_string(),
+                        repo_rev: Tid::from("rev0000000000".to_string()),
                         tx,
                     }))
                     .unwrap();
@@ -114,7 +114,7 @@ async fn seed_records(pool: &Arc<HandlerPool>, users: &[UserInfo], records_per_u
                                 did: user.did.clone(),
                                 expected_root_cid: None,
                                 new_root_cid: test_cid(2),
-                                new_rev: "rev0000000001".to_string(),
+                                new_rev: Tid::from("rev0000000001".to_string()),
                                 new_block_cids,
                                 obsolete_block_cids: vec![],
                                 record_upserts,
@@ -130,7 +130,7 @@ async fn seed_records(pool: &Arc<HandlerPool>, users: &[UserInfo], records_per_u
                                     blobs: None,
                                     blocks: None,
                                     prev_data_cid: None,
-                                    rev: Some("rev0000000001".to_string()),
+                                    rev: Some(Tid::from("rev0000000001".to_string())),
                                 },
                             };
                             let (tx, rx) = oneshot::channel();

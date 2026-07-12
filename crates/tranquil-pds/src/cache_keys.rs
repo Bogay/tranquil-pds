@@ -1,4 +1,6 @@
-pub fn session_key(did: &str, jti: &str) -> String {
+use crate::types::{CidLink, Did, Handle, Jti};
+
+pub fn session_key(did: &Did, jti: &Jti) -> String {
     format!("auth:session:{}:{}", did, jti)
 }
 
@@ -30,7 +32,7 @@ pub fn email_update_key(did: &str) -> String {
     format!("email_update:{}", did)
 }
 
-pub fn scope_ref_key(cid: &str) -> String {
+pub fn scope_ref_key(cid: &CidLink) -> String {
     format!("scope_ref:{}", cid)
 }
 

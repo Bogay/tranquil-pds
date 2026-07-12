@@ -7,7 +7,7 @@ use tranquil_db_traits::{
     RepoAccountInfo, RepoEventType, RepoInfo, RepoListItem, RepoRepository, RepoWithoutRev,
     SequenceNumber, SequencedEvent, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
 };
-use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey};
+use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey, Tid};
 use uuid::Uuid;
 
 use super::user::map_sqlx_error;
@@ -63,7 +63,9 @@ fn row_to_event_blocks(
 
 fn legacy_fallback(legacy_blocks_cids: Option<Vec<String>>) -> Option<EventBlocks> {
     match legacy_blocks_cids {
-        Some(cids) if !cids.is_empty() => Some(EventBlocks::LegacyCids(cids)),
+        Some(cids) if !cids.is_empty() => Some(EventBlocks::LegacyCids(
+            cids.into_iter().map(CidLink::from).collect(),
+        )),
         _ => None,
     }
 }
@@ -102,12 +104,14 @@ fn map_sequenced_row(r: SequencedEventRow) -> Result<SequencedEvent, DbError> {
         prev_cid: r.prev_cid.map(CidLink::from),
         prev_data_cid: r.prev_data_cid.map(CidLink::from),
         ops: r.ops,
-        blobs: r.blobs,
+        blobs: r
+            .blobs
+            .map(|blobs| blobs.into_iter().map(CidLink::from).collect()),
         blocks,
         handle: r.handle.map(Handle::from),
         active: r.active,
         status,
-        rev: r.rev,
+        rev: r.rev.map(Tid::from),
     })
 }
 
@@ -197,13 +201,13 @@ impl RepoRepository for PostgresRepoRepository {
         _did: &Did,
         _handle: &Handle,
         repo_root_cid: &CidLink,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError> {
         sqlx::query!(
             "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
             user_id,
             repo_root_cid.as_str(),
-            repo_rev
+            repo_rev.as_str()
         )
         .execute(&self.pool)
         .await
@@ -216,12 +220,12 @@ impl RepoRepository for PostgresRepoRepository {
         &self,
         user_id: Uuid,
         repo_root_cid: &CidLink,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError> {
         sqlx::query!(
             "UPDATE repos SET repo_root_cid = $1, repo_rev = $2, updated_at = NOW() WHERE user_id = $3",
             repo_root_cid.as_str(),
-            repo_rev,
+            repo_rev.as_str(),
             user_id
         )
         .execute(&self.pool)
@@ -231,10 +235,10 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(())
     }
 
-    async fn update_repo_rev(&self, user_id: Uuid, repo_rev: &str) -> Result<(), DbError> {
+    async fn update_repo_rev(&self, user_id: Uuid, repo_rev: &Tid) -> Result<(), DbError> {
         sqlx::query!(
             "UPDATE repos SET repo_rev = $1 WHERE user_id = $2",
-            repo_rev,
+            repo_rev.as_str(),
             user_id
         )
         .execute(&self.pool)
@@ -277,7 +281,7 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(row.map(|r| RepoInfo {
             user_id: r.user_id,
             repo_root_cid: CidLink::from(r.repo_root_cid),
-            repo_rev: r.repo_rev,
+            repo_rev: r.repo_rev.map(Tid::from),
         }))
     }
 
@@ -323,7 +327,7 @@ impl RepoRepository for PostgresRepoRepository {
         collections: &[Nsid],
         rkeys: &[Rkey],
         record_cids: &[CidLink],
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError> {
         let collections_str: Vec<&str> = collections.iter().map(|c| c.as_str()).collect();
         let rkeys_str: Vec<&str> = rkeys.iter().map(|r| r.as_str()).collect();
@@ -341,7 +345,7 @@ impl RepoRepository for PostgresRepoRepository {
             &collections_str as &[&str],
             &rkeys_str as &[&str],
             &cids_str as &[&str],
-            repo_rev
+            repo_rev.as_str()
         )
         .execute(&self.pool)
         .await
@@ -705,7 +709,7 @@ impl RepoRepository for PostgresRepoRepository {
         &self,
         user_id: Uuid,
         block_cids: &[Vec<u8>],
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError> {
         sqlx::query(
             r#"
@@ -716,7 +720,7 @@ impl RepoRepository for PostgresRepoRepository {
         )
         .bind(user_id)
         .bind(block_cids)
-        .bind(repo_rev)
+        .bind(repo_rev.as_str())
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -756,7 +760,7 @@ impl RepoRepository for PostgresRepoRepository {
     async fn get_user_block_cids_since_rev(
         &self,
         user_id: Uuid,
-        since_rev: &str,
+        since_rev: &Tid,
     ) -> Result<Vec<Vec<u8>>, DbError> {
         let rows: Vec<(Vec<u8>,)> = sqlx::query_as(
             r#"
@@ -790,7 +794,7 @@ impl RepoRepository for PostgresRepoRepository {
             &block_cids as &[Vec<u8>],
             &block_data as &[Vec<u8>],
             data.prev_data_cid.as_ref().map(|c| c.as_str()),
-            data.rev
+            data.rev.as_deref()
         )
         .execute(&self.pool)
         .await
@@ -846,7 +850,7 @@ impl RepoRepository for PostgresRepoRepository {
         &self,
         did: &Did,
         commit_cid: &CidLink,
-        rev: Option<&str>,
+        rev: Option<&Tid>,
         commit_bytes: &[u8],
     ) -> Result<(), DbError> {
         let cid_bytes = commit_cid
@@ -862,7 +866,7 @@ impl RepoRepository for PostgresRepoRepository {
             "#,
             did.as_str(),
             commit_cid.as_str(),
-            rev,
+            rev.map(|r| r.as_str()),
             &block_cids as &[Vec<u8>],
             &block_data as &[Vec<u8>]
         )
@@ -879,7 +883,7 @@ impl RepoRepository for PostgresRepoRepository {
         did: &Did,
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
-        rev: &str,
+        rev: &Tid,
         commit_bytes: &[u8],
         mst_root_bytes: &[u8],
     ) -> Result<(), DbError> {
@@ -909,7 +913,7 @@ impl RepoRepository for PostgresRepoRepository {
             &blobs,
             &block_cids as &[Vec<u8>],
             &block_data as &[Vec<u8>],
-            rev
+            rev.as_str()
         )
         .execute(&self.pool)
         .await
@@ -1154,7 +1158,7 @@ impl RepoRepository for PostgresRepoRepository {
                 deactivated_at: r.deactivated_at,
                 takedown_ref: r.takedown_ref,
                 repo_root_cid: CidLink::from(r.repo_root_cid),
-                repo_rev: r.repo_rev,
+                repo_rev: r.repo_rev.map(Tid::from),
             })
             .collect())
     }
@@ -1477,7 +1481,7 @@ impl RepoRepository for PostgresRepoRepository {
             &event_block_cids as &[Vec<u8>],
             &event_block_data as &[Vec<u8>],
             event.prev_data_cid.as_ref().map(|c| c.as_str()),
-            event.rev
+            event.rev.as_deref()
         )
         .execute(&mut *tx)
         .await
@@ -1513,7 +1517,7 @@ impl RepoRepository for PostgresRepoRepository {
             .map(|(user_id, repo_root_cid, repo_rev)| UserWithoutBlocks {
                 user_id,
                 repo_root_cid: CidLink::from(repo_root_cid),
-                repo_rev,
+                repo_rev: repo_rev.map(Tid::from),
             })
             .collect())
     }

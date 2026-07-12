@@ -104,7 +104,7 @@ fn test_create_signed_commit_helper() {
         .expect("valid test DID");
     let data_cid =
         Cid::from_str("bafyreib2rxk3ryblouj3fxza5jvx6psmwewwessc4m6g6e7pqhhkwqomfi").unwrap();
-    let rev = Tid::now(LimitedU32::MIN).to_string();
+    let rev = Tid::now(LimitedU32::MIN);
 
     let (signed_bytes, sig) = create_signed_commit(&did, data_cid, &rev, None, &signing_key)
         .expect("signing should succeed");

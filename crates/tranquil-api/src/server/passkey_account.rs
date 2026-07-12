@@ -318,7 +318,7 @@ pub async fn create_passkey_account(
         encrypted_key_bytes: repo.encrypted_key_bytes,
         encryption_version: tranquil_pds::config::ENCRYPTION_VERSION,
         reserved_key_id,
-        commit_cid: repo.commit_cid.to_string(),
+        commit_cid: tranquil_types::CidLink::from(repo.commit_cid.to_string()),
         repo_rev: repo.repo_rev.clone(),
         genesis_block_cids: repo.genesis_block_cids,
         invite_code: invite_registration.into_invite_code(),

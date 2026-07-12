@@ -28,7 +28,7 @@ use tranquil_db_traits::{
     InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo, QueuedComms,
     ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
-use tranquil_types::{CidLink, Did, Handle};
+use tranquil_types::{CidLink, Did, Handle, InviteCode};
 
 pub struct InfraOps {
     db: Database,

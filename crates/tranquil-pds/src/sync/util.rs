@@ -16,7 +16,7 @@ use std::io::Cursor;
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
 use tranquil_db_traits::{AccountStatus, EventBlocks, RepoEventType, RepoRepository};
-use tranquil_types::Did;
+use tranquil_types::{Did, Tid};
 
 #[derive(Debug)]
 pub enum SyncFrameError {
@@ -181,10 +181,10 @@ pub async fn assert_repo_availability(
     Ok(account)
 }
 
-fn extract_rev_from_commit_bytes(commit_bytes: &[u8]) -> Option<String> {
+fn extract_rev_from_commit_bytes(commit_bytes: &[u8]) -> Option<Tid> {
     Commit::from_cbor(commit_bytes)
         .ok()
-        .map(|c| c.rev().to_string())
+        .and_then(|c| Tid::new(c.rev().to_string()).ok())
 }
 
 async fn write_car_blocks(

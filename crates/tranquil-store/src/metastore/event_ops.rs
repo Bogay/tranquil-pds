@@ -7,7 +7,7 @@ use tracing::warn;
 use tranquil_db_traits::{
     AccountStatus, CommitEventData, DbError, RepoEventType, SequenceNumber, SequencedEvent,
 };
-use tranquil_types::{CidLink, Did, Handle};
+use tranquil_types::{CidLink, Did, Handle, Tid};
 
 use super::encoding::{KeyReader, exclusive_upper_bound};
 use super::event_keys::{
@@ -175,7 +175,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
             handle: None,
             active: None,
             status: None,
-            rev: rev.map(str::to_owned),
+            rev: rev.map(|r| Tid::from(r.to_owned())),
         };
 
         self.append_and_index(&event, did, rev)
@@ -221,7 +221,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
             handle: None,
             active: None,
             status: None,
-            rev: Some(rev.to_owned()),
+            rev: Some(Tid::from(rev.to_owned())),
         };
 
         self.append_and_index(&event, did, Some(rev))
@@ -732,6 +732,10 @@ mod tests {
     use sha2::Digest;
     use tranquil_db_traits::RepoEventType;
 
+    fn tid(s: &str) -> Tid {
+        Tid::from(s.to_owned())
+    }
+
     struct TestHarness {
         _metastore_dir: tempfile::TempDir,
         _eventlog_dir: tempfile::TempDir,
@@ -794,7 +798,7 @@ mod tests {
             blobs: None,
             blocks: None,
             prev_data_cid: None,
-            rev: Some("3k2abcde".to_owned()),
+            rev: Some(tid("3k2abcde")),
         };
 
         let seq = h.event_ops.insert_commit_event(&data).unwrap();
@@ -804,7 +808,7 @@ mod tests {
         assert_eq!(event.did.as_str(), test_did().as_str());
         assert_eq!(event.event_type, RepoEventType::Commit);
         assert_eq!(event.commit_cid, Some(cid));
-        assert_eq!(event.rev, Some("3k2abcde".to_owned()));
+        assert_eq!(event.rev, Some(tid("3k2abcde")));
     }
 
     #[test]
@@ -855,7 +859,7 @@ mod tests {
         let event = h.event_ops.get_event_by_seq(seq).unwrap().unwrap();
         assert_eq!(event.event_type, RepoEventType::Sync);
         assert_eq!(event.commit_cid, Some(cid));
-        assert_eq!(event.rev, Some("rev1".to_owned()));
+        assert_eq!(event.rev, Some(tid("rev1")));
     }
 
     #[test]
@@ -881,7 +885,7 @@ mod tests {
         assert_eq!(event.event_type, RepoEventType::Commit);
         assert_eq!(event.commit_cid, Some(commit_cid));
         assert_eq!(event.prev_data_cid, Some(mst_cid));
-        assert_eq!(event.rev, Some("genesis_rev".to_owned()));
+        assert_eq!(event.rev, Some(tid("genesis_rev")));
     }
 
     #[test]
@@ -1003,7 +1007,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_a".to_owned()),
+                rev: Some(tid("rev_a")),
             })
             .unwrap();
 
@@ -1018,7 +1022,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_b".to_owned()),
+                rev: Some(tid("rev_b")),
             })
             .unwrap();
 
@@ -1045,7 +1049,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_x".to_owned()),
+                rev: Some(tid("rev_x")),
             })
             .unwrap();
 
@@ -1060,7 +1064,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_y".to_owned()),
+                rev: Some(tid("rev_y")),
             })
             .unwrap();
 
@@ -1146,7 +1150,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("r1".to_owned()),
+                rev: Some(tid("r1")),
             })
             .unwrap();
         let s2 = h.event_ops.insert_identity_event(&did, None).unwrap();
@@ -1191,7 +1195,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_keep".to_owned()),
+                rev: Some(tid("rev_keep")),
             })
             .unwrap();
 
@@ -1246,7 +1250,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_old".to_owned()),
+                rev: Some(tid("rev_old")),
             })
             .unwrap();
 
@@ -1261,7 +1265,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_keep".to_owned()),
+                rev: Some(tid("rev_keep")),
             })
             .unwrap();
 
@@ -1312,7 +1316,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_a".to_owned()),
+                rev: Some(tid("rev_a")),
             })
             .unwrap();
 
@@ -1327,7 +1331,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_b".to_owned()),
+                rev: Some(tid("rev_b")),
             })
             .unwrap();
 
@@ -1369,7 +1373,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_1".to_owned()),
+                rev: Some(tid("rev_1")),
             })
             .unwrap();
 
@@ -1398,7 +1402,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_1".to_owned()),
+                rev: Some(tid("rev_1")),
             })
             .unwrap();
 
@@ -1420,7 +1424,7 @@ mod tests {
             handle: None,
             active: None,
             status: None,
-            rev: Some("rev_2".to_owned()),
+            rev: Some(tid("rev_2")),
         };
         h.event_ops.bridge.insert_event(&crash_event).unwrap();
 
@@ -1456,7 +1460,7 @@ mod tests {
             handle: None,
             active: None,
             status: None,
-            rev: Some("rev_3".to_owned()),
+            rev: Some(tid("rev_3")),
         };
         h.event_ops.bridge.insert_event(&crash_event_3).unwrap();
 

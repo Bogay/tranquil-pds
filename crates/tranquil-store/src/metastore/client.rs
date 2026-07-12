@@ -28,7 +28,7 @@ use tranquil_db_traits::{
 };
 use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
-    AtUri, AuthorizationCode, CidLink, ClientId, DPoPProofId, DeviceId, Did, Handle, Nsid,
+    AtIdentifier, AtUri, AuthorizationCode, CidLink, ClientId, DPoPProofId, DeviceId, Did, Handle,
     InviteCode, Jti, Nsid, PasswordHash, RefreshToken, RequestId, Rkey, Tid, TokenId,
 };
 use uuid::Uuid;
@@ -125,7 +125,7 @@ impl<S: StorageIO> MetastoreClient<S> {
         did: &Did,
         handle: &Handle,
         repo_root_cid: &CidLink,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
@@ -134,7 +134,7 @@ impl<S: StorageIO> MetastoreClient<S> {
                 did: did.clone(),
                 handle: handle.clone(),
                 repo_root_cid: repo_root_cid.clone(),
-                repo_rev: repo_rev.to_string(),
+                repo_rev: repo_rev.clone(),
                 tx,
             }))?;
         recv(rx).await
@@ -149,7 +149,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         did: &Did,
         handle: &Handle,
         repo_root_cid: &CidLink,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError> {
         self.create_repo_full(user_id, did, handle, repo_root_cid, repo_rev)
             .await
@@ -178,7 +178,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         &self,
         user_id: Uuid,
         repo_root_cid: &CidLink,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
@@ -191,7 +191,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         recv(rx).await
     }
 
-    async fn update_repo_rev(&self, user_id: Uuid, repo_rev: &str) -> Result<(), DbError> {
+    async fn update_repo_rev(&self, user_id: Uuid, repo_rev: &Tid) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::Repo(RepoRequest::UpdateRepoRev {
@@ -261,7 +261,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         collections: &[Nsid],
         rkeys: &[Rkey],
         record_cids: &[CidLink],
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
@@ -420,7 +420,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         &self,
         user_id: Uuid,
         block_cids: &[Vec<u8>],
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::UserBlock(
@@ -453,7 +453,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
     async fn get_user_block_cids_since_rev(
         &self,
         user_id: Uuid,
-        since_rev: &str,
+        since_rev: &Tid,
     ) -> Result<Vec<Vec<u8>>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::UserBlock(
@@ -514,7 +514,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         &self,
         did: &Did,
         commit_cid: &CidLink,
-        rev: Option<&str>,
+        rev: Option<&Tid>,
         commit_bytes: &[u8],
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
@@ -522,7 +522,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
             .send(MetastoreRequest::Event(EventRequest::InsertSyncEvent {
                 did: did.clone(),
                 commit_cid: commit_cid.clone(),
-                rev: rev.map(str::to_owned),
+                rev: rev.map(|r| r.to_string()),
                 commit_bytes: commit_bytes.to_vec(),
                 tx,
             }))?;
@@ -534,7 +534,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         did: &Did,
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
-        rev: &str,
+        rev: &Tid,
         commit_bytes: &[u8],
         mst_root_bytes: &[u8],
     ) -> Result<(), DbError> {
@@ -910,7 +910,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::BlobRepository for MetastoreCli
     async fn list_blobs_since_rev(
         &self,
         did: &tranquil_types::Did,
-        since: &str,
+        since: &Tid,
     ) -> Result<Vec<CidLink>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool

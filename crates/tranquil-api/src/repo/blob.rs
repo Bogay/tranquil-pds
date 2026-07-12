@@ -16,7 +16,7 @@ use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Auth, AuthAny, NotTakendown, Permissive, VerifyScope};
 use tranquil_pds::delegation::DelegationActionType;
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{CidLink, Did};
+use tranquil_pds::types::{CidLink, Did, Nsid};
 use tranquil_pds::util::get_header_str;
 
 fn detect_mime_type(data: &[u8], client_hint: &str) -> String {

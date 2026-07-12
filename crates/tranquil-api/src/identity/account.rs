@@ -14,7 +14,7 @@ use tranquil_pds::api::invite::check_registration_invite;
 use tranquil_pds::auth::{ServiceTokenVerifier, extract_auth_token_from_header, is_service_token};
 use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle, PlainPassword};
+use tranquil_pds::types::{CidLink, Did, Handle, Nsid, PlainPassword};
 use tranquil_pds::validation::validate_password;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -438,23 +438,15 @@ pub async fn create_account(
         None
     };
 
-    let did_for_commit: Did = match did.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InternalError(Some("Invalid DID".into())).into_response(),
-    };
-    let repo = match super::provision::init_genesis_repo(
-        &state,
-        &did_for_commit,
-        &signing_key,
-        &secret_key_bytes,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => return e.into_response(),
-    };
-    let commit_cid_str = repo.commit_cid.to_string();
-    let rev_str = repo.repo_rev.clone();
+    let repo =
+        match super::provision::init_genesis_repo(&state, &did, &signing_key, &secret_key_bytes)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => return e.into_response(),
+        };
+    let commit_cid = CidLink::from(repo.commit_cid.to_string());
+    let repo_rev = repo.repo_rev.clone();
 
     let birthdate_pref = if tranquil_config::get().server.age_assurance_override {
         Some(json!({
@@ -487,8 +479,8 @@ pub async fn create_account(
         encrypted_key_bytes: repo.encrypted_key_bytes,
         encryption_version: tranquil_pds::config::ENCRYPTION_VERSION,
         reserved_key_id,
-        commit_cid: commit_cid_str.clone(),
-        repo_rev: rev_str.clone(),
+        commit_cid: commit_cid.clone(),
+        repo_rev: repo_rev.clone(),
         genesis_block_cids: repo.genesis_block_cids,
         invite_code: invite_registration.into_invite_code(),
         birthdate_pref,

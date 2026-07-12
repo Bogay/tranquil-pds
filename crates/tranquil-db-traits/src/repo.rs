@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey};
+use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey, Tid};
 use uuid::Uuid;
 
 use crate::DbError;
@@ -137,7 +137,7 @@ pub struct RepoAccountInfo {
 pub struct RepoInfo {
     pub user_id: Uuid,
     pub repo_root_cid: CidLink,
-    pub repo_rev: Option<String>,
+    pub repo_rev: Option<Tid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,7 +169,7 @@ pub struct RepoWithoutRev {
 pub struct UserWithoutBlocks {
     pub user_id: Uuid,
     pub repo_root_cid: CidLink,
-    pub repo_rev: Option<String>,
+    pub repo_rev: Option<Tid>,
 }
 
 #[derive(Debug, Clone)]
@@ -225,7 +225,7 @@ pub struct EventBlockInline {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventBlocks {
     Inline(Vec<EventBlockInline>),
-    LegacyCids(Vec<String>),
+    LegacyCids(Vec<CidLink>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,12 +238,12 @@ pub struct SequencedEvent {
     pub prev_cid: Option<CidLink>,
     pub prev_data_cid: Option<CidLink>,
     pub ops: Option<serde_json::Value>,
-    pub blobs: Option<Vec<String>>,
+    pub blobs: Option<Vec<CidLink>>,
     pub blocks: Option<EventBlocks>,
     pub handle: Option<Handle>,
     pub active: Option<bool>,
     pub status: Option<AccountStatus>,
-    pub rev: Option<String>,
+    pub rev: Option<Tid>,
 }
 
 #[derive(Debug, Clone)]
@@ -253,10 +253,10 @@ pub struct CommitEventData {
     pub commit_cid: Option<CidLink>,
     pub prev_cid: Option<CidLink>,
     pub ops: Option<serde_json::Value>,
-    pub blobs: Option<Vec<String>>,
+    pub blobs: Option<Vec<CidLink>>,
     pub blocks: Option<Vec<EventBlockInline>>,
     pub prev_data_cid: Option<CidLink>,
-    pub rev: Option<String>,
+    pub rev: Option<Tid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,7 +265,7 @@ pub struct RepoListItem {
     pub deactivated_at: Option<DateTime<Utc>>,
     pub takedown_ref: Option<String>,
     pub repo_root_cid: CidLink,
-    pub repo_rev: Option<String>,
+    pub repo_rev: Option<Tid>,
 }
 
 #[derive(Debug, Clone)]
@@ -307,7 +307,7 @@ pub struct ApplyCommitInput {
     pub did: Did,
     pub expected_root_cid: Option<CidLink>,
     pub new_root_cid: CidLink,
-    pub new_rev: String,
+    pub new_rev: Tid,
     pub new_block_cids: Vec<Vec<u8>>,
     pub obsolete_block_cids: Vec<Vec<u8>>,
     pub record_upserts: Vec<RecordUpsert>,
@@ -337,17 +337,17 @@ pub trait RepoRepository: Send + Sync {
         did: &Did,
         handle: &Handle,
         repo_root_cid: &CidLink,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError>;
 
     async fn update_repo_root(
         &self,
         user_id: Uuid,
         repo_root_cid: &CidLink,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError>;
 
-    async fn update_repo_rev(&self, user_id: Uuid, repo_rev: &str) -> Result<(), DbError>;
+    async fn update_repo_rev(&self, user_id: Uuid, repo_rev: &Tid) -> Result<(), DbError>;
 
     async fn update_repo_status(
         &self,
@@ -375,7 +375,7 @@ pub trait RepoRepository: Send + Sync {
         collections: &[Nsid],
         rkeys: &[Rkey],
         record_cids: &[CidLink],
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError>;
 
     async fn delete_records(
@@ -427,7 +427,7 @@ pub trait RepoRepository: Send + Sync {
         &self,
         user_id: Uuid,
         block_cids: &[Vec<u8>],
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), DbError>;
 
     async fn delete_user_blocks(
@@ -439,7 +439,7 @@ pub trait RepoRepository: Send + Sync {
     async fn get_user_block_cids_since_rev(
         &self,
         user_id: Uuid,
-        since_rev: &str,
+        since_rev: &Tid,
     ) -> Result<Vec<Vec<u8>>, DbError>;
 
     async fn count_user_blocks(&self, user_id: Uuid) -> Result<i64, DbError>;
@@ -458,7 +458,7 @@ pub trait RepoRepository: Send + Sync {
         &self,
         did: &Did,
         commit_cid: &CidLink,
-        rev: Option<&str>,
+        rev: Option<&Tid>,
         commit_bytes: &[u8],
     ) -> Result<(), DbError>;
 
@@ -467,7 +467,7 @@ pub trait RepoRepository: Send + Sync {
         did: &Did,
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
-        rev: &str,
+        rev: &Tid,
         commit_bytes: &[u8],
         mst_root_bytes: &[u8],
     ) -> Result<(), DbError>;

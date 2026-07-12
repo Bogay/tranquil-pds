@@ -9,7 +9,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::debug;
 use tranquil_db_traits::{ImportBlock, ImportRecord, ImportRepoError, RepoRepository};
-use tranquil_types::CidLink;
+use tranquil_types::{CidLink, Nsid, Rkey};
 use uuid::Uuid;
 
 #[derive(Error, Debug)]
@@ -52,7 +52,7 @@ impl From<ImportRepoError> for ImportError {
 
 #[derive(Debug, Clone)]
 pub struct BlobRef {
-    pub cid: String,
+    pub cid: CidLink,
     pub mime_type: Option<String>,
 }
 
@@ -91,11 +91,11 @@ pub fn find_blob_refs_ipld(value: &Ipld, depth: usize) -> Vec<BlobRef> {
                 && type_str == "blob"
             {
                 let cid_str = if let Some(Ipld::Link(link_cid)) = obj.get("ref") {
-                    Some(link_cid.to_string())
+                    Some(CidLink::from(link_cid))
                 } else if let Some(Ipld::Map(ref_obj)) = obj.get("ref")
                     && let Some(Ipld::String(link)) = ref_obj.get("$link")
                 {
-                    Some(link.clone())
+                    CidLink::new(link.as_str()).ok()
                 } else {
                     None
                 };
@@ -136,6 +136,7 @@ pub fn find_blob_refs(value: &JsonValue, depth: usize) -> Vec<BlobRef> {
                 && type_str == "blob"
                 && let Some(JsonValue::Object(ref_obj)) = obj.get("ref")
                 && let Some(JsonValue::String(link)) = ref_obj.get("$link")
+                && let Ok(cid) = CidLink::new(link.as_str())
             {
                 let mime = obj
                     .get("mimeType")

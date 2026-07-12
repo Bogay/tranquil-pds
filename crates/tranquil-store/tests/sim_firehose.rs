@@ -44,7 +44,7 @@ fn append_seq(el: &EventLog<Arc<SimulatedIO>>, idx: u32) {
         handle: None,
         active: None,
         status: None,
-        rev: Some(format!("rev{idx}")),
+        rev: Some(tranquil_types::Tid::from(format!("rev{idx}"))),
     };
     el.append_event(&did, RepoEventType::Commit, &event)
         .unwrap();

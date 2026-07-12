@@ -145,12 +145,12 @@ async fn sync_event_carries_inline_commit_block() {
     let commit_bytes = b"synthetic sync commit block payload".to_vec();
     let commit_cid = synthetic_cid(&commit_bytes);
     let cid_link: CidLink = (&commit_cid).into();
-    let rev = "3kabcdefghij2";
+    let rev = tranquil_types::Tid::from("3kabcdefghij2".to_string());
 
     let baseline = repos.repo.get_max_seq().await.expect("get_max_seq");
     repos
         .repo
-        .insert_sync_event(&did, &cid_link, Some(rev), &commit_bytes)
+        .insert_sync_event(&did, &cid_link, Some(&rev), &commit_bytes)
         .await
         .expect("insert_sync_event");
 
@@ -192,7 +192,7 @@ async fn genesis_commit_event_carries_inline_blocks() {
     let mst_root_cid = synthetic_cid(&mst_root_bytes);
     let commit_link: CidLink = (&commit_cid).into();
     let mst_link: CidLink = (&mst_root_cid).into();
-    let rev = "3kabcdefghij3";
+    let rev = tranquil_types::Tid::from("3kabcdefghij3".to_string());
 
     let baseline = repos.repo.get_max_seq().await.expect("get_max_seq");
     repos
@@ -201,7 +201,7 @@ async fn genesis_commit_event_carries_inline_blocks() {
             &did,
             &commit_link,
             &mst_link,
-            rev,
+            &rev,
             &commit_bytes,
             &mst_root_bytes,
         )

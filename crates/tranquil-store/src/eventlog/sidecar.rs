@@ -567,7 +567,7 @@ mod tests {
     use sha2::Digest;
     use std::path::Path;
     use tranquil_db_traits::{AccountStatus, RepoEventType, SequenceNumber, SequencedEvent};
-    use tranquil_types::{Did, Handle};
+    use tranquil_types::{CidLink, Did, Handle, Tid};
 
     fn test_did() -> Did {
         Did::new("did:plc:testuser1234567890abcdef").unwrap()
@@ -604,12 +604,12 @@ mod tests {
             prev_cid: Some(cid.clone()),
             prev_data_cid: Some(cid),
             ops: Some(ops),
-            blobs: Some(vec!["bafkreibtest".to_owned()]),
+            blobs: Some(vec![CidLink::from("bafkreibtest".to_owned())]),
             blocks: None,
             handle: Some(Handle::new("test.bsky.social").unwrap()),
             active: None,
             status: None,
-            rev: Some("rev123".to_owned()),
+            rev: Some(Tid::from("rev123".to_owned())),
         }
     }
 

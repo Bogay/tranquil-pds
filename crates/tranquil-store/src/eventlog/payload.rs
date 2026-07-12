@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use tranquil_db_traits::{
     AccountStatus, EventBlockInline, EventBlocks, SequenceNumber, SequencedEvent,
 };
-use tranquil_types::{CidLink, Did, Handle};
+use tranquil_types::{CidLink, Did, Handle, Tid};
 
 use crate::eventlog::reader::RawEvent;
 
@@ -117,7 +117,7 @@ pub fn encode_payload_with_mutations(
             .map(|h: &Handle| h.as_str().to_owned()),
         active: event.active,
         status: event.status.as_ref().map(account_status_to_u8),
-        rev: event.rev.clone(),
+        rev: event.rev.as_ref().map(|r| r.as_str().to_owned()),
         mutation_set: mutation_set.map(|b| b.to_vec()),
     };
 
@@ -215,12 +215,15 @@ pub fn to_sequenced_event(
             .transpose()?
             .flatten(),
         ops,
-        blobs: payload.blobs.clone(),
+        blobs: payload
+            .blobs
+            .clone()
+            .map(|v| v.into_iter().map(CidLink::from).collect()),
         blocks: payload.blocks.clone().map(EventBlocks::Inline),
         handle,
         active: payload.active,
         status: payload.status.and_then(u8_to_account_status),
-        rev: payload.rev.clone(),
+        rev: payload.rev.clone().map(Tid::from),
     })
 }
 
@@ -286,7 +289,7 @@ mod tests {
             prev_cid: Some(cid.clone()),
             prev_data_cid: Some(cid.clone()),
             ops: Some(ops.clone()),
-            blobs: Some(vec!["bafkreibtest".to_owned()]),
+            blobs: Some(vec![CidLink::from("bafkreibtest".to_owned())]),
             blocks: Some(EventBlocks::Inline(vec![EventBlockInline {
                 cid_bytes: cid_link_to_bytes(&cid).unwrap(),
                 data: b"hello block".to_vec(),
@@ -294,7 +297,7 @@ mod tests {
             handle: Some(Handle::new("test.bsky.social").unwrap()),
             active: None,
             status: None,
-            rev: Some("rev123".to_owned()),
+            rev: Some(Tid::from("rev123".to_owned())),
         };
 
         let encoded = encode_payload(&event);

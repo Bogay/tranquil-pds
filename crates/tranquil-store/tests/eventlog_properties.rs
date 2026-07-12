@@ -222,12 +222,14 @@ fn payload_round_trip() {
                 ops: Some(
                     serde_json::json!([{"action": "create", "path": "app.bsky.feed.post/abc"}]),
                 ),
-                blobs: Some(vec!["bafkreibtest".to_owned()]),
+                blobs: Some(vec![tranquil_types::CidLink::from(
+                    "bafkreibtest".to_owned(),
+                )]),
                 blocks: None,
                 handle: None,
                 active: None,
                 status: None,
-                rev: Some("rev1".to_owned()),
+                rev: Some(tranquil_types::Tid::from("rev1".to_owned())),
             },
         ),
         (

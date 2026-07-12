@@ -30,8 +30,8 @@ use tranquil_db_traits::{
 };
 use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
-    AtUri, AuthorizationCode, CidLink, ClientId, DPoPProofId, DeviceId, Did, Handle, Nsid,
-    RefreshToken, RequestId, Rkey, TokenId,
+    AtUri, AuthorizationCode, CidLink, ClientId, DPoPProofId, DeviceId, Did, Handle, InviteCode,
+    Nsid, RefreshToken, RequestId, Rkey, Tid, TokenId,
 };
 use uuid::Uuid;
 
@@ -192,7 +192,7 @@ pub enum RepoRequest {
         did: Did,
         handle: Handle,
         repo_root_cid: CidLink,
-        repo_rev: String,
+        repo_rev: Tid,
         tx: Tx<()>,
     },
     UpdateRepoRoot {
@@ -2454,7 +2454,7 @@ fn convert_repo_info(r: super::repo_ops::RepoInfo) -> tranquil_db_traits::RepoIn
     tranquil_db_traits::RepoInfo {
         user_id: r.user_id,
         repo_root_cid: r.repo_root_cid,
-        repo_rev: r.repo_rev,
+        repo_rev: r.repo_rev.map(Tid::from),
     }
 }
 
@@ -2481,7 +2481,7 @@ fn convert_repo_list_entry(
         deactivated_at: r.deactivated_at,
         takedown_ref: r.takedown_ref,
         repo_root_cid: r.repo_root_cid,
-        repo_rev: r.repo_rev,
+        repo_rev: r.repo_rev.map(Tid::from),
     })
 }
 
@@ -6158,7 +6158,7 @@ mod tests {
                 did,
                 handle,
                 repo_root_cid: cid.clone(),
-                repo_rev: "rev1".to_string(),
+                repo_rev: Tid::from("rev1".to_string()),
                 tx,
             }))
             .unwrap();
@@ -6339,7 +6339,7 @@ mod tests {
                 did,
                 handle,
                 repo_root_cid: cid,
-                repo_rev: "rev1".to_string(),
+                repo_rev: Tid::from("rev1".to_string()),
                 tx,
             }))
             .unwrap();

@@ -17,7 +17,7 @@ use tranquil_pds::delegation::{
 };
 use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Handle};
+use tranquil_pds::types::{CidLink, Did, Handle};
 
 pub async fn list_controllers(
     State(state): State<AppState>,
@@ -394,7 +394,7 @@ pub async fn create_delegated_account(
         controller_scopes: input.controller_scopes.as_str().to_string(),
         encrypted_key_bytes: repo.encrypted_key_bytes,
         encryption_version: tranquil_pds::config::ENCRYPTION_VERSION,
-        commit_cid: repo.commit_cid.to_string(),
+        commit_cid: CidLink::from(repo.commit_cid.to_string()),
         repo_rev: repo.repo_rev.clone(),
         genesis_block_cids: repo.genesis_block_cids,
     };

@@ -18,7 +18,7 @@ use tranquil_pds::cache::Cache;
 use tranquil_pds::oauth::scopes::{AccountAction, AccountAttr};
 use tranquil_pds::plc::PlcClient;
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::PlainPassword;
+use tranquil_pds::types::{PlainPassword, Tid};
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -27,7 +27,7 @@ pub struct CheckAccountStatusOutput {
     pub activated: bool,
     pub valid_did: bool,
     pub repo_commit: String,
-    pub repo_rev: String,
+    pub repo_rev: Tid,
     pub repo_blocks: i64,
     pub indexed_records: i64,
     pub private_state_values: i64,
@@ -72,16 +72,16 @@ pub async fn check_account_status(
             if let Ok(Some(block)) = state.block_store.get(&cid).await {
                 Commit::from_cbor(&block)
                     .ok()
-                    .map(|c| c.rev().to_string())
-                    .unwrap_or_default()
+                    .map(|c| Tid::from(c.rev().to_string()))
+                    .unwrap_or_else(|| Tid::from(String::new()))
             } else {
-                String::new()
+                Tid::from(String::new())
             }
         } else {
-            String::new()
+            Tid::from(String::new())
         }
     } else {
-        String::new()
+        Tid::from(String::new())
     };
     let record_count: i64 = state.repos.repo.count_records(user_id).await.unwrap_or(0);
     let imported_blobs: i64 = state
@@ -449,7 +449,9 @@ pub async fn activate_account(
                 );
                 let rev = if let Ok(cid) = Cid::from_str(root_cid_link.as_str()) {
                     if let Ok(Some(block)) = state.block_store.get(&cid).await {
-                        Commit::from_cbor(&block).ok().map(|c| c.rev().to_string())
+                        Commit::from_cbor(&block)
+                            .ok()
+                            .map(|c| Tid::from(c.rev().to_string()))
                     } else {
                         None
                     }
@@ -459,8 +461,8 @@ pub async fn activate_account(
                 if let Err(e) = tranquil_pds::repo_ops::sequence_sync_event(
                     &state,
                     &did,
-                    root_cid_link.as_str(),
-                    rev.as_deref(),
+                    &root_cid_link,
+                    rev.as_ref(),
                 )
                 .await
                 {

@@ -37,7 +37,7 @@ async fn process_repo_rev(
         }
     };
     let commit = Commit::from_cbor(&block).map_err(|_| user_id)?;
-    let rev = commit.rev().to_string();
+    let rev = crate::types::Tid::from(commit.rev().to_string());
     repo_repo
         .update_repo_rev(user_id, &rev)
         .await
@@ -95,7 +95,7 @@ async fn process_user_blocks(
     block_store: &AnyBlockStore,
     user_id: uuid::Uuid,
     repo_root_cid: String,
-    repo_rev: Option<String>,
+    repo_rev: Option<crate::types::Tid>,
 ) -> Result<(uuid::Uuid, usize), uuid::Uuid> {
     let root_cid = Cid::from_str(&repo_root_cid).map_err(|_| user_id)?;
     let block_cids = collect_current_repo_blocks(block_store, &root_cid)
@@ -105,7 +105,7 @@ async fn process_user_blocks(
         return Err(user_id);
     }
     let count = block_cids.len();
-    let rev = repo_rev.unwrap_or_else(|| "0".to_string());
+    let rev = repo_rev.unwrap_or_else(|| crate::types::Tid::from("0".to_string()));
     repo_repo
         .insert_user_blocks(user_id, &block_cids, &rev)
         .await

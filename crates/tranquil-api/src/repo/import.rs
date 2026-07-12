@@ -238,6 +238,7 @@ pub async fn import_repo(
                     ApiError::InternalError(None)
                 })?;
             let new_root_cid_link = CidLink::from(&new_root_cid);
+            let new_rev_tid = tranquil_pds::types::Tid::from(new_rev_str.clone());
             state
                 .repos
                 .repo

@@ -18,7 +18,7 @@ use tranquil_pds::repo_ops::{
     finalize_repo_write, with_repair_retry,
 };
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
+use tranquil_pds::types::{AtIdentifier, AtUri, CidLink, Did, Nsid, Rkey};
 use tranquil_pds::validation::ValidationStatus;
 
 const MAX_BATCH_WRITES: usize = 200;
@@ -27,7 +27,7 @@ struct WriteAccumulator {
     mst: Mst<TrackingBlockStore>,
     results: Vec<WriteResult>,
     ops: Vec<RecordOp>,
-    all_blob_cids: Vec<String>,
+    all_blob_cids: Vec<CidLink>,
     backlinks_to_add: Vec<Backlink>,
     backlinks_to_remove: Vec<AtUri>,
 }

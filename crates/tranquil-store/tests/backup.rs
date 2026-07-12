@@ -133,7 +133,7 @@ fn seed_events(store: &TestStore, count: u16) {
             handle: None,
             active: None,
             status: None,
-            rev: Some(format!("rev{i}")),
+            rev: Some(tranquil_types::Tid::from(format!("rev{i}"))),
         };
         store
             .eventlog
@@ -702,7 +702,7 @@ fn backup_during_concurrent_writes_produces_consistent_snapshot() {
                 handle: None,
                 active: None,
                 status: None,
-                rev: Some(format!("concurrent-{i}")),
+                rev: Some(tranquil_types::Tid::from(format!("concurrent-{i}"))),
             };
             let _ = el_clone.append_event(&did, tranquil_db_traits::RepoEventType::Commit, &event);
             let _ = el_clone.sync();

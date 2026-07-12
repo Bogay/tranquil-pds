@@ -17,7 +17,7 @@ use tranquil_pds::repo_ops::{
     finalize_repo_write, with_repair_retry,
 };
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
+use tranquil_pds::types::{AtIdentifier, AtUri, Did, Nsid, Rkey, Tid};
 use tranquil_pds::validation::ValidationStatus;
 use uuid::Uuid;
 
@@ -102,7 +102,7 @@ pub struct CreateRecordInput {
 #[serde(rename_all = "camelCase")]
 pub struct CommitInfo {
     pub cid: String,
-    pub rev: String,
+    pub rev: Tid,
 }
 
 #[derive(Serialize)]

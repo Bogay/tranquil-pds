@@ -2530,8 +2530,8 @@ impl UserRepository for PostgresUserRepository {
         sqlx::query!(
             "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
             user_id,
-            input.commit_cid,
-            input.repo_rev
+            input.commit_cid.as_str(),
+            input.repo_rev.as_str()
         )
         .execute(&mut *tx)
         .await
@@ -2647,8 +2647,8 @@ impl UserRepository for PostgresUserRepository {
         sqlx::query!(
             "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
             user_id,
-            input.commit_cid,
-            input.repo_rev
+            input.commit_cid.as_str(),
+            input.repo_rev.as_str()
         )
         .execute(&mut *tx)
         .await
@@ -2763,8 +2763,8 @@ impl UserRepository for PostgresUserRepository {
         sqlx::query!(
             "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
             user_id,
-            input.commit_cid,
-            input.repo_rev
+            input.commit_cid.as_str(),
+            input.repo_rev.as_str()
         )
         .execute(&mut *tx)
         .await
@@ -2898,8 +2898,8 @@ impl UserRepository for PostgresUserRepository {
         sqlx::query!(
             "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
             user_id,
-            input.commit_cid,
-            input.repo_rev
+            input.commit_cid.as_str(),
+            input.repo_rev.as_str()
         )
         .execute(&mut *tx)
         .await

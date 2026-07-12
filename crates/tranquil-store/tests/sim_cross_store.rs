@@ -66,7 +66,7 @@ fn make_commit_event(did: &Did, idx: u64) -> SequencedEvent {
         handle: None,
         active: None,
         status: None,
-        rev: Some(format!("rev{idx}")),
+        rev: Some(tranquil_types::Tid::from(format!("rev{idx}"))),
     }
 }
 
@@ -495,7 +495,7 @@ fn sim_backup_during_concurrent_block_and_event_writes() {
                             handle: None,
                             active: None,
                             status: None,
-                            rev: Some(format!("concurrent-{i}")),
+                            rev: Some(tranquil_types::Tid::from(format!("concurrent-{i}"))),
                         };
                         let _ = stores
                             .eventlog

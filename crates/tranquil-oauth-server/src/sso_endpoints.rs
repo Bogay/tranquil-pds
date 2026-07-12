@@ -1099,7 +1099,7 @@ pub async fn complete_registration(
     let (commit_bytes, _sig) = match tranquil_pds::repo_ops::create_signed_commit(
         &did_typed,
         mst_root,
-        rev.as_ref(),
+        &rev,
         None,
         &signing_key,
     ) {
@@ -1151,8 +1151,8 @@ pub async fn complete_registration(
             .filter(|s| !s.is_empty()),
         encrypted_key_bytes: encrypted_key_bytes.clone(),
         encryption_version: tranquil_pds::config::ENCRYPTION_VERSION,
-        commit_cid: commit_cid.to_string(),
-        repo_rev: rev.as_ref().to_string(),
+        commit_cid: tranquil_types::CidLink::from(commit_cid.to_string()),
+        repo_rev: tranquil_types::Tid::from(rev.as_ref().to_string()),
         genesis_block_cids,
         invite_code: invite_registration.into_invite_code(),
         birthdate_pref,

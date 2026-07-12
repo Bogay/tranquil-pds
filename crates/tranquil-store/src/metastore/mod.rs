@@ -465,8 +465,10 @@ mod tests {
             encrypted_key_bytes: vec![7u8; 32],
             encryption_version: 0,
             reserved_key_id: None,
-            commit_cid: "bafyreib2rxk3ryblouj3fxza5jvx6psmwewwessc4m6g6e7pqhhkwqomfi".to_string(),
-            repo_rev: "rev0".to_string(),
+            commit_cid: tranquil_types::CidLink::from(
+                "bafyreib2rxk3ryblouj3fxza5jvx6psmwewwessc4m6g6e7pqhhkwqomfi".to_string(),
+            ),
+            repo_rev: tranquil_types::Tid::from("rev0".to_string()),
             genesis_block_cids: vec![],
             invite_code: None,
             birthdate_pref: None,

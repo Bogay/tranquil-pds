@@ -57,7 +57,7 @@ fn build_segments(segments_dir: &std::path::Path, n_events: u32) {
             handle: None,
             active: None,
             status: None,
-            rev: Some(format!("rev{i}")),
+            rev: Some(tranquil_types::Tid::from(format!("rev{i}"))),
         };
         el.append_event(&did, RepoEventType::Commit, &event)
             .unwrap();

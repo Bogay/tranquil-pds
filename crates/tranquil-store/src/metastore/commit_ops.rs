@@ -28,7 +28,7 @@ use tranquil_db_traits::{
     ApplyCommitError, ApplyCommitInput, ApplyCommitResult, ImportBlock, ImportRecord,
     ImportRepoError, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
 };
-use tranquil_types::{AtUri, CidLink, Did};
+use tranquil_types::{AtUri, CidLink, Did, Tid};
 
 use serde::{Deserialize, Serialize};
 
@@ -148,7 +148,7 @@ impl<S: StorageIO + 'static> CommitOps<S> {
 
         let updated_meta = RepoMetaValue {
             repo_root_cid: new_cid_bytes.clone(),
-            repo_rev: input.new_rev.clone(),
+            repo_rev: input.new_rev.to_string(),
             ..meta
         };
 
@@ -393,7 +393,7 @@ impl<S: StorageIO + 'static> CommitOps<S> {
                     repo_root_cid: root_cid,
                     repo_rev: match meta.repo_rev.is_empty() {
                         true => None,
-                        false => Some(meta.repo_rev),
+                        false => Some(Tid::from(meta.repo_rev)),
                     },
                 })
             },
@@ -573,7 +573,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: new_root.clone(),
-            new_rev: "rev1".to_string(),
+            new_rev: Tid::from("rev1".to_string()),
             new_block_cids: vec![vec![0x01, 0x02]],
             obsolete_block_cids: vec![],
             record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -593,7 +593,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev1".to_string()),
+                rev: Some(Tid::from("rev1".to_string())),
             },
         };
 
@@ -627,7 +627,7 @@ mod tests {
             did,
             expected_root_cid: Some(stale_root),
             new_root_cid: new_root,
-            new_rev: "rev1".to_string(),
+            new_rev: Tid::from("rev1".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -643,7 +643,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev1".to_string()),
+                rev: Some(Tid::from("rev1".to_string())),
             },
         };
 
@@ -664,7 +664,7 @@ mod tests {
             did: test_did("nonexistent"),
             expected_root_cid: None,
             new_root_cid: test_cid_link(1),
-            new_rev: "rev1".to_string(),
+            new_rev: Tid::from("rev1".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -706,7 +706,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: mid_root.clone(),
-            new_rev: "rev1".to_string(),
+            new_rev: Tid::from("rev1".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -726,7 +726,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev1".to_string()),
+                rev: Some(Tid::from("rev1".to_string())),
             },
         };
         ops.apply_commit(insert_input).unwrap();
@@ -745,7 +745,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(mid_root.clone()),
             new_root_cid: final_root.clone(),
-            new_rev: "rev2".to_string(),
+            new_rev: Tid::from("rev2".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -764,7 +764,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev2".to_string()),
+                rev: Some(Tid::from("rev2".to_string())),
             },
         };
         ops.apply_commit(delete_input).unwrap();
@@ -790,7 +790,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: new_root.clone(),
-            new_rev: "rev1".to_string(),
+            new_rev: Tid::from("rev1".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -806,7 +806,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev1".to_string()),
+                rev: Some(Tid::from("rev1".to_string())),
             },
         };
 
@@ -898,7 +898,7 @@ mod tests {
             did: did_a.clone(),
             expected_root_cid: Some(root_a),
             new_root_cid: new_root.clone(),
-            new_rev: "rev1".to_string(),
+            new_rev: Tid::from("rev1".to_string()),
             new_block_cids: vec![vec![0x01, 0x02, 0x03]],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -914,7 +914,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev1".to_string()),
+                rev: Some(Tid::from("rev1".to_string())),
             },
         };
         ops.apply_commit(input).unwrap();
@@ -936,7 +936,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: None,
             new_root_cid: new_root.clone(),
-            new_rev: "rev_force".to_string(),
+            new_rev: Tid::from("rev_force".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -952,7 +952,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev_force".to_string()),
+                rev: Some(Tid::from("rev_force".to_string())),
             },
         };
 
@@ -979,7 +979,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: mid_root.clone(),
-            new_rev: "rev1".to_string(),
+            new_rev: Tid::from("rev1".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -1003,7 +1003,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev1".to_string()),
+                rev: Some(Tid::from("rev1".to_string())),
             },
         };
         ops.apply_commit(create_input).unwrap();
@@ -1023,7 +1023,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(mid_root.clone()),
             new_root_cid: final_root.clone(),
-            new_rev: "rev2".to_string(),
+            new_rev: Tid::from("rev2".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -1047,7 +1047,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev2".to_string()),
+                rev: Some(Tid::from("rev2".to_string())),
             },
         };
         ops.apply_commit(update_input).unwrap();
@@ -1121,7 +1121,7 @@ mod tests {
                 did: did.clone(),
                 expected_root_cid: Some(initial_root.clone()),
                 new_root_cid: new_root.clone(),
-                new_rev: "rev1".to_string(),
+                new_rev: Tid::from("rev1".to_string()),
                 new_block_cids: vec![vec![0xAA, 0xBB]],
                 obsolete_block_cids: vec![],
                 record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -1141,7 +1141,7 @@ mod tests {
                     blobs: None,
                     blocks: None,
                     prev_data_cid: None,
-                    rev: Some("rev1".to_string()),
+                    rev: Some(Tid::from("rev1".to_string())),
                 },
             };
 
@@ -1266,7 +1266,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev1".to_string()),
+                rev: Some(Tid::from("rev1".to_string())),
             };
 
             let mut batch = metastore.database().batch();
@@ -1355,7 +1355,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: mid_root.clone(),
-            new_rev: "rev1".to_string(),
+            new_rev: Tid::from("rev1".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![
@@ -1393,7 +1393,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev1".to_string()),
+                rev: Some(Tid::from("rev1".to_string())),
             },
         };
         ops.apply_commit(input).unwrap();
@@ -1424,7 +1424,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(mid_root.clone()),
             new_root_cid: final_root.clone(),
-            new_rev: "rev2".to_string(),
+            new_rev: Tid::from("rev2".to_string()),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -1440,7 +1440,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some("rev2".to_string()),
+                rev: Some(Tid::from("rev2".to_string())),
             },
         };
         ops.apply_commit(remove_like).unwrap();

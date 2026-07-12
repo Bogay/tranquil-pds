@@ -107,7 +107,7 @@ pub async fn get_current_root_cid(state: &AppState, user_id: Uuid) -> Result<Com
         .map_err(|_| ApiError::InternalError(Some("Invalid repo root CID".into())))
 }
 
-pub fn extract_blob_cids(record: &Value) -> Vec<String> {
+pub fn extract_blob_cids(record: &Value) -> Vec<crate::types::CidLink> {
     crate::sync::import::find_blob_refs(record, 0)
         .into_iter()
         .map(|b| b.cid)
@@ -167,7 +167,7 @@ pub struct FinalizeParams<'a> {
     pub controller_did: Option<&'a Did>,
     pub delegation_detail: Option<serde_json::Value>,
     pub ops: Vec<RecordOp>,
-    pub blob_cids: &'a [String],
+    pub blob_cids: &'a [crate::types::CidLink],
     pub backlinks_to_add: Vec<Backlink>,
     pub backlinks_to_remove: Vec<AtUri>,
 }
@@ -264,7 +264,7 @@ pub async fn repair_repo_structure(
         ApiError::InternalError(None)
     })?;
     let data_root = commit.data;
-    let repo_rev = commit.rev().to_string();
+    let repo_rev = crate::types::Tid::from(commit.rev().to_string());
 
     let records = state
         .repos
@@ -614,15 +614,13 @@ pub async fn finalize_repo_write(
 pub fn create_signed_commit(
     did: &Did,
     data: Cid,
-    rev: &str,
+    rev: &Tid,
     prev: Option<Cid>,
     signing_key: &SigningKey,
 ) -> Result<(Vec<u8>, Bytes), CommitError> {
     let did = jacquard_common::types::string::Did::new(did.as_str())
         .map_err(|e| CommitError::InvalidDid(format!("{:?}", e)))?;
-    let rev = jacquard_common::types::string::Tid::from_str(rev)
-        .map_err(|e| CommitError::InvalidTid(format!("{:?}", e)))?;
-    let unsigned = Commit::new_unsigned(did, data, rev, prev);
+    let unsigned = Commit::new_unsigned(did, data, rev.clone(), prev);
     let signed = unsigned
         .sign(signing_key)
         .map_err(|e| CommitError::SigningFailed(format!("{:?}", e)))?;
@@ -670,7 +668,7 @@ impl RecordOp {
 
 pub struct CommitResult {
     pub commit_cid: Cid,
-    pub rev: String,
+    pub rev: crate::types::Tid,
 }
 
 pub struct CommitParams<'a> {
@@ -683,7 +681,7 @@ pub struct CommitParams<'a> {
     pub ops: Vec<RecordOp>,
     pub block_bytes: std::collections::HashMap<Cid, Bytes>,
     pub new_tree_cids: Vec<Cid>,
-    pub blobs: &'a [String],
+    pub blobs: &'a [crate::types::CidLink],
     pub obsolete_cids: Vec<Cid>,
     pub backlinks_to_add: Vec<Backlink>,
     pub backlinks_to_remove: Vec<AtUri>,
@@ -732,7 +730,7 @@ pub async fn commit_and_log(
     let rev = Tid::now(LimitedU32::MIN);
     let rev_str = rev.to_string();
     let (new_commit_bytes, _sig) =
-        create_signed_commit(did, new_mst_root, &rev_str, current_root_cid, &signing_key)?;
+        create_signed_commit(did, new_mst_root, &rev, current_root_cid, &signing_key)?;
     let new_root_cid =
         compute_cid(&new_commit_bytes).map_err(|e| CommitError::BlockStoreFailed(e.to_string()))?;
 
@@ -868,7 +866,7 @@ pub async fn commit_and_log(
         blobs: Some(blobs.to_vec()),
         blocks: Some(inline_blocks),
         prev_data_cid: prev_data_cid.map(crate::types::CidLink::from),
-        rev: Some(rev_str.clone()),
+        rev: Some(crate::types::Tid::from(rev_str.clone())),
     };
 
     let input = ApplyCommitInput {
@@ -876,7 +874,7 @@ pub async fn commit_and_log(
         did: did.clone(),
         expected_root_cid: current_root_cid.map(crate::types::CidLink::from),
         new_root_cid: crate::types::CidLink::from(new_root_cid),
-        new_rev: rev_str.clone(),
+        new_rev: crate::types::Tid::from(rev_str.clone()),
         new_block_cids: all_block_cids,
         obsolete_block_cids: obsolete_bytes,
         record_upserts,
@@ -924,7 +922,7 @@ pub async fn commit_and_log(
 
     Ok(CommitResult {
         commit_cid: new_root_cid,
-        rev: rev_str,
+        rev: crate::types::Tid::from(rev_str),
     })
 }
 pub async fn create_record_internal(
@@ -1030,14 +1028,12 @@ pub async fn sequence_account_event(
 pub async fn sequence_sync_event(
     state: &AppState,
     did: &Did,
-    commit_cid: &str,
-    rev: Option<&str>,
+    commit_cid: &crate::types::CidLink,
+    rev: Option<&crate::types::Tid>,
 ) -> Result<(), CommitError> {
-    let cid_link: crate::types::CidLink = commit_cid
-        .parse()
-        .map_err(|_| CommitError::InvalidCid(commit_cid.to_string()))?;
-    let commit_cid_parsed =
-        Cid::from_str(commit_cid).map_err(|e| CommitError::InvalidCid(e.to_string()))?;
+    let commit_cid_parsed = commit_cid
+        .to_cid()
+        .ok_or_else(|| CommitError::InvalidCid(commit_cid.to_string()))?;
     let commit_bytes = state
         .block_store
         .get(&commit_cid_parsed)
@@ -1049,7 +1045,7 @@ pub async fn sequence_sync_event(
     state
         .repos
         .repo
-        .insert_sync_event(did, &cid_link, rev, &commit_bytes)
+        .insert_sync_event(did, commit_cid, rev, &commit_bytes)
         .await
         .map_err(|e| CommitError::DatabaseError(format!("sync event: {}", e)))
 }
@@ -1059,7 +1055,7 @@ pub async fn sequence_genesis_commit(
     did: &Did,
     commit_cid: &Cid,
     mst_root_cid: &Cid,
-    rev: &str,
+    rev: &crate::types::Tid,
 ) -> Result<(), CommitError> {
     let commit_cid_link = crate::types::CidLink::from(commit_cid);
     let mst_root_cid_link = crate::types::CidLink::from(mst_root_cid);

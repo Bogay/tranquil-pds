@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tranquil_types::{AtUri, CidLink, Did};
+use tranquil_types::{AtUri, CidLink, Did, Tid};
 use uuid::Uuid;
 
 use crate::DbError;
@@ -58,7 +58,7 @@ pub trait BlobRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<CidLink>, DbError>;
 
-    async fn list_blobs_since_rev(&self, did: &Did, since: &str) -> Result<Vec<CidLink>, DbError>;
+    async fn list_blobs_since_rev(&self, did: &Did, since: &Tid) -> Result<Vec<CidLink>, DbError>;
 
     async fn count_blobs_by_user(&self, user_id: Uuid) -> Result<i64, DbError>;
 
