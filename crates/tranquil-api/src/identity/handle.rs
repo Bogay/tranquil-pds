@@ -26,10 +26,9 @@ pub async fn verify_handle_ownership(
     _rate_limit: RateLimited<HandleVerificationLimit>,
     Json(input): Json<VerifyHandleOwnershipInput>,
 ) -> Response {
-    let handle_str = input.handle.as_str();
     let did_str = input.did.as_str();
 
-    let dns_mismatch = match tranquil_pds::handle::resolve_handle_dns(handle_str).await {
+    let dns_mismatch = match tranquil_pds::handle::resolve_handle_dns(&input.handle).await {
         Ok(did) if did == did_str => {
             return Json(VerifyHandleOwnershipOutput {
                 verified: true,
@@ -45,7 +44,7 @@ pub async fn verify_handle_ownership(
         Err(_) => None,
     };
 
-    match tranquil_pds::handle::resolve_handle_http(handle_str).await {
+    match tranquil_pds::handle::resolve_handle_http(&input.handle).await {
         Ok(did) if did == did_str => Json(VerifyHandleOwnershipOutput {
             verified: true,
             method: Some("http".to_string()),

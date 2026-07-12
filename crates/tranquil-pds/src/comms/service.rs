@@ -308,7 +308,7 @@ pub mod repo {
         infra_repo: &dyn InfraRepository,
         user_id: Uuid,
         new_email: &str,
-        handle: &str,
+        handle: &crate::types::Handle,
         code: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
@@ -323,7 +323,7 @@ pub mod repo {
         let body = format_message(
             strings.email_update_body,
             &[
-                ("handle", handle),
+                ("handle", handle.as_str()),
                 ("code", code),
                 ("verify_page", &verify_page),
                 ("verify_link", &verify_link),

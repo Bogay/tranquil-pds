@@ -65,8 +65,8 @@ pub struct RepoOp {
 pub struct IdentityFrame {
     pub did: Did,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub handle: Option<String>,
-    pub seq: i64,
+    pub handle: Option<Handle>,
+    pub seq: SequenceNumber,
     pub time: String,
 }
 

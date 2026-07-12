@@ -797,7 +797,7 @@ pub async fn check_handle_available(
     }
     let domain = query.domain.as_deref().unwrap_or(&available_domains[0]);
     let full_handle = format!("{}.{}", validated, domain);
-    let handle_typed: tranquil_pds::types::Handle = match full_handle.parse() {
+    let handle: tranquil_pds::types::Handle = match full_handle.parse() {
         Ok(h) => h,
         Err(_) => return Err(ApiError::InvalidHandle(None)),
     };
@@ -805,7 +805,7 @@ pub async fn check_handle_available(
     let db_available = state
         .repos
         .user
-        .check_handle_available_for_new_account(&handle_typed)
+        .check_handle_available_for_new_account(&handle)
         .await
         .unwrap_or(false);
 
@@ -840,7 +840,7 @@ pub struct CompleteRegistrationInput {
 #[serde(rename_all = "camelCase")]
 pub struct CompleteRegistrationResponse {
     pub did: String,
-    pub handle: String,
+    pub handle: tranquil_pds::types::Handle,
     pub redirect_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub access_jwt: Option<String>,
@@ -889,24 +889,27 @@ pub async fn complete_registration(
         .filter(|d| input.handle.ends_with(&format!(".{}", d)))
         .max_by_key(|d| d.len());
 
-    let handle = if !input.handle.contains('.') || matched_domain.is_some() {
-        let handle_to_validate = match matched_domain {
-            Some(domain) => input
-                .handle
-                .strip_suffix(&format!(".{}", domain))
-                .unwrap_or(&input.handle),
-            None => &input.handle,
+    let handle: tranquil_pds::types::Handle =
+        if !input.handle.contains('.') || matched_domain.is_some() {
+            let handle_to_validate = match matched_domain {
+                Some(domain) => input
+                    .handle
+                    .strip_suffix(&format!(".{}", domain))
+                    .unwrap_or(&input.handle),
+                None => &input.handle,
+            };
+            match tranquil_pds::api::validation::validate_short_handle(handle_to_validate) {
+                Ok(h) => format!("{}.{}", h, matched_domain.unwrap_or(&available_domains[0]))
+                    .parse()
+                    .map_err(|_| ApiError::InvalidHandle(None))?,
+                Err(_) => return Err(ApiError::InvalidHandle(None)),
+            }
+        } else {
+            match tranquil_pds::api::validation::validate_full_domain_handle(&input.handle) {
+                Ok(h) => h,
+                Err(_) => return Err(ApiError::InvalidHandle(None)),
+            }
         };
-        match tranquil_pds::api::validation::validate_short_handle(handle_to_validate) {
-            Ok(h) => format!("{}.{}", h, matched_domain.unwrap_or(&available_domains[0])),
-            Err(_) => return Err(ApiError::InvalidHandle(None)),
-        }
-    } else {
-        match tranquil_pds::api::validation::validate_full_domain_handle(&input.handle) {
-            Ok(h) => h,
-            Err(_) => return Err(ApiError::InvalidHandle(None)),
-        }
-    };
 
     let verification_channel = input
         .verification_channel
@@ -989,12 +992,10 @@ pub async fn complete_registration(
     let invite_registration =
         check_registration_invite(&state, input.invite_code.as_deref()).await?;
 
-    let handle_typed: tranquil_pds::types::Handle =
-        handle.parse().map_err(|_| ApiError::InvalidHandle(None))?;
     let reserved = state
         .repos
         .user
-        .reserve_handle(&handle_typed, client_ip)
+        .reserve_handle(&handle, client_ip)
         .await
         .unwrap_or(false);
 
@@ -1130,7 +1131,7 @@ pub async fn complete_registration(
     };
 
     let create_input = tranquil_db_traits::CreateSsoAccountInput {
-        handle: handle_typed.clone(),
+        handle: handle.clone(),
         email: email.clone(),
         did: did_typed.clone(),
         preferred_comms_channel: verification_channel,
@@ -1190,15 +1191,10 @@ pub async fn complete_registration(
         }
     };
 
-    let _ = state
-        .repos
-        .user
-        .release_handle_reservation(&handle_typed)
-        .await;
+    let _ = state.repos.user.release_handle_reservation(&handle).await;
 
     if let Err(e) =
-        tranquil_pds::repo_ops::sequence_identity_event(&state, &did_typed, Some(&handle_typed))
-            .await
+        tranquil_pds::repo_ops::sequence_identity_event(&state, &did, Some(&handle)).await
     {
         tracing::warn!("Failed to sequence identity event for {}: {}", did, e);
     }
@@ -1214,7 +1210,7 @@ pub async fn complete_registration(
 
     let profile_record = json!({
         "$type": "app.bsky.actor.profile",
-        "displayName": handle_typed.as_str()
+        "displayName": handle.as_str()
     });
     if let Err(e) = tranquil_pds::repo_ops::create_record_internal(
         &state,

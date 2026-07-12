@@ -1,4 +1,5 @@
 use crate::cache::Cache;
+use crate::types::{Did, Handle};
 use base32::Alphabet;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer};
@@ -518,7 +519,7 @@ pub struct GenesisResult {
 pub fn create_genesis_operation(
     signing_key: &SigningKey,
     configured_rotation_key: Option<&str>,
-    handle: &str,
+    handle: &Handle,
     pds_endpoint: &str,
 ) -> Result<GenesisResult, PlcError> {
     let signing_did_key = signing_key_to_did_key(signing_key);
@@ -780,9 +781,13 @@ mod tests {
         let key = SigningKey::random(&mut rand::thread_rng());
         let signing_did_key = signing_key_to_did_key(&key);
         let operator_key = "did:key:zQ3shWhelkOperatorKey";
-        let result =
-            create_genesis_operation(&key, Some(operator_key), "whelk.nel.pet", "https://nel.pet")
-                .unwrap();
+        let result = create_genesis_operation(
+            &key,
+            Some(operator_key),
+            &crate::types::Handle::from("whelk.nel.pet".to_string()),
+            "https://nel.pet",
+        )
+        .unwrap();
         let rotation_keys = result.signed_operation["rotationKeys"]
             .as_array()
             .unwrap()

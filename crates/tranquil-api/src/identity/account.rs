@@ -48,22 +48,14 @@ pub struct CreateAccountOutput {
 async fn try_reactivate_migration(
     state: &AppState,
     did: &str,
-    handle: &str,
+    handle: &Handle,
     email: &Option<String>,
     verification_channel: tranquil_db_traits::CommsChannel,
     verification_recipient: Option<&str>,
 ) -> Option<Response> {
-    let did_typed: Did = match did.parse() {
-        Ok(d) => d,
-        Err(_) => return Some(ApiError::InternalError(Some("Invalid DID".into())).into_response()),
-    };
-    let handle_typed: Handle = match handle.parse() {
-        Ok(h) => h,
-        Err(_) => return Some(ApiError::InvalidHandle(None).into_response()),
-    };
     let reactivate_input = tranquil_db_traits::MigrationReactivationInput {
-        did: did_typed.clone(),
-        new_handle: handle_typed.clone(),
+        did: did.clone(),
+        new_handle: handle.clone(),
         new_email: email.clone(),
     };
     match state
@@ -153,8 +145,8 @@ async fn try_reactivate_migration(
                 (
                     StatusCode::OK,
                     Json(CreateAccountOutput {
-                        handle: handle.to_string().into(),
-                        did: did_typed.clone(),
+                        handle: handle.clone(),
+                        did: did.clone(),
                         did_doc: state
                             .did_resolver
                             .fetch_did_document(did)
@@ -342,7 +334,7 @@ pub async fn create_account(
             }
             if !is_did_web_byod
                 && let Err(e) =
-                    verify_did_web(d, hostname, &input.handle, input.signing_key.as_deref()).await
+                    verify_did_web(d, hostname, &input.handle, input.signing_key.as_ref()).await
             {
                 return ApiError::InvalidDid(e.to_string()).into_response();
             }
@@ -357,7 +349,7 @@ pub async fn create_account(
                 } else if d.starts_with("did:web:") {
                     if !is_did_web_byod
                         && let Err(e) =
-                            verify_did_web(d, hostname, &input.handle, input.signing_key.as_deref())
+                            verify_did_web(d, hostname, &input.handle, input.signing_key.as_ref())
                                 .await
                     {
                         return ApiError::InvalidDid(e.to_string()).into_response();
@@ -397,14 +389,10 @@ pub async fn create_account(
         return response;
     }
 
-    let handle_typed: Handle = match handle.parse() {
-        Ok(h) => h,
-        Err(_) => return ApiError::InvalidHandle(None).into_response(),
-    };
     let handle_available = match state
         .repos
         .user
-        .check_handle_available_for_new_account(&handle_typed)
+        .check_handle_available_for_new_account(&handle)
         .await
     {
         Ok(available) => available,
@@ -466,7 +454,7 @@ pub async fn create_account(
     let repo_for_seq = repo.clone();
 
     let create_input = tranquil_db_traits::CreatePasswordAccountInput {
-        handle: handle_typed.clone(),
+        handle: handle.clone(),
         email: email.clone(),
         did: did_for_commit.clone(),
         password_hash,
@@ -512,14 +500,8 @@ pub async fn create_account(
     };
     let user_id = create_result.user_id;
     if !is_migration && !is_did_web_byod {
-        super::provision::sequence_new_account(
-            &state,
-            &did_for_commit,
-            &handle_typed,
-            &repo_for_seq,
-            &input.handle,
-        )
-        .await;
+        super::provision::sequence_new_account(&state, &did, &handle, &repo_for_seq, &input.handle)
+            .await;
     }
     if !is_migration {
         if let Some(ref recipient) = verification_recipient {
@@ -569,8 +551,8 @@ pub async fn create_account(
     (
         StatusCode::OK,
         Json(CreateAccountOutput {
-            handle: handle.clone().into(),
-            did: did_for_commit,
+            handle: handle.clone(),
+            did,
             did_doc: did_doc.map(|f| (*f).clone()),
             access_jwt: session.access_jwt,
             refresh_jwt: session.refresh_jwt,

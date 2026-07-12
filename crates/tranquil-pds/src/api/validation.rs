@@ -1,3 +1,4 @@
+use crate::types::Handle;
 use std::fmt;
 
 pub const MAX_EMAIL_LENGTH: usize = 254;
@@ -146,7 +147,7 @@ pub enum ReservedHandlePolicy {
     Reject,
 }
 
-pub fn validate_full_domain_handle(handle: &str) -> Result<String, HandleValidationError> {
+pub fn validate_full_domain_handle(handle: &str) -> Result<Handle, HandleValidationError> {
     let handle = handle.trim();
 
     if handle.is_empty() {
@@ -189,14 +190,14 @@ pub fn validate_full_domain_handle(handle: &str) -> Result<String, HandleValidat
         return Err(HandleValidationError::BannedWord);
     }
 
-    Ok(handle_lower)
+    Ok(Handle::from(handle_lower))
 }
 
 pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationError> {
     validate_service_handle(handle, ReservedHandlePolicy::Reject)
 }
 
-pub fn resolve_handle_input(input: &str) -> Result<String, HandleValidationError> {
+pub fn resolve_handle_input(input: &str) -> Result<Handle, HandleValidationError> {
     let available_domains = tranquil_config::get().server.available_user_domain_list();
     let matched_domain = available_domains
         .iter()
@@ -209,7 +210,7 @@ pub fn resolve_handle_input(input: &str) -> Result<String, HandleValidationError
             None => input,
         };
         let validated = validate_short_handle(handle_to_validate)?;
-        Ok(format!(
+        Ok(Handle::from(format!(
             "{}.{}",
             validated,
             matched_domain.unwrap_or(&available_domains[0])

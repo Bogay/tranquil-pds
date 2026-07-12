@@ -106,7 +106,7 @@ pub async fn update_account_handle(
             }
             let _ = state
                 .cache
-                .delete(&tranquil_pds::cache_keys::handle_key(&handle))
+                .delete(&tranquil_pds::cache_keys::handle_key(&handle_for_check))
                 .await;
             if let Err(e) = tranquil_pds::repo_ops::sequence_identity_event(
                 &state,

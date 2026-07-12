@@ -168,10 +168,11 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
         "Received /start from Discord user"
     );
 
+    let handle = handle.map(Handle::from);
     match state
         .repos
         .user
-        .store_discord_user_id(&discord_username, &discord_user_id, handle.as_deref())
+        .store_discord_user_id(&discord_username, &discord_user_id, handle.as_ref())
         .await
     {
         Ok(Some(user_id)) => {

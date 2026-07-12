@@ -294,10 +294,6 @@ pub async fn create_passkey_account(
         None
     };
 
-    let handle_typed: Handle = match handle.parse() {
-        Ok(h) => h,
-        Err(_) => return Err(ApiError::InvalidHandle(None)),
-    };
     let repo_for_seq = repo.clone();
     let comms = crate::identity::provision::normalize_comms_usernames(
         input.discord_username.as_deref(),
@@ -305,7 +301,7 @@ pub async fn create_passkey_account(
         input.signal_username.as_deref(),
     );
     let create_input = tranquil_db_traits::CreatePasskeyAccountInput {
-        handle: handle_typed.clone(),
+        handle: handle.clone(),
         email: email.clone().unwrap_or_default(),
         did: did_typed.clone(),
         preferred_comms_channel: verification_channel,
@@ -346,10 +342,10 @@ pub async fn create_passkey_account(
     if !is_byod_did_web {
         crate::identity::provision::sequence_new_account(
             &state,
-            &did_typed,
-            &handle_typed,
-            &repo_for_seq,
+            &did,
             &handle,
+            &repo_for_seq,
+            handle.as_str(),
         )
         .await;
     }
@@ -398,8 +394,8 @@ pub async fn create_passkey_account(
     };
 
     Ok(Json(CreatePasskeyAccountOutput {
-        did: did.into(),
-        handle: handle.into(),
+        did,
+        handle,
         setup_token,
         setup_expires_at,
         access_jwt,

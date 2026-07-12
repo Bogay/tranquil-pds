@@ -10,7 +10,7 @@ use tranquil_pds::auth::{
 };
 use tranquil_pds::rate_limit::{PasswordResetLimit, RateLimited, ResetPasswordLimit};
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::PlainPassword;
+use tranquil_pds::types::{Handle, PlainPassword};
 use tranquil_pds::validation::validate_password;
 
 #[derive(Deserialize)]
@@ -48,7 +48,10 @@ pub async fn request_password_reset(
     let user_id = match state
         .repos
         .user
-        .get_id_by_email_or_handle(normalized, normalized_handle.as_str())
+        .get_id_by_email_or_handle(
+            normalized,
+            &Handle::from(normalized_handle.as_str().to_string()),
+        )
         .await
     {
         Ok(Some(id)) => id,

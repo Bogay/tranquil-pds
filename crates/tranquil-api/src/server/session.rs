@@ -20,7 +20,7 @@ use tranquil_pds::rate_limit::{
     check_user_rate_limit_with_message,
 };
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{AccountState, Did, Handle, PlainPassword};
+use tranquil_pds::types::{AccountState, AtIdentifier, Did, Handle, PlainPassword};
 use tranquil_types::TokenId;
 
 pub fn verification_blocks_login(channel_verification: &ChannelVerificationStatus) -> bool {
@@ -78,6 +78,16 @@ pub async fn create_session(
         "Normalized identifier: {} -> {}",
         input.identifier, normalized_identifier
     );
+    let Ok(login_identifier) = AtIdentifier::new(normalized_identifier.as_str()) else {
+        let _ = verify(
+            &input.password,
+            "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYw1ZzQKZqmK",
+        );
+        warn!("Login identifier is not a valid handle or DID");
+        return Err(ApiError::AuthenticationFailed(Some(
+            "Invalid identifier or password".into(),
+        )));
+    };
     let row = match state
         .repos
         .user

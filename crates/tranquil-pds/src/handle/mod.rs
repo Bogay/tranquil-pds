@@ -1,5 +1,6 @@
 pub mod reserved;
 
+use crate::types::{Did, Handle};
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use thiserror::Error;
@@ -18,7 +19,7 @@ pub enum HandleResolutionError {
     DidMismatch { expected: String, actual: String },
 }
 
-pub async fn resolve_handle_dns(handle: &str) -> Result<String, HandleResolutionError> {
+pub async fn resolve_handle_dns(handle: &Handle) -> Result<Did, HandleResolutionError> {
     let resolver = TokioAsyncResolver::tokio_from_system_conf().unwrap_or_else(|e| {
         tracing::warn!("falling back to default DNS resolvers: {}", e);
         TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
@@ -41,7 +42,7 @@ pub async fn resolve_handle_dns(handle: &str) -> Result<String, HandleResolution
         .ok_or(HandleResolutionError::NotFound)
 }
 
-pub async fn resolve_handle_http(handle: &str) -> Result<String, HandleResolutionError> {
+pub async fn resolve_handle_http(handle: &Handle) -> Result<Did, HandleResolutionError> {
     let url = format!("https://{}/.well-known/atproto-did", handle);
     let client = crate::api::proxy_client::handle_resolution_client();
     let response = client
@@ -65,7 +66,7 @@ pub async fn resolve_handle_http(handle: &str) -> Result<String, HandleResolutio
     }
 }
 
-pub async fn resolve_handle(handle: &str) -> Result<String, HandleResolutionError> {
+pub async fn resolve_handle(handle: &Handle) -> Result<Did, HandleResolutionError> {
     match resolve_handle_dns(handle).await {
         Ok(did) => return Ok(did),
         Err(e) => {
@@ -76,7 +77,7 @@ pub async fn resolve_handle(handle: &str) -> Result<String, HandleResolutionErro
 }
 
 pub async fn verify_handle_ownership(
-    handle: &str,
+    handle: &Handle,
     expected_did: &str,
 ) -> Result<(), HandleResolutionError> {
     let resolved_did = resolve_handle(handle).await?;

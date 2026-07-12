@@ -245,8 +245,8 @@ fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameErr
         FrameType::Identity,
         &IdentityFrame {
             did: event.did.clone(),
-            handle: event.handle.as_ref().map(|h| h.to_string()),
-            seq: event.seq.as_i64(),
+            handle: event.handle.clone(),
+            seq: event.seq,
             time: format_atproto_time(event.created_at),
         },
         256,

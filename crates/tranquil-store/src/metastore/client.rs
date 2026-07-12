@@ -3858,14 +3858,14 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
         &self,
         telegram_username: &str,
         chat_id: i64,
-        handle: Option<&str>,
+        handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::StoreTelegramChatId {
                 telegram_username: telegram_username.to_owned(),
                 chat_id,
-                handle: handle.map(str::to_owned),
+                handle: handle.map(|h| h.to_string()),
                 tx,
             }))?;
         recv(rx).await
@@ -3900,14 +3900,14 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
         &self,
         discord_username: &str,
         discord_id: &str,
-        handle: Option<&str>,
+        handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::StoreDiscordUserId {
                 discord_username: discord_username.to_owned(),
                 discord_id: discord_id.to_owned(),
-                handle: handle.map(str::to_owned),
+                handle: handle.map(|h| h.to_string()),
                 tx,
             }))?;
         recv(rx).await
@@ -4473,13 +4473,13 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
     async fn get_id_by_email_or_handle(
         &self,
         email: &str,
-        handle: &str,
+        handle: &Handle,
     ) -> Result<Option<Uuid>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::GetIdByEmailOrHandle {
                 email: email.to_owned(),
-                handle: handle.to_owned(),
+                handle: handle.to_string(),
                 tx,
             }))?;
         recv(rx).await

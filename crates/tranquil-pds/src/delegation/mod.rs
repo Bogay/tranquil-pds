@@ -12,14 +12,14 @@ pub use tranquil_db_traits::DelegationActionType;
 
 use crate::did::DidResolutionError;
 use crate::state::AppState;
-use crate::types::Did;
+use crate::types::{Did, Handle};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedIdentity {
     pub did: Did,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub handle: Option<String>,
+    pub handle: Option<Handle>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pds_url: Option<String>,
     pub is_local: bool,
@@ -52,7 +52,8 @@ pub async fn resolve_identity(
     let handle = did_doc
         .also_known_as
         .iter()
-        .find_map(|alias| alias.strip_prefix("at://").map(|s| s.to_string()));
+        .find_map(|alias| alias.strip_prefix("at://"))
+        .and_then(|s| Handle::new(s).ok());
 
     Ok(ResolvedIdentity {
         did: did.clone(),

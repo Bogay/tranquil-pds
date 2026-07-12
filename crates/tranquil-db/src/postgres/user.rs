@@ -1732,12 +1732,12 @@ impl UserRepository for PostgresUserRepository {
     async fn get_id_by_email_or_handle(
         &self,
         email: &str,
-        handle: &str,
+        handle: &Handle,
     ) -> Result<Option<Uuid>, DbError> {
         sqlx::query_scalar!(
             "SELECT id FROM users WHERE LOWER(email) = $1 OR handle = $2",
             email,
-            handle
+            handle.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -3225,7 +3225,7 @@ impl UserRepository for PostgresUserRepository {
         &self,
         discord_username: &str,
         discord_id: &str,
-        handle: Option<&str>,
+        handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError> {
         let result = match handle {
             Some(h) => sqlx::query_scalar!(
@@ -3287,7 +3287,7 @@ impl UserRepository for PostgresUserRepository {
         &self,
         telegram_username: &str,
         chat_id: i64,
-        handle: Option<&str>,
+        handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError> {
         let result = match handle {
             Some(h) => sqlx::query_scalar!(

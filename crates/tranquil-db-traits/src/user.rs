@@ -264,7 +264,7 @@ pub trait UserRepository: Send + Sync {
         &self,
         telegram_username: &str,
         chat_id: i64,
-        handle: Option<&str>,
+        handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError>;
 
     async fn get_telegram_chat_id(&self, user_id: Uuid) -> Result<Option<i64>, DbError>;
@@ -279,7 +279,7 @@ pub trait UserRepository: Send + Sync {
         &self,
         discord_username: &str,
         discord_id: &str,
-        handle: Option<&str>,
+        handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError>;
 
     async fn get_verification_info(
@@ -442,7 +442,7 @@ pub trait UserRepository: Send + Sync {
     async fn get_id_by_email_or_handle(
         &self,
         email: &str,
-        handle: &str,
+        handle: &Handle,
     ) -> Result<Option<Uuid>, DbError>;
 
     async fn count_accounts_by_email(&self, email: &str) -> Result<i64, DbError>;

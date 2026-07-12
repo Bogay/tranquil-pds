@@ -41,8 +41,7 @@ pub async fn list_controllers(
                     .fetch_did_document(c.did.as_str())
                     .await
                     .ok()
-                    .and_then(|doc| tranquil_types::did_doc::extract_handle(&doc))
-                    .map(Into::into);
+                    .and_then(|doc| tranquil_types::did_doc::extract_handle(&doc));
             }
             c
         }
@@ -380,7 +379,6 @@ pub async fn create_delegated_account(
         e
     })?;
     let did = plc.did;
-    let handle: Handle = handle.parse().map_err(|_| ApiError::InvalidHandle(None))?;
     info!(did = %did, handle = %handle, controller = %can_control.did(), "Created DID for delegated account");
 
     let repo = init_genesis_repo(&state, &did, &plc.signing_key, &plc.signing_key_bytes).await?;
@@ -465,14 +463,13 @@ pub async fn resolve_controller(
             .parse()
             .map_err(|_| ApiError::ControllerNotFound)?
     } else {
-        let local_handle: Option<Handle> = identifier.parse().ok();
-        let local_user = match local_handle {
-            Some(ref h) => state.repos.user.get_by_handle(h).await.ok().flatten(),
-            None => None,
-        };
+        let handle: Handle = identifier
+            .parse()
+            .map_err(|_| ApiError::ControllerNotFound)?;
+        let local_user = state.repos.user.get_by_handle(&handle).await.ok().flatten();
         match local_user {
             Some(user) => user.did,
-            None => tranquil_pds::handle::resolve_handle(identifier)
+            None => tranquil_pds::handle::resolve_handle(&handle)
                 .await
                 .map_err(|_| ApiError::ControllerNotFound)?
                 .parse()

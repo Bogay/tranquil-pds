@@ -12,7 +12,7 @@ pub fn user_status_key(did: &str) -> String {
     format!("auth:status:{}", did)
 }
 
-pub fn handle_key(handle: &str) -> String {
+pub fn handle_key(handle: &Handle) -> String {
     format!("handle:{}", handle)
 }
 

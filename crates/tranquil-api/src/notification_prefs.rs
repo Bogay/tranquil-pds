@@ -6,7 +6,7 @@ use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Active, Auth};
 use tranquil_pds::state::AppState;
-use tranquil_types::Did;
+use tranquil_types::{Did, Handle};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,7 +137,7 @@ pub async fn request_channel_verification(
     did: &Did,
     channel: CommsChannel,
     identifier: &str,
-    handle: Option<&str>,
+    handle: Option<&Handle>,
 ) -> Result<String, ApiError> {
     let token = tranquil_pds::auth::verification_token::generate_channel_update_token(
         did, channel, identifier,
@@ -147,12 +147,12 @@ pub async fn request_channel_verification(
     match channel {
         CommsChannel::Email => {
             let hostname = &tranquil_config::get().server.hostname;
-            let handle_str = handle.unwrap_or("user");
+            let fallback_handle = Handle::from("user".to_string());
             tranquil_pds::comms::comms_repo::enqueue_email_update(
                 state.repos.infra.as_ref(),
                 user_id,
                 identifier,
-                handle_str,
+                handle.unwrap_or(&fallback_handle),
                 &formatted_token,
                 hostname,
             )

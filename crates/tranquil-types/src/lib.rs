@@ -873,7 +873,7 @@ pub mod did_doc {
             })
     }
 
-    pub fn extract_handle(doc: &serde_json::Value) -> Option<String> {
+    pub fn extract_handle(doc: &serde_json::Value) -> Option<crate::Handle> {
         doc.get("alsoKnownAs")
             .and_then(|a| a.as_array())
             .and_then(|aliases| {
@@ -881,7 +881,7 @@ pub mod did_doc {
                     alias
                         .as_str()
                         .and_then(|s| s.strip_prefix("at://"))
-                        .map(|h| h.to_string())
+                        .and_then(|h| crate::Handle::new(h).ok())
                 })
             })
     }

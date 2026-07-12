@@ -423,10 +423,8 @@ pub async fn activate_account(
                 "[MIGRATION] activateAccount: Sequencing identity event for did={} handle={:?}",
                 did, handle
             );
-            let handle_typed = handle.clone();
             if let Err(e) =
-                tranquil_pds::repo_ops::sequence_identity_event(&state, &did, handle_typed.as_ref())
-                    .await
+                tranquil_pds::repo_ops::sequence_identity_event(&state, &did, handle.as_ref()).await
             {
                 warn!(
                     "[MIGRATION] activateAccount: Failed to sequence identity event for activation: {}",

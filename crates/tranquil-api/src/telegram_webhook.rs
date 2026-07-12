@@ -62,7 +62,8 @@ pub async fn handle_telegram_webhook(
             && let Some(from) = message.from
             && let Some(username) = from.username
         {
-            let handle = parse_start_handle(message.text.as_deref());
+            let handle =
+                parse_start_handle(message.text.as_deref()).map(tranquil_types::Handle::from);
 
             debug!(
                 telegram_username = %username,
@@ -73,7 +74,7 @@ pub async fn handle_telegram_webhook(
             match state
                 .repos
                 .user
-                .store_telegram_chat_id(&username, from.id, handle.as_deref())
+                .store_telegram_chat_id(&username, from.id, handle.as_ref())
                 .await
             {
                 Ok(Some(user_id)) => {

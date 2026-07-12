@@ -19,7 +19,7 @@ use tranquil_pds::rate_limit::{
     HandleUpdateDailyLimit, HandleUpdateLimit, check_user_rate_limit_with_message,
 };
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::Handle;
+use tranquil_pds::types::{Did, Handle};
 use tranquil_pds::util::get_header_str;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +54,10 @@ pub async fn resolve_handle(
             return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response();
         }
     };
+    let cache_key = tranquil_pds::cache_keys::handle_key(&handle);
+    if let Some(did) = state.cache.get(&cache_key).await {
+        return DidResponse::response(did).into_response();
+    }
     let user = state.repos.user.get_by_handle(&handle).await;
     match user {
         Ok(Some(row)) => {
@@ -63,7 +67,7 @@ pub async fn resolve_handle(
                 .await;
             DidResponse::response(row.did).into_response()
         }
-        Ok(None) => match tranquil_pds::handle::resolve_handle(handle.as_str()).await {
+        Ok(None) => match tranquil_pds::handle::resolve_handle(&handle).await {
             Ok(did) => {
                 let _ = state
                     .cache
@@ -212,8 +216,7 @@ async fn serve_handle_did_doc(state: &AppState, handle: &str, hostname: &str) ->
 pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
     let hostname = &tranquil_config::get().server.hostname;
     let hostname_for_handles = tranquil_config::get().server.hostname_without_port();
-    let current_handle = format!("{}.{}", handle, hostname_for_handles);
-    let current_handle_typed: Handle = match current_handle.parse() {
+    let current_handle: Handle = match format!("{}.{}", handle, hostname_for_handles).parse() {
         Ok(h) => h,
         Err(_) => {
             return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response();
@@ -583,7 +586,7 @@ pub async fn update_handle(
         .max_by_key(|d| d.len())
         .cloned();
     let is_domain_itself = handle_domains.iter().any(|d| d == &new_handle);
-    let handle = if (!new_handle.contains('.') || matched_handle_domain.is_some())
+    let handle: Handle = if (!new_handle.contains('.') || matched_handle_domain.is_some())
         && !is_domain_itself
     {
         let (short_part, full_handle) = match &matched_handle_domain {
@@ -598,13 +601,12 @@ pub async fn update_handle(
             }
         };
         if full_handle == current_handle {
-            let handle_typed: Handle = match full_handle.parse() {
+            let handle: Handle = match full_handle.parse() {
                 Ok(h) => h,
                 Err(_) => return Err(ApiError::InvalidHandle(None)),
             };
             if let Err(e) =
-                tranquil_pds::repo_ops::sequence_identity_event(&state, &did, Some(&handle_typed))
-                    .await
+                tranquil_pds::repo_ops::sequence_identity_event(&state, &did, Some(&handle)).await
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
@@ -622,21 +624,25 @@ pub async fn update_handle(
             return Err(ApiError::InvalidHandle(Some("Handle too long".into())));
         }
         full_handle
+            .parse()
+            .map_err(|_| ApiError::InvalidHandle(Some("Invalid handle format".into())))?
     } else {
+        let handle: Handle = new_handle
+            .parse()
+            .map_err(|_| ApiError::InvalidHandle(Some("Invalid handle format".into())))?;
         if new_handle == current_handle {
             let handle_typed: Handle = match new_handle.parse() {
                 Ok(h) => h,
                 Err(_) => return Err(ApiError::InvalidHandle(None)),
             };
             if let Err(e) =
-                tranquil_pds::repo_ops::sequence_identity_event(&state, &did, Some(&handle_typed))
-                    .await
+                tranquil_pds::repo_ops::sequence_identity_event(&state, &did, Some(&handle)).await
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
             return Ok(Json(EmptyResponse {}));
         }
-        match tranquil_pds::handle::verify_handle_ownership(&new_handle, &did).await {
+        match tranquil_pds::handle::verify_handle_ownership(&handle, &did).await {
             Ok(()) => {}
             Err(tranquil_pds::handle::HandleResolutionError::NotFound) => {
                 return Err(ApiError::HandleNotAvailable(None));
@@ -655,15 +661,12 @@ pub async fn update_handle(
                 ))));
             }
         }
-        new_handle.clone()
+        handle
     };
-    let handle_typed: Handle = handle
-        .parse()
-        .map_err(|_| ApiError::InvalidHandle(Some("Invalid handle format".into())))?;
     let handle_exists = state
         .repos
         .user
-        .check_handle_exists(&handle_typed, user_id)
+        .check_handle_exists(&handle, user_id)
         .await
         .log_db_err("checking handle existence")?;
     if handle_exists {
@@ -672,7 +675,7 @@ pub async fn update_handle(
     state
         .repos
         .user
-        .update_handle(user_id, &handle_typed)
+        .update_handle(user_id, &handle)
         .await
         .map_err(|e| {
             error!("DB error updating handle: {:?}", e);
@@ -690,11 +693,11 @@ pub async fn update_handle(
         .delete(&tranquil_pds::cache_keys::handle_key(&handle))
         .await;
     if let Err(e) =
-        tranquil_pds::repo_ops::sequence_identity_event(&state, &did, Some(&handle_typed)).await
+        tranquil_pds::repo_ops::sequence_identity_event(&state, &did, Some(&handle)).await
     {
         warn!("Failed to sequence identity event for handle update: {}", e);
     }
-    if let Err(e) = update_plc_handle(&state, &did, &handle_typed).await {
+    if let Err(e) = update_plc_handle(&state, &did, &handle).await {
         warn!("Failed to update PLC handle: {}", e);
     }
     Ok(Json(EmptyResponse {}))

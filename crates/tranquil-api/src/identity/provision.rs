@@ -14,7 +14,7 @@ pub struct PlcDidResult {
     pub signing_key: SigningKey,
 }
 
-pub async fn create_plc_did(state: &AppState, handle: &str) -> Result<PlcDidResult, ApiError> {
+pub async fn create_plc_did(state: &AppState, handle: &Handle) -> Result<PlcDidResult, ApiError> {
     use k256::SecretKey;
     use rand::rngs::OsRng;
 
@@ -25,10 +25,7 @@ pub async fn create_plc_did(state: &AppState, handle: &str) -> Result<PlcDidResu
         ApiError::InternalError(None)
     })?;
 
-    let did_str = submit_plc_genesis(state, &signing_key, handle).await?;
-    let did: Did = did_str
-        .parse()
-        .map_err(|_| ApiError::InternalError(Some("PLC genesis returned invalid DID".into())))?;
+    let did = submit_plc_genesis(state, &signing_key, handle).await?;
 
     Ok(PlcDidResult {
         did,
@@ -40,7 +37,7 @@ pub async fn create_plc_did(state: &AppState, handle: &str) -> Result<PlcDidResu
 pub async fn submit_plc_genesis(
     state: &AppState,
     signing_key: &SigningKey,
-    handle: &str,
+    handle: &Handle,
 ) -> Result<String, ApiError> {
     let hostname = &tranquil_config::get().server.hostname;
     let pds_endpoint = format!("https://{}", hostname);
