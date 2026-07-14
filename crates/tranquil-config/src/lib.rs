@@ -853,18 +853,27 @@ pub struct FirehoseConfig {
     pub max_concurrent_repo_exports: usize,
 
     /// List of relay / crawler notification URLs.
-    #[config(env = "CRAWLERS", parse_env = split_comma_list)]
-    pub crawlers: Option<Vec<String>>,
-}
+    #[config(env = "CRAWLERS", parse_env = split_comma_list, default = [
+        // If you know of more relays it makes sense to have here by all means make a PR!
+        // All we request is that you only add "major" relays.
+        // What exactly "major" means is up to interpretation and we will make the final call,
+        // but a good rule of thumb is "most people are likely to add the relay if they know about it"
 
-impl FirehoseConfig {
-    /// Returns the list of crawler URLs, falling back to `["https://bsky.network"]`
-    /// when none are configured.
-    pub fn crawler_list(&self) -> Vec<String> {
-        self.crawlers
-            .clone()
-            .unwrap_or_else(|| vec!["https://bsky.network".to_string()])
-    }
+        // Microcosm relays
+        "https://relay.fire.hose.cam",
+        "https://relay3.fr.hose.cam",
+        // PBC relay
+        "https://bsky.network",
+        // firehose.network relays
+        "https://northamerica.firehose.network",
+        "https://europe.firehose.network",
+        "https://asia.firehose.network",
+        // Blacksky relay
+        "https://atproto.africa",
+        // UpCloud relay
+        "https://relay.upcloud.world",
+    ])]
+    pub crawlers: Vec<String>,
 }
 
 #[derive(Debug, Config)]

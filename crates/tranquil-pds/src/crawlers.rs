@@ -47,13 +47,13 @@ impl Crawlers {
             return None;
         }
 
-        let crawler_urls = cfg.firehose.crawler_list();
+        let crawler_urls = &cfg.firehose.crawlers;
 
         if crawler_urls.is_empty() {
             return None;
         }
 
-        Some(Self::new(hostname.to_string(), crawler_urls))
+        Some(Self::new(hostname.to_string(), crawler_urls.clone()))
     }
 
     fn should_notify(&self) -> bool {
