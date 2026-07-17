@@ -5,9 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["postgres"]
 postgres = []
-sqlite = []
 
 [dependencies]
 tranquil-db-traits = { workspace = true }

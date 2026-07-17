@@ -92,9 +92,9 @@ macro_rules! simple_string_newtype {
         $vis:vis struct $name:ident;
     ) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        #[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(transparent))]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, sqlx::Type)]
         #[serde(transparent)]
+        #[sqlx(transparent)]
         $vis struct $name(String);
 
         impl $name {
@@ -148,9 +148,9 @@ macro_rules! validated_string_newtype {
         validator = $validator:expr;
     ) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-        #[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(transparent))]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, sqlx::Type)]
         #[serde(transparent)]
+        #[sqlx(transparent)]
         $vis struct $name(String);
 
         impl<'de> Deserialize<'de> for $name {
@@ -223,9 +223,9 @@ impl Did {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(transparent))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, sqlx::Type)]
 #[serde(transparent)]
+#[sqlx(transparent)]
 pub struct Handle(String);
 
 impl<'de> Deserialize<'de> for Handle {
@@ -523,9 +523,9 @@ validated_string_newtype! {
     validator = |s| jacquard_common::types::string::Language::from_str(s).map(|v| v.as_str().to_owned()).map_err(|_| ());
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(transparent))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, sqlx::Type)]
 #[serde(transparent)]
+#[sqlx(transparent)]
 pub struct CidLink(String);
 
 impl<'de> Deserialize<'de> for CidLink {
@@ -718,9 +718,9 @@ impl Deref for PlainPassword {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(transparent))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(transparent)]
+#[sqlx(transparent)]
 pub struct PasswordHash(String);
 
 impl PasswordHash {
@@ -843,13 +843,9 @@ simple_string_newtype! {
     pub struct InviteCode;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "sqlx",
-    derive(sqlx::Type),
-    sqlx(type_name = "comms_channel", rename_all = "snake_case")
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "comms_channel", rename_all = "snake_case")]
 #[derive(Copy)]
 pub enum CommsChannel {
     Email,
@@ -885,13 +881,9 @@ impl fmt::Display for CommsChannel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "sqlx",
-    derive(sqlx::Type),
-    sqlx(type_name = "comms_type", rename_all = "snake_case")
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "comms_type", rename_all = "snake_case")]
 pub enum CommsType {
     Verification,
     PasswordReset,

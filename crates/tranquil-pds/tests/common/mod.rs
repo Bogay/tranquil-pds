@@ -1,8 +1,8 @@
-#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
+#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
 use aws_config::BehaviorVersion;
-#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
+#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
 use aws_sdk_s3::Client as S3Client;
-#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
+#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
 use aws_sdk_s3::config::Credentials;
 use chrono::Utc;
 use reqwest::{Client, StatusCode, header};
@@ -56,9 +56,9 @@ pub struct ServerInstance {
     pub distributed_rate_limiter: Option<Arc<dyn DistributedRateLimiter>>,
 }
 
-#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
+#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
 use testcontainers::GenericImage;
-#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
+#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
 use testcontainers::core::ContainerPort;
 #[cfg(not(feature = "external-infra"))]
 use testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
@@ -66,7 +66,7 @@ use testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use testcontainers_modules::postgres::Postgres;
 #[cfg(not(feature = "external-infra"))]
 static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
-#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
+#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
 static S3_CONTAINER: OnceLock<ContainerAsync<GenericImage>> = OnceLock::new();
 
 #[allow(dead_code)]
@@ -195,7 +195,7 @@ async fn setup_with_external_infra() -> String {
     spawn_app(database_url).await
 }
 
-#[cfg(all(not(feature = "external-infra"), not(feature = "s3-storage")))]
+#[cfg(all(not(feature = "external-infra"), not(feature = "s3")))]
 async fn setup_with_testcontainers() -> String {
     let temp_dir = std::env::temp_dir().join(format!("tranquil-pds-test-{}", uuid::Uuid::new_v4()));
     let blob_path = temp_dir.join("blobs");
@@ -227,7 +227,7 @@ async fn setup_with_testcontainers() -> String {
     spawn_app(connection_string).await
 }
 
-#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
+#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
 async fn setup_with_testcontainers() -> String {
     let s3_container = GenericImage::new("cgr.dev/chainguard/minio", "latest")
         .with_exposed_port(ContainerPort::Tcp(9000))

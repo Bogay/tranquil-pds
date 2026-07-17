@@ -7,7 +7,6 @@ license.workspace = true
 [dependencies]
 tranquil-types = { workspace = true }
 tranquil-config = { workspace = true }
-tranquil-crypto = { workspace = true }
 tranquil-storage = { workspace = true }
 tranquil-cache = { workspace = true }
 tranquil-repo = { workspace = true }
@@ -29,13 +28,11 @@ axum = { workspace = true }
 base32 = { workspace = true }
 base64 = { workspace = true }
 bcrypt = { workspace = true }
-bs58 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 cid = { workspace = true }
 ed25519-dalek = { workspace = true }
 futures = { workspace = true }
-hex = { workspace = true }
 futures-util = { workspace = true }
 governor = { workspace = true }
 hickory-resolver = { workspace = true }
@@ -43,7 +40,6 @@ hkdf = { workspace = true }
 hmac = { workspace = true }
 http = { workspace = true }
 image = { workspace = true }
-infer = { workspace = true }
 ipld-core = { workspace = true }
 iroh-car = { workspace = true }
 jacquard-common = { workspace = true }
@@ -57,7 +53,6 @@ multihash = { workspace = true }
 p256 = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
-redis = { workspace = true, optional = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -70,7 +65,6 @@ sqlx = { workspace = true }
 subtle = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-tungstenite = { workspace = true }
 tokio-util = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
@@ -80,16 +74,12 @@ urlencoding = { workspace = true }
 uuid = { workspace = true }
 webauthn-rs = { workspace = true }
 webauthn-rs-proto = { workspace = true }
-zip = { workspace = true }
-aws-config = { workspace = true, optional = true }
-aws-sdk-s3 = { workspace = true, optional = true }
 
 [features]
-default = ["frontend", "s3", "valkey"]
 external-infra = []
-s3-storage = ["tranquil-storage/s3", "dep:aws-config", "dep:aws-sdk-s3"]
-s3 = ["s3-storage"]
-valkey = ["tranquil-cache/valkey", "dep:redis"]
+postgres = ["tranquil-db/postgres"]
+s3 = ["tranquil-storage/s3"]
+valkey = ["tranquil-cache/valkey"]
 frontend = []
 native-tls-roots = ["tranquil-oauth/native-tls-roots"]
 
@@ -105,3 +95,8 @@ tranquil-api = { workspace = true }
 tranquil-oauth-server = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock = { workspace = true }
+hex = { workspace = true }
+tokio-tungstenite = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+redis = { workspace = true }

@@ -8,13 +8,10 @@ license.workspace = true
 tranquil-pds = { workspace = true }
 tranquil-types = { workspace = true }
 tranquil-config = { workspace = true }
-tranquil-db = { workspace = true }
 tranquil-db-traits = { workspace = true }
 tranquil-lexicon = { workspace = true, features = ["resolve"] }
-tranquil-scopes = { workspace = true }
 tranquil-signal = { workspace = true }
 
-anyhow = { workspace = true }
 axum = { workspace = true }
 backon = { workspace = true }
 base32 = { workspace = true }
@@ -50,4 +47,3 @@ tracing = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true }
 webauthn-rs = { workspace = true }
-zip = { workspace = true }

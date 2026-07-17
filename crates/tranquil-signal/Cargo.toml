@@ -17,13 +17,11 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 futures = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 url = "2.5"
 uuid = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-tranquil-signal = { path = ".", features = ["fjall-store"] }
 rand = "0.9"
 tempfile = "3"

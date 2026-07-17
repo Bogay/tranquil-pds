@@ -41,8 +41,9 @@ tracing-subscriber = { workspace = true }
 rcgen = { workspace = true }
 
 [features]
-default = ["frontend", "s3", "valkey"]
+default = ["frontend", "postgres", "s3", "valkey"]
 frontend = ["tranquil-pds/frontend"]
+postgres = ["tranquil-pds/postgres"]
 s3 = ["tranquil-pds/s3"]
 valkey = ["tranquil-pds/valkey"]
 native-tls-roots = ["tranquil-pds/native-tls-roots"]

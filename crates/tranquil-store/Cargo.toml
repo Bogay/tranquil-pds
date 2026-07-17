@@ -59,8 +59,7 @@ tempfile = "3"
 futures = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros", "time"] }
 jacquard-common = { workspace = true }
-tranquil-repo = { workspace = true }
-tranquil-db = { workspace = true }
+tranquil-db = { workspace = true, features = [ "postgres" ] }
 sqlx = { workspace = true }
 k256 = { workspace = true }
 rand = { workspace = true }

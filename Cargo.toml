@@ -47,7 +47,6 @@ tranquil-db = { path = "crates/tranquil-db" }
 tranquil-ripple = { path = "crates/tranquil-ripple" }
 tranquil-lexicon = { path = "crates/tranquil-lexicon" }
 tranquil-pds = { path = "crates/tranquil-pds" }
-tranquil-server = { path = "crates/tranquil-server" }
 tranquil-sync = { path = "crates/tranquil-sync" }
 tranquil-oauth-server = { path = "crates/tranquil-oauth-server" }
 tranquil-api = { path = "crates/tranquil-api" }
@@ -142,7 +141,6 @@ uuid = { version = "1.19", features = ["v4", "v5", "v7", "fast-rng", "serde"] }
 webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys", "conditional-ui"] }
 webauthn-rs-proto = "0.5"
 x509-parser = "0.18"
-zip = { version = "7.0", default-features = false, features = ["deflate"] }
 
 ciborium = "0.2"
 ctor = "0.6"
