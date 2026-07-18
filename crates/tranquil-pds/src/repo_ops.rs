@@ -115,6 +115,10 @@ pub fn extract_blob_cids(record: &Value) -> Vec<crate::types::CidLink> {
 use crate::types::AtUri;
 use tranquil_db_traits::{Backlink, BacklinkPath};
 
+// TODO: it really really should not be necessary to extract backlinks and store those.
+// especially not in a way that isnt generic.
+// figure out what the fuck is going on here
+// (lewis do you remember why you did this???)
 pub fn extract_backlinks(uri: &AtUri, record: &Value) -> Vec<Backlink> {
     let record_type = record
         .get("$type")

@@ -87,6 +87,7 @@ pub const HEADER_ATPROTO_ACCEPT_LABELERS: HeaderName =
 pub const HEADER_ATPROTO_REPO_REV: HeaderName = HeaderName::from_static("atproto-repo-rev");
 pub const HEADER_ATPROTO_CONTENT_LABELERS: HeaderName =
     HeaderName::from_static("atproto-content-labelers");
+#[cfg(feature = "bsky-support")]
 pub const HEADER_X_BSKY_TOPICS: HeaderName = HeaderName::from_static("x-bsky-topics");
 
 pub fn get_header_str(
@@ -247,7 +248,13 @@ pub fn build_full_url(path: &str) -> String {
     let cfg = tranquil_config::get();
     let normalized_path = if !path.starts_with("/xrpc/")
         && (path.starts_with("/com.atproto.")
-            || path.starts_with("/app.bsky.")
+            // BSKY: Bluesky requires that the PDS implement some app.bsky.* endpoints so we need to deal with those here too.
+            // TODO: surely we can figure out a way to do this more generically?
+            || (if cfg!(feature = "bsky-support") {
+                path.starts_with("/app.bsky.")
+            } else {
+                true
+            })
             || path.starts_with("/_"))
     {
         format!("/xrpc{path}")

@@ -1,5 +1,12 @@
-pub mod actor;
+// BSKY: Bluesky requires PDSs to implement its private preferences API
+#[cfg(feature = "bsky-support")]
+pub mod actor {
+    mod preferences;
+
+    pub use preferences::{get_preferences, put_preferences};
+}
 pub mod admin;
+#[cfg(feature = "bsky")]
 pub mod age_assurance;
 pub mod common;
 pub mod delegation;
@@ -21,7 +28,7 @@ pub fn api_routes() -> axum::Router<AppState> {
     let blob_body_limit =
         DefaultBodyLimit::max(tranquil_config::get().server.max_blob_size as usize);
 
-    axum::Router::new()
+    let router = axum::Router::new()
         .route("/_health", get(server::health))
         .route(
             "/com.atproto.server.describeServer",
@@ -374,14 +381,6 @@ pub fn api_routes() -> axum::Router<AppState> {
         )
         .route("/com.atproto.admin.sendEmail", post(admin::send_email))
         .route(
-            "/app.bsky.actor.getPreferences",
-            get(actor::get_preferences),
-        )
-        .route(
-            "/app.bsky.actor.putPreferences",
-            post(actor::put_preferences),
-        )
-        .route(
             "/com.atproto.temp.checkSignupQueue",
             get(temp::check_signup_queue),
         )
@@ -438,7 +437,21 @@ pub fn api_routes() -> axum::Router<AppState> {
         .route(
             "/_delegation.resolveController",
             get(delegation::resolve_controller),
+        );
+
+    #[cfg(feature = "bsky-support")]
+    let router = router
+        .route(
+            "/app.bsky.actor.getPreferences",
+            get(actor::get_preferences),
         )
+        .route(
+            "/app.bsky.actor.putPreferences",
+            post(actor::put_preferences),
+        );
+
+    #[cfg(feature = "bsky")]
+    let router = router
         .route(
             "/app.bsky.ageassurance.getState",
             get(age_assurance::get_state),
@@ -446,7 +459,9 @@ pub fn api_routes() -> axum::Router<AppState> {
         .route(
             "/app.bsky.unspecced.getAgeAssuranceState",
             get(age_assurance::get_age_assurance_state),
-        )
+        );
+
+    router
 }
 
 pub fn well_known_api_routes() -> axum::Router<AppState> {

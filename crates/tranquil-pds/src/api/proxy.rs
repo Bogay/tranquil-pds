@@ -19,9 +19,7 @@ use tower::{Service, util::BoxCloneSyncService};
 use tracing::{error, info, warn};
 
 static PROTECTED_METHODS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    [
-        "app.bsky.actor.getPreferences",
-        "app.bsky.actor.putPreferences",
+    let mut methods: HashSet<&str> = [
         "com.atproto.admin.deleteAccount",
         "com.atproto.admin.disableAccountInvites",
         "com.atproto.admin.disableInviteCodes",
@@ -103,7 +101,13 @@ static PROTECTED_METHODS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
         "com.atproto.temp.dereferenceScope",
     ]
     .into_iter()
-    .collect()
+    .collect();
+    // BSKY: the Bluesky preferences API must be implemented by PDSs
+    if cfg!(feature = "bsky-support") {
+        methods.insert("app.bsky.actor.getPreferences");
+        methods.insert("app.bsky.actor.putPreferences");
+    };
+    methods
 });
 
 fn is_protected_method(method: &str) -> bool {
@@ -111,6 +115,7 @@ fn is_protected_method(method: &str) -> bool {
 }
 
 /// Fetch the `feed` generator record from the AppView and return its `did`.
+#[cfg(feature = "bsky-support")]
 async fn resolve_feed_generator_did(appview_url: &str, query: Option<&str>) -> Option<Did> {
     #[derive(serde::Deserialize)]
     struct GetFeedQuery {
@@ -201,6 +206,7 @@ impl<S: Service<Request, Response = Response, Error = Infallible>> Service<Reque
             }
 
             // If the age assurance override is set and this is an age assurance call then we dont want to proxy even if the client requests it
+            #[cfg(feature = "bsky")]
             if tranquil_config::get().server.age_assurance_override
                 && (path.ends_with("app.bsky.ageassurance.getState")
                     || path.ends_with("app.bsky.unspecced.getAgeAssuranceState"))
@@ -328,27 +334,28 @@ async fn proxy_handler(
                     },
                 };
 
-                // getFeed must be audienced to the feed generator, not the AppView.
-                let (token_aud, token_lxm) = if method == "app.bsky.feed.getFeed" {
-                    match resolve_feed_generator_did(&resolved.url, query.as_deref()).await {
-                        Some(feed_did) => (
-                            feed_did,
-                            "app.bsky.feed.getFeedSkeleton"
-                                .parse::<Nsid>()
-                                .expect("getFeedSkeleton is a valid NSID"),
-                        ),
-                        None => {
-                            warn!(
-                                "getFeed proxy: could not resolve feed generator DID; refusing \
+                // BSKY: getFeed must be audienced to the feed generator, not the AppView.
+                let (token_aud, token_lxm) =
+                    if cfg!(feature = "bsky-support") && method == "app.bsky.feed.getFeed" {
+                        match resolve_feed_generator_did(&resolved.url, query.as_deref()).await {
+                            Some(feed_did) => (
+                                feed_did,
+                                "app.bsky.feed.getFeedSkeleton"
+                                    .parse::<Nsid>()
+                                    .expect("getFeedSkeleton is a valid NSID"),
+                            ),
+                            None => {
+                                warn!(
+                                    "getFeed proxy: could not resolve feed generator DID; refusing \
                                  to mint an AppView-audienced token"
-                            );
-                            return ApiError::InvalidRequest("Could not resolve feed".into())
-                                .into_response();
+                                );
+                                return ApiError::InvalidRequest("Could not resolve feed".into())
+                                    .into_response();
+                            }
                         }
-                    }
-                } else {
-                    (resolved.did.clone(), method_nsid.clone())
-                };
+                    } else {
+                        (resolved.did.clone(), method_nsid.clone())
+                    };
 
                 match crate::auth::create_service_token(
                     &auth_user.did,

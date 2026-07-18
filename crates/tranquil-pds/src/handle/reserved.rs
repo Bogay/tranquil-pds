@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
+// TODO: make all of this configurable.
+// PDS implementation should not impose any reserved domains imo.
+// some of these are even bad to have as defaults let alone non-configurables
 const ATP_SPECIFIC: &[&str] = &[
     "at", "atp", "plc", "pds", "did", "repo", "tid", "nsid", "xrpc", "lex", "lexicon", "bsky",
     "bluesky", "handle",

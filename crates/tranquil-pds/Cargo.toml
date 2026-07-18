@@ -76,6 +76,8 @@ webauthn-rs = { workspace = true }
 webauthn-rs-proto = { workspace = true }
 
 [features]
+bsky = ["bsky-support"]
+bsky-support = []
 external-infra = []
 postgres = ["tranquil-db/postgres"]
 s3 = ["tranquil-storage/s3"]

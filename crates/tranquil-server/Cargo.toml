@@ -41,7 +41,9 @@ tracing-subscriber = { workspace = true }
 rcgen = { workspace = true }
 
 [features]
-default = ["frontend", "postgres", "s3", "valkey"]
+default = ["bsky", "frontend", "postgres", "s3", "valkey"]
+bsky = ["bsky-support", "tranquil-pds/bsky", "tranquil-api/bsky"]
+bsky-support = ["tranquil-pds/bsky-support", "tranquil-api/bsky-support"]
 frontend = ["tranquil-pds/frontend"]
 postgres = ["tranquil-pds/postgres"]
 s3 = ["tranquil-pds/s3"]

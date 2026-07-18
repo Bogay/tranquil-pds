@@ -205,20 +205,24 @@ pub async fn sequence_new_account(
     {
         tracing::warn!("Failed to sequence sync event for {}: {}", did, e);
     }
-    let profile_record = serde_json::json!({
-        "$type": "app.bsky.actor.profile",
-        "displayName": display_name
-    });
-    if let Err(e) = tranquil_pds::repo_ops::create_record_internal(
-        state,
-        did,
-        &tranquil_pds::types::PROFILE_COLLECTION,
-        &tranquil_pds::types::PROFILE_RKEY,
-        &profile_record,
-    )
-    .await
+    // TODO: make this configurable and also deduplicate with tranquil-oauth-server/src/sso_endpoints.rs:1210
+    #[cfg(feature = "bsky")]
     {
-        tracing::warn!("Failed to create default profile for {}: {}", did, e);
+        let profile_record = serde_json::json!({
+            "$type": "app.bsky.actor.profile",
+            "displayName": display_name
+        });
+        if let Err(e) = tranquil_pds::repo_ops::create_record_internal(
+            state,
+            did,
+            &tranquil_pds::types::PROFILE_COLLECTION,
+            &tranquil_pds::types::PROFILE_RKEY,
+            &profile_record,
+        )
+        .await
+        {
+            tracing::warn!("Failed to create default profile for {}: {}", did, e);
+        };
     }
 }
 

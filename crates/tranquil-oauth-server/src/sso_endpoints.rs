@@ -1209,20 +1209,23 @@ pub async fn complete_registration(
         tracing::warn!("Failed to sequence account event for {}: {}", did, e);
     }
 
-    let profile_record = json!({
-        "$type": "app.bsky.actor.profile",
-        "displayName": handle.as_str()
-    });
-    if let Err(e) = tranquil_pds::repo_ops::create_record_internal(
-        &state,
-        &did,
-        &tranquil_pds::types::PROFILE_COLLECTION,
-        &tranquil_pds::types::PROFILE_RKEY,
-        &profile_record,
-    )
-    .await
+    #[cfg(feature = "bsky")]
     {
-        tracing::warn!("Failed to create default profile for {}: {}", did, e);
+        let profile_record = json!({
+            "$type": "app.bsky.actor.profile",
+            "displayName": handle.as_str()
+        });
+        if let Err(e) = tranquil_pds::repo_ops::create_record_internal(
+            &state,
+            &did,
+            &tranquil_pds::types::PROFILE_COLLECTION,
+            &tranquil_pds::types::PROFILE_RKEY,
+            &profile_record,
+        )
+        .await
+        {
+            tracing::warn!("Failed to create default profile for {}: {}", did, e);
+        };
     }
 
     let app_password = generate_app_password();

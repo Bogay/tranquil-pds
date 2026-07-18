@@ -147,12 +147,22 @@ impl std::fmt::Display for SsrfError {
 }
 
 impl std::error::Error for SsrfError {}
-
+// TODO: update to match https://github.com/bluesky-social/atproto/blob/main/packages/pds/src/pipethrough.ts
+// Currently spec says nothing at all!! about forwarding headers during proxying and https://github.com/bluesky-social/atproto/discussions/2350
+#[cfg(feature = "bsky-support")]
 pub static HEADERS_TO_FORWARD: LazyLock<[HeaderName; 4]> = LazyLock::new(|| {
     [
         HeaderName::from_static("accept-language"),
         crate::util::HEADER_ATPROTO_ACCEPT_LABELERS,
         crate::util::HEADER_X_BSKY_TOPICS,
+        http::header::CONTENT_TYPE,
+    ]
+});
+#[cfg(not(feature = "bsky-support"))]
+pub static HEADERS_TO_FORWARD: LazyLock<[HeaderName; 3]> = LazyLock::new(|| {
+    [
+        HeaderName::from_static("accept-language"),
+        crate::util::HEADER_ATPROTO_ACCEPT_LABELERS,
         http::header::CONTENT_TYPE,
     ]
 });

@@ -47,3 +47,7 @@ tracing = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true }
 webauthn-rs = { workspace = true }
+
+[features]
+bsky = ["bsky-support"]
+bsky-support = []

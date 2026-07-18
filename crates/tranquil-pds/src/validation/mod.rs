@@ -138,20 +138,25 @@ fn check_banned_content(
     rkey: Option<&Rkey>,
 ) -> Result<(), ValidationError> {
     match record_type {
+        #[cfg(feature = "bsky")]
         "app.bsky.feed.post" => {
             check_post_banned_content(obj)?;
         }
+        #[cfg(feature = "bsky")]
         "app.bsky.actor.profile" => {
             check_string_field(obj, "displayName")?;
             check_string_field(obj, "description")?;
         }
+        #[cfg(feature = "bsky")]
         "app.bsky.graph.list" => {
             check_string_field(obj, "name")?;
         }
+        #[cfg(feature = "bsky")]
         "app.bsky.graph.starterpack" => {
             check_string_field(obj, "name")?;
             check_string_field(obj, "description")?;
         }
+        #[cfg(feature = "bsky")]
         "app.bsky.feed.generator" => {
             if let Some(rkey) = rkey
                 && crate::moderation::has_explicit_slur(rkey)
@@ -167,6 +172,7 @@ fn check_banned_content(
     Ok(())
 }
 
+#[cfg(feature = "bsky")]
 fn check_post_banned_content(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
     if let Some(tags) = obj.get("tags").and_then(|v| v.as_array()) {
         tags.iter().enumerate().try_for_each(|(i, tag)| {

@@ -37,3 +37,6 @@ webauthn-rs = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
+
+[features]
+bsky = []
