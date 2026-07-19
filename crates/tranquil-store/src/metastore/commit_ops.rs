@@ -212,8 +212,8 @@ impl<S: StorageIO + 'static> CommitOps<S> {
                     let cid_bytes = cid_link_to_bytes(&u.cid)
                         .map_err(|e| ApplyCommitError::Database(e.to_string()))?;
                     Ok(RecordMutationUpsert {
-                        collection: u.collection.as_str().to_owned(),
-                        rkey: u.rkey.as_str().to_owned(),
+                        collection: u.collection.clone(),
+                        rkey: u.rkey.clone(),
                         cid_bytes,
                     })
                 })
@@ -222,8 +222,8 @@ impl<S: StorageIO + 'static> CommitOps<S> {
                 .record_deletes
                 .iter()
                 .map(|d| RecordMutationDelete {
-                    collection: d.collection.as_str().to_owned(),
-                    rkey: d.rkey.as_str().to_owned(),
+                    collection: d.collection.clone(),
+                    rkey: d.rkey.clone(),
                 })
                 .collect(),
             block_inserts: input.new_block_cids.clone(),
@@ -232,16 +232,12 @@ impl<S: StorageIO + 'static> CommitOps<S> {
                 .backlinks_to_add
                 .iter()
                 .map(|bl| BacklinkMutation {
-                    uri: bl.uri.as_str().to_owned(),
+                    uri: bl.uri.clone(),
                     path: path_to_discriminant(bl.path),
                     link_to: bl.link_to.clone(),
                 })
                 .collect(),
-            backlink_remove_uris: input
-                .backlinks_to_remove
-                .iter()
-                .map(|uri| uri.as_str().to_owned())
-                .collect(),
+            backlink_remove_uris: input.backlinks_to_remove.clone(),
         };
         let mutation_set_bytes = mutation_set
             .serialize()
@@ -372,10 +368,11 @@ impl<S: StorageIO + 'static> CommitOps<S> {
         self.scan_users_missing_prefix(
             record_blobs_user_prefix,
             |meta, user_id| {
-                let did = meta
-                    .did
-                    .map(Did::from)
-                    .ok_or(MetastoreError::CorruptData("repo_meta missing did field"))?;
+                let did = match meta.did {
+                    None => Err(MetastoreError::CorruptData("repo_meta missing DID field")),
+                    Some(d) => Did::new(d)
+                        .map_err(|_| MetastoreError::CorruptData("corrupt repo_meta did")),
+                }?;
                 Ok(UserNeedingRecordBlobsBackfill { user_id, did })
             },
             limit_usize,
@@ -394,7 +391,9 @@ impl<S: StorageIO + 'static> CommitOps<S> {
                     repo_root_cid: root_cid,
                     repo_rev: match meta.repo_rev.is_empty() {
                         true => None,
-                        false => Some(Tid::from(meta.repo_rev)),
+                        false => Some(Tid::new(meta.repo_rev).map_err(|_| {
+                            MetastoreError::CorruptData("corrupt repo_meta repo_rev")
+                        })?),
                     },
                 })
             },
@@ -424,7 +423,10 @@ impl<S: StorageIO + 'static> CommitOps<S> {
 
                 let user_hash = match parse_user_hash_from_key(&key_bytes) {
                     Some(h) => h,
-                    None => return Some(Err(MetastoreError::CorruptData("invalid repo_meta key"))),
+                    None => {
+                        tracing::warn!("skipping a repo_meta row whose key doesn't parse");
+                        return None;
+                    }
                 };
 
                 let check_prefix = make_prefix(user_hash);
@@ -442,20 +444,34 @@ impl<S: StorageIO + 'static> CommitOps<S> {
                         let meta = match RepoMetaValue::deserialize(&val_bytes) {
                             Some(v) => v,
                             None => {
-                                return Some(Err(MetastoreError::CorruptData(
-                                    "invalid repo_meta value",
-                                )));
+                                tracing::warn!(
+                                    user_hash = user_hash.raw(),
+                                    "skipping a repo_meta row whose value doesn't decode"
+                                );
+                                return None;
                             }
                         };
                         let user_id = match self.user_hashes.get_uuid(&user_hash) {
                             Some(id) => id,
                             None => {
-                                return Some(Err(MetastoreError::CorruptData(
-                                    "user_hash has no reverse mapping",
-                                )));
+                                tracing::warn!(
+                                    user_hash = user_hash.raw(),
+                                    "skipping a repo_meta row whose user_hash has no reverse mapping"
+                                );
+                                return None;
                             }
                         };
-                        Some(build_result(meta, user_id))
+                        match build_result(meta, user_id) {
+                            Ok(v) => Some(Ok(v)),
+                            Err(e) => {
+                                tracing::warn!(
+                                    user_id = %user_id,
+                                    error = %e,
+                                    "skipping a repo_meta row the current validators reject"
+                                );
+                                None
+                            }
+                        }
                     }
                 }
             })
@@ -528,11 +544,19 @@ mod tests {
     }
 
     fn test_did(name: &str) -> Did {
-        Did::from(format!("did:plc:{name}"))
+        Did::new(format!("did:plc:{name}")).expect("test DID is well-formed")
     }
 
     fn test_handle(name: &str) -> Handle {
-        Handle::from(format!("{name}.test.invalid"))
+        Handle::new(format!("{name}.oyster.cafe")).expect("test handle is valid")
+    }
+
+    fn test_nsid(name: impl Into<String>) -> Nsid {
+        Nsid::new(name).expect("test collection is a valid NSID")
+    }
+
+    fn test_rkey(key: impl Into<String>) -> Rkey {
+        Rkey::new(key).expect("test record key is a valid rkey")
     }
 
     fn test_rev(seq: u64) -> Tid {
@@ -582,15 +606,15 @@ mod tests {
 
         let new_root = test_cid_link(2);
         let record_cid = test_cid_link(3);
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("3k2abc".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("3k2abc");
 
         let input = ApplyCommitInput {
             user_id,
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: new_root.clone(),
-            new_rev: Tid::from("rev1".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaab").unwrap(),
             new_block_cids: vec![vec![0x01, 0x02]],
             obsolete_block_cids: vec![],
             record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -610,7 +634,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev1".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaab").unwrap()),
             },
         };
 
@@ -619,7 +643,7 @@ mod tests {
 
         let repo = h.metastore.repo_ops().get_repo(user_id).unwrap().unwrap();
         assert_eq!(repo.repo_root_cid, new_root);
-        assert_eq!(repo.repo_rev.as_deref(), Some("rev1"));
+        assert_eq!(repo.repo_rev.as_deref(), Some("3k2aaaaaaaaab"));
 
         let found_cid = h
             .metastore
@@ -644,7 +668,7 @@ mod tests {
             did,
             expected_root_cid: Some(stale_root),
             new_root_cid: new_root,
-            new_rev: Tid::from("rev1".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaab").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -660,7 +684,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev1".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaab").unwrap()),
             },
         };
 
@@ -681,7 +705,7 @@ mod tests {
             did: test_did("nonexistent"),
             expected_root_cid: None,
             new_root_cid: test_cid_link(1),
-            new_rev: Tid::from("rev1".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaab").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -715,15 +739,15 @@ mod tests {
 
         let mid_root = test_cid_link(21);
         let record_cid = test_cid_link(22);
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("3k2del".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("3k2del");
 
         let insert_input = ApplyCommitInput {
             user_id,
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: mid_root.clone(),
-            new_rev: Tid::from("rev1".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaab").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -743,7 +767,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev1".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaab").unwrap()),
             },
         };
         ops.apply_commit(insert_input).unwrap();
@@ -762,7 +786,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(mid_root.clone()),
             new_root_cid: final_root.clone(),
-            new_rev: Tid::from("rev2".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaac").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -781,7 +805,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev2".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaac").unwrap()),
             },
         };
         ops.apply_commit(delete_input).unwrap();
@@ -807,7 +831,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: new_root.clone(),
-            new_rev: Tid::from("rev1".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaab").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -823,7 +847,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev1".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaab").unwrap()),
             },
         };
 
@@ -833,7 +857,7 @@ mod tests {
         let event = ops.event_ops.get_event_by_seq(seq).unwrap().unwrap();
         assert_eq!(event.did, did);
         assert_eq!(event.event_type, RepoEventType::Commit);
-        assert_eq!(event.rev.as_deref(), Some("rev1"));
+        assert_eq!(event.rev.as_deref(), Some("3k2aaaaaaaaab"));
     }
 
     #[test]
@@ -842,8 +866,8 @@ mod tests {
         let ops = make_commit_ops(&h);
         let (user_id, _did, root_cid) = create_test_repo(&h, "bailey", 40);
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("3k2import".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("3k2import");
         let record_cid = test_cid_link(41);
 
         ops.import_repo_data(
@@ -915,7 +939,7 @@ mod tests {
             did: did_a.clone(),
             expected_root_cid: Some(root_a),
             new_root_cid: new_root.clone(),
-            new_rev: Tid::from("rev1".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaab").unwrap(),
             new_block_cids: vec![vec![0x01, 0x02, 0x03]],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -931,7 +955,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev1".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaab").unwrap()),
             },
         };
         ops.apply_commit(input).unwrap();
@@ -953,7 +977,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: None,
             new_root_cid: new_root.clone(),
-            new_rev: Tid::from("rev_force".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaaz").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -969,7 +993,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev_force".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaaz").unwrap()),
             },
         };
 
@@ -983,10 +1007,10 @@ mod tests {
 
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id, did, root_cid) = create_test_repo(&h, "backlink_upd", 90);
+        let (user_id, did, root_cid) = create_test_repo(&h, "backlink-upd", 90);
 
-        let collection = Nsid::from("app.bsky.feed.like".to_string());
-        let rkey = Rkey::from("3k2like1".to_string());
+        let collection = test_nsid("app.bsky.feed.like");
+        let rkey = test_rkey("3k2like1");
         let record_cid = test_cid_link(91);
         let record_uri = AtUri::from_parts(&did, &collection, &rkey);
 
@@ -996,7 +1020,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: mid_root.clone(),
-            new_rev: Tid::from("rev1".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaab").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -1020,7 +1044,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev1".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaab").unwrap()),
             },
         };
         ops.apply_commit(create_input).unwrap();
@@ -1040,7 +1064,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(mid_root.clone()),
             new_root_cid: final_root.clone(),
-            new_rev: Tid::from("rev2".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaac").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -1064,7 +1088,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev2".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaac").unwrap()),
             },
         };
         ops.apply_commit(update_input).unwrap();
@@ -1091,13 +1115,13 @@ mod tests {
         std::fs::create_dir_all(&segments_dir).unwrap();
 
         let user_id = Uuid::new_v4();
-        let did = test_did("crash_alice");
-        let handle = test_handle("crash_alice");
+        let did = test_did("crash-nel");
+        let handle = test_handle("crash-nel");
         let initial_root = test_cid_link(200);
         let new_root = test_cid_link(201);
         let record_cid = test_cid_link(202);
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("3k2crash".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("3k2crash");
 
         let event_log = EventLog::open(
             EventLogConfig {
@@ -1138,7 +1162,7 @@ mod tests {
                 did: did.clone(),
                 expected_root_cid: Some(initial_root.clone()),
                 new_root_cid: new_root.clone(),
-                new_rev: Tid::from("rev1".to_string()),
+                new_rev: Tid::new("3k2aaaaaaaaab").unwrap(),
                 new_block_cids: vec![vec![0xAA, 0xBB]],
                 obsolete_block_cids: vec![],
                 record_upserts: vec![tranquil_db_traits::RecordUpsert {
@@ -1158,7 +1182,7 @@ mod tests {
                     blobs: None,
                     blocks: None,
                     prev_data_cid: None,
-                    rev: Some(Tid::from("rev1".to_string())),
+                    rev: Some(Tid::new("3k2aaaaaaaaab").unwrap()),
                 },
             };
 
@@ -1216,13 +1240,13 @@ mod tests {
         std::fs::create_dir_all(&segments_dir).unwrap();
 
         let user_id = Uuid::new_v4();
-        let did = test_did("crash_bob");
-        let handle = test_handle("crash_bob");
+        let did = test_did("crash-teq");
+        let handle = test_handle("crash-teq");
         let initial_root = test_cid_link(210);
         let new_root = test_cid_link(211);
         let record_cid = test_cid_link(212);
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("3k2bob".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("3k2bob");
 
         let event_log = EventLog::open(
             EventLogConfig {
@@ -1260,10 +1284,10 @@ mod tests {
             let event_ops = metastore.event_ops(Arc::clone(&bridge));
             let mutation_set = super::CommitMutationSet {
                 new_root_cid: super::cid_link_to_bytes(&new_root).unwrap(),
-                new_rev: test_rev(1),
+                new_rev: Tid::new("3k2abcdefghij").unwrap(),
                 record_upserts: vec![super::RecordMutationUpsert {
-                    collection: collection.as_str().to_owned(),
-                    rkey: rkey.as_str().to_owned(),
+                    collection: collection.clone(),
+                    rkey: rkey.clone(),
                     cid_bytes: super::cid_link_to_bytes(&record_cid).unwrap(),
                 }],
                 record_deletes: vec![],
@@ -1283,7 +1307,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev1".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaab").unwrap()),
             };
 
             let mut batch = metastore.database().batch();
@@ -1325,7 +1349,7 @@ mod tests {
 
             let repo_after = metastore.repo_ops().get_repo(user_id).unwrap().unwrap();
             assert_eq!(repo_after.repo_root_cid, new_root);
-            assert_eq!(repo_after.repo_rev.as_deref(), Some("rev1"));
+            assert_eq!(repo_after.repo_rev.as_deref(), Some("3k2abcdefghij"));
 
             let record_after = metastore
                 .record_ops()
@@ -1356,11 +1380,11 @@ mod tests {
 
         let h = setup();
         let ops = make_commit_ops(&h);
-        let (user_id, did, root_cid) = create_test_repo(&h, "col_iso", 95);
+        let (user_id, did, root_cid) = create_test_repo(&h, "col-iso", 95);
 
-        let col_like = Nsid::from("app.bsky.feed.like".to_string());
-        let col_repost = Nsid::from("app.bsky.feed.repost".to_string());
-        let rkey = Rkey::from("same_rkey".to_string());
+        let col_like = test_nsid("app.bsky.feed.like");
+        let col_repost = test_nsid("app.bsky.feed.repost");
+        let rkey = test_rkey("same_rkey");
         let target = "at://did:plc:someone/app.bsky.feed.post/p1";
 
         let mid_root = test_cid_link(96);
@@ -1372,7 +1396,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(root_cid.clone()),
             new_root_cid: mid_root.clone(),
-            new_rev: Tid::from("rev1".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaab").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![
@@ -1410,7 +1434,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev1".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaab").unwrap()),
             },
         };
         ops.apply_commit(input).unwrap();
@@ -1441,7 +1465,7 @@ mod tests {
             did: did.clone(),
             expected_root_cid: Some(mid_root.clone()),
             new_root_cid: final_root.clone(),
-            new_rev: Tid::from("rev2".to_string()),
+            new_rev: Tid::new("3k2aaaaaaaaac").unwrap(),
             new_block_cids: vec![],
             obsolete_block_cids: vec![],
             record_upserts: vec![],
@@ -1457,7 +1481,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(Tid::from("rev2".to_string())),
+                rev: Some(Tid::new("3k2aaaaaaaaac").unwrap()),
             },
         };
         ops.apply_commit(remove_like).unwrap();

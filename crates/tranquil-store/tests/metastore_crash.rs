@@ -10,7 +10,7 @@ use tranquil_store::metastore::recovery::{
 };
 use tranquil_store::metastore::{Metastore, MetastoreConfig};
 use tranquil_store::{sim_proptest_cases, sim_seed_range};
-use tranquil_types::{CidLink, Did, Handle, Tid};
+use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey, Tid};
 use uuid::Uuid;
 
 const NAMES: &[&str] = &["olaren", "teq", "nel", "lyna", "bailey"];
@@ -27,7 +27,7 @@ fn open_metastore(path: &Path) -> Metastore {
 
 fn test_did(seed: u64) -> Did {
     let name = NAMES[(seed as usize) % NAMES.len()];
-    Did::from(format!("did:plc:{name}{seed}"))
+    Did::new(format!("did:plc:{name}{seed}")).expect("generated DID is valid")
 }
 
 fn test_handle(seed: u64) -> Handle {
@@ -46,29 +46,37 @@ fn test_uuid(seed: u64) -> Uuid {
     Uuid::from_u128(seed as u128 | 0x4000_0000_0000_0000_8000_0000_0000_0000)
 }
 
+const NSID_PATTERN: &str = "[a-z]{3,8}\\.[a-z]{3,8}\\.[a-z]{3,8}";
+const RKEY_PATTERN: &str = "[a-z0-9]{3,10}";
 const TID_PATTERN: &str = "[234567abcdefghij][234567abcdefghijklmnopqrstuvwxyz]{12}";
+const AT_URI_PATTERN: &str =
+    "at://did:plc:[a-z]{3,8}/[a-z]{3,8}\\.[a-z]{3,8}\\.[a-z]{3,8}/[a-z0-9]{3,8}";
 
 fn arb_mutation_set() -> impl Strategy<Value = CommitMutationSet> {
     let arb_upsert = (
-        "[a-z\\.]{5,20}",
-        "[a-z0-9]{3,10}",
+        NSID_PATTERN,
+        RKEY_PATTERN,
         prop::collection::vec(any::<u8>(), 4..36),
     )
         .prop_map(|(collection, rkey, cid_bytes)| RecordMutationUpsert {
-            collection,
-            rkey,
+            collection: Nsid::new(collection).expect("generated NSID is valid"),
+            rkey: Rkey::new(rkey).expect("generated rkey is valid"),
             cid_bytes,
         });
 
-    let arb_delete = ("[a-z\\.]{5,20}", "[a-z0-9]{3,10}")
-        .prop_map(|(collection, rkey)| RecordMutationDelete { collection, rkey });
+    let arb_delete =
+        (NSID_PATTERN, RKEY_PATTERN).prop_map(|(collection, rkey)| RecordMutationDelete {
+            collection: Nsid::new(collection).expect("generated NSID is valid"),
+            rkey: Rkey::new(rkey).expect("generated rkey is valid"),
+        });
 
-    let arb_backlink = (
-        "at://did:plc:[a-z]{3,8}/[a-z\\.]{5,20}/[a-z0-9]{3,8}",
-        0u8..4,
-        "at://did:plc:[a-z]{3,8}/[a-z\\.]{5,20}/[a-z0-9]{3,8}",
-    )
-        .prop_map(|(uri, path, link_to)| BacklinkMutation { uri, path, link_to });
+    let arb_backlink = (AT_URI_PATTERN, 0u8..4, AT_URI_PATTERN).prop_map(|(uri, path, link_to)| {
+        BacklinkMutation {
+            uri: AtUri::new(uri).expect("generated AT URI is valid"),
+            path,
+            link_to,
+        }
+    });
 
     (
         prop::collection::vec(any::<u8>(), 0..64),
@@ -78,7 +86,10 @@ fn arb_mutation_set() -> impl Strategy<Value = CommitMutationSet> {
         prop::collection::vec(prop::collection::vec(any::<u8>(), 4..36), 0..20),
         prop::collection::vec(prop::collection::vec(any::<u8>(), 4..36), 0..20),
         prop::collection::vec(arb_backlink, 0..5),
-        prop::collection::vec("at://did:plc:[a-z]{3,8}/[a-z\\.]{5,20}/[a-z0-9]{3,8}", 0..5),
+        prop::collection::vec(
+            AT_URI_PATTERN.prop_map(|uri| AtUri::new(uri).expect("generated AT URI is valid")),
+            0..5,
+        ),
     )
         .prop_map(
             |(
