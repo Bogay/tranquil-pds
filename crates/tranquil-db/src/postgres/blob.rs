@@ -6,7 +6,9 @@ use tranquil_db_traits::{
 use tranquil_types::{AtUri, CidLink, Did, Tid};
 use uuid::Uuid;
 
+use super::col;
 use super::user::map_sqlx_error;
+use super::{column, column_vec, opt_column};
 
 pub struct PostgresBlobRepository {
     pool: PgPool,
@@ -42,7 +44,7 @@ impl BlobRepository for PostgresBlobRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(result.map(CidLink::from))
+        opt_column(result, col::BLOBS_CID)
     }
 
     async fn get_blob_metadata(&self, cid: &CidLink) -> Result<Option<BlobMetadata>, DbError> {
@@ -73,10 +75,14 @@ impl BlobRepository for PostgresBlobRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(result.map(|r| BlobWithTakedown {
-            cid: CidLink::from(r.cid),
-            takedown_ref: r.takedown_ref,
-        }))
+        result
+            .map(|r| {
+                Ok(BlobWithTakedown {
+                    cid: column(r.cid, col::BLOBS_CID)?,
+                    takedown_ref: r.takedown_ref,
+                })
+            })
+            .transpose()
     }
 
     async fn get_blob_storage_key(&self, cid: &CidLink) -> Result<Option<String>, DbError> {
@@ -109,7 +115,7 @@ impl BlobRepository for PostgresBlobRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(results.into_iter().map(CidLink::from).collect())
+        column_vec(results, col::BLOBS_CID)
     }
 
     async fn list_blobs_since_rev(&self, did: &Did, since: &Tid) -> Result<Vec<CidLink>, DbError> {
@@ -124,7 +130,7 @@ impl BlobRepository for PostgresBlobRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(results.into_iter().map(CidLink::from).collect())
+        column_vec(results, col::REPO_SEQ_BLOBS)
     }
 
     async fn count_blobs_by_user(&self, user_id: Uuid) -> Result<i64, DbError> {
@@ -244,13 +250,15 @@ impl BlobRepository for PostgresBlobRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(results
+        results
             .into_iter()
-            .map(|r| MissingBlobInfo {
-                blob_cid: CidLink::from(r.blob_cid),
-                record_uri: AtUri::from(r.record_uri),
+            .map(|r| {
+                Ok(MissingBlobInfo {
+                    blob_cid: column(r.blob_cid, col::RECORD_BLOBS_BLOB_CID)?,
+                    record_uri: column(r.record_uri, col::RECORD_BLOBS_RECORD_URI)?,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn count_distinct_record_blobs(&self, repo_id: Uuid) -> Result<i64, DbError> {
@@ -277,13 +285,15 @@ impl BlobRepository for PostgresBlobRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(results
+        results
             .into_iter()
-            .map(|r| BlobForExport {
-                cid: CidLink::from(r.cid),
-                storage_key: r.storage_key,
-                mime_type: r.mime_type,
+            .map(|r| {
+                Ok(BlobForExport {
+                    cid: column(r.cid, col::BLOBS_CID)?,
+                    storage_key: r.storage_key,
+                    mime_type: r.mime_type,
+                })
             })
-            .collect())
+            .collect()
     }
 }

@@ -10,7 +10,9 @@ use tranquil_db_traits::{
 use tranquil_types::{Did, Jti, PasswordHash};
 use uuid::Uuid;
 
+use super::col;
 use super::user::map_sqlx_error;
+use super::{column, opt_column};
 
 pub struct PostgresSessionRepository {
     pool: PgPool,
@@ -69,21 +71,24 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| SessionToken {
-            id: SessionId::new(r.id),
-            did: Did::from(r.did),
-            access_jti: Jti::from(r.access_jti),
-            refresh_jti: Jti::from(r.refresh_jti),
-            access_expires_at: r.access_expires_at,
-            refresh_expires_at: r.refresh_expires_at,
-            login_type: LoginType::from_legacy_flag(r.legacy_login),
-            mfa_verified: r.mfa_verified,
-            scope: r.scope,
-            controller_did: r.controller_did.map(Did::from),
-            app_password_name: r.app_password_name,
-            created_at: r.created_at,
-            updated_at: r.updated_at,
-        }))
+        row.map(|r| {
+            Ok(SessionToken {
+                id: SessionId::new(r.id),
+                did: column(r.did, col::SESSION_TOKENS_DID)?,
+                access_jti: Jti::from(r.access_jti),
+                refresh_jti: Jti::from(r.refresh_jti),
+                access_expires_at: r.access_expires_at,
+                refresh_expires_at: r.refresh_expires_at,
+                login_type: LoginType::from_legacy_flag(r.legacy_login),
+                mfa_verified: r.mfa_verified,
+                scope: r.scope,
+                controller_did: opt_column(r.controller_did, col::SESSION_TOKENS_CONTROLLER_DID)?,
+                app_password_name: r.app_password_name,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            })
+        })
+        .transpose()
     }
 
     async fn get_session_for_refresh(
@@ -104,14 +109,17 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| SessionForRefresh {
-            id: SessionId::new(r.id),
-            did: Did::from(r.did),
-            scope: r.scope,
-            controller_did: r.controller_did.map(Did::from),
-            key_bytes: r.key_bytes,
-            encryption_version: r.encryption_version.unwrap_or(0),
-        }))
+        row.map(|r| {
+            Ok(SessionForRefresh {
+                id: SessionId::new(r.id),
+                did: column(r.did, col::SESSION_TOKENS_DID)?,
+                scope: r.scope,
+                controller_did: opt_column(r.controller_did, col::SESSION_TOKENS_CONTROLLER_DID)?,
+                key_bytes: r.key_bytes,
+                encryption_version: r.encryption_version.unwrap_or(0),
+            })
+        })
+        .transpose()
     }
 
     async fn delete_session_by_access_jti(
@@ -274,9 +282,9 @@ impl SessionRepository for PostgresSessionRepository {
         let grace_cutoff = Utc::now() - Duration::seconds(REFRESH_GRACE_PERIOD_SECS);
         if r.used_at > grace_cutoff {
             Ok(RefreshGraceLookup::Replay(RefreshGraceReplay {
-                did: Did::from(r.did),
+                did: column(r.did, col::SESSION_TOKENS_DID)?,
                 scope: r.scope,
-                controller_did: r.controller_did.map(Did::from),
+                controller_did: opt_column(r.controller_did, col::SESSION_TOKENS_CONTROLLER_DID)?,
                 access_jti: Jti::from(r.access_jti),
                 refresh_jti: Jti::from(r.refresh_jti),
                 access_expires_at: r.access_expires_at,
@@ -286,7 +294,7 @@ impl SessionRepository for PostgresSessionRepository {
             }))
         } else {
             Ok(RefreshGraceLookup::Compromised {
-                did: Did::from(r.did),
+                did: column(r.did, col::SESSION_TOKENS_DID)?,
                 session_id: SessionId::new(r.session_id),
                 key_bytes: r.key_bytes,
                 encryption_version: r.encryption_version.unwrap_or(0),
@@ -308,19 +316,23 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| AppPasswordRecord {
-                id: r.id,
-                user_id: r.user_id,
-                name: r.name,
-                password_hash: PasswordHash::new(r.password_hash),
-                created_at: r.created_at,
-                privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
-                scopes: r.scopes,
-                created_by_controller_did: r.created_by_controller_did.map(Did::from),
+        rows.into_iter()
+            .map(|r| {
+                Ok(AppPasswordRecord {
+                    id: r.id,
+                    user_id: r.user_id,
+                    name: r.name,
+                    password_hash: PasswordHash::new(r.password_hash),
+                    created_at: r.created_at,
+                    privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
+                    scopes: r.scopes,
+                    created_by_controller_did: opt_column(
+                        r.created_by_controller_did,
+                        col::APP_PASSWORDS_CREATED_BY_CONTROLLER_DID,
+                    )?,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn get_app_passwords_for_login(
@@ -341,19 +353,23 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| AppPasswordRecord {
-                id: r.id,
-                user_id: r.user_id,
-                name: r.name,
-                password_hash: PasswordHash::new(r.password_hash),
-                created_at: r.created_at,
-                privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
-                scopes: r.scopes,
-                created_by_controller_did: r.created_by_controller_did.map(Did::from),
+        rows.into_iter()
+            .map(|r| {
+                Ok(AppPasswordRecord {
+                    id: r.id,
+                    user_id: r.user_id,
+                    name: r.name,
+                    password_hash: PasswordHash::new(r.password_hash),
+                    created_at: r.created_at,
+                    privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
+                    scopes: r.scopes,
+                    created_by_controller_did: opt_column(
+                        r.created_by_controller_did,
+                        col::APP_PASSWORDS_CREATED_BY_CONTROLLER_DID,
+                    )?,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn get_app_password_by_name(
@@ -374,16 +390,22 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| AppPasswordRecord {
-            id: r.id,
-            user_id: r.user_id,
-            name: r.name,
-            password_hash: PasswordHash::new(r.password_hash),
-            created_at: r.created_at,
-            privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
-            scopes: r.scopes,
-            created_by_controller_did: r.created_by_controller_did.map(Did::from),
-        }))
+        row.map(|r| {
+            Ok(AppPasswordRecord {
+                id: r.id,
+                user_id: r.user_id,
+                name: r.name,
+                password_hash: PasswordHash::new(r.password_hash),
+                created_at: r.created_at,
+                privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
+                scopes: r.scopes,
+                created_by_controller_did: opt_column(
+                    r.created_by_controller_did,
+                    col::APP_PASSWORDS_CREATED_BY_CONTROLLER_DID,
+                )?,
+            })
+        })
+        .transpose()
     }
 
     async fn create_app_password(&self, data: &AppPasswordCreate) -> Result<Uuid, DbError> {

@@ -4,6 +4,8 @@ use tranquil_db_traits::{Backlink, BacklinkRepository, DbError};
 use tranquil_types::{AtUri, Nsid};
 use uuid::Uuid;
 
+use super::col;
+use super::column_vec;
 use super::user::map_sqlx_error;
 
 pub struct PostgresBacklinkRepository {
@@ -49,7 +51,7 @@ impl BacklinkRepository for PostgresBacklinkRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(results.into_iter().map(Into::into).collect())
+        column_vec(results, col::BACKLINKS_URI)
     }
 
     async fn add_backlinks(&self, repo_id: Uuid, backlinks: &[Backlink]) -> Result<(), DbError> {

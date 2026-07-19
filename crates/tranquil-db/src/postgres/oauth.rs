@@ -11,11 +11,12 @@ use tranquil_oauth::{
     SessionId as OAuthSessionId, TokenData,
 };
 use tranquil_types::{
-    AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId,
-    TokenId,
+    AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, RefreshToken, RequestId, TokenId,
 };
 use uuid::Uuid;
 
+use super::col;
+use super::column;
 use super::user::map_sqlx_error;
 
 const REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS: i64 = 600;
@@ -98,7 +99,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                 did: r
                     .did
                     .parse()
-                    .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
+                    .map_err(|_| DbError::InvalidColumn(col::OAUTH_TOKEN_DID))?,
                 token_id: TokenId::from(r.token_id),
                 created_at: r.created_at,
                 updated_at: r.updated_at,
@@ -115,7 +116,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                     .controller_did
                     .map(|s| s.parse())
                     .transpose()
-                    .map_err(|_| DbError::Other("Invalid controller DID".into()))?,
+                    .map_err(|_| DbError::InvalidColumn(col::OAUTH_TOKEN_CONTROLLER_DID))?,
             })),
             None => Ok(None),
         }
@@ -144,7 +145,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                     did: r
                         .did
                         .parse()
-                        .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
+                        .map_err(|_| DbError::InvalidColumn(col::OAUTH_TOKEN_DID))?,
                     token_id: TokenId::from(r.token_id),
                     created_at: r.created_at,
                     updated_at: r.updated_at,
@@ -161,7 +162,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                         .controller_did
                         .map(|s| s.parse())
                         .transpose()
-                        .map_err(|_| DbError::Other("Invalid controller DID".into()))?,
+                        .map_err(|_| DbError::InvalidColumn(col::OAUTH_TOKEN_CONTROLLER_DID))?,
                 },
             ))),
             None => Ok(None),
@@ -193,7 +194,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                     did: r
                         .did
                         .parse()
-                        .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
+                        .map_err(|_| DbError::InvalidColumn(col::OAUTH_TOKEN_DID))?,
                     token_id: TokenId::from(r.token_id),
                     created_at: r.created_at,
                     updated_at: r.updated_at,
@@ -210,7 +211,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                         .controller_did
                         .map(|s| s.parse())
                         .transpose()
-                        .map_err(|_| DbError::Other("Invalid controller DID".into()))?,
+                        .map_err(|_| DbError::InvalidColumn(col::OAUTH_TOKEN_CONTROLLER_DID))?,
                 },
             ))),
             None => Ok(None),
@@ -326,7 +327,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                     did: r
                         .did
                         .parse()
-                        .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
+                        .map_err(|_| DbError::InvalidColumn(col::OAUTH_TOKEN_DID))?,
                     token_id: TokenId::from(r.token_id),
                     created_at: r.created_at,
                     updated_at: r.updated_at,
@@ -343,7 +344,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                         .controller_did
                         .map(|s| s.parse())
                         .transpose()
-                        .map_err(|_| DbError::Other("Invalid controller DID".into()))?,
+                        .map_err(|_| DbError::InvalidColumn(col::OAUTH_TOKEN_CONTROLLER_DID))?,
                 })
             })
             .collect()
@@ -476,18 +477,14 @@ impl OAuthRepository for PostgresOAuthRepository {
                     client_auth,
                     parameters,
                     expires_at: r.expires_at,
-                    did: r
-                        .did
-                        .map(|s| s.parse())
-                        .transpose()
-                        .map_err(|_| DbError::Other("Invalid DID in DB".into()))?,
+                    did: r.did.map(|s| s.parse()).transpose().map_err(|_| {
+                        DbError::InvalidColumn(col::OAUTH_AUTHORIZATION_REQUEST_DID)
+                    })?,
                     device_id: r.device_id.map(DeviceId::from),
                     code: r.code.map(AuthorizationCode::from),
-                    controller_did: r
-                        .controller_did
-                        .map(|s| s.parse())
-                        .transpose()
-                        .map_err(|_| DbError::Other("Invalid controller DID in DB".into()))?,
+                    controller_did: r.controller_did.map(|s| s.parse()).transpose().map_err(
+                        |_| DbError::InvalidColumn(col::OAUTH_AUTHORIZATION_REQUEST_CONTROLLER_DID),
+                    )?,
                 }))
             }
             None => Ok(None),
@@ -570,18 +567,14 @@ impl OAuthRepository for PostgresOAuthRepository {
                     client_auth,
                     parameters,
                     expires_at: r.expires_at,
-                    did: r
-                        .did
-                        .map(|s| s.parse())
-                        .transpose()
-                        .map_err(|_| DbError::Other("Invalid DID in DB".into()))?,
+                    did: r.did.map(|s| s.parse()).transpose().map_err(|_| {
+                        DbError::InvalidColumn(col::OAUTH_AUTHORIZATION_REQUEST_DID)
+                    })?,
                     device_id: r.device_id.map(DeviceId::from),
                     code: r.code.map(AuthorizationCode::from),
-                    controller_did: r
-                        .controller_did
-                        .map(|s| s.parse())
-                        .transpose()
-                        .map_err(|_| DbError::Other("Invalid controller DID in DB".into()))?,
+                    controller_did: r.controller_did.map(|s| s.parse()).transpose().map_err(
+                        |_| DbError::InvalidColumn(col::OAUTH_AUTHORIZATION_REQUEST_CONTROLLER_DID),
+                    )?,
                 }))
             }
             None => Ok(None),
@@ -813,15 +806,16 @@ impl OAuthRepository for PostgresOAuthRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(rows
-            .into_iter()
-            .map(|r| DeviceAccountRow {
-                did: Did::from(r.did),
-                handle: Handle::from(r.handle),
-                email: r.email,
-                last_used_at: r.last_used_at,
+        rows.into_iter()
+            .map(|r| {
+                Ok(DeviceAccountRow {
+                    did: column(r.did, col::USERS_DID)?,
+                    handle: column(r.handle, col::USERS_HANDLE)?,
+                    email: r.email,
+                    last_used_at: r.last_used_at,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn verify_account_on_device(
@@ -904,7 +898,7 @@ impl OAuthRepository for PostgresOAuthRepository {
         .map_err(map_sqlx_error)?;
         Ok(TwoFactorChallenge {
             id: row.id,
-            did: Did::from(row.did),
+            did: column(row.did, col::OAUTH_2FA_CHALLENGE_DID)?,
             request_uri: RequestId::from(row.request_uri),
             code: row.code,
             attempts: row.attempts,
@@ -928,15 +922,18 @@ impl OAuthRepository for PostgresOAuthRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| TwoFactorChallenge {
-            id: r.id,
-            did: Did::from(r.did),
-            request_uri: RequestId::from(r.request_uri),
-            code: r.code,
-            attempts: r.attempts,
-            created_at: r.created_at,
-            expires_at: r.expires_at,
-        }))
+        row.map(|r| {
+            Ok(TwoFactorChallenge {
+                id: r.id,
+                did: column(r.did, col::OAUTH_2FA_CHALLENGE_DID)?,
+                request_uri: RequestId::from(r.request_uri),
+                code: r.code,
+                attempts: r.attempts,
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+            })
+        })
+        .transpose()
     }
 
     async fn increment_2fa_attempts(&self, id: Uuid) -> Result<i32, DbError> {
