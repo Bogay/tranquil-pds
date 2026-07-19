@@ -42,8 +42,6 @@ pub enum PayloadError {
     InvalidTimestamp(u64),
     #[error("invalid ops DAG-CBOR in payload: {0}")]
     InvalidDagCborOps(String),
-    #[error("invalid handle in payload: {0}")]
-    InvalidHandle(String),
     #[error("invalid CID length: got {got}, expected {expected}")]
     InvalidCidLength { got: usize, expected: usize },
 }
@@ -188,11 +186,16 @@ pub fn to_sequenced_event(
         })
         .transpose()?;
 
-    let handle = payload
-        .handle
-        .as_ref()
-        .map(|h| Handle::new(h.as_str()).map_err(|_| PayloadError::InvalidHandle(h.clone())))
-        .transpose()?;
+    let handle = payload.handle.as_ref().and_then(|h| {
+        Handle::new(h.as_str())
+            .inspect_err(|_| {
+                tracing::warn!(
+                    value = %h,
+                    "ignoring an invalid event handle"
+                );
+            })
+            .ok()
+    });
 
     Ok(SequencedEvent {
         seq: SequenceNumber::from_raw(raw.seq.as_i64()),
@@ -218,15 +221,34 @@ pub fn to_sequenced_event(
             .transpose()?
             .flatten(),
         ops,
-        blobs: payload
-            .blobs
-            .clone()
-            .map(|v| v.into_iter().map(CidLink::from).collect()),
+        blobs: payload.blobs.clone().map(|v| {
+            v.into_iter()
+                .filter_map(|c| {
+                    CidLink::new(c.clone())
+                        .inspect_err(|_| {
+                            tracing::warn!(
+                                value = %c,
+                                "skipping an event blob reference that isn't a valid CID"
+                            );
+                        })
+                        .ok()
+                })
+                .collect()
+        }),
         blocks: payload.blocks.clone().map(EventBlocks::Inline),
         handle,
         active: payload.active,
         status: payload.status.and_then(u8_to_account_status),
-        rev: payload.rev.clone().map(Tid::from),
+        rev: payload.rev.clone().and_then(|r| {
+            Tid::new(r.clone())
+                .inspect_err(|_| {
+                    tracing::warn!(
+                        value = %r,
+                        "ignoring an event rev that isn't a valid TID"
+                    );
+                })
+                .ok()
+        }),
     })
 }
 
@@ -242,11 +264,20 @@ mod tests {
         Did::new("did:plc:testuser1234567890abcdef").unwrap()
     }
 
-    fn test_cid_link() -> CidLink {
-        let hash = sha2::Digest::finalize(sha2::Sha256::new());
+    fn test_cid_link(seed: u8) -> CidLink {
+        let hash = sha2::Sha256::digest([seed]);
         let mh = multihash::Multihash::<64>::wrap(0x12, &hash).unwrap();
         let c = cid::Cid::new_v1(0x71, mh);
         CidLink::from_cid(&c)
+    }
+
+    fn test_rev(seq: u64) -> Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        Tid::new(s).expect("generated TID is valid")
     }
 
     #[test]
@@ -280,7 +311,7 @@ mod tests {
 
     #[test]
     fn round_trip_full_commit_payload() {
-        let cid = test_cid_link();
+        let cid = test_cid_link(1);
         let ops = serde_json::json!([{"action": "create", "path": "app.bsky.feed.post/abc"}]);
 
         let event = SequencedEvent {
@@ -292,7 +323,7 @@ mod tests {
             prev_cid: Some(cid.clone()),
             prev_data_cid: Some(cid.clone()),
             ops: Some(ops.clone()),
-            blobs: Some(vec![CidLink::from("bafkreibtest".to_owned())]),
+            blobs: Some(vec![test_cid_link(2)]),
             blocks: Some(EventBlocks::Inline(vec![EventBlockInline {
                 cid_bytes: cid_link_to_bytes(&cid).unwrap(),
                 data: b"hello block".to_vec(),
@@ -300,7 +331,7 @@ mod tests {
             handle: Some(Handle::new("test.bsky.social").unwrap()),
             active: None,
             status: None,
-            rev: Some(Tid::from("rev123".to_owned())),
+            rev: Some(test_rev(123)),
         };
 
         let encoded = encode_payload(&event);
@@ -416,7 +447,7 @@ mod tests {
 
     #[test]
     fn cid_bytes_round_trip() {
-        let cid = test_cid_link();
+        let cid = test_cid_link(1);
         let bytes = cid_link_to_bytes(&cid).unwrap();
         assert_eq!(bytes.len(), CID_BYTE_LEN);
         let recovered = bytes_to_cid_link(&bytes).unwrap().unwrap();
