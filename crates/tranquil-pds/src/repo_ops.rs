@@ -14,7 +14,7 @@ use jacquard_repo::mst::{Mst, VerifiedWriteOp};
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -262,7 +262,7 @@ pub async fn repair_repo_structure(
         ApiError::InternalError(None)
     })?;
     let data_root = commit.data;
-    let repo_rev = crate::types::Tid::from(commit.rev().to_string());
+    let repo_rev = crate::types::Tid::from(commit.rev().clone());
 
     let records = state
         .repos
@@ -323,30 +323,67 @@ pub async fn repair_repo_structure(
                 missing.len()
             ))));
         }
+    }
 
-        let block_cids =
-            crate::scheduled::collect_current_repo_blocks(&state.block_store, &current_root_cid)
-                .await
-                .map_err(|e| {
-                    error!("repair: re-walk for user_blocks backfill failed: {}", e);
-                    ApiError::InternalError(None)
-                })?;
+    let walk = crate::scheduled::collect_current_repo_blocks(&state.block_store, &current_root_cid)
+        .await
+        .map_err(|e| {
+            error!("repair: re-walk for user_blocks backfill failed: {}", e);
+            ApiError::InternalError(None)
+        })?;
 
+    let recorded = state
+        .repos
+        .repo
+        .get_user_block_cids_since_rev(user_id, None)
+        .await
+        .map_err(|e| {
+            error!("repair: reading recorded user_blocks set failed: {}", e);
+            ApiError::InternalError(None)
+        })?;
+    let reachable: HashSet<&[u8]> = walk.block_cids.iter().map(Vec::as_slice).collect();
+    let stale: Vec<Vec<u8>> = match walk.is_complete() {
+        true => recorded
+            .into_iter()
+            .filter(|cid| !reachable.contains(cid.as_slice()))
+            .collect(),
+        false => {
+            error!(
+                user_id = %user_id,
+                unreadable = walk.unreadable,
+                "repair: repo walk couldn't read every block, so its complement isn't the \
+                 unreachable set. Backfilling without pruning."
+            );
+            Vec::new()
+        }
+    };
+
+    state
+        .repos
+        .repo
+        .insert_user_blocks(user_id, &walk.block_cids, &repo_rev)
+        .await
+        .map_err(|e| {
+            error!("repair: user_blocks backfill failed: {}", e);
+            ApiError::InternalError(None)
+        })?;
+    if !stale.is_empty() {
         state
             .repos
             .repo
-            .insert_user_blocks(user_id, &block_cids, &repo_rev)
+            .delete_user_blocks(user_id, &stale)
             .await
             .map_err(|e| {
-                error!("repair: user_blocks backfill failed: {}", e);
+                error!("repair: pruning unreachable user_blocks rows failed: {}", e);
                 ApiError::InternalError(None)
             })?;
-        warn!(
-            user_id = %user_id,
-            blocks = block_cids.len(),
-            "repair: backfilled user_blocks from repaired DAG"
-        );
     }
+    warn!(
+        user_id = %user_id,
+        blocks = walk.block_cids.len(),
+        pruned = stale.len(),
+        "repair: rewrote user_blocks from current DAG"
+    );
 
     Ok(outcome)
 }
@@ -460,6 +497,69 @@ pub fn schedule_repo_repair(state: &AppState, user_id: Uuid) {
     });
 }
 
+async fn leaves_referenced_elsewhere(
+    state: &AppState,
+    user_id: Uuid,
+    dropped_leaves: &BTreeSet<Cid>,
+    ops: &[RecordOp],
+) -> BTreeSet<Cid> {
+    if dropped_leaves.is_empty() {
+        return BTreeSet::new();
+    }
+    let by_link: BTreeMap<crate::types::CidLink, Cid> = dropped_leaves
+        .iter()
+        .map(|cid| (crate::types::CidLink::from_cid(cid), *cid))
+        .collect();
+    let cids: Vec<crate::types::CidLink> = by_link.keys().cloned().collect();
+    // Because the commit only runs later on, records table still shows
+    // this write's pre-write state at this point
+    // so excluding the keys that this write touches is the thing that
+    // keeps a deleted record from counting as a reference to its own block.
+    let touched: Vec<(&Nsid, &Rkey)> = ops.iter().map(RecordOp::collection_rkey).collect();
+    // The two failure directions aren't symmetric at all
+    // because a user_blocks row for a block that's already gone is only noise
+    // that the scheduled repair clears...
+    // While a *missing* row for a block that's still reachable
+    // makes `getRepo` with a since-cursor give an incomplete tree
+    // and thus any doubt at all about the lookup ought to mean keeping every row.
+    let keep_everything = |reason: &str| {
+        error!(
+            user_id = %user_id,
+            "{reason}. Keeping the user_blocks row for every record block this write removed. \
+             Their refcounts still drop, so a row may remain after its block is gone until the \
+             scheduled structural repair rewrites the set."
+        );
+        schedule_repo_repair(state, user_id);
+        dropped_leaves.clone()
+    };
+    match state
+        .repos
+        .repo
+        .referenced_record_cids(user_id, &cids, &touched)
+        .await
+    {
+        Ok(referenced) => referenced
+            .iter()
+            .map(|link| by_link.get(link).copied())
+            .collect::<Option<BTreeSet<Cid>>>()
+            .unwrap_or_else(|| {
+                keep_everything("record cid reference lookup returned a cid that wasn't queried")
+            }),
+        Err(e) => keep_everything(&format!("record cid reference lookup failed: {e:?}")),
+    }
+}
+
+pub async fn reachable_tree_cids<S: BlockStore + Sync + 'static>(
+    mst: &Mst<S>,
+) -> Result<BTreeSet<Cid>, jacquard_repo::error::RepoError> {
+    let nodes = mst.collect_node_cids().await?;
+    let leaves = mst.leaves().await?;
+    Ok(nodes
+        .into_iter()
+        .chain(leaves.into_iter().map(|(_, cid)| cid))
+        .collect())
+}
+
 pub async fn finalize_repo_write(
     state: &AppState,
     ctx: RepoWriteContext,
@@ -472,7 +572,6 @@ pub async fn finalize_repo_write(
         .map_err(|e| ApiError::from_mst_error("MST persist", &e))?;
 
     let written_bytes = ctx.tracking_store.take_written_blocks();
-    let new_tree_cids: Vec<Cid> = written_bytes.keys().copied().collect();
 
     let storage_for_proof = Arc::new(ctx.tracking_store.clone());
     let original_settled = Mst::load(storage_for_proof.clone(), ctx.prev_data_cid, None);
@@ -545,27 +644,124 @@ pub async fn finalize_repo_write(
         }
     }
 
-    let obsolete_cids = match original_settled.diff(&new_settled).await {
+    let replaced_refs: Vec<Cid> = params
+        .ops
+        .iter()
+        .filter_map(RecordOp::replaced_cid)
+        .collect();
+
+    let (new_tree_cids, new_mst_bytes, dropped) = match original_settled.diff(&new_settled).await {
         Ok(diff) => {
-            let mut obsolete: Vec<Cid> =
-                Vec::with_capacity(1 + diff.removed_mst_blocks.len() + diff.removed_cids.len());
-            obsolete.push(ctx.current_root_cid);
-            obsolete.extend(diff.removed_mst_blocks);
-            obsolete.extend(diff.removed_cids);
-            obsolete
+            // The moment that a leaf CID leaves its old position (leaves, get it)
+            // the diff will report it as removed
+            // even where the new tree goes on using that same block somewhere else
+            // so filtering the removed leaves against `live` will stop this write
+            // from dropping a block the new tree still needs.
+            // The diffing minuses the unchanged nodes from `removed_mst_blocks` itself
+            // and the same filter only covers a node which matches the new root.
+            let live: BTreeSet<Cid> = diff
+                .new_mst_blocks
+                .keys()
+                .copied()
+                .chain(diff.new_leaf_cids.iter().copied())
+                .chain(std::iter::once(new_mst_root))
+                .collect();
+            let dropped_leaves: BTreeSet<Cid> = diff
+                .removed_cids
+                .iter()
+                .copied()
+                .filter(|cid| !live.contains(cid))
+                .collect();
+            let still_referenced =
+                leaves_referenced_elsewhere(state, params.user_id, &dropped_leaves, &params.ops)
+                    .await;
+            let removed_mst_blocks: Vec<Cid> = diff
+                .removed_mst_blocks
+                .iter()
+                .copied()
+                .filter(|cid| !live.contains(cid))
+                .collect();
+
+            // These sets have distinct purposes:
+            // - `unreachable` deletes user_blocks rows
+            //   and so has to leave out any block another record still references
+            // - `decrements` drops one refcount for every ref this write released
+            //   including the replaced record CIDs that other records
+            //   continue on referencing
+            //
+            // Neither set includes the previous data root
+            // since the diff reports subtree nodes and never a root of its own.
+            // So that block keeps its refcount and its user_blocks row
+            // until the leaked-refcount sweep reclaims it.
+            let dropped = DroppedBlocks {
+                unreachable: std::iter::once(ctx.current_root_cid)
+                    .chain(removed_mst_blocks.iter().copied())
+                    .chain(
+                        dropped_leaves
+                            .iter()
+                            .copied()
+                            .filter(|cid| !still_referenced.contains(cid)),
+                    )
+                    .collect(),
+                decrements: std::iter::once(ctx.current_root_cid)
+                    .chain(removed_mst_blocks)
+                    .chain(replaced_refs)
+                    .collect(),
+            };
+            (live.into_iter().collect(), diff.new_mst_blocks, dropped)
         }
         Err(e) => {
             error!(
-                "MST diff failed during finalize_repo_write: {e}. \
-                 Proceeding with commit CID only; leaked blocks \
-                 will be reclaimed by reachability GC."
+                user_id = %params.user_id,
+                "MST diff failed during finalize_repo_write: {e}. Walking the new MST insetad \
+                 and scheduling a structural repair."
             );
-            vec![ctx.current_root_cid]
+            schedule_repo_repair(state, params.user_id);
+            let dropped = DroppedBlocks {
+                unreachable: vec![ctx.current_root_cid],
+                decrements: std::iter::once(ctx.current_root_cid)
+                    .chain(replaced_refs)
+                    .collect(),
+            };
+            match reachable_tree_cids(&new_settled).await {
+                Ok(cids) => (cids.into_iter().collect(), BTreeMap::new(), dropped),
+                Err(walk_err) => {
+                    error!(
+                        "MST walk after diff failure also failed: {walk_err}. \
+                         Recording only blocks this write observed and the commit CID. \
+                         user_blocks stays incomplete until a structural repair rewrites the tree."
+                    );
+                    (
+                        written_bytes.keys().copied().collect(),
+                        BTreeMap::new(),
+                        dropped,
+                    )
+                }
+            }
         }
     };
 
+    // Under jacquard-repo 0.9 that tranquil pins for now,
+    // `Mst::persist` skips any subtree that's already in store
+    // so `written_bytes` under-reports the new node set
+    // and `new_mst_blocks` is full
+    // where each of these blocks still needs a `put` to take a refcount
+    // even though its bytes are already on disk.
+    let recovered: Vec<(Cid, Bytes)> = new_mst_bytes
+        .iter()
+        .filter(|(cid, _)| !written_bytes.contains_key(*cid))
+        .map(|(cid, bytes)| (*cid, bytes.clone()))
+        .collect();
+    if !recovered.is_empty() {
+        state.block_store.put_many(recovered).await.map_err(|e| {
+            error!("failed to reference MST blocks recovered from the diff: {e}");
+            ApiError::InternalError(None)
+        })?;
+    }
+
     let mut block_bytes = written_bytes;
     block_bytes.extend(relevant);
+    block_bytes.extend(new_mst_bytes);
 
     let result = commit_and_log(
         state,
@@ -580,7 +776,7 @@ pub async fn finalize_repo_write(
             block_bytes,
             new_tree_cids,
             blobs: params.blob_cids,
-            obsolete_cids,
+            dropped,
             backlinks_to_add: params.backlinks_to_add,
             backlinks_to_remove: params.backlinks_to_remove,
         },
@@ -649,6 +845,13 @@ pub enum RecordOp {
 }
 
 impl RecordOp {
+    pub fn replaced_cid(&self) -> Option<Cid> {
+        match self {
+            Self::Create { .. } => None,
+            Self::Update { prev, .. } | Self::Delete { prev, .. } => Some(*prev.as_cid()),
+        }
+    }
+
     pub fn collection_rkey(&self) -> (&Nsid, &Rkey) {
         match self {
             Self::Create {
@@ -669,6 +872,11 @@ pub struct CommitResult {
     pub rev: crate::types::Tid,
 }
 
+pub struct DroppedBlocks {
+    pub unreachable: Vec<Cid>,
+    pub decrements: Vec<Cid>,
+}
+
 pub struct CommitParams<'a> {
     pub did: &'a Did,
     pub user_id: Uuid,
@@ -680,7 +888,7 @@ pub struct CommitParams<'a> {
     pub block_bytes: std::collections::HashMap<Cid, Bytes>,
     pub new_tree_cids: Vec<Cid>,
     pub blobs: &'a [crate::types::CidLink],
-    pub obsolete_cids: Vec<Cid>,
+    pub dropped: DroppedBlocks,
     pub backlinks_to_add: Vec<Backlink>,
     pub backlinks_to_remove: Vec<AtUri>,
 }
@@ -705,7 +913,7 @@ pub async fn commit_and_log(
         mut block_bytes,
         new_tree_cids,
         blobs,
-        obsolete_cids,
+        dropped,
         backlinks_to_add,
         backlinks_to_remove,
     } = params;
@@ -726,7 +934,7 @@ pub async fn commit_and_log(
     let signing_key =
         SigningKey::from_slice(&key_bytes).map_err(|e| CommitError::InvalidKey(e.to_string()))?;
     let rev = Tid::now(LimitedU32::MIN);
-    let rev_str = rev.to_string();
+    let repo_rev = crate::types::Tid::from(rev.clone());
     let (new_commit_bytes, _sig) =
         create_signed_commit(did, new_mst_root, &rev, current_root_cid, &signing_key)?;
     let new_root_cid =
@@ -751,7 +959,7 @@ pub async fn commit_and_log(
         .map(|c| c.to_bytes())
         .collect();
 
-    let obsolete_bytes: Vec<Vec<u8>> = obsolete_cids.iter().map(|c| c.to_bytes()).collect();
+    let obsolete_bytes: Vec<Vec<u8>> = dropped.unreachable.iter().map(|c| c.to_bytes()).collect();
 
     let final_ops: HashMap<(&Nsid, &Rkey), &RecordOp> =
         ops.iter().map(|op| (op.collection_rkey(), op)).collect();
@@ -864,7 +1072,7 @@ pub async fn commit_and_log(
         blobs: Some(blobs.to_vec()),
         blocks: Some(inline_blocks),
         prev_data_cid: prev_data_cid.map(crate::types::CidLink::from),
-        rev: Some(crate::types::Tid::from(rev_str.clone())),
+        rev: Some(repo_rev.clone()),
     };
 
     let input = ApplyCommitInput {
@@ -872,7 +1080,7 @@ pub async fn commit_and_log(
         did: did.clone(),
         expected_root_cid: current_root_cid.map(crate::types::CidLink::from),
         new_root_cid: crate::types::CidLink::from(new_root_cid),
-        new_rev: crate::types::Tid::from(rev_str.clone()),
+        new_rev: repo_rev.clone(),
         new_block_cids: all_block_cids,
         obsolete_block_cids: obsolete_bytes,
         record_upserts,
@@ -895,7 +1103,7 @@ pub async fn commit_and_log(
 
     let apply_result = (|| {
         let bs = state.block_store.clone();
-        let decrements = obsolete_cids.clone();
+        let decrements = dropped.decrements.clone();
         async move { bs.decrement_refs(&decrements).await }
     })
     .retry(
@@ -907,7 +1115,7 @@ pub async fn commit_and_log(
     .await;
 
     if let Err(e) = apply_result {
-        let leaked: Vec<String> = obsolete_cids.iter().map(Cid::to_string).collect();
+        let leaked: Vec<String> = dropped.decrements.iter().map(Cid::to_string).collect();
         tracing::error!(
             error = %e,
             user_id = %user_id,
@@ -920,7 +1128,7 @@ pub async fn commit_and_log(
 
     Ok(CommitResult {
         commit_cid: new_root_cid,
-        rev: crate::types::Tid::from(rev_str),
+        rev: repo_rev,
     })
 }
 pub async fn create_record_internal(

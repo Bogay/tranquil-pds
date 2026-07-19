@@ -37,7 +37,7 @@ async fn process_repo_rev(
         }
     };
     let commit = Commit::from_cbor(&block).map_err(|_| user_id)?;
-    let rev = crate::types::Tid::from(commit.rev().to_string());
+    let rev = crate::types::Tid::from(commit.rev().clone());
     repo_repo
         .update_repo_rev(user_id, &rev)
         .await
@@ -98,14 +98,22 @@ async fn process_user_blocks(
     repo_rev: Option<crate::types::Tid>,
 ) -> Result<(uuid::Uuid, usize), uuid::Uuid> {
     let root_cid = Cid::from_str(&repo_root_cid).map_err(|_| user_id)?;
-    let block_cids = collect_current_repo_blocks(block_store, &root_cid)
+    let walk = collect_current_repo_blocks(block_store, &root_cid)
         .await
         .map_err(|_| user_id)?;
+    if !walk.is_complete() {
+        error!(
+            user_id = %user_id,
+            unreadable = walk.unreadable,
+            "user_blocks backfill recorded an incomplete set becuase the walk couldn't read every block"
+        );
+    }
+    let block_cids = walk.block_cids;
     if block_cids.is_empty() {
         return Err(user_id);
     }
     let count = block_cids.len();
-    let rev = repo_rev.unwrap_or_else(|| crate::types::Tid::from("0".to_string()));
+    let rev = repo_rev.unwrap_or_else(crate::types::Tid::earliest);
     repo_repo
         .insert_user_blocks(user_id, &block_cids, &rev)
         .await
@@ -162,13 +170,35 @@ pub async fn backfill_user_blocks(repo_repo: Arc<dyn RepoRepository>, block_stor
     info!(success, failed, "Completed user_blocks backfill");
 }
 
+// When a walk couldn't read every block,
+// what comes back is a subset of the reachable set
+// ...and the complement of a subset is *not* the unreachable set.
+// So callers check `is_complete` before they prune
+// or one unreadable block is enough to delete live rows.
+//
+// The count only covers a block that the store reports as missing or corrupt,
+// whereas a block whose bytes decode as neither commit or MST node ends
+// traversal without counting
+// so `is_complete` is necessary for a prune and not sufficient.
+pub struct RepoWalk {
+    pub block_cids: Vec<Vec<u8>>,
+    pub unreadable: usize,
+}
+
+impl RepoWalk {
+    pub fn is_complete(&self) -> bool {
+        self.unreadable == 0
+    }
+}
+
 pub async fn collect_current_repo_blocks(
     block_store: &AnyBlockStore,
     head_cid: &Cid,
-) -> anyhow::Result<Vec<Vec<u8>>> {
+) -> anyhow::Result<RepoWalk> {
     let mut block_cids: Vec<Vec<u8>> = Vec::new();
     let mut to_visit = vec![*head_cid];
     let mut visited = std::collections::HashSet::new();
+    let mut unreadable = 0usize;
 
     while let Some(cid) = to_visit.pop() {
         if visited.contains(&cid) {
@@ -179,9 +209,14 @@ pub async fn collect_current_repo_blocks(
 
         let block = match block_store.get(&cid).await {
             Ok(Some(b)) => b,
-            Ok(None) => continue,
+            Ok(None) => {
+                warn!(cid = %cid, "block missing during repo walk, so its subtree stays unvisited");
+                unreadable += 1;
+                continue;
+            }
             Err(e) if crate::api::error::ApiError::detail_is_repo_corruption(&format!("{e:#}")) => {
                 warn!(cid = %cid, error = %format!("{e:#}"), "skipping corrupt block during repo walk");
+                unreadable += 1;
                 continue;
             }
             Err(e) => anyhow::bail!("Failed to get block {}: {:?}", cid, e),
@@ -215,7 +250,10 @@ pub async fn collect_current_repo_blocks(
         }
     }
 
-    Ok(block_cids)
+    Ok(RepoWalk {
+        block_cids,
+        unreadable,
+    })
 }
 
 async fn process_record_blobs(
@@ -771,7 +809,9 @@ pub async fn generate_repo_car(
     block_store: &AnyBlockStore,
     head_cid: &Cid,
 ) -> Result<Vec<u8>, RepoCarError> {
-    let block_cids_bytes = collect_current_repo_blocks(block_store, head_cid).await?;
+    let block_cids_bytes = collect_current_repo_blocks(block_store, head_cid)
+        .await?
+        .block_cids;
     let block_cids: Vec<Cid> = block_cids_bytes
         .iter()
         .filter_map(|b| match Cid::try_from(b.as_slice()) {

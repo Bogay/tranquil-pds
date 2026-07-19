@@ -107,9 +107,11 @@ async fn mst_blocks_survive_full_store_reopen() {
 
     let head_cid = cid::Cid::try_from(repo_root_str.as_str()).expect("invalid cid");
 
-    let car_blocks = tranquil_pds::scheduled::collect_current_repo_blocks(block_store, &head_cid)
+    let walk = tranquil_pds::scheduled::collect_current_repo_blocks(block_store, &head_cid)
         .await
         .expect("collect blocks");
+    assert!(walk.is_complete(), "repo walk read every block it reached");
+    let car_blocks = walk.block_cids;
 
     let block_count_before = car_blocks.len();
 

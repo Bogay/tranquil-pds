@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::borrow::Cow;
 use std::str::FromStr;
+use tracing::warn;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{
     Active, Auth, AuthSource, RepoScopeAction, ScopeVerified, VerifyScope, require_not_migrated,
@@ -181,8 +182,15 @@ async fn create_record_inner(
                 else {
                     continue;
                 };
-                let conflict_rkey = Rkey::from(conflict_rkey_str.to_string());
-                let conflict_collection = Nsid::from(conflict_col_str.to_string());
+                let (Ok(conflict_rkey), Ok(conflict_collection)) =
+                    (Rkey::new(conflict_rkey_str), Nsid::new(conflict_col_str))
+                else {
+                    warn!(
+                        uri = %conflict_uri,
+                        "skipping a backlink conflict whose stored URI doesn't parse"
+                    );
+                    continue;
+                };
                 let conflict_key = format!("{}/{}", conflict_collection, conflict_rkey);
 
                 let prev_cid = match mst.get(&conflict_key).await {
@@ -373,11 +381,8 @@ async fn put_record_inner(
     let record_ipld = tranquil_pds::util::json_to_ipld(&input.record);
     let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
         .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
-    let record_cid = ctx
-        .tracking_store
-        .put(&record_bytes)
-        .await
-        .map_err(|_| ApiError::InternalError(Some("Failed to save record block".into())))?;
+    let record_cid = jacquard_repo::mst::util::compute_cid(&record_bytes)
+        .map_err(|_| ApiError::InvalidRecord("Failed to compute record CID".into()))?;
 
     if existing_cid == Some(record_cid) {
         return Ok(PutRecordOutput {
@@ -387,6 +392,11 @@ async fn put_record_inner(
             validation_status,
         });
     }
+
+    ctx.tracking_store
+        .put(&record_bytes)
+        .await
+        .map_err(|_| ApiError::InternalError(Some("Failed to save record block".into())))?;
 
     let record_uri = AtUri::from_parts(did, &input.collection, &input.rkey);
     let (new_mst, op, is_update, backlinks_to_remove) = match existing_cid {

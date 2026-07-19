@@ -233,7 +233,7 @@ pub async fn import_repo(
                     ApiError::InternalError(None)
                 })?;
             let new_root_cid_link = CidLink::from(&new_root_cid);
-            let new_rev_tid = tranquil_pds::types::Tid::from(new_rev_str.clone());
+            let new_rev_tid = tranquil_pds::types::Tid::from(new_rev.clone());
             state
                 .repos
                 .repo
@@ -243,17 +243,40 @@ pub async fn import_repo(
                     error!("Failed to update repo root: {:?}", e);
                     ApiError::InternalError(None)
                 })?;
-            let mut all_block_cids: Vec<Vec<u8>> = blocks.keys().map(|c| c.to_bytes()).collect();
-            all_block_cids.push(new_root_cid.to_bytes());
-            state
-                .repos
-                .repo
-                .insert_user_blocks(user_id, &all_block_cids, &new_rev_tid)
-                .await
-                .map_err(|e| {
-                    error!("Failed to insert user_blocks: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+            match tranquil_pds::scheduled::collect_current_repo_blocks(
+                &state.block_store,
+                &new_root_cid,
+            )
+            .await
+            {
+                Ok(reachable) => {
+                    if !reachable.is_complete() {
+                        error!(
+                            unreadable = reachable.unreadable,
+                            "scheduling a structural repair because the imported repo walk could \
+                             not read every block"
+                        );
+                        tranquil_pds::repo_ops::schedule_repo_repair(&state, user_id);
+                    }
+                    state
+                        .repos
+                        .repo
+                        .insert_user_blocks(user_id, &reachable.block_cids, &new_rev_tid)
+                        .await
+                        .map_err(|e| {
+                            error!("Failed to insert user_blocks: {:?}", e);
+                            ApiError::InternalError(None)
+                        })?;
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to walk the imported repo: {:?}. The root is already updated and \
+                         a scheduled structural repair will rebuild user_blocks",
+                        e
+                    );
+                    tranquil_pds::repo_ops::schedule_repo_repair(&state, user_id);
+                }
+            }
             let new_root_str = new_root_cid.to_string();
             info!(
                 "Created new commit for imported repo: cid={}, rev={}",
