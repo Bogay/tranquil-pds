@@ -27,12 +27,20 @@ pub struct CheckAccountStatusOutput {
     pub activated: bool,
     pub valid_did: bool,
     pub repo_commit: String,
-    pub repo_rev: Tid,
+    #[serde(serialize_with = "serialize_optional_rev")]
+    pub repo_rev: Option<Tid>,
     pub repo_blocks: i64,
     pub indexed_records: i64,
     pub private_state_values: i64,
     pub expected_blobs: i64,
     pub imported_blobs: i64,
+}
+
+fn serialize_optional_rev<S: serde::Serializer>(
+    rev: &Option<Tid>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(rev.as_ref().map_or("", Tid::as_str))
 }
 
 pub async fn check_account_status(
@@ -65,23 +73,20 @@ pub async fn check_account_status(
         .count_user_blocks(user_id)
         .await
         .unwrap_or(0);
-    let repo_rev = if let Some(rev) = repo_rev_from_db {
-        rev
-    } else if !repo_commit.is_empty() {
-        if let Ok(cid) = Cid::from_str(&repo_commit) {
-            if let Ok(Some(block)) = state.block_store.get(&cid).await {
+    let repo_rev = match (repo_rev_from_db, Cid::from_str(&repo_commit)) {
+        (Some(rev), _) => Some(rev),
+        (None, Ok(cid)) => state
+            .block_store
+            .get(&cid)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|block| {
                 Commit::from_cbor(&block)
                     .ok()
-                    .map(|c| Tid::from(c.rev().to_string()))
-                    .unwrap_or_else(|| Tid::from(String::new()))
-            } else {
-                Tid::from(String::new())
-            }
-        } else {
-            Tid::from(String::new())
-        }
-    } else {
-        Tid::from(String::new())
+                    .map(|commit| Tid::from(commit.rev().clone()))
+            }),
+        (None, Err(_)) => None,
     };
     let record_count: i64 = state.repos.repo.count_records(user_id).await.unwrap_or(0);
     let imported_blobs: i64 = state
@@ -449,7 +454,7 @@ pub async fn activate_account(
                     if let Ok(Some(block)) = state.block_store.get(&cid).await {
                         Commit::from_cbor(&block)
                             .ok()
-                            .map(|c| Tid::from(c.rev().to_string()))
+                            .map(|c| Tid::from(c.rev().clone()))
                     } else {
                         None
                     }
