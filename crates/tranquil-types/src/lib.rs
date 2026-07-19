@@ -42,12 +42,6 @@ macro_rules! impl_string_common {
             }
         }
 
-        impl From<String> for $name {
-            fn from(s: String) -> Self {
-                Self(s)
-            }
-        }
-
         impl<'a> From<&'a $name> for Cow<'a, str> {
             fn from(val: &'a $name) -> Self {
                 Cow::Borrowed(&val.0)
@@ -109,6 +103,12 @@ macro_rules! simple_string_newtype {
             }
         }
 
+        impl From<String> for $name {
+            fn from(s: String) -> Self {
+                Self(s)
+            }
+        }
+
         impl_string_common!($name);
     };
 }
@@ -126,6 +126,12 @@ macro_rules! simple_string_newtype_no_sqlx {
         impl $name {
             pub fn new(s: impl Into<String>) -> Self {
                 Self(s.into())
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(s: String) -> Self {
+                Self(s)
             }
         }
 
