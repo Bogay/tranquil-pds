@@ -324,6 +324,12 @@ pub enum RecordRequest {
         cid: CidLink,
         tx: Tx<Option<tranquil_db_traits::RecordWithTakedown>>,
     },
+    ReferencedRecordCids {
+        repo_id: Uuid,
+        cids: Vec<CidLink>,
+        excluded_keys: Vec<(Nsid, Rkey)>,
+        tx: Tx<Vec<CidLink>>,
+    },
     SetRecordTakedown {
         cid: CidLink,
         takedown_ref: Option<String>,
@@ -342,7 +348,8 @@ impl RecordRequest {
             | Self::ListRecords { repo_id, .. }
             | Self::GetAllRecords { repo_id, .. }
             | Self::ListCollections { repo_id, .. }
-            | Self::CountRecords { repo_id, .. } => uuid_to_routing(user_hashes, repo_id),
+            | Self::CountRecords { repo_id, .. }
+            | Self::ReferencedRecordCids { repo_id, .. } => uuid_to_routing(user_hashes, repo_id),
             Self::CountAllRecords { .. } | Self::GetRecordByCid { .. } => Routing::Global,
             Self::SetRecordTakedown {
                 scope_user: Some(user_id),
@@ -2757,7 +2764,8 @@ fn dispatch_record<S: StorageIO>(state: &HandlerState<S>, req: RecordRequest) {
                 state
                     .metastore
                     .record_ops()
-                    .delete_records(&mut batch, user_hash, &deletes);
+                    .delete_records(&mut batch, user_hash, &deletes)
+                    .map_err(metastore_to_db)?;
                 batch.commit().map_err(|e| DbError::Query(e.to_string()))
             })();
             let _ = tx.send(result);
@@ -2858,6 +2866,23 @@ fn dispatch_record<S: StorageIO>(state: &HandlerState<S>, req: RecordRequest) {
                 .record_ops()
                 .get_record_by_cid(&cid, None)
                 .map(|opt| opt.map(convert_record_with_takedown))
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        RecordRequest::ReferencedRecordCids {
+            repo_id,
+            cids,
+            excluded_keys,
+            tx,
+        } => {
+            let excluded: Vec<(&Nsid, &Rkey)> = excluded_keys
+                .iter()
+                .map(|(collection, rkey)| (collection, rkey))
+                .collect();
+            let result = state
+                .metastore
+                .record_ops()
+                .referenced_record_cids(repo_id, &cids, &excluded)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }

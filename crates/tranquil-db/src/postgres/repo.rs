@@ -721,6 +721,45 @@ impl RepoRepository for PostgresRepoRepository {
         }))
     }
 
+    async fn referenced_record_cids(
+        &self,
+        repo_id: Uuid,
+        cids: &[CidLink],
+        excluded_keys: &[(&Nsid, &Rkey)],
+    ) -> Result<Vec<CidLink>, DbError> {
+        if cids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let cid_strs: Vec<String> = cids.iter().map(|c| c.as_str().to_owned()).collect();
+        let (excluded_collections, excluded_rkeys): (Vec<String>, Vec<String>) = excluded_keys
+            .iter()
+            .map(|(collection, rkey)| (collection.as_str().to_owned(), rkey.as_str().to_owned()))
+            .unzip();
+
+        let rows = sqlx::query_scalar!(
+            r#"
+            SELECT DISTINCT r.record_cid AS "record_cid!"
+            FROM records r
+            WHERE r.repo_id = $1
+              AND r.record_cid = ANY($2)
+              AND NOT EXISTS (
+                  SELECT 1 FROM UNNEST($3::text[], $4::text[]) AS k(collection, rkey)
+                  WHERE k.collection = r.collection AND k.rkey = r.rkey
+              )
+            "#,
+            repo_id,
+            &cid_strs,
+            &excluded_collections,
+            &excluded_rkeys
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        column_vec(rows, col::RECORDS_RECORD_CID)
+    }
+
     async fn set_record_takedown(
         &self,
         cid: &CidLink,

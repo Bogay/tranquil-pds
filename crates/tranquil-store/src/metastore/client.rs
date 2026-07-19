@@ -400,6 +400,27 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         recv(rx).await
     }
 
+    async fn referenced_record_cids(
+        &self,
+        repo_id: Uuid,
+        cids: &[CidLink],
+        excluded_keys: &[(&Nsid, &Rkey)],
+    ) -> Result<Vec<CidLink>, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::Record(
+            RecordRequest::ReferencedRecordCids {
+                repo_id,
+                cids: cids.to_vec(),
+                excluded_keys: excluded_keys
+                    .iter()
+                    .map(|(collection, rkey)| ((*collection).clone(), (*rkey).clone()))
+                    .collect(),
+                tx,
+            },
+        ))?;
+        recv(rx).await
+    }
+
     async fn set_record_takedown(
         &self,
         cid: &CidLink,

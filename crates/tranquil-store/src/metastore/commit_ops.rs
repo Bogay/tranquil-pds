@@ -181,7 +181,8 @@ impl<S: StorageIO + 'static> CommitOps<S> {
             .collect();
 
         self.record_ops
-            .delete_records(&mut batch, user_hash, &deletes);
+            .delete_records(&mut batch, user_hash, &deletes)
+            .map_err(|e| ApplyCommitError::Database(e.to_string()))?;
 
         self.user_block_ops
             .insert_user_blocks(&mut batch, user_hash, &input.new_block_cids, &input.new_rev)

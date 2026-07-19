@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT r.record_cid AS \"record_cid!\"\n            FROM records r\n            WHERE r.repo_id = $1\n              AND r.record_cid = ANY($2)\n              AND NOT EXISTS (\n                  SELECT 1 FROM UNNEST($3::text[], $4::text[]) AS k(collection, rkey)\n                  WHERE k.collection = r.collection AND k.rkey = r.rkey\n              )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record_cid!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "105807a41c7337e7aa46bace29ab613030fd4fbf6845baddab9c0b2009972c02"
+}

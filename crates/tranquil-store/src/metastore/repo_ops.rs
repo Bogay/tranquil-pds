@@ -6,7 +6,7 @@ use uuid::Uuid;
 use super::MetastoreError;
 use super::encoding::KeyReader;
 use super::keys::{KeyTag, UserHash};
-use super::records::record_user_prefix;
+use super::records::{record_by_cid_user_prefix, record_user_prefix};
 use super::repo_meta::{
     RepoMetaValue, RepoStatus, handle_key, repo_meta_key, repo_meta_prefix, stage_repo_meta_removal,
 };
@@ -620,6 +620,11 @@ pub(super) fn stage_full_repo_data_removal(
 ) -> Result<(), MetastoreError> {
     stage_repo_meta_removal(batch, repo_data, user_hash, handle);
     delete_all_by_prefix(repo_data, batch, record_user_prefix(user_hash).as_slice())?;
+    delete_all_by_prefix(
+        repo_data,
+        batch,
+        record_by_cid_user_prefix(user_hash).as_slice(),
+    )?;
     delete_all_by_prefix(
         repo_data,
         batch,

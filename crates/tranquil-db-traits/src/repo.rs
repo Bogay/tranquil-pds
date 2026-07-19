@@ -410,6 +410,13 @@ pub trait RepoRepository: Send + Sync {
     async fn get_record_by_cid(&self, cid: &CidLink)
     -> Result<Option<RecordWithTakedown>, DbError>;
 
+    async fn referenced_record_cids(
+        &self,
+        repo_id: Uuid,
+        cids: &[CidLink],
+        excluded_keys: &[(&Nsid, &Rkey)],
+    ) -> Result<Vec<CidLink>, DbError>;
+
     async fn set_record_takedown(
         &self,
         cid: &CidLink,

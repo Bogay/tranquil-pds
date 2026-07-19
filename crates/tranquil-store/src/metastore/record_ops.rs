@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use fjall::Keyspace;
@@ -8,10 +9,16 @@ use super::MetastoreError;
 use super::encoding::{KeyReader, exclusive_upper_bound};
 use super::keys::UserHash;
 use super::records::{
-    RecordValue, record_collection_prefix, record_key, record_user_prefix, records_prefix,
+    RecordValue, record_by_cid_built_key, record_by_cid_index_prefix, record_by_cid_key,
+    record_by_cid_key_from_suffix, record_by_cid_prefix, record_by_cid_suffix,
+    record_by_cid_user_prefix, record_collection_prefix, record_key,
+    record_key_user_hash_and_suffix, record_user_prefix, records_prefix,
 };
 use super::repo_ops::{bytes_to_cid_link, cid_link_to_bytes};
-use super::scan::{count_prefix, delete_all_by_prefix, point_lookup};
+use super::scan::{
+    count_prefix, delete_all_by_prefix, delete_all_by_prefix_chunked, point_lookup, prefix_entries,
+    stage_in_chunks,
+};
 use super::user_hash::UserHashMap;
 
 use tranquil_types::{CidLink, Nsid, Rkey};
@@ -77,22 +84,36 @@ impl RecordOps {
         user_hash: UserHash,
         records: &[RecordWrite<'_>],
     ) -> Result<(), MetastoreError> {
-        records.iter().try_for_each(|rec| {
-            let key = record_key(user_hash, rec.collection, rec.rkey);
-            let cid_bytes = cid_link_to_bytes(rec.cid)?;
-            let existing_takedown = self
-                .repo_data
-                .get(key.as_slice())
-                .map_err(MetastoreError::Fjall)?
-                .and_then(|raw| RecordValue::deserialize(&raw))
-                .and_then(|v| v.takedown_ref);
-            let value = RecordValue {
-                record_cid: cid_bytes,
-                takedown_ref: existing_takedown,
-            };
-            batch.insert(&self.repo_data, key.as_slice(), value.serialize());
-            Ok::<(), MetastoreError>(())
-        })
+        let last_write_per_key: BTreeMap<(&Nsid, &Rkey), &CidLink> = records
+            .iter()
+            .map(|rec| ((rec.collection, rec.rkey), rec.cid))
+            .collect();
+
+        last_write_per_key
+            .into_iter()
+            .try_for_each(|((collection, rkey), cid)| {
+                let key = record_key(user_hash, collection, rkey);
+                let cid_bytes = cid_link_to_bytes(cid)?;
+                let existing = self
+                    .repo_data
+                    .get(key.as_slice())
+                    .map_err(MetastoreError::Fjall)?
+                    .and_then(|raw| RecordValue::deserialize(&raw));
+                if let Some(prev) = &existing
+                    && prev.record_cid != cid_bytes
+                {
+                    let stale = record_by_cid_key(user_hash, &prev.record_cid, collection, rkey);
+                    batch.remove(&self.repo_data, stale.as_slice());
+                }
+                let value = RecordValue {
+                    record_cid: cid_bytes,
+                    takedown_ref: existing.and_then(|v| v.takedown_ref),
+                };
+                let reverse = record_by_cid_key(user_hash, &value.record_cid, collection, rkey);
+                batch.insert(&self.repo_data, key.as_slice(), value.serialize());
+                batch.insert(&self.repo_data, reverse.as_slice(), []);
+                Ok::<(), MetastoreError>(())
+            })
     }
 
     pub fn delete_records(
@@ -100,11 +121,22 @@ impl RecordOps {
         batch: &mut fjall::OwnedWriteBatch,
         user_hash: UserHash,
         records: &[RecordDelete<'_>],
-    ) {
-        records.iter().for_each(|rec| {
+    ) -> Result<(), MetastoreError> {
+        records.iter().try_for_each(|rec| {
             let key = record_key(user_hash, rec.collection, rec.rkey);
+            let existing = self
+                .repo_data
+                .get(key.as_slice())
+                .map_err(MetastoreError::Fjall)?
+                .and_then(|raw| RecordValue::deserialize(&raw));
+            if let Some(prev) = existing {
+                let reverse =
+                    record_by_cid_key(user_hash, &prev.record_cid, rec.collection, rec.rkey);
+                batch.remove(&self.repo_data, reverse.as_slice());
+            }
             batch.remove(&self.repo_data, key.as_slice());
-        });
+            Ok(())
+        })
     }
 
     pub fn delete_all_records(
@@ -112,8 +144,56 @@ impl RecordOps {
         batch: &mut fjall::OwnedWriteBatch,
         user_hash: UserHash,
     ) -> Result<(), MetastoreError> {
-        let prefix = record_user_prefix(user_hash);
-        delete_all_by_prefix(&self.repo_data, batch, prefix.as_slice())
+        delete_all_by_prefix(
+            &self.repo_data,
+            batch,
+            record_by_cid_user_prefix(user_hash).as_slice(),
+        )?;
+        delete_all_by_prefix(
+            &self.repo_data,
+            batch,
+            record_user_prefix(user_hash).as_slice(),
+        )
+    }
+
+    pub fn referenced_record_cids(
+        &self,
+        repo_id: Uuid,
+        cids: &[CidLink],
+        excluded_keys: &[(&Nsid, &Rkey)],
+    ) -> Result<Vec<CidLink>, MetastoreError> {
+        let user_hash = self
+            .user_hashes
+            .get(&repo_id)
+            .ok_or(MetastoreError::InvalidInput(
+                "repo id has no user hash mapping",
+            ))?;
+
+        let excluded: HashSet<SmallVec<[u8; 128]>> = excluded_keys
+            .iter()
+            .map(|(collection, rkey)| record_by_cid_suffix(collection, rkey))
+            .collect();
+
+        cids.iter()
+            .map(|cid| {
+                let cid_bytes = cid_link_to_bytes(cid)?;
+                let prefix = record_by_cid_prefix(user_hash, &cid_bytes);
+                let referenced = self
+                    .repo_data
+                    .prefix(prefix.as_slice())
+                    .find_map(|guard| match guard.into_inner() {
+                        Err(e) => Some(Err(MetastoreError::Fjall(e))),
+                        Ok((key_bytes, _)) => key_bytes
+                            .get(prefix.len()..)
+                            .is_none_or(|suffix| !excluded.contains(suffix))
+                            .then_some(Ok::<(), MetastoreError>(())),
+                    })
+                    .transpose()?
+                    .is_some();
+                Ok(referenced.then(|| cid.clone()))
+            })
+            .filter_map(Result::transpose)
+            .collect()
     }
 
     pub fn get_record_cid(
@@ -286,7 +366,6 @@ impl RecordOps {
             };
             let (key_bytes, _) = guard.into_inner().map_err(MetastoreError::Fjall)?;
             let collection = parse_record_key_collection(&key_bytes)
-                .map(Nsid::from)
                 .ok_or(MetastoreError::CorruptData("invalid record key"))?;
             let coll_prefix = record_collection_prefix(user_hash, &collection);
             seek_from = exclusive_upper_bound(coll_prefix.as_slice())
@@ -339,7 +418,7 @@ impl RecordOps {
 
                 match value.record_cid == target_bytes {
                     true => {
-                        let (coll_str, rkey_str) = match parse_record_key_fields(&key_bytes) {
+                        let (collection, rkey) = match parse_record_key_fields(&key_bytes) {
                             Some(pair) => pair,
                             None => {
                                 return Some(Err(MetastoreError::CorruptData(
@@ -365,8 +444,8 @@ impl RecordOps {
                         };
                         Some(Ok(RecordWithTakedown {
                             id: user_id,
-                            collection: Nsid::from(coll_str),
-                            rkey: Rkey::from(rkey_str),
+                            collection,
+                            rkey,
                             takedown_ref: value.takedown_ref,
                         }))
                     }
@@ -430,7 +509,7 @@ fn decode_record_info(key_bytes: &[u8], val_bytes: &[u8]) -> Result<RecordInfo, 
         .ok_or(MetastoreError::CorruptData("invalid record key"))?;
     let cid = bytes_to_cid_link(&value.record_cid)?;
     Ok(RecordInfo {
-        rkey: Rkey::from(rkey),
+        rkey,
         record_cid: cid,
     })
 }
@@ -445,26 +524,95 @@ fn decode_full_record_info(
         .ok_or(MetastoreError::CorruptData("invalid record key"))?;
     let cid = bytes_to_cid_link(&value.record_cid)?;
     Ok(FullRecordInfo {
-        collection: Nsid::from(collection),
-        rkey: Rkey::from(rkey),
+        collection,
+        rkey,
         record_cid: cid,
     })
 }
 
-fn parse_record_key_fields(key_bytes: &[u8]) -> Option<(String, String)> {
+fn parse_record_key_fields(key_bytes: &[u8]) -> Option<(Nsid, Rkey)> {
     let mut reader = KeyReader::new(key_bytes);
     let _tag = reader.tag()?;
     let _user_hash = reader.u64()?;
-    let collection = reader.string()?;
-    let rkey = reader.string()?;
+    let collection = Nsid::new(reader.string()?).ok()?;
+    let rkey = Rkey::new(reader.string()?).ok()?;
     Some((collection, rkey))
 }
 
-fn parse_record_key_collection(key_bytes: &[u8]) -> Option<String> {
+fn parse_record_key_collection(key_bytes: &[u8]) -> Option<Nsid> {
     let mut reader = KeyReader::new(key_bytes);
     let _tag = reader.tag()?;
     let _user_hash = reader.u64()?;
-    reader.string()
+    Nsid::new(reader.string()?).ok()
+}
+
+// Committing in chunks like this means
+// the rebuild leaves entries under the index prefix
+// that only cover some of the records
+// if anything interrupts it part-way through
+// where the marker goes in last
+// and is the only evidence a rebuild ever finished
+// so its absence means wiping whatever is there and starting over
+// as opposed to trusting a partial index.
+pub fn rebuild_record_by_cid_index(
+    db: &fjall::Database,
+    repo_data: &Keyspace,
+) -> Result<usize, MetastoreError> {
+    let built_key = record_by_cid_built_key();
+    if repo_data
+        .get(built_key.as_slice())
+        .map_err(MetastoreError::Fjall)?
+        .is_some()
+    {
+        return Ok(0);
+    }
+
+    const COMMIT_EVERY: usize = 10_000;
+    let discarded = delete_all_by_prefix_chunked(
+        db,
+        repo_data,
+        record_by_cid_index_prefix().as_slice(),
+        COMMIT_EVERY,
+    )?;
+    if discarded > 0 {
+        tracing::warn!(
+            entries = discarded,
+            "discarded a record_by_cid index that an interrupted rebuild left wihtout its marker"
+        );
+    }
+
+    let mut skipped = 0usize;
+    let written = stage_in_chunks(
+        db,
+        prefix_entries(repo_data, records_prefix().as_slice()),
+        COMMIT_EVERY,
+        |batch, (key_bytes, val_bytes)| {
+            match (
+                record_key_user_hash_and_suffix(&key_bytes),
+                RecordValue::deserialize(&val_bytes),
+            ) {
+                (Some((user_hash, suffix)), Some(value)) => {
+                    let reverse =
+                        record_by_cid_key_from_suffix(user_hash, &value.record_cid, suffix);
+                    batch.insert(repo_data, reverse.as_slice(), []);
+                }
+                _ => skipped += 1,
+            }
+            Ok(())
+        },
+    )?;
+    if skipped > 0 {
+        tracing::warn!(
+            skipped,
+            "record_by_cid rebuild skipped rows whose key or value doesn't decode. \
+             Those records are unreadable through every other path too."
+        );
+    }
+
+    let mut batch = db.batch();
+    batch.insert(repo_data, built_key.as_slice(), []);
+    batch.commit()?;
+    Ok(written.saturating_sub(skipped))
 }
 
 fn parse_record_key_user_hash(key_bytes: &[u8]) -> Option<UserHash> {
@@ -492,20 +640,6 @@ mod tests {
         CidLink::from_cid(&c)
     }
 
-    fn open_fresh() -> (tempfile::TempDir, Metastore) {
-        let dir = tempfile::TempDir::new().unwrap();
-        let ms = Metastore::open(dir.path(), test_config()).unwrap();
-        (dir, ms)
-    }
-
-    fn test_did(name: &str) -> tranquil_types::Did {
-        tranquil_types::Did::from(format!("did:plc:{name}"))
-    }
-
-    fn test_handle(name: &str) -> tranquil_types::Handle {
-        tranquil_types::Handle::from(format!("{name}.test.invalid"))
-    }
-
     fn test_rev(seq: u64) -> tranquil_types::Tid {
         const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
         let s: String = (0..13)
@@ -515,10 +649,32 @@ mod tests {
         tranquil_types::Tid::new(s).expect("generated TID is valid")
     }
 
+    fn open_fresh() -> (tempfile::TempDir, Metastore) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ms = Metastore::open(dir.path(), test_config()).unwrap();
+        (dir, ms)
+    }
+
+    fn test_did(name: &str) -> tranquil_types::Did {
+        tranquil_types::Did::new(format!("did:plc:{name}")).expect("test DID is well-formed")
+    }
+
+    fn test_handle(name: &str) -> tranquil_types::Handle {
+        tranquil_types::Handle::new(format!("{name}.oyster.cafe")).expect("test handle is valid")
+    }
+
+    fn test_nsid(name: impl Into<String>) -> Nsid {
+        Nsid::new(name).expect("test collection is a valid NSID")
+    }
+
+    fn test_rkey(key: impl Into<String>) -> Rkey {
+        Rkey::new(key).expect("test record key is a valid rkey")
+    }
+
     fn setup_user(ms: &Metastore) -> (Uuid, super::super::keys::UserHash) {
         let user_id = Uuid::new_v4();
-        let did = test_did("testuser");
-        let handle = test_handle("testuser");
+        let did = test_did("limpet");
+        let handle = test_handle("limpet");
         let cid = test_cid_link(0);
         ms.repo_ops()
             .create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(0))
@@ -565,8 +721,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("3k2abcd".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("3k2abcd");
         let cid = test_cid_link(1);
 
         let mut batch = ms.database().batch();
@@ -585,8 +741,8 @@ mod tests {
         let (user_id, _) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("nonexistent".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("nonexistent");
         assert!(
             rec_ops
                 .get_record_cid(user_id, &collection, &rkey)
@@ -601,8 +757,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("3k2abcd".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("3k2abcd");
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
 
@@ -628,8 +784,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("3k2abcd".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("3k2abcd");
         let cid = test_cid_link(1);
 
         let mut batch = ms.database().batch();
@@ -639,7 +795,9 @@ mod tests {
         batch.commit().unwrap();
 
         let mut batch = ms.database().batch();
-        rec_ops.delete_records(&mut batch, user_hash, &[rd(&collection, &rkey)]);
+        rec_ops
+            .delete_records(&mut batch, user_hash, &[rd(&collection, &rkey)])
+            .unwrap();
         batch.commit().unwrap();
 
         assert!(
@@ -656,10 +814,10 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let coll1 = Nsid::from("app.bsky.feed.post".to_string());
-        let coll2 = Nsid::from("app.bsky.feed.like".to_string());
-        let rkey_a = Rkey::from("a".to_string());
-        let rkey_b = Rkey::from("b".to_string());
+        let coll1 = test_nsid("app.bsky.feed.post");
+        let coll2 = test_nsid("app.bsky.feed.like");
+        let rkey_a = test_rkey("a");
+        let rkey_b = test_rkey("b");
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
 
@@ -688,8 +846,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..5).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkeys: Vec<Rkey> = (0..5).map(|i| test_rkey(format!("rkey{i:03}"))).collect();
         let cids: Vec<CidLink> = (0..5).map(|i| test_cid_link(i + 1)).collect();
 
         let writes: Vec<RecordWrite<'_>> = rkeys
@@ -719,8 +877,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..5).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkeys: Vec<Rkey> = (0..5).map(|i| test_rkey(format!("rkey{i:03}"))).collect();
         let cids: Vec<CidLink> = (0..5).map(|i| test_cid_link(i + 1)).collect();
 
         let writes: Vec<RecordWrite<'_>> = rkeys
@@ -735,7 +893,7 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        let cursor = Rkey::from("rkey003".to_string());
+        let cursor = test_rkey("rkey003");
         let results = rec_ops
             .list_records(&lrq(
                 user_id,
@@ -759,8 +917,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..5).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkeys: Vec<Rkey> = (0..5).map(|i| test_rkey(format!("rkey{i:03}"))).collect();
         let cids: Vec<CidLink> = (0..5).map(|i| test_cid_link(i + 1)).collect();
 
         let writes: Vec<RecordWrite<'_>> = rkeys
@@ -790,8 +948,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..5).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkeys: Vec<Rkey> = (0..5).map(|i| test_rkey(format!("rkey{i:03}"))).collect();
         let cids: Vec<CidLink> = (0..5).map(|i| test_cid_link(i + 1)).collect();
 
         let writes: Vec<RecordWrite<'_>> = rkeys
@@ -806,7 +964,7 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        let cursor = Rkey::from("rkey001".to_string());
+        let cursor = test_rkey("rkey001");
         let results = rec_ops
             .list_records(&lrq(
                 user_id,
@@ -830,8 +988,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..10).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkeys: Vec<Rkey> = (0..10).map(|i| test_rkey(format!("rkey{i:03}"))).collect();
         let cids: Vec<CidLink> = (0..10).map(|i| test_cid_link(i + 1)).collect();
 
         let writes: Vec<RecordWrite<'_>> = rkeys
@@ -846,8 +1004,8 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        let rkey_start = Rkey::from("rkey003".to_string());
-        let rkey_end = Rkey::from("rkey006".to_string());
+        let rkey_start = test_rkey("rkey003");
+        let rkey_end = test_rkey("rkey006");
         let results = rec_ops
             .list_records(&lrq(
                 user_id,
@@ -870,11 +1028,11 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let coll1 = Nsid::from("app.bsky.feed.like".to_string());
-        let coll2 = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey_a = Rkey::from("a".to_string());
-        let rkey_b = Rkey::from("b".to_string());
-        let rkey_c = Rkey::from("c".to_string());
+        let coll1 = test_nsid("app.bsky.feed.like");
+        let coll2 = test_nsid("app.bsky.feed.post");
+        let rkey_a = test_rkey("a");
+        let rkey_b = test_rkey("b");
+        let rkey_c = test_rkey("c");
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
         let cid3 = test_cid_link(3);
@@ -906,12 +1064,12 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let coll1 = Nsid::from("app.bsky.feed.like".to_string());
-        let coll2 = Nsid::from("app.bsky.feed.post".to_string());
-        let coll3 = Nsid::from("app.bsky.graph.follow".to_string());
+        let coll1 = test_nsid("app.bsky.feed.like");
+        let coll2 = test_nsid("app.bsky.feed.post");
+        let coll3 = test_nsid("app.bsky.graph.follow");
         let rkeys: Vec<Rkey> = ["a", "b", "c", "d", "e"]
             .iter()
-            .map(|s| Rkey::from(s.to_string()))
+            .map(|s| test_rkey(s.to_string()))
             .collect();
         let cids: Vec<CidLink> = (1..=5).map(test_cid_link).collect();
 
@@ -947,9 +1105,9 @@ mod tests {
         assert_eq!(rec_ops.count_records(user_id).unwrap(), 0);
         assert_eq!(rec_ops.count_all_records().unwrap(), 0);
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey_a = Rkey::from("a".to_string());
-        let rkey_b = Rkey::from("b".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey_a = test_rkey("a");
+        let rkey_b = test_rkey("b");
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
 
@@ -1005,9 +1163,9 @@ mod tests {
             .unwrap();
         let hash2 = ms.user_hashes().get(&user2).unwrap();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey_a = Rkey::from("a".to_string());
-        let rkey_b = Rkey::from("b".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey_a = test_rkey("a");
+        let rkey_b = test_rkey("b");
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
 
@@ -1031,8 +1189,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("r1".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("r1");
         let cid = test_cid_link(42);
 
         let mut batch = ms.database().batch();
@@ -1066,8 +1224,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("r1".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("r1");
         let cid = test_cid_link(42);
 
         let mut batch = ms.database().batch();
@@ -1097,8 +1255,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("r1".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("r1");
         let cid = test_cid_link(42);
 
         let mut batch = ms.database().batch();
@@ -1129,8 +1287,8 @@ mod tests {
         let (_user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("r1".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("r1");
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
 
@@ -1158,8 +1316,8 @@ mod tests {
     fn records_survive_reopen() {
         let dir = tempfile::TempDir::new().unwrap();
         let user_id;
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from("durable".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("durable");
         let cid = test_cid_link(77);
 
         {
@@ -1202,12 +1360,12 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
         let rkeys_unordered = ["zebra", "apple", "mango", "banana"];
 
         let rkeys: Vec<Rkey> = rkeys_unordered
             .iter()
-            .map(|rk| Rkey::from(rk.to_string()))
+            .map(|rk| test_rkey(rk.to_string()))
             .collect();
         let cids: Vec<CidLink> = (0..rkeys.len())
             .map(|i| test_cid_link(i as u8 + 1))
@@ -1233,13 +1391,13 @@ mod tests {
     }
 
     #[test]
-    fn record_with_empty_rkey() {
+    fn record_with_shortest_rkey() {
         let (_dir, ms) = open_fresh();
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey = Rkey::from(String::new());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("z");
         let cid = test_cid_link(1);
 
         let mut batch = ms.database().batch();
@@ -1258,14 +1416,14 @@ mod tests {
     }
 
     #[test]
-    fn record_with_null_bytes_in_rkey() {
+    fn record_rkey_extending_another_stays_distinct() {
         let (_dir, ms) = open_fresh();
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkey_with_null = Rkey::from("abc\x00def".to_string());
-        let rkey_plain = Rkey::from("abc".to_string());
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey_extended = test_rkey("abc.def");
+        let rkey_plain = test_rkey("abc");
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
 
@@ -1275,7 +1433,7 @@ mod tests {
                 &mut batch,
                 user_hash,
                 &[
-                    rw(&collection, &rkey_with_null, &cid1),
+                    rw(&collection, &rkey_extended, &cid1),
                     rw(&collection, &rkey_plain, &cid2),
                 ],
             )
@@ -1283,7 +1441,7 @@ mod tests {
         batch.commit().unwrap();
 
         let found1 = rec_ops
-            .get_record_cid(user_id, &collection, &rkey_with_null)
+            .get_record_cid(user_id, &collection, &rkey_extended)
             .unwrap();
         assert_eq!(found1, Some(cid1));
 
@@ -1296,19 +1454,19 @@ mod tests {
             .list_records(&lrq(user_id, &collection, None, 100, false, None, None))
             .unwrap();
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].rkey.as_str(), "abc\x00def");
+        assert_eq!(results[0].rkey.as_str(), "abc.def");
         assert_eq!(results[1].rkey.as_str(), "abc");
     }
 
     #[test]
-    fn record_with_null_bytes_in_collection() {
+    fn record_collection_extending_another_stays_distinct() {
         let (_dir, ms) = open_fresh();
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let coll_normal = Nsid::from("app.bsky.feed.post".to_string());
-        let coll_with_null = Nsid::from("app.bsky.feed.post\x00extra".to_string());
-        let rkey = Rkey::from("r1".to_string());
+        let coll_normal = test_nsid("app.bsky.feed.post");
+        let coll_extended = test_nsid("app.bsky.feed.post.extra");
+        let rkey = test_rkey("r1");
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
 
@@ -1319,7 +1477,7 @@ mod tests {
                 user_hash,
                 &[
                     rw(&coll_normal, &rkey, &cid1),
-                    rw(&coll_with_null, &rkey, &cid2),
+                    rw(&coll_extended, &rkey, &cid2),
                 ],
             )
             .unwrap();
@@ -1331,7 +1489,7 @@ mod tests {
         assert_eq!(found1, Some(cid1));
 
         let found2 = rec_ops
-            .get_record_cid(user_id, &coll_with_null, &rkey)
+            .get_record_cid(user_id, &coll_extended, &rkey)
             .unwrap();
         assert_eq!(found2, Some(cid2));
 
@@ -1340,10 +1498,10 @@ mod tests {
             .unwrap();
         assert_eq!(results_normal.len(), 1);
 
-        let results_null = rec_ops
-            .list_records(&lrq(user_id, &coll_with_null, None, 100, false, None, None))
+        let results_extended = rec_ops
+            .list_records(&lrq(user_id, &coll_extended, None, 100, false, None, None))
             .unwrap();
-        assert_eq!(results_null.len(), 1);
+        assert_eq!(results_extended.len(), 1);
 
         let collections = rec_ops.list_collections(user_id).unwrap();
         assert_eq!(collections.len(), 2);
@@ -1355,8 +1513,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..5).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkeys: Vec<Rkey> = (0..5).map(|i| test_rkey(format!("rkey{i:03}"))).collect();
         let cids: Vec<CidLink> = (0..5).map(|i| test_cid_link(i + 1)).collect();
 
         let writes: Vec<RecordWrite<'_>> = rkeys
@@ -1371,7 +1529,7 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        let cursor = Rkey::from("a".to_string());
+        let cursor = test_rkey("a");
         let results = rec_ops
             .list_records(&lrq(
                 user_id,
@@ -1392,8 +1550,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..10).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkeys: Vec<Rkey> = (0..10).map(|i| test_rkey(format!("rkey{i:03}"))).collect();
         let cids: Vec<CidLink> = (0..10).map(|i| test_cid_link(i + 1)).collect();
 
         let writes: Vec<RecordWrite<'_>> = rkeys
@@ -1408,8 +1566,8 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        let rkey_start = Rkey::from("rkey002".to_string());
-        let rkey_end = Rkey::from("rkey007".to_string());
+        let rkey_start = test_rkey("rkey002");
+        let rkey_end = test_rkey("rkey007");
         let results = rec_ops
             .list_records(&lrq(
                 user_id,
@@ -1432,8 +1590,8 @@ mod tests {
         let (user_id, user_hash) = setup_user(&ms);
         let rec_ops = ms.record_ops();
 
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
-        let rkeys: Vec<Rkey> = (0..10).map(|i| Rkey::from(format!("rkey{i:03}"))).collect();
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkeys: Vec<Rkey> = (0..10).map(|i| test_rkey(format!("rkey{i:03}"))).collect();
         let cids: Vec<CidLink> = (0..10).map(|i| test_cid_link(i + 1)).collect();
 
         let writes: Vec<RecordWrite<'_>> = rkeys
@@ -1448,7 +1606,7 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        let cursor = Rkey::from("rkey005".to_string());
+        let cursor = test_rkey("rkey005");
         let results = rec_ops
             .list_records(&lrq(
                 user_id,
@@ -1510,5 +1668,493 @@ mod tests {
             k
         };
         assert!(key_outside.as_slice() >= upper.as_slice());
+    }
+
+    #[test]
+    fn referenced_record_cids_reports_a_cid_held_by_another_key() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let kept = test_rkey("kept");
+        let dropped = test_rkey("dropped");
+        let shared = test_cid_link(9);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(
+                &mut batch,
+                user_hash,
+                &[
+                    rw(&collection, &kept, &shared),
+                    rw(&collection, &dropped, &shared),
+                ],
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(
+            rec_ops
+                .referenced_record_cids(
+                    user_id,
+                    std::slice::from_ref(&shared),
+                    &[(&collection, &dropped)]
+                )
+                .unwrap(),
+            vec![shared.clone()]
+        );
+        assert!(
+            rec_ops
+                .referenced_record_cids(
+                    user_id,
+                    &[shared],
+                    &[(&collection, &dropped), (&collection, &kept)]
+                )
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn referenced_record_cids_errors_for_a_repo_with_no_user_hash() {
+        let (_dir, ms) = open_fresh();
+        let rec_ops = ms.record_ops();
+
+        assert!(matches!(
+            rec_ops.referenced_record_cids(Uuid::new_v4(), &[test_cid_link(1)], &[]),
+            Err(MetastoreError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn two_upserts_of_one_key_in_a_batch_leave_only_the_last_cid_indexed() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("twice");
+        let first = test_cid_link(20);
+        let second = test_cid_link(21);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(
+                &mut batch,
+                user_hash,
+                &[
+                    rw(&collection, &rkey, &first),
+                    rw(&collection, &rkey, &second),
+                ],
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        assert!(
+            rec_ops
+                .referenced_record_cids(user_id, &[first], &[])
+                .unwrap()
+                .is_empty(),
+            "overwritten cid must not stay in the reverse index"
+        );
+        assert_eq!(
+            rec_ops
+                .referenced_record_cids(user_id, std::slice::from_ref(&second), &[])
+                .unwrap(),
+            vec![second]
+        );
+    }
+
+    #[test]
+    fn referenced_record_cids_forgets_a_cid_an_upsert_replaced() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("churned");
+        let first = test_cid_link(1);
+        let second = test_cid_link(2);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &[rw(&collection, &rkey, &first)])
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &[rw(&collection, &rkey, &second)])
+            .unwrap();
+        batch.commit().unwrap();
+
+        assert!(
+            rec_ops
+                .referenced_record_cids(user_id, &[first], &[])
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            rec_ops
+                .referenced_record_cids(user_id, std::slice::from_ref(&second), &[])
+                .unwrap(),
+            vec![second]
+        );
+    }
+
+    #[test]
+    fn referenced_record_cids_forgets_a_deleted_record() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("gone");
+        let cid = test_cid_link(3);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &[rw(&collection, &rkey, &cid)])
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .delete_records(&mut batch, user_hash, &[rd(&collection, &rkey)])
+            .unwrap();
+        batch.commit().unwrap();
+
+        assert!(
+            rec_ops
+                .referenced_record_cids(user_id, &[cid], &[])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn delete_all_records_clears_the_reverse_index() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("only");
+        let cid = test_cid_link(4);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &[rw(&collection, &rkey, &cid)])
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = ms.database().batch();
+        rec_ops.delete_all_records(&mut batch, user_hash).unwrap();
+        batch.commit().unwrap();
+
+        assert!(
+            ms.partition(crate::metastore::Partition::RepoData)
+                .prefix(record_by_cid_user_prefix(user_hash).as_slice())
+                .next()
+                .is_none()
+        );
+        assert!(
+            rec_ops
+                .referenced_record_cids(user_id, &[cid], &[])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    fn drop_index_and_marker(ms: &Metastore, repo_data: &Keyspace) {
+        let mut batch = ms.database().batch();
+        crate::metastore::scan::delete_all_by_prefix(
+            repo_data,
+            &mut batch,
+            record_by_cid_index_prefix().as_slice(),
+        )
+        .unwrap();
+        batch.remove(repo_data, record_by_cid_built_key().as_slice());
+        batch.commit().unwrap();
+    }
+
+    #[test]
+    fn rebuild_backfills_a_store_written_before_the_index_existed() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+        let repo_data = ms.partition(crate::metastore::Partition::RepoData).clone();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("legacy");
+        let cid = test_cid_link(5);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &[rw(&collection, &rkey, &cid)])
+            .unwrap();
+        batch.commit().unwrap();
+
+        drop_index_and_marker(&ms, &repo_data);
+        assert!(
+            rec_ops
+                .referenced_record_cids(user_id, std::slice::from_ref(&cid), &[])
+                .unwrap()
+                .is_empty()
+        );
+
+        assert_eq!(
+            rebuild_record_by_cid_index(ms.database(), &repo_data).unwrap(),
+            1
+        );
+        assert_eq!(
+            rec_ops
+                .referenced_record_cids(user_id, &[cid], &[])
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn rebuild_redoes_an_index_left_partial_by_a_crash() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+        let repo_data = ms.partition(crate::metastore::Partition::RepoData).clone();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let indexed = test_rkey("indexed");
+        let missed = test_rkey("missed");
+        let indexed_cid = test_cid_link(7);
+        let missed_cid = test_cid_link(8);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(
+                &mut batch,
+                user_hash,
+                &[
+                    rw(&collection, &indexed, &indexed_cid),
+                    rw(&collection, &missed, &missed_cid),
+                ],
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        drop_index_and_marker(&ms, &repo_data);
+        let mut batch = ms.database().batch();
+        batch.insert(
+            &repo_data,
+            record_by_cid_key(
+                user_hash,
+                &cid_link_to_bytes(&indexed_cid).unwrap(),
+                &collection,
+                &indexed,
+            )
+            .as_slice(),
+            [],
+        );
+        batch.commit().unwrap();
+
+        assert_eq!(
+            rebuild_record_by_cid_index(ms.database(), &repo_data).unwrap(),
+            2,
+            "a partial index without the marker must be rebuilt from scratch"
+        );
+        assert_eq!(
+            rec_ops
+                .referenced_record_cids(user_id, &[indexed_cid, missed_cid], &[])
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn rebuild_drops_a_stale_entry_an_older_binary_left_behind() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+        let repo_data = ms.partition(crate::metastore::Partition::RepoData).clone();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("churned");
+        let stale_cid = test_cid_link(10);
+        let live_cid = test_cid_link(11);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &[rw(&collection, &rkey, &live_cid)])
+            .unwrap();
+        batch.insert(
+            &repo_data,
+            record_by_cid_key(
+                user_hash,
+                &cid_link_to_bytes(&stale_cid).unwrap(),
+                &collection,
+                &rkey,
+            )
+            .as_slice(),
+            [],
+        );
+        batch.remove(&repo_data, record_by_cid_built_key().as_slice());
+        batch.commit().unwrap();
+
+        assert_eq!(
+            rebuild_record_by_cid_index(ms.database(), &repo_data).unwrap(),
+            1
+        );
+        assert!(
+            rec_ops
+                .referenced_record_cids(user_id, &[stale_cid], &[])
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            rec_ops
+                .referenced_record_cids(user_id, &[live_cid], &[])
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn rebuild_commits_in_chunks_past_the_batch_threshold() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+        let repo_data = ms.partition(crate::metastore::Partition::RepoData).clone();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let record_count = 10_001usize;
+        let rkeys: Vec<Rkey> = (0..record_count)
+            .map(|i| test_rkey(format!("chunk{i:05}")))
+            .collect();
+        let cids: Vec<CidLink> = (0..record_count)
+            .map(|i| test_cid_link((i % 251) as u8))
+            .collect();
+
+        let writes: Vec<RecordWrite<'_>> = rkeys
+            .iter()
+            .zip(cids.iter())
+            .map(|(rkey, cid)| rw(&collection, rkey, cid))
+            .collect();
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &writes)
+            .unwrap();
+        batch.commit().unwrap();
+
+        drop_index_and_marker(&ms, &repo_data);
+
+        assert_eq!(
+            rebuild_record_by_cid_index(ms.database(), &repo_data).unwrap(),
+            record_count
+        );
+        assert_eq!(
+            rec_ops
+                .referenced_record_cids(user_id, std::slice::from_ref(&cids[0]), &[])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            rec_ops
+                .referenced_record_cids(user_id, std::slice::from_ref(cids.last().unwrap()), &[])
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn rebuild_discards_a_large_stale_index_past_the_batch_threshold() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+        let repo_data = ms.partition(crate::metastore::Partition::RepoData).clone();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let live_rkey = test_rkey("live");
+        let live_cid = test_cid_link(1);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(
+                &mut batch,
+                user_hash,
+                &[rw(&collection, &live_rkey, &live_cid)],
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let stale_count = 10_001usize;
+        let stale: Vec<(Rkey, Vec<u8>)> = (0..stale_count)
+            .map(|i| {
+                let rkey = test_rkey(format!("stale{i:05}"));
+                let cid = cid_link_to_bytes(&test_cid_link(2)).unwrap();
+                let cid = cid
+                    .iter()
+                    .copied()
+                    .chain((i as u32).to_be_bytes())
+                    .collect();
+                (rkey, cid)
+            })
+            .collect();
+        let mut batch = ms.database().batch();
+        stale.iter().for_each(|(rkey, cid)| {
+            batch.insert(
+                &repo_data,
+                record_by_cid_key(user_hash, cid, &collection, rkey).as_slice(),
+                [],
+            );
+        });
+        batch.remove(&repo_data, record_by_cid_built_key().as_slice());
+        batch.commit().unwrap();
+
+        assert_eq!(
+            rebuild_record_by_cid_index(ms.database(), &repo_data).unwrap(),
+            1
+        );
+        assert_eq!(
+            repo_data
+                .prefix(record_by_cid_index_prefix().as_slice())
+                .count(),
+            1,
+            "rebuild must leave exactly one index entry, so no stale key survived the chunked delete"
+        );
+        assert_eq!(
+            rec_ops
+                .referenced_record_cids(user_id, &[live_cid], &[])
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn rebuild_is_a_noop_once_the_marker_exists() {
+        let (_dir, ms) = open_fresh();
+        let (_user_id, user_hash) = setup_user(&ms);
+        let rec_ops = ms.record_ops();
+        let repo_data = ms.partition(crate::metastore::Partition::RepoData).clone();
+
+        let collection = test_nsid("app.bsky.feed.post");
+        let rkey = test_rkey("present");
+        let cid = test_cid_link(6);
+
+        let mut batch = ms.database().batch();
+        rec_ops
+            .upsert_records(&mut batch, user_hash, &[rw(&collection, &rkey, &cid)])
+            .unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(
+            rebuild_record_by_cid_index(ms.database(), &repo_data).unwrap(),
+            0
+        );
     }
 }
