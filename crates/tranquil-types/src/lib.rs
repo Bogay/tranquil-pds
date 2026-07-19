@@ -160,9 +160,16 @@ macro_rules! validated_string_newtype {
         impl $name {
             pub fn new(s: impl Into<String>) -> Result<Self, $error> {
                 let s = s.into();
-                let validator: fn(&str) -> Result<(), ()> = $validator;
-                validator(&s).map_err(|_| $error::Invalid(s.clone()))?;
-                Ok(Self(s))
+                // The validator gives back the string it accepted rather than unit
+                // because the jacquard-common 0.9 that tranquil has for now
+                // normalizes as it parses and strips `at://` prefix at the same time,
+                // so storing the caller's input instead would leave Did::new(x).as_str()
+                // and x in a split-brain bork.
+                let validator: fn(&str) -> Result<String, ()> = $validator;
+                match validator(&s) {
+                    Ok(validated) => Ok(Self(validated)),
+                    Err(()) => Err($error::Invalid(s)),
+                }
             }
         }
 
@@ -197,7 +204,7 @@ validated_string_newtype! {
     pub struct Did;
     error = DidError;
     label = "DID";
-    validator = |s| jacquard_common::types::string::Did::new(s).map(|_| ()).map_err(|_| ());
+    validator = |s| jacquard_common::types::string::Did::new(s).map(|v| v.as_str().to_owned()).map_err(|_| ());
 }
 
 impl Did {
@@ -226,11 +233,30 @@ impl<'de> Deserialize<'de> for Handle {
 }
 
 impl Handle {
+    // In jacquard-common 0.9, `Handle::new` strips the prefix
+    // and checks the regex but then seems to reject every reserved TLD
+    // except literal "handle.invalid"
+    // where instead we need all of them to parse
+    // such that validation can report `DisallowedTld` against them.
+    //
+    // And jacquard hands the stripped slice back without ever lowercasing it
+    // so lowercasing here gets `Eq` & `Hash` agreeing for a given account.
     pub fn new(s: impl Into<String>) -> Result<Self, HandleError> {
         let s = s.into();
-        jacquard_common::types::string::Handle::new(&s)
-            .map_err(|_| HandleError::Invalid(s.clone()))?;
-        Ok(Self(s))
+        let stripped = s
+            .strip_prefix("at://")
+            .or_else(|| s.strip_prefix('@'))
+            .unwrap_or(&s);
+        match stripped.len() <= 253
+            && jacquard_common::types::handle::HANDLE_REGEX.is_match(stripped)
+        {
+            true => Ok(Self(stripped.to_ascii_lowercase())),
+            false => Err(HandleError::Invalid(s)),
+        }
+    }
+
+    pub fn has_disallowed_tld(&self) -> bool {
+        jacquard_common::types::ends_with(&self.0, jacquard_common::types::DISALLOWED_TLDS)
     }
 }
 
@@ -368,7 +394,7 @@ validated_string_newtype! {
     pub struct Rkey;
     error = RkeyError;
     label = "rkey";
-    validator = |s| jacquard_common::types::string::Rkey::new(s).map(|_| ()).map_err(|_| ());
+    validator = |s| jacquard_common::types::string::Rkey::new(s).map(|v| v.as_str().to_owned()).map_err(|_| ());
 }
 
 impl Rkey {
@@ -390,7 +416,7 @@ validated_string_newtype! {
     pub struct Nsid;
     error = NsidError;
     label = "NSID";
-    validator = |s| jacquard_common::types::string::Nsid::new(s).map(|_| ()).map_err(|_| ());
+    validator = |s| jacquard_common::types::string::Nsid::new(s).map(|v| v.as_str().to_owned()).map_err(|_| ());
 }
 
 impl Nsid {
@@ -407,7 +433,7 @@ validated_string_newtype! {
     pub struct AtUri;
     error = AtUriError;
     label = "AT URI";
-    validator = |s| jacquard_common::types::string::AtUri::new(s).map(|_| ()).map_err(|_| ());
+    validator = |s| jacquard_common::types::string::AtUri::new(s).map(|v| v.as_str().to_owned()).map_err(|_| ());
 }
 
 impl AtUri {
@@ -438,7 +464,7 @@ validated_string_newtype! {
     pub struct Tid;
     error = TidError;
     label = "TID";
-    validator = |s| jacquard_common::types::string::Tid::from_str(s).map(|_| ()).map_err(|_| ());
+    validator = |s| jacquard_common::types::string::Tid::from_str(s).map(|v| v.as_str().to_owned()).map_err(|_| ());
 }
 
 impl Tid {
@@ -446,13 +472,30 @@ impl Tid {
         use jacquard_common::types::integer::LimitedU32;
         Self(jacquard_common::types::string::Tid::now(LimitedU32::MIN).to_string())
     }
+
+    // TIDs sort like plain strings over base32-sortable
+    // whose lowest character is '2'
+    // so 13 of those is the smallest well-formed TID
+    // I can make.
+    // Any sentinel outside base32 would sort lower still
+    // (cough cough how I used to do it when being lazy with "0")
+    // but can't round-trip through `Tid::new`.
+    pub fn earliest() -> Self {
+        Self("2222222222222".to_owned())
+    }
+}
+
+impl From<jacquard_common::types::string::Tid> for Tid {
+    fn from(tid: jacquard_common::types::string::Tid) -> Self {
+        Self(tid.to_string())
+    }
 }
 
 validated_string_newtype! {
     pub struct Datetime;
     error = DatetimeError;
     label = "datetime";
-    validator = |s| jacquard_common::types::string::Datetime::from_str(s).map(|_| ()).map_err(|_| ());
+    validator = |s| jacquard_common::types::string::Datetime::from_str(s).map(|v| v.as_str().to_owned()).map_err(|_| ());
 }
 
 impl Datetime {
@@ -471,7 +514,7 @@ validated_string_newtype! {
     pub struct Language;
     error = LanguageError;
     label = "language";
-    validator = |s| jacquard_common::types::string::Language::from_str(s).map(|_| ()).map_err(|_| ());
+    validator = |s| jacquard_common::types::string::Language::from_str(s).map(|v| v.as_str().to_owned()).map_err(|_| ());
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -884,5 +927,80 @@ pub mod did_doc {
                         .and_then(|h| crate::Handle::new(h).ok())
                 })
             })
+    }
+}
+
+#[cfg(test)]
+mod validated_newtype_tests {
+    use super::*;
+
+    #[test]
+    fn a_did_stores_the_string_the_validator_accepted() {
+        assert_eq!(
+            Did::new("at://did:plc:nel").unwrap().as_str(),
+            "did:plc:nel",
+            "jacquard validates the at:// stripped form, so the stripped form must be stored"
+        );
+        assert_eq!(Did::new("did:plc:nel").unwrap().as_str(), "did:plc:nel");
+    }
+
+    #[test]
+    fn a_handle_stores_the_string_the_validator_accepted() {
+        assert_eq!(Handle::new("@nel.pet").unwrap().as_str(), "nel.pet");
+        assert_eq!(Handle::new("at://nel.pet").unwrap().as_str(), "nel.pet");
+        assert_eq!(Handle::new("nel.pet").unwrap().as_str(), "nel.pet");
+    }
+
+    #[test]
+    fn a_handle_lowercases_on_construction() {
+        assert_eq!(Handle::new("Nel.Pet").unwrap().as_str(), "nel.pet");
+        assert_eq!(
+            Handle::new("WHELK.OYSTER.CAFE").unwrap(),
+            Handle::new("whelk.oyster.cafe").unwrap()
+        );
+    }
+
+    #[test]
+    fn a_prefixed_did_round_trips_through_its_own_constructor() {
+        let once = Did::new("at://did:plc:whelk").unwrap();
+        let twice = Did::new(once.as_str()).unwrap();
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn an_invalid_value_reports_the_string_it_was_given() {
+        let err = Did::new("at://not-a-did").unwrap_err();
+        assert!(
+            err.to_string().contains("at://not-a-did"),
+            "the error names the caller's input, got {err}"
+        );
+    }
+
+    #[test]
+    fn the_earliest_tid_sorts_below_every_generated_tid() {
+        let earliest = Tid::earliest();
+        assert!(Tid::new(earliest.as_str()).is_ok());
+        assert!(earliest.as_str() < Tid::now().as_str());
+    }
+
+    #[test]
+    fn a_reserved_tld_handle_parses_but_reports_its_tld_as_disallowed() {
+        assert!(
+            !Handle::new("whelk.oyster.cafe")
+                .unwrap()
+                .has_disallowed_tld()
+        );
+        assert!(
+            Handle::new("whelk.pds.internal")
+                .unwrap()
+                .has_disallowed_tld()
+        );
+        assert!(
+            Handle::new("whelk.test.local")
+                .unwrap()
+                .has_disallowed_tld()
+        );
+        assert!(Handle::new("not a handle").is_err());
+        assert!(Handle::new("nodots").is_err());
     }
 }
