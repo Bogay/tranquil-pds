@@ -39,7 +39,7 @@ use self::keys::KeyTag;
 use self::partitions::Partition;
 use self::user_hash::UserHashMap;
 
-const CURRENT_FORMAT_VERSION: u64 = 1;
+const CURRENT_FORMAT_VERSION: u64 = 2;
 
 #[derive(Debug, Clone)]
 pub struct MetastoreConfig {
@@ -197,6 +197,11 @@ impl Metastore {
         let repo_data = partitions[Partition::RepoData.index()].clone();
         Self::check_or_write_version(&db, &repo_data)?;
 
+        let rebuilt = record_ops::rebuild_record_by_cid_index(&db, &repo_data)?;
+        if rebuilt > 0 {
+            tracing::info!(records = rebuilt, "rebuilt record_by_cid index");
+        }
+
         let user_hashes = Arc::new(UserHashMap::new(repo_data));
         let loaded = user_hashes.load_all()?;
         tracing::info!(count = loaded, "loaded user hash mappings");
@@ -222,12 +227,23 @@ impl Metastore {
                     .try_into()
                     .map_err(|_| MetastoreError::CorruptData("format version not 8 bytes"))?;
                 let found = u64::from_be_bytes(found_bytes);
-                match found == CURRENT_FORMAT_VERSION {
-                    true => Ok(()),
-                    false => Err(MetastoreError::VersionMismatch {
+                match found.cmp(&CURRENT_FORMAT_VERSION) {
+                    std::cmp::Ordering::Equal => Ok(()),
+                    std::cmp::Ordering::Greater => Err(MetastoreError::VersionMismatch {
                         expected: CURRENT_FORMAT_VERSION,
                         found,
                     }),
+                    std::cmp::Ordering::Less => {
+                        tracing::warn!(
+                            from = found,
+                            to = CURRENT_FORMAT_VERSION,
+                            "upgrading metastore format and rebuilding derived indexes"
+                        );
+                        repo_data.remove(records::record_by_cid_built_key().as_slice())?;
+                        repo_data.insert(version_key, version_bytes)?;
+                        db.persist(fjall::PersistMode::SyncData)?;
+                        Ok(())
+                    }
                 }
             }
             None => {
@@ -416,6 +432,21 @@ mod tests {
         }
     }
 
+    fn test_cid_link(seed: u8) -> tranquil_types::CidLink {
+        let digest: [u8; 32] = std::array::from_fn(|i| seed.wrapping_add(i as u8));
+        let mh = multihash::Multihash::<64>::wrap(0x12, &digest).unwrap();
+        tranquil_types::CidLink::from_cid(&cid::Cid::new_v1(0x71, mh))
+    }
+
+    fn test_rev(seq: u64) -> tranquil_types::Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        tranquil_types::Tid::new(s).expect("generated TID is valid")
+    }
+
     #[test]
     fn open_fresh_directory_succeeds() {
         let (_dir, ms) = open_fresh();
@@ -465,10 +496,8 @@ mod tests {
             encrypted_key_bytes: vec![7u8; 32],
             encryption_version: 0,
             reserved_key_id: None,
-            commit_cid: tranquil_types::CidLink::from(
-                "bafyreib2rxk3ryblouj3fxza5jvx6psmwewwessc4m6g6e7pqhhkwqomfi".to_string(),
-            ),
-            repo_rev: tranquil_types::Tid::from("rev0".to_string()),
+            commit_cid: test_cid_link(0),
+            repo_rev: test_rev(0),
             genesis_block_cids: vec![],
             invite_code: None,
             birthdate_pref: None,
@@ -742,28 +771,69 @@ mod tests {
         }
     }
 
+    fn stamp_format_version(dir: &std::path::Path, version: u64) {
+        let ms = Metastore::open(dir, test_config()).unwrap();
+        let repo_data = ms.partition(Partition::RepoData);
+        repo_data
+            .insert([KeyTag::FORMAT_VERSION.raw()], version.to_be_bytes())
+            .unwrap();
+        ms.persist().unwrap();
+    }
+
+    fn stored_format_version(ms: &Metastore) -> u64 {
+        let raw = ms
+            .partition(Partition::RepoData)
+            .get([KeyTag::FORMAT_VERSION.raw()])
+            .unwrap()
+            .unwrap();
+        u64::from_be_bytes(raw.as_ref().try_into().unwrap())
+    }
+
     #[test]
-    fn version_mismatch_returns_error() {
+    fn a_format_version_from_the_future_refuses_to_open() {
         let dir = tempfile::TempDir::new().unwrap();
+        stamp_format_version(dir.path(), 999);
+
+        assert!(matches!(
+            Metastore::open(dir.path(), test_config()),
+            Err(MetastoreError::VersionMismatch {
+                expected: CURRENT_FORMAT_VERSION,
+                found: 999
+            })
+        ));
+    }
+
+    #[test]
+    fn an_older_format_version_upgrades_and_rebuilds_derived_indexes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let stale: Vec<u8> = records::record_by_cid_index_prefix()
+            .iter()
+            .copied()
+            .chain([0xAB, 0xCD])
+            .collect();
 
         {
             let ms = Metastore::open(dir.path(), test_config()).unwrap();
             let repo_data = ms.partition(Partition::RepoData);
-            let version_key = [KeyTag::FORMAT_VERSION.raw()];
-            repo_data.insert(version_key, 999u64.to_be_bytes()).unwrap();
+            repo_data.insert(stale.as_slice(), []).unwrap();
+            repo_data
+                .insert(
+                    [KeyTag::FORMAT_VERSION.raw()],
+                    (CURRENT_FORMAT_VERSION - 1).to_be_bytes(),
+                )
+                .unwrap();
             ms.persist().unwrap();
         }
 
-        {
-            let result = Metastore::open(dir.path(), test_config());
-            assert!(matches!(
-                result,
-                Err(MetastoreError::VersionMismatch {
-                    expected: 1,
-                    found: 999
-                })
-            ));
-        }
+        let ms = Metastore::open(dir.path(), test_config()).unwrap();
+        assert_eq!(stored_format_version(&ms), CURRENT_FORMAT_VERSION);
+        assert!(
+            ms.partition(Partition::RepoData)
+                .get(stale.as_slice())
+                .unwrap()
+                .is_none(),
+            "the upgrade drops the built marker, so the rebuild wipes the stale index an older binary wrote"
+        );
     }
 
     #[test]
