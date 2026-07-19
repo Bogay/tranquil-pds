@@ -65,7 +65,7 @@ async fn try_reactivate_migration(
         .await
     {
         Ok(reactivated) => {
-            info!(did = %did, old_handle = %reactivated.old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
+            info!(did = %did, old_handle = ?reactivated.old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
             let secret_key_bytes = match state
                 .repos
                 .user
@@ -202,7 +202,8 @@ pub async fn create_account(
         let token = extracted.token;
         if is_service_token(&token) {
             let verifier = ServiceTokenVerifier::new();
-            let create_account_lxm = Nsid::from("com.atproto.server.createAccount".to_string());
+            let create_account_lxm = Nsid::new("com.atproto.server.createAccount")
+                .expect("com.atproto.server.createAccount is a valid NSID");
             match verifier
                 .verify_service_token(&token, Some(&create_account_lxm))
                 .await
@@ -448,7 +449,7 @@ pub async fn create_account(
             Ok(r) => r,
             Err(e) => return e.into_response(),
         };
-    let commit_cid = CidLink::from(repo.commit_cid.to_string());
+    let commit_cid = CidLink::from(&repo.commit_cid);
     let repo_rev = repo.repo_rev.clone();
 
     let birthdate_pref = if tranquil_config::get().server.age_assurance_override {

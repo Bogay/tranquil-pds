@@ -147,12 +147,14 @@ pub async fn request_channel_verification(
     match channel {
         CommsChannel::Email => {
             let hostname = &tranquil_config::get().server.hostname;
-            let fallback_handle = Handle::from("user".to_string());
+            let handle = handle.ok_or_else(|| {
+                ApiError::InternalError(Some("Email verification requires a handle".into()))
+            })?;
             tranquil_pds::comms::comms_repo::enqueue_email_update(
                 state.repos.infra.as_ref(),
                 user_id,
                 identifier,
-                handle.unwrap_or(&fallback_handle),
+                handle,
                 &formatted_token,
                 hostname,
             )

@@ -670,7 +670,6 @@ pub struct UserForVerification {
     pub did: Did,
     pub email: Option<String>,
     pub email_verified: bool,
-    pub handle: Handle,
 }
 
 #[derive(Debug, Clone)]
@@ -1119,7 +1118,7 @@ pub struct MigrationReactivationInput {
 #[derive(Debug, Clone)]
 pub struct ReactivatedAccountInfo {
     pub user_id: Uuid,
-    pub old_handle: Handle,
+    pub old_handle: Option<Handle>,
 }
 
 #[derive(Debug, Clone)]

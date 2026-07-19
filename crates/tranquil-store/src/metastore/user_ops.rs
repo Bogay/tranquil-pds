@@ -460,8 +460,6 @@ impl UserOps {
                         .map_err(|_| MetastoreError::CorruptData("invalid user did"))?,
                     email: v.email.clone(),
                     email_verified: v.email_verified,
-                    handle: Handle::new(v.handle.clone())
-                        .map_err(|_| MetastoreError::CorruptData("invalid user handle"))?,
                 })
             })
             .transpose()
@@ -3000,7 +2998,13 @@ impl UserOps {
         }
 
         let old_handle = Handle::new(user.handle.clone())
-            .map_err(|_| MigrationReactivationError::Database("invalid handle".to_owned()))?;
+            .inspect_err(|_| {
+                tracing::warn!(
+                    handle = %user.handle,
+                    "ignoring a stored handle that isn't valid"
+                );
+            })
+            .ok();
         let user_id = user.id;
 
         let mut batch = self.db.batch();

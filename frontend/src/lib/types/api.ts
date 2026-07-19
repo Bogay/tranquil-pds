@@ -529,7 +529,7 @@ export interface DelegationController {
 
 export interface DelegationControlledAccount {
   did: Did;
-  handle: Handle;
+  handle?: Handle;
   grantedScopes: ScopeSet;
   grantedAt: ISODateString;
 }

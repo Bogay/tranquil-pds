@@ -306,9 +306,7 @@ impl DelegationOps {
                 if let Some(val) = grant_val.filter(|v| v.revoked_at_ms.is_none()) {
                     let delegated_did = Did::new(val.delegated_did.clone())
                         .map_err(|_| MetastoreError::CorruptData("invalid delegated_did"))?;
-                    let handle = self
-                        .resolve_handle_for_did(&val.delegated_did)
-                        .unwrap_or_else(|| Handle::new("unknown.invalid").unwrap());
+                    let handle = self.resolve_handle_for_did(&val.delegated_did);
                     acc.push(DelegatedAccountInfo {
                         did: delegated_did,
                         handle,

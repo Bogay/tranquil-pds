@@ -58,7 +58,7 @@
         state: state,
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
-        login_hint: account.handle
+        login_hint: account.handle ?? account.did
       })
     })
 

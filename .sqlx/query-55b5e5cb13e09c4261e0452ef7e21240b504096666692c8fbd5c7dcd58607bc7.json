@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, did, email, email_verified, handle\n               FROM users\n               WHERE LOWER(email) = $1",
+  "query": "SELECT id, did, email, email_verified\n               FROM users\n               WHERE LOWER(email) = $1",
   "describe": {
     "columns": [
       {
@@ -22,11 +22,6 @@
         "ordinal": 3,
         "name": "email_verified",
         "type_info": "Bool"
-      },
-      {
-        "ordinal": 4,
-        "name": "handle",
-        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -38,9 +33,8 @@
       false,
       false,
       true,
-      false,
       false
     ]
   },
-  "hash": "b230a27fce54d4f79de4ffcc754bf6c7e5a889623e64cdd7aaec791b3553ed83"
+  "hash": "55b5e5cb13e09c4261e0452ef7e21240b504096666692c8fbd5c7dcd58607bc7"
 }

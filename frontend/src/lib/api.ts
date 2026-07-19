@@ -355,7 +355,7 @@ function _castDelegationControlledAccount(
   const a = raw as Record<string, unknown>;
   return {
     did: unsafeAsDid(a.did as string),
-    handle: unsafeAsHandle(a.handle as string),
+    handle: a.handle ? unsafeAsHandle(a.handle as string) : undefined,
     grantedScopes: unsafeAsScopeSet(
       (a.granted_scopes ?? a.grantedScopes) as string,
     ),

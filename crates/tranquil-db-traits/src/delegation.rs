@@ -23,7 +23,8 @@ pub struct DelegationGrant {
 #[serde(rename_all = "camelCase")]
 pub struct DelegatedAccountInfo {
     pub did: Did,
-    pub handle: Handle,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<Handle>,
     pub granted_scopes: DbScope,
     pub granted_at: DateTime<Utc>,
 }
@@ -32,6 +33,7 @@ pub struct DelegatedAccountInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ControllerInfo {
     pub did: Did,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handle: Option<Handle>,
     pub granted_scopes: DbScope,
     pub granted_at: DateTime<Utc>,

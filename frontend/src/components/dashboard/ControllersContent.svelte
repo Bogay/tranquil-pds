@@ -26,7 +26,7 @@
 
   interface ControlledAccount {
     did: Did
-    handle: Handle
+    handle?: Handle
     grantedScopes: ScopeSet
     grantedAt: string
   }
@@ -505,7 +505,7 @@
             <div class="item-card">
               <div class="item-info">
                 <div class="item-header">
-                  <span class="item-handle">@{account.handle}</span>
+                  <span class="item-handle">{account.handle ? `@${account.handle}` : account.did}</span>
                   <span class="badge scope">{getScopeLabel(account.grantedScopes)}</span>
                 </div>
                 <div class="item-details">

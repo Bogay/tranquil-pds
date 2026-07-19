@@ -7,7 +7,9 @@ use tranquil_db_traits::{
 use tranquil_types::Did;
 use uuid::Uuid;
 
+use super::col;
 use super::user::map_sqlx_error;
+use super::{column, legacy_column, opt_column};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "delegation_action_type", rename_all = "snake_case")]
@@ -166,16 +168,19 @@ impl DelegationRepository for PostgresDelegationRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| DelegationGrant {
-            id: r.id,
-            delegated_did: r.delegated_did.into(),
-            controller_did: r.controller_did.into(),
-            granted_scopes: DbScope::from_db(r.granted_scopes),
-            granted_at: r.granted_at,
-            granted_by: r.granted_by.into(),
-            revoked_at: r.revoked_at,
-            revoked_by: r.revoked_by.map(Into::into),
-        }))
+        row.map(|r| {
+            Ok(DelegationGrant {
+                id: r.id,
+                delegated_did: column(r.delegated_did, col::ACCOUNT_DELEGATIONS_DELEGATED_DID)?,
+                controller_did: column(r.controller_did, col::ACCOUNT_DELEGATIONS_CONTROLLER_DID)?,
+                granted_scopes: DbScope::from_db(r.granted_scopes),
+                granted_at: r.granted_at,
+                granted_by: column(r.granted_by, col::ACCOUNT_DELEGATIONS_GRANTED_BY)?,
+                revoked_at: r.revoked_at,
+                revoked_by: opt_column(r.revoked_by, col::ACCOUNT_DELEGATIONS_REVOKED_BY)?,
+            })
+        })
+        .transpose()
     }
 
     async fn get_delegations_for_account(
@@ -205,17 +210,18 @@ impl DelegationRepository for PostgresDelegationRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| ControllerInfo {
-                did: r.controller_did.into(),
-                handle: r.handle.map(Into::into),
-                granted_scopes: DbScope::from_db(r.granted_scopes),
-                granted_at: r.granted_at,
-                is_active: r.is_active,
-                is_local: r.is_local,
+        rows.into_iter()
+            .map(|r| {
+                Ok(ControllerInfo {
+                    did: column(r.controller_did, col::ACCOUNT_DELEGATIONS_CONTROLLER_DID)?,
+                    handle: r.handle.and_then(|h| legacy_column(h, col::USERS_HANDLE)),
+                    granted_scopes: DbScope::from_db(r.granted_scopes),
+                    granted_at: r.granted_at,
+                    is_active: r.is_active,
+                    is_local: r.is_local,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn get_accounts_controlled_by(
@@ -243,15 +249,16 @@ impl DelegationRepository for PostgresDelegationRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| DelegatedAccountInfo {
-                did: r.did.into(),
-                handle: r.handle.into(),
-                granted_scopes: DbScope::from_db(r.granted_scopes),
-                granted_at: r.granted_at,
+        rows.into_iter()
+            .map(|r| {
+                Ok(DelegatedAccountInfo {
+                    did: column(r.did, col::USERS_DID)?,
+                    handle: legacy_column(r.handle, col::USERS_HANDLE),
+                    granted_scopes: DbScope::from_db(r.granted_scopes),
+                    granted_at: r.granted_at,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn count_active_controllers(&self, delegated_did: &Did) -> Result<i64, DbError> {
@@ -353,20 +360,27 @@ impl DelegationRepository for PostgresDelegationRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| AuditLogEntry {
-                id: r.id,
-                delegated_did: r.delegated_did.into(),
-                actor_did: r.actor_did.into(),
-                controller_did: r.controller_did.map(Into::into),
-                action_type: r.action_type.into(),
-                action_details: r.action_details,
-                ip_address: r.ip_address,
-                user_agent: r.user_agent,
-                created_at: r.created_at,
+        rows.into_iter()
+            .map(|r| {
+                Ok(AuditLogEntry {
+                    id: r.id,
+                    delegated_did: column(
+                        r.delegated_did,
+                        col::DELEGATION_AUDIT_LOG_DELEGATED_DID,
+                    )?,
+                    actor_did: column(r.actor_did, col::DELEGATION_AUDIT_LOG_ACTOR_DID)?,
+                    controller_did: opt_column(
+                        r.controller_did,
+                        col::DELEGATION_AUDIT_LOG_CONTROLLER_DID,
+                    )?,
+                    action_type: r.action_type.into(),
+                    action_details: r.action_details,
+                    ip_address: r.ip_address,
+                    user_agent: r.user_agent,
+                    created_at: r.created_at,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn count_audit_log_entries(&self, delegated_did: &Did) -> Result<i64, DbError> {

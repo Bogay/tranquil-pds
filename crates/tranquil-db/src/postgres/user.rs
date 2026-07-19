@@ -4,6 +4,8 @@ use sqlx::PgPool;
 use tranquil_types::{AtIdentifier, Did, Handle, Jti, PasswordHash, TokenId};
 use uuid::Uuid;
 
+use super::col;
+use super::{column, legacy_column, opt_column};
 use tranquil_db_traits::{
     AccountSearchResult, AccountType, ChannelVerificationStatus, CommsChannel, DbError,
     DidWebOverrides, NotificationPrefs, OAuthTokenWithUser, PasswordResetResult, SsoProviderType,
@@ -87,17 +89,20 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| UserRow {
-            id: r.id,
-            did: Did::from(r.did),
-            handle: Handle::from(r.handle),
-            email: r.email,
-            created_at: r.created_at,
-            deactivated_at: r.deactivated_at,
-            takedown_ref: r.takedown_ref,
-            is_admin: r.is_admin,
-            inbound_migration: r.inbound_migration,
-        }))
+        row.map(|r| {
+            Ok(UserRow {
+                id: r.id,
+                did: column(r.did, col::USERS_DID)?,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                email: r.email,
+                created_at: r.created_at,
+                deactivated_at: r.deactivated_at,
+                takedown_ref: r.takedown_ref,
+                is_admin: r.is_admin,
+                inbound_migration: r.inbound_migration,
+            })
+        })
+        .transpose()
     }
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<UserRow>, DbError> {
@@ -110,17 +115,20 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| UserRow {
-            id: r.id,
-            did: Did::from(r.did),
-            handle: Handle::from(r.handle),
-            email: r.email,
-            created_at: r.created_at,
-            deactivated_at: r.deactivated_at,
-            takedown_ref: r.takedown_ref,
-            is_admin: r.is_admin,
-            inbound_migration: r.inbound_migration,
-        }))
+        row.map(|r| {
+            Ok(UserRow {
+                id: r.id,
+                did: column(r.did, col::USERS_DID)?,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                email: r.email,
+                created_at: r.created_at,
+                deactivated_at: r.deactivated_at,
+                takedown_ref: r.takedown_ref,
+                is_admin: r.is_admin,
+                inbound_migration: r.inbound_migration,
+            })
+        })
+        .transpose()
     }
 
     async fn get_with_key_by_did(&self, did: &Did) -> Result<Option<UserWithKey>, DbError> {
@@ -136,17 +144,20 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| UserWithKey {
-            id: r.id,
-            did: Did::from(r.did),
-            handle: Handle::from(r.handle),
-            email: r.email,
-            deactivated_at: r.deactivated_at,
-            takedown_ref: r.takedown_ref,
-            is_admin: r.is_admin,
-            key_bytes: r.key_bytes,
-            encryption_version: r.encryption_version,
-        }))
+        row.map(|r| {
+            Ok(UserWithKey {
+                id: r.id,
+                did: column(r.did, col::USERS_DID)?,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                email: r.email,
+                deactivated_at: r.deactivated_at,
+                takedown_ref: r.takedown_ref,
+                is_admin: r.is_admin,
+                key_bytes: r.key_bytes,
+                encryption_version: r.encryption_version,
+            })
+        })
+        .transpose()
     }
 
     async fn get_status_by_did(&self, did: &Did) -> Result<Option<UserStatus>, DbError> {
@@ -207,15 +218,18 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| OAuthTokenWithUser {
-            did: Did::from(r.did),
-            expires_at: r.expires_at,
-            deactivated_at: r.deactivated_at,
-            takedown_ref: r.takedown_ref,
-            is_admin: r.is_admin,
-            key_bytes: r.key_bytes,
-            encryption_version: r.encryption_version,
-        }))
+        row.map(|r| {
+            Ok(OAuthTokenWithUser {
+                did: column(r.did, col::OAUTH_TOKEN_DID)?,
+                expires_at: r.expires_at,
+                deactivated_at: r.deactivated_at,
+                takedown_ref: r.takedown_ref,
+                is_admin: r.is_admin,
+                key_bytes: r.key_bytes,
+                encryption_version: r.encryption_version,
+            })
+        })
+        .transpose()
     }
 
     async fn get_user_info_by_did(&self, did: &Did) -> Result<Option<UserInfoForAuth>, DbError> {
@@ -288,14 +302,16 @@ impl UserRepository for PostgresUserRepository {
         .map_err(map_sqlx_error)?;
         Ok(rows
             .into_iter()
-            .map(|r| AccountSearchResult {
-                did: Did::from(r.did),
-                handle: Handle::from(r.handle),
-                email: r.email,
-                created_at: r.created_at,
-                email_verified: r.email_verified,
-                deactivated_at: r.deactivated_at,
-                invites_disabled: r.invites_disabled,
+            .filter_map(|r| {
+                Some(AccountSearchResult {
+                    did: legacy_column(r.did, col::USERS_DID)?,
+                    handle: legacy_column(r.handle, col::USERS_HANDLE)?,
+                    email: r.email,
+                    created_at: r.created_at,
+                    email_verified: r.email_verified,
+                    deactivated_at: r.deactivated_at,
+                    invites_disabled: r.invites_disabled,
+                })
             })
             .collect())
     }
@@ -311,24 +327,27 @@ impl UserRepository for PostgresUserRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| UserAuthInfo {
-            id: r.id,
-            did: Did::from(r.did),
-            password_hash: r.password_hash.map(PasswordHash::new),
-            deactivated_at: r.deactivated_at,
-            takedown_ref: r.takedown_ref,
-            channel_verification: ChannelVerificationStatus::from_db_row(
-                r.email_verified,
-                r.discord_verified,
-                r.telegram_verified,
-                r.signal_verified,
-            ),
-        }))
+        row.map(|r| {
+            Ok(UserAuthInfo {
+                id: r.id,
+                did: column(r.did, col::USERS_DID)?,
+                password_hash: r.password_hash.map(PasswordHash::new),
+                deactivated_at: r.deactivated_at,
+                takedown_ref: r.takedown_ref,
+                channel_verification: ChannelVerificationStatus::from_db_row(
+                    r.email_verified,
+                    r.discord_verified,
+                    r.telegram_verified,
+                    r.signal_verified,
+                ),
+            })
+        })
+        .transpose()
     }
 
     async fn get_by_email(&self, email: &str) -> Result<Option<UserForVerification>, DbError> {
         let row = sqlx::query!(
-            r#"SELECT id, did, email, email_verified, handle
+            r#"SELECT id, did, email, email_verified
                FROM users
                WHERE LOWER(email) = $1"#,
             email
@@ -336,13 +355,15 @@ impl UserRepository for PostgresUserRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| UserForVerification {
-            id: r.id,
-            did: Did::from(r.did),
-            email: r.email,
-            email_verified: r.email_verified,
-            handle: Handle::from(r.handle),
-        }))
+        row.map(|r| {
+            Ok(UserForVerification {
+                id: r.id,
+                did: column(r.did, col::USERS_DID)?,
+                email: r.email,
+                email_verified: r.email_verified,
+            })
+        })
+        .transpose()
     }
 
     async fn get_comms_prefs(&self, user_id: Uuid) -> Result<Option<UserCommsPrefs>, DbError> {
@@ -354,15 +375,18 @@ impl UserRepository for PostgresUserRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| UserCommsPrefs {
-            email: r.email,
-            handle: Handle::from(r.handle),
-            preferred_channel: r.preferred_channel,
-            preferred_locale: r.preferred_locale,
-            telegram_chat_id: r.telegram_chat_id,
-            discord_id: r.discord_id,
-            signal_username: r.signal_username,
-        }))
+        row.map(|r| {
+            Ok(UserCommsPrefs {
+                email: r.email,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                preferred_channel: r.preferred_channel,
+                preferred_locale: r.preferred_locale,
+                telegram_chat_id: r.telegram_chat_id,
+                discord_id: r.discord_id,
+                signal_username: r.signal_username,
+            })
+        })
+        .transpose()
     }
 
     async fn get_id_by_did(&self, did: &Did) -> Result<Option<Uuid>, DbError> {
@@ -395,10 +419,13 @@ impl UserRepository for PostgresUserRepository {
             .fetch_optional(&self.pool)
             .await
             .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| UserIdAndHandle {
-            id: r.id,
-            handle: Handle::from(r.handle),
-        }))
+        row.map(|r| {
+            Ok(UserIdAndHandle {
+                id: r.id,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+            })
+        })
+        .transpose()
     }
 
     async fn get_did_web_info_by_handle(
@@ -412,11 +439,14 @@ impl UserRepository for PostgresUserRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| UserDidWebInfo {
-            id: r.id,
-            did: Did::from(r.did),
-            migrated_to_pds: r.migrated_to_pds,
-        }))
+        row.map(|r| {
+            Ok(UserDidWebInfo {
+                id: r.id,
+                did: column(r.did, col::USERS_DID)?,
+                migrated_to_pds: r.migrated_to_pds,
+            })
+        })
+        .transpose()
     }
 
     async fn get_did_web_overrides(
@@ -441,7 +471,7 @@ impl UserRepository for PostgresUserRepository {
             .fetch_optional(&self.pool)
             .await
             .map_err(map_sqlx_error)?;
-        Ok(handle.map(Handle::from))
+        opt_column(handle, col::USERS_HANDLE)
     }
 
     async fn check_handle_exists(
@@ -538,12 +568,15 @@ impl UserRepository for PostgresUserRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| UserEmailInfo {
-            id: r.id,
-            handle: Handle::from(r.handle),
-            email: r.email,
-            email_verified: r.email_verified,
-        }))
+        row.map(|r| {
+            Ok(UserEmailInfo {
+                id: r.id,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                email: r.email,
+                email_verified: r.email_verified,
+            })
+        })
+        .transpose()
     }
 
     async fn check_email_exists(
@@ -726,11 +759,14 @@ impl UserRepository for PostgresUserRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| UserIdHandleEmail {
-            id: r.id,
-            handle: Handle::from(r.handle),
-            email: r.email,
-        }))
+        row.map(|r| {
+            Ok(UserIdHandleEmail {
+                id: r.id,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                email: r.email,
+            })
+        })
+        .transpose()
     }
 
     async fn update_preferred_comms_channel(
@@ -794,17 +830,20 @@ impl UserRepository for PostgresUserRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| UserVerificationInfo {
-            id: r.id,
-            handle: Handle::from(r.handle),
-            email: r.email,
-            channel_verification: ChannelVerificationStatus::from_db_row(
-                r.email_verified,
-                r.discord_verified,
-                r.telegram_verified,
-                r.signal_verified,
-            ),
-        }))
+        row.map(|r| {
+            Ok(UserVerificationInfo {
+                id: r.id,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                email: r.email,
+                channel_verification: ChannelVerificationStatus::from_db_row(
+                    r.email_verified,
+                    r.discord_verified,
+                    r.telegram_verified,
+                    r.signal_verified,
+                ),
+            })
+        })
+        .transpose()
     }
 
     async fn verify_email_channel(&self, user_id: Uuid, email: &str) -> Result<bool, DbError> {
@@ -954,21 +993,22 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| StoredPasskey {
-                id: r.id,
-                did: Did::from(r.did),
-                credential_id: r.credential_id,
-                public_key: r.public_key,
-                sign_count: r.sign_count,
-                created_at: r.created_at,
-                last_used: r.last_used,
-                friendly_name: r.friendly_name,
-                aaguid: r.aaguid,
-                transports: r.transports,
+        rows.into_iter()
+            .map(|r| {
+                Ok(StoredPasskey {
+                    id: r.id,
+                    did: column(r.did, col::PASSKEYS_DID)?,
+                    credential_id: r.credential_id,
+                    public_key: r.public_key,
+                    sign_count: r.sign_count,
+                    created_at: r.created_at,
+                    last_used: r.last_used,
+                    friendly_name: r.friendly_name,
+                    aaguid: r.aaguid,
+                    transports: r.transports,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn get_passkey_by_credential_id(
@@ -985,18 +1025,21 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| StoredPasskey {
-            id: r.id,
-            did: Did::from(r.did),
-            credential_id: r.credential_id,
-            public_key: r.public_key,
-            sign_count: r.sign_count,
-            created_at: r.created_at,
-            last_used: r.last_used,
-            friendly_name: r.friendly_name,
-            aaguid: r.aaguid,
-            transports: r.transports,
-        }))
+        row.map(|r| {
+            Ok(StoredPasskey {
+                id: r.id,
+                did: column(r.did, col::PASSKEYS_DID)?,
+                credential_id: r.credential_id,
+                public_key: r.public_key,
+                sign_count: r.sign_count,
+                created_at: r.created_at,
+                last_used: r.last_used,
+                friendly_name: r.friendly_name,
+                aaguid: r.aaguid,
+                transports: r.transports,
+            })
+        })
+        .transpose()
     }
 
     async fn save_passkey(
@@ -1431,13 +1474,14 @@ impl UserRepository for PostgresUserRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)
-        .map(|opt| {
-            opt.map(|r| UserLoginCheck {
-                did: Did::from(r.did),
+        .map_err(map_sqlx_error)?
+        .map(|r| {
+            Ok(UserLoginCheck {
+                did: column(r.did, col::USERS_DID)?,
                 password_hash: r.password_hash.map(PasswordHash::new),
             })
         })
+        .transpose()
     }
 
     async fn get_login_info_by_identifier(
@@ -1458,11 +1502,11 @@ impl UserRepository for PostgresUserRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)
-        .map(|opt| {
-            opt.map(|row| UserLoginInfo {
+        .map_err(map_sqlx_error)?
+        .map(|row| {
+            Ok(UserLoginInfo {
                 id: row.id,
-                did: Did::from(row.did),
+                did: column(row.did, col::USERS_DID)?,
                 email: row.email,
                 password_hash: row.password_hash.map(PasswordHash::new),
                 password_required: row.password_required,
@@ -1479,6 +1523,7 @@ impl UserRepository for PostgresUserRepository {
                 account_type: row.account_type,
             })
         })
+        .transpose()
     }
 
     async fn get_2fa_status_by_did(&self, did: &Did) -> Result<Option<User2faStatus>, DbError> {
@@ -1527,10 +1572,10 @@ impl UserRepository for PostgresUserRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)
-        .map(|opt| {
-            opt.map(|row| UserSessionInfo {
-                handle: Handle::from(row.handle),
+        .map_err(map_sqlx_error)?
+        .map(|row| {
+            Ok(UserSessionInfo {
+                handle: column(row.handle, col::USERS_HANDLE)?,
                 email: row.email,
                 is_admin: row.is_admin,
                 deactivated_at: row.deactivated_at,
@@ -1549,6 +1594,7 @@ impl UserRepository for PostgresUserRepository {
                 email_2fa_enabled: row.email_2fa_enabled,
             })
         })
+        .transpose()
     }
 
     async fn get_legacy_login_pref(
@@ -1620,12 +1666,12 @@ impl UserRepository for PostgresUserRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)
-        .map(|opt| {
-            opt.map(|row| UserLoginFull {
+        .map_err(map_sqlx_error)?
+        .map(|row| {
+            Ok(UserLoginFull {
                 id: row.id,
-                did: Did::from(row.did),
-                handle: Handle::from(row.handle),
+                did: column(row.did, col::USERS_DID)?,
+                handle: column(row.handle, col::USERS_HANDLE)?,
                 password_hash: row.password_hash.map(PasswordHash::new),
                 email: row.email,
                 deactivated_at: row.deactivated_at,
@@ -1645,6 +1691,7 @@ impl UserRepository for PostgresUserRepository {
                 email_2fa_enabled: row.email_2fa_enabled,
             })
         })
+        .transpose()
     }
 
     async fn get_confirm_signup_by_did(
@@ -1664,12 +1711,12 @@ impl UserRepository for PostgresUserRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)
-        .map(|opt| {
-            opt.map(|row| UserConfirmSignup {
+        .map_err(map_sqlx_error)?
+        .map(|row| {
+            Ok(UserConfirmSignup {
                 id: row.id,
-                did: Did::from(row.did),
-                handle: Handle::from(row.handle),
+                did: column(row.did, col::USERS_DID)?,
+                handle: column(row.handle, col::USERS_HANDLE)?,
                 email: row.email,
                 channel: row.channel,
                 discord_username: row.discord_username,
@@ -1679,6 +1726,7 @@ impl UserRepository for PostgresUserRepository {
                 encryption_version: row.encryption_version,
             })
         })
+        .transpose()
     }
 
     async fn get_resend_verification_by_did(
@@ -1697,11 +1745,11 @@ impl UserRepository for PostgresUserRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)
-        .map(|opt| {
-            opt.map(|row| UserResendVerification {
+        .map_err(map_sqlx_error)?
+        .map(|row| {
+            Ok(UserResendVerification {
                 id: row.id,
-                handle: Handle::from(row.handle),
+                handle: column(row.handle, col::USERS_HANDLE)?,
                 email: row.email,
                 channel: row.channel,
                 discord_username: row.discord_username,
@@ -1715,6 +1763,7 @@ impl UserRepository for PostgresUserRepository {
                 ),
             })
         })
+        .transpose()
     }
 
     async fn set_channel_verified(&self, did: &Did, channel: CommsChannel) -> Result<(), DbError> {
@@ -1760,14 +1809,18 @@ impl UserRepository for PostgresUserRepository {
     }
 
     async fn get_handles_by_email(&self, email: &str) -> Result<Vec<Handle>, DbError> {
-        sqlx::query_scalar!(
+        let handles = sqlx::query_scalar!(
             "SELECT handle FROM users WHERE LOWER(email) = LOWER($1) AND deactivated_at IS NULL ORDER BY created_at DESC",
             email
         )
         .fetch_all(&self.pool)
         .await
-        .map(|handles| handles.into_iter().map(Handle::from).collect())
-        .map_err(map_sqlx_error)
+        .map_err(map_sqlx_error)?;
+
+        Ok(handles
+            .into_iter()
+            .filter_map(|h| legacy_column(h, col::USERS_HANDLE))
+            .collect())
     }
 
     async fn set_password_reset_code(
@@ -1798,15 +1851,16 @@ impl UserRepository for PostgresUserRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)
-        .map(|opt| {
-            opt.map(|row| UserResetCodeInfo {
+        .map_err(map_sqlx_error)?
+        .map(|row| {
+            Ok(UserResetCodeInfo {
                 id: row.id,
-                did: Did::from(row.did),
+                did: column(row.did, col::USERS_DID)?,
                 preferred_comms_channel: row.preferred_comms_channel,
                 expires_at: row.password_reset_code_expires_at,
             })
         })
+        .transpose()
     }
 
     async fn clear_password_reset_code(&self, user_id: Uuid) -> Result<(), DbError> {
@@ -1894,12 +1948,11 @@ impl UserRepository for PostgresUserRepository {
             .await
             .map_err(map_sqlx_error)?;
 
+        let did = column(user_did, col::USERS_DID)?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
 
-        Ok(PasswordResetResult {
-            did: Did::from(user_did),
-            session_jtis,
-        })
+        Ok(PasswordResetResult { did, session_jtis })
     }
 
     async fn activate_account(&self, did: &Did) -> Result<bool, DbError> {
@@ -2004,14 +2057,15 @@ impl UserRepository for PostgresUserRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)
-        .map(|opt| {
-            opt.map(|row| UserForDeletion {
+        .map_err(map_sqlx_error)?
+        .map(|row| {
+            Ok(UserForDeletion {
                 id: row.id,
                 password_hash: row.password_hash.map(PasswordHash::new),
-                handle: Handle::from(row.handle),
+                handle: column(row.handle, col::USERS_HANDLE)?,
             })
         })
+        .transpose()
     }
 
     async fn get_user_key_by_did(&self, did: &Did) -> Result<Option<UserKeyInfo>, DbError> {
@@ -2154,11 +2208,14 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| UserForDidDoc {
-            id: r.id,
-            handle: Handle::from(r.handle),
-            deactivated_at: r.deactivated_at,
-        }))
+        row.map(|r| {
+            Ok(UserForDidDoc {
+                id: r.id,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                deactivated_at: r.deactivated_at,
+            })
+        })
+        .transpose()
     }
 
     async fn get_user_for_did_doc_build(
@@ -2173,11 +2230,14 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| UserForDidDocBuild {
-            id: r.id,
-            handle: Handle::from(r.handle),
-            migrated_to_pds: r.migrated_to_pds,
-        }))
+        row.map(|r| {
+            Ok(UserForDidDocBuild {
+                id: r.id,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                migrated_to_pds: r.migrated_to_pds,
+            })
+        })
+        .transpose()
     }
 
     async fn upsert_did_web_overrides(
@@ -2234,13 +2294,16 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| UserForPasskeySetup {
-            id: r.id,
-            handle: Handle::from(r.handle),
-            recovery_token: r.recovery_token,
-            recovery_token_expires_at: r.recovery_token_expires_at,
-            password_required: r.password_required,
-        }))
+        row.map(|r| {
+            Ok(UserForPasskeySetup {
+                id: r.id,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                recovery_token: r.recovery_token,
+                recovery_token_expires_at: r.recovery_token_expires_at,
+                password_required: r.password_required,
+            })
+        })
+        .transpose()
     }
 
     async fn get_user_for_passkey_recovery(
@@ -2257,12 +2320,15 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| UserForPasskeyRecovery {
-            id: r.id,
-            did: Did::from(r.did),
-            handle: Handle::from(r.handle),
-            password_required: r.password_required,
-        }))
+        row.map(|r| {
+            Ok(UserForPasskeyRecovery {
+                id: r.id,
+                did: column(r.did, col::USERS_DID)?,
+                handle: column(r.handle, col::USERS_HANDLE)?,
+                password_required: r.password_required,
+            })
+        })
+        .transpose()
     }
 
     async fn set_recovery_token(
@@ -2292,13 +2358,16 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| UserForRecovery {
-            id: r.id,
-            did: Did::from(r.did),
-            preferred_comms_channel: r.preferred_comms_channel,
-            recovery_token: r.recovery_token,
-            recovery_token_expires_at: r.recovery_token_expires_at,
-        }))
+        row.map(|r| {
+            Ok(UserForRecovery {
+                id: r.id,
+                did: column(r.did, col::USERS_DID)?,
+                preferred_comms_channel: r.preferred_comms_channel,
+                recovery_token: r.recovery_token,
+                recovery_token_expires_at: r.recovery_token_expires_at,
+            })
+        })
+        .transpose()
     }
 
     async fn get_accounts_scheduled_for_deletion(
@@ -2322,10 +2391,12 @@ impl UserRepository for PostgresUserRepository {
 
         Ok(rows
             .into_iter()
-            .map(|r| tranquil_db_traits::ScheduledDeletionAccount {
-                id: r.id,
-                did: Did::from(r.did),
-                handle: Handle::from(r.handle),
+            .filter_map(|r| {
+                Some(tranquil_db_traits::ScheduledDeletionAccount {
+                    id: r.id,
+                    did: legacy_column(r.did, col::USERS_DID)?,
+                    handle: legacy_column(r.handle, col::USERS_HANDLE)?,
+                })
             })
             .collect())
     }
@@ -3029,13 +3100,15 @@ impl UserRepository for PostgresUserRepository {
             ));
         }
 
+        let old_handle = legacy_column(old_handle, col::USERS_HANDLE);
+
         tx.commit()
             .await
             .map_err(|e| tranquil_db_traits::MigrationReactivationError::Database(e.to_string()))?;
 
         Ok(tranquil_db_traits::ReactivatedAccountInfo {
             user_id: account_id,
-            old_handle: Handle::from(old_handle),
+            old_handle,
         })
     }
 
