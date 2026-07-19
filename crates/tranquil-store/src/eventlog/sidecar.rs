@@ -12,7 +12,7 @@ use super::segment_file::{
 use super::types::{DidHash, EventSequence, EventTypeTag, SegmentOffset, TimestampMicros};
 
 pub const SIDECAR_MAGIC: [u8; 4] = *b"TQSC";
-pub const SIDECAR_VERSION: u8 = 1;
+pub const SIDECAR_VERSION: u8 = 2;
 pub const SIDECAR_HEADER_SIZE: usize = 16;
 pub const SIDECAR_ENTRY_SIZE: usize = 64;
 
@@ -374,6 +374,22 @@ fn skip_optional_vec_of_strings(data: &[u8], pos: usize) -> Option<usize> {
     }
 }
 
+fn skip_optional_vec_of_inline_blocks(data: &[u8], pos: usize) -> Option<usize> {
+    let tag = *data.get(pos)?;
+    match tag {
+        0 => Some(pos + 1),
+        1 => {
+            let (count, current) = read_varint(data, pos + 1)?;
+            (0..count).try_fold(current, |cur, _| {
+                let (_, after_cid) = read_bytes_span(data, cur)?;
+                let (_, end) = read_bytes_span(data, after_cid)?;
+                Some(end)
+            })
+        }
+        _ => None,
+    }
+}
+
 fn read_optional_bool(data: &[u8], pos: usize) -> Option<(Option<bool>, usize)> {
     let tag = *data.get(pos)?;
     match tag {
@@ -405,7 +421,7 @@ fn extract_field_positions(postcard_body: &[u8]) -> Option<PayloadFieldPositions
     let (prev_data_cid, pos) = read_optional_bytes_span(postcard_body, pos)?;
     let (ops, pos) = read_optional_bytes_span(postcard_body, pos)?;
     let pos = skip_optional_vec_of_strings(postcard_body, pos)?;
-    let pos = skip_optional_vec_of_strings(postcard_body, pos)?;
+    let pos = skip_optional_vec_of_inline_blocks(postcard_body, pos)?;
     let (handle, pos) = read_optional_bytes_span(postcard_body, pos)?;
     let (active, pos) = read_optional_bool(postcard_body, pos)?;
     let (status, pos) = read_optional_u8(postcard_body, pos)?;
@@ -566,18 +582,29 @@ mod tests {
     use crate::sim::SimulatedIO;
     use sha2::Digest;
     use std::path::Path;
-    use tranquil_db_traits::{AccountStatus, RepoEventType, SequenceNumber, SequencedEvent};
+    use tranquil_db_traits::{
+        AccountStatus, EventBlockInline, EventBlocks, RepoEventType, SequenceNumber, SequencedEvent,
+    };
     use tranquil_types::{CidLink, Did, Handle, Tid};
 
     fn test_did() -> Did {
         Did::new("did:plc:testuser1234567890abcdef").unwrap()
     }
 
-    fn test_cid_link() -> tranquil_types::CidLink {
-        let hash = sha2::Digest::finalize(sha2::Sha256::new());
+    fn test_cid_link(seed: u8) -> CidLink {
+        let hash = sha2::Sha256::digest([seed]);
         let mh = multihash::Multihash::<64>::wrap(0x12, &hash).unwrap();
         let c = cid::Cid::new_v1(0x71, mh);
-        tranquil_types::CidLink::from_cid(&c)
+        CidLink::from_cid(&c)
+    }
+
+    fn test_rev(seq: u64) -> Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        Tid::new(s).expect("generated TID is valid")
     }
 
     fn setup() -> (SimulatedIO, FileId) {
@@ -592,7 +619,7 @@ mod tests {
     }
 
     fn make_commit_event(seq: u64) -> SequencedEvent {
-        let cid = test_cid_link();
+        let cid = test_cid_link(1);
         let ops = serde_json::json!([{"action": "create", "path": "app.bsky.feed.post/abc"}]);
 
         SequencedEvent {
@@ -604,12 +631,21 @@ mod tests {
             prev_cid: Some(cid.clone()),
             prev_data_cid: Some(cid),
             ops: Some(ops),
-            blobs: Some(vec![CidLink::from("bafkreibtest".to_owned())]),
-            blocks: None,
+            blobs: Some(vec![test_cid_link(2)]),
+            blocks: Some(EventBlocks::Inline(vec![
+                EventBlockInline {
+                    cid_bytes: test_cid_link(3).to_cid().unwrap().to_bytes(),
+                    data: b"first inline block".to_vec(),
+                },
+                EventBlockInline {
+                    cid_bytes: test_cid_link(4).to_cid().unwrap().to_bytes(),
+                    data: b"second inline block".to_vec(),
+                },
+            ])),
             handle: Some(Handle::new("test.bsky.social").unwrap()),
             active: None,
             status: None,
-            rev: Some(Tid::from("rev123".to_owned())),
+            rev: Some(test_rev(123)),
         }
     }
 
@@ -889,7 +925,7 @@ mod tests {
         sim.read_exact_at(fd, entry.rev_offset as u64, &mut rev_bytes)
             .unwrap();
         let rev_str = std::str::from_utf8(&rev_bytes).unwrap();
-        assert_eq!(rev_str, "rev123");
+        assert_eq!(rev_str, test_rev(123).as_str());
 
         let mut handle_bytes = vec![0u8; entry.handle_len as usize];
         sim.read_exact_at(fd, entry.handle_offset as u64, &mut handle_bytes)
@@ -992,7 +1028,7 @@ mod tests {
         assert_eq!(slice(&commit_cid_span), slice(&prev_cid_span));
         assert_eq!(slice(&commit_cid_span), slice(&prev_data_cid_span));
 
-        let expected_cid = test_cid_link().to_cid().unwrap().to_bytes();
+        let expected_cid = test_cid_link(1).to_cid().unwrap().to_bytes();
         assert_eq!(slice(&commit_cid_span), expected_cid.as_slice());
 
         let ops_span = positions.ops.unwrap();
@@ -1012,7 +1048,10 @@ mod tests {
         assert_eq!(positions.status, None);
 
         let rev_span = positions.rev.unwrap();
-        assert_eq!(std::str::from_utf8(slice(&rev_span)).unwrap(), "rev123");
+        assert_eq!(
+            std::str::from_utf8(slice(&rev_span)).unwrap(),
+            test_rev(123).as_str()
+        );
     }
 
     #[test]
