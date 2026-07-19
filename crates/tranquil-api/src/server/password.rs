@@ -45,15 +45,23 @@ pub async fn request_password_reset(
         None
     };
 
-    let user_id = match state
-        .repos
-        .user
-        .get_id_by_email_or_handle(
-            normalized,
-            &Handle::from(normalized_handle.as_str().to_string()),
-        )
-        .await
-    {
+    let lookup = match Handle::new(normalized_handle.as_str()) {
+        Ok(handle) => {
+            state
+                .repos
+                .user
+                .get_id_by_email_or_handle(normalized, &handle)
+                .await
+        }
+        Err(_) => state
+            .repos
+            .user
+            .get_by_email(normalized)
+            .await
+            .map(|user| user.map(|user| user.id)),
+    };
+
+    let user_id = match lookup {
         Ok(Some(id)) => id,
         Ok(None) => {
             info!("Password reset requested for unknown identifier");

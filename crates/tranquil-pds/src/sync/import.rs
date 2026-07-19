@@ -227,15 +227,23 @@ fn walk_mst_node(
                 {
                     let blob_refs = find_blob_refs_ipld(&record_value, 0);
                     let parts: Vec<&str> = full_key.split('/').collect();
-                    if parts.len() >= 2 {
-                        let collection = Nsid::from(parts[..parts.len() - 1].join("/"));
-                        let rkey = Rkey::from(parts[parts.len() - 1].to_string());
-                        records.push(ImportedRecord {
+                    let parsed = match parts.len() >= 2 {
+                        true => Nsid::new(parts[..parts.len() - 1].join("/"))
+                            .ok()
+                            .zip(Rkey::new(parts[parts.len() - 1].to_string()).ok()),
+                        false => None,
+                    };
+                    match parsed {
+                        Some((collection, rkey)) => records.push(ImportedRecord {
                             collection,
                             rkey,
                             cid: record_cid,
                             blob_refs,
-                        });
+                        }),
+                        None => tracing::warn!(
+                            key = %full_key,
+                            "skipping a CAR record whose MST key isn't a valid collection/rkey pair"
+                        ),
                     }
                 }
 

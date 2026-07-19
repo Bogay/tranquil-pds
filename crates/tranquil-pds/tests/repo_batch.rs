@@ -512,9 +512,9 @@ async fn follow_uris_pointing_to(repo_id: uuid::Uuid, target_did: &str) -> Vec<S
     let repos = get_test_repos().await;
     let probe = Backlink {
         uri: AtUri::from_parts(
-            &Did::from("did:plc:periwinkle".to_string()),
-            &Nsid::from("app.bsky.graph.follow".to_string()),
-            &Rkey::from("probe".to_string()),
+            &Did::new("did:plc:periwinkle").expect("valid DID"),
+            &Nsid::new("app.bsky.graph.follow").expect("valid NSID"),
+            &Rkey::new("probe").expect("valid rkey"),
         ),
         path: BacklinkPath::Subject,
         link_to: target_did.to_string(),

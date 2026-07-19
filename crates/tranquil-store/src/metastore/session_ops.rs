@@ -211,7 +211,8 @@ impl SessionOps {
         }
 
         Ok(RefreshGraceLookup::Compromised {
-            did: Did::from(session.did.clone()),
+            did: Did::new(session.did.clone())
+                .map_err(|_| MetastoreError::CorruptData("corrupt session did"))?,
             session_id: SessionId::new(session_id),
             key_bytes: user.key_bytes,
             encryption_version: user.encryption_version,

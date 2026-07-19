@@ -58,9 +58,16 @@ pub async fn dereference_scope(
 
     for part in scope_parts {
         if let Some(cid_str) = part.strip_prefix("ref:") {
-            let cache_key = tranquil_pds::cache_keys::scope_ref_key(
-                &tranquil_types::CidLink::from(cid_str.to_string()),
-            );
+            let cid = match Cid::from_str(cid_str) {
+                Ok(c) => c,
+                Err(_) => {
+                    tracing::warn!("Invalid CID in scope ref: {}", cid_str);
+                    continue;
+                }
+            };
+
+            let cache_key =
+                tranquil_pds::cache_keys::scope_ref_key(&tranquil_types::CidLink::from(&cid));
             if let Some(cached) = state.cache.get(&cache_key).await {
                 for s in cached.split_whitespace() {
                     if !resolved_scopes.contains(&s.to_string()) {
@@ -69,14 +76,6 @@ pub async fn dereference_scope(
                 }
                 continue;
             }
-
-            let cid = match Cid::from_str(cid_str) {
-                Ok(c) => c,
-                Err(_) => {
-                    tracing::warn!("Invalid CID in scope ref: {}", cid_str);
-                    continue;
-                }
-            };
 
             let block_bytes = match state.block_store.get(&cid).await {
                 Ok(Some(b)) => b,

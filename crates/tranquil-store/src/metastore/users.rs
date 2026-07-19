@@ -799,7 +799,7 @@ mod tests {
         let mut user = UserValue {
             id: uuid::Uuid::new_v4(),
             did: "did:plc:test".to_owned(),
-            handle: "t.invalid".to_owned(),
+            handle: "teq.oyster.cafe".to_owned(),
             email: None,
             email_verified: false,
             password_hash: None,

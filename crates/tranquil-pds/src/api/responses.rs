@@ -28,8 +28,8 @@ pub struct DidResponse {
 }
 
 impl DidResponse {
-    pub fn response(did: impl Into<Did>) -> impl IntoResponse {
-        Json(Self { did: did.into() })
+    pub fn response(did: Did) -> impl IntoResponse {
+        Json(Self { did })
     }
 }
 

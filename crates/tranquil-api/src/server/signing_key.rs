@@ -21,7 +21,8 @@ fn public_key_to_did_key(signing_key: &SigningKey) -> Did {
     multicodec_key.extend_from_slice(&SECP256K1_MULTICODEC_PREFIX);
     multicodec_key.extend_from_slice(&compressed_pubkey);
     let encoded = multibase::encode(multibase::Base::Base58Btc, &multicodec_key);
-    Did::from(format!("did:key:{}", encoded))
+    Did::new(format!("did:key:{}", encoded))
+        .expect("did:key with a multibase-encoded secp256k1 key is a valid DID")
 }
 
 #[derive(Deserialize)]

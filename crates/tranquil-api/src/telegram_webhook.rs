@@ -62,8 +62,20 @@ pub async fn handle_telegram_webhook(
             && let Some(from) = message.from
             && let Some(username) = from.username
         {
-            let handle =
-                parse_start_handle(message.text.as_deref()).map(tranquil_types::Handle::from);
+            let handle = match parse_start_handle(message.text.as_deref())
+                .map(tranquil_types::Handle::new)
+                .transpose()
+            {
+                Ok(h) => h,
+                Err(e) => {
+                    warn!(
+                        telegram_username = %username,
+                        error = %e,
+                        "Ignoring /start with an invalid handle"
+                    );
+                    return StatusCode::OK;
+                }
+            };
 
             debug!(
                 telegram_username = %username,

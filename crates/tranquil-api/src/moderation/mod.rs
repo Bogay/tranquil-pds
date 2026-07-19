@@ -6,12 +6,16 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::sync::LazyLock;
 use tracing::{error, info, warn};
 use tranquil_pds::api::ApiError;
 use tranquil_pds::api::proxy_client::{is_ssrf_safe, proxy_client};
 use tranquil_pds::auth::{AnyUser, Auth};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{Did, Nsid};
+
+static CREATE_REPORT_NSID: LazyLock<Nsid> =
+    LazyLock::new(|| "com.atproto.moderation.createReport".parse().unwrap());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReportReasonType {
@@ -145,11 +149,10 @@ async fn proxy_to_report_service(
         },
     };
 
-    let report_lxm = Nsid::from("com.atproto.moderation.createReport".to_string());
     let service_token = match tranquil_pds::auth::create_service_token(
         &auth_user.did,
         service_did,
-        Some(&report_lxm),
+        Some(&CREATE_REPORT_NSID),
         &key_bytes,
     ) {
         Ok(t) => t,

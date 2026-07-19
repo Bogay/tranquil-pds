@@ -100,7 +100,8 @@ impl CarVerifier {
             .ok_or_else(|| VerifyError::BlockNotFound(root_cid.to_string()))?;
         let commit =
             Commit::from_cbor(root_block).map_err(|e| VerifyError::InvalidCommit(e.to_string()))?;
-        let commit_did = commit.did().to_string().into();
+        let commit_did = tranquil_types::Did::new(commit.did().to_string())
+            .map_err(|e| VerifyError::InvalidCommit(e.to_string()))?;
         let data_cid = commit.data();
         self.verify_mst_structure(data_cid, blocks)?;
         debug!("MST structure verified for commit: {:?}", commit);

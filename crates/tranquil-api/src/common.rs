@@ -200,7 +200,8 @@ pub fn create_self_hosted_did_web(handle: &str) -> Result<Did, ApiError> {
         return Err(ApiError::SelfHostedDidWebDisabled);
     }
     let encoded_handle = handle.replace(':', "%3A");
-    Ok(Did::from(format!("did:web:{}", encoded_handle)))
+    Did::new(format!("did:web:{}", encoded_handle))
+        .map_err(|_| ApiError::InvalidHandle(Some("Handle is not a valid did:web".into())))
 }
 
 pub enum CredentialMatch {

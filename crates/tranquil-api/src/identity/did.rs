@@ -51,7 +51,9 @@ pub async fn resolve_handle(
         }
     };
     let cache_key = tranquil_pds::cache_keys::handle_key(&handle);
-    if let Some(did) = state.cache.get(&cache_key).await {
+    if let Some(cached) = state.cache.get(&cache_key).await
+        && let Ok(did) = tranquil_pds::Did::new(cached)
+    {
         return DidResponse::response(did).into_response();
     }
     let user = state.repos.user.get_by_handle(&handle).await;

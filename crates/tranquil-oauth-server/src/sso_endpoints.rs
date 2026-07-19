@@ -1023,7 +1023,9 @@ pub async fn complete_registration(
             }
             let encoded_handle = handle.replace(':', "%3A");
             let self_hosted_did =
-                tranquil_pds::types::Did::from(format!("did:web:{}", encoded_handle));
+                tranquil_pds::types::Did::new(format!("did:web:{}", encoded_handle)).map_err(
+                    |_| ApiError::InvalidHandle(Some("Handle is not a valid did:web".into())),
+                )?;
             tracing::info!(did = %self_hosted_did, "Creating self-hosted did:web SSO account");
             self_hosted_did
         }
@@ -1151,8 +1153,8 @@ pub async fn complete_registration(
             .filter(|s| !s.is_empty()),
         encrypted_key_bytes: encrypted_key_bytes.clone(),
         encryption_version: tranquil_pds::config::ENCRYPTION_VERSION,
-        commit_cid: tranquil_types::CidLink::from(commit_cid.to_string()),
-        repo_rev: tranquil_types::Tid::from(rev.as_ref().to_string()),
+        commit_cid: tranquil_types::CidLink::from_cid(&commit_cid),
+        repo_rev: tranquil_types::Tid::from(rev.clone()),
         genesis_block_cids,
         invite_code: invite_registration.into_invite_code(),
         birthdate_pref,

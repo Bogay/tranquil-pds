@@ -149,17 +149,21 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
         }
     };
 
-    let handle = parse_start_handle(interaction.data.as_ref().and_then(|d| d.options.as_deref()));
-
-    if let Some(ref h) = handle
-        && Handle::new(h).is_err()
+    let handle = match parse_start_handle(
+        interaction.data.as_ref().and_then(|d| d.options.as_deref()),
+    )
+    .map(Handle::new)
+    .transpose()
     {
-        return Json(json!({
-            "type": 4,
-            "data": {"content": "Invalid handle format. Handle should look like: alice.example.com", "flags": 64}
-        }))
-        .into_response();
-    }
+        Ok(h) => h,
+        Err(_) => {
+            return Json(json!({
+                "type": 4,
+                "data": {"content": "Invalid handle format. Handle should look like: nel.oyster.cafe", "flags": 64}
+            }))
+            .into_response();
+        }
+    };
 
     debug!(
         discord_username = %discord_username,
@@ -168,7 +172,6 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
         "Received /start from Discord user"
     );
 
-    let handle = handle.map(Handle::from);
     match state
         .repos
         .user

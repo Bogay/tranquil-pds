@@ -363,14 +363,19 @@ impl BlobOps {
             })?;
 
         let start = cursor.map_or(Bound::Unbounded, Bound::Excluded);
-        Ok(missing
+        missing
             .range::<str, _>((start, Bound::Unbounded))
             .take(limit)
-            .map(|(cid_str, uri)| tranquil_db_traits::MissingBlobInfo {
-                blob_cid: CidLink::from(cid_str.clone()),
-                record_uri: tranquil_types::AtUri::from(uri.clone()),
+            .map(|(cid_str, uri)| {
+                Ok(tranquil_db_traits::MissingBlobInfo {
+                    blob_cid: CidLink::new(cid_str.clone()).map_err(|_| {
+                        MetastoreError::CorruptData("corrupt record_blobs blob cid")
+                    })?,
+                    record_uri: tranquil_types::AtUri::new(uri.clone())
+                        .map_err(|_| MetastoreError::CorruptData("corrupt record_blobs uri"))?,
+                })
             })
-            .collect())
+            .collect()
     }
 
     fn collect_referenced_cid_bytes(
@@ -445,7 +450,7 @@ fn parse_blob_cid_from_key(key: &[u8]) -> Result<CidLink, MetastoreError> {
     ))?;
     reader
         .string()
-        .map(CidLink::from)
+        .and_then(|s| CidLink::new(s).ok())
         .ok_or(MetastoreError::CorruptData("corrupt blob key: missing cid"))
 }
 

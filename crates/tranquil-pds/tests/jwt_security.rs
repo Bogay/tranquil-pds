@@ -40,7 +40,7 @@ fn create_unsigned_jwt(header: &Value, claims: &Value) -> String {
 #[test]
 fn test_signature_attacks() {
     let key_bytes = generate_user_key();
-    let did = Did::from("did:plc:whelk".to_string());
+    let did = Did::new("did:plc:whelk").expect("valid DID");
     let token = create_access_token(&did, &key_bytes).expect("create token");
     let parts: Vec<&str> = token.split('.').collect();
 
@@ -143,7 +143,7 @@ fn test_algorithm_substitution_attacks() {
 #[test]
 fn test_token_type_confusion() {
     let key_bytes = generate_user_key();
-    let did = Did::from("did:plc:whelk".to_string());
+    let did = Did::new("did:plc:whelk").expect("valid DID");
 
     let refresh_token = create_refresh_token(&did, &key_bytes).expect("create refresh token");
     let result = verify_access_token(&refresh_token, &key_bytes);
@@ -169,8 +169,8 @@ fn test_token_type_confusion() {
 
     let service_token = create_service_token(
         &did,
-        &Did::from("did:web:nel.pet".to_string()),
-        Some(&Nsid::from("cafe.oyster.method".to_string())),
+        &Did::new("did:web:nel.pet").expect("valid DID"),
+        Some(&Nsid::new("cafe.oyster.method").expect("valid NSID")),
         &key_bytes,
     )
     .unwrap();
@@ -434,7 +434,7 @@ fn test_claim_validation() {
 #[test]
 fn test_did_and_jti_extraction() {
     let key_bytes = generate_user_key();
-    let did = Did::from("did:plc:limpet".to_string());
+    let did = Did::new("did:plc:limpet").expect("valid DID");
     let token = create_access_token(&did, &key_bytes).expect("create token");
 
     assert_eq!(get_did_from_token(&token).unwrap(), did);
@@ -459,7 +459,7 @@ fn test_did_and_jti_extraction() {
 #[test]
 fn test_header_injection_and_constant_time() {
     let key_bytes = generate_user_key();
-    let did = Did::from("did:plc:whelk".to_string());
+    let did = Did::new("did:plc:whelk").expect("valid DID");
 
     let header = json!({
         "alg": "ES256K", "typ": TokenType::Access.as_str(),
@@ -501,7 +501,7 @@ async fn test_server_rejects_invalid_tokens() {
 
     let key_bytes = generate_user_key();
     let forged_token =
-        create_access_token(&Did::from("did:plc:lyna".to_string()), &key_bytes).unwrap();
+        create_access_token(&Did::new("did:plc:lyna").expect("valid DID"), &key_bytes).unwrap();
     let res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getSession", url))
         .header("Authorization", format!("Bearer {}", forged_token))

@@ -11,6 +11,7 @@ use multihash::Multihash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::pin::Pin;
+use std::sync::LazyLock;
 use tracing::{debug, error, info, warn};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Auth, AuthAny, NotTakendown, Permissive, VerifyScope};
@@ -18,6 +19,9 @@ use tranquil_pds::delegation::DelegationActionType;
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{CidLink, Did, Nsid};
 use tranquil_pds::util::get_header_str;
+
+static UPLOAD_BLOB_NSID: LazyLock<Nsid> =
+    LazyLock::new(|| "com.atproto.repo.uploadBlob".parse().unwrap());
 
 fn detect_mime_type(data: &[u8], client_hint: &str) -> String {
     if let Some(kind) = infer::get(data) {
@@ -48,7 +52,7 @@ pub async fn upload_blob(
 ) -> Result<Response, ApiError> {
     let (did, controller_did): (Did, Option<Did>) = match &auth {
         AuthAny::Service(service) => {
-            service.require_lxm(&Nsid::from("com.atproto.repo.uploadBlob".to_string()))?;
+            service.require_lxm(&UPLOAD_BLOB_NSID)?;
             (service.did.clone(), None)
         }
         AuthAny::User(user) => {

@@ -624,7 +624,7 @@ mod tests {
     use super::*;
 
     fn n(s: &str) -> crate::types::Nsid {
-        crate::types::Nsid::from(s.to_string())
+        crate::types::Nsid::new(s).expect("valid NSID")
     }
 
     #[test]

@@ -48,7 +48,9 @@ async fn test_reserve_signing_key_with_did() {
     assert!(signing_key.starts_with("did:key:z"));
     let row = repos
         .infra
-        .get_reserved_signing_key_full(&tranquil_types::Did::from(signing_key.to_string()))
+        .get_reserved_signing_key_full(
+            &tranquil_types::Did::new(signing_key.to_string()).expect("valid DID"),
+        )
         .await
         .expect("db error")
         .expect("Reserved key not found in database");
@@ -75,7 +77,9 @@ async fn test_reserve_signing_key_stores_private_key() {
     let signing_key = body["signingKey"].as_str().unwrap();
     let row = repos
         .infra
-        .get_reserved_signing_key_full(&tranquil_types::Did::from(signing_key.to_string()))
+        .get_reserved_signing_key_full(
+            &tranquil_types::Did::new(signing_key.to_string()).expect("valid DID"),
+        )
         .await
         .expect("db error")
         .expect("Reserved key not found in database");
@@ -185,7 +189,9 @@ async fn test_create_account_with_reserved_signing_key() {
     assert!(!access_jwt.is_empty());
     let reserved = repos
         .infra
-        .get_reserved_signing_key_full(&tranquil_types::Did::from(signing_key.to_string()))
+        .get_reserved_signing_key_full(
+            &tranquil_types::Did::new(signing_key.to_string()).expect("valid DID"),
+        )
         .await
         .expect("db error")
         .expect("Reserved key not found");

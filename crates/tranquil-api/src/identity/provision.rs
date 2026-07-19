@@ -109,7 +109,7 @@ pub async fn init_genesis_repo(
         encrypted_key_bytes,
         commit_cid,
         mst_root_cid: mst_root,
-        repo_rev: Tid::from(rev.as_ref().to_string()),
+        repo_rev: Tid::from(rev.clone()),
         genesis_block_cids: vec![mst_root.to_bytes(), commit_cid.to_bytes()],
     })
 }
@@ -198,7 +198,7 @@ pub async fn sequence_new_account(
     if let Err(e) = tranquil_pds::repo_ops::sequence_sync_event(
         state,
         did,
-        &CidLink::from(repo.commit_cid.to_string()),
+        &CidLink::from(&repo.commit_cid),
         Some(&repo.repo_rev),
     )
     .await

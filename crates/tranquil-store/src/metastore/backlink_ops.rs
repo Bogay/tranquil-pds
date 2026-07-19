@@ -174,7 +174,8 @@ impl BacklinkOps {
                         MetastoreError::CorruptData("corrupt backlink value in indexes partition"),
                     )?;
 
-                    let uri: AtUri = val.source_uri.into();
+                    let uri = AtUri::new(val.source_uri)
+                        .map_err(|_| MetastoreError::CorruptData("corrupt backlink source_uri"))?;
                     let matches_collection = uri.collection().is_some_and(|c| c == collection_str);
                     let matches_path = match discriminant_to_path(val.path) {
                         Some(p) => p == bl.path,
@@ -236,13 +237,6 @@ mod tests {
         }
     }
 
-    fn test_cid_link(seed: u8) -> tranquil_types::CidLink {
-        let digest: [u8; 32] = std::array::from_fn(|i| seed.wrapping_add(i as u8));
-        let mh = multihash::Multihash::<64>::wrap(0x12, &digest).unwrap();
-        let c = cid::Cid::new_v1(0x71, mh);
-        tranquil_types::CidLink::from_cid(&c)
-    }
-
     fn test_rev(seq: u64) -> tranquil_types::Tid {
         const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
         let s: String = (0..13)
@@ -252,10 +246,17 @@ mod tests {
         tranquil_types::Tid::new(s).expect("generated TID is valid")
     }
 
+    fn test_cid_link(seed: u8) -> tranquil_types::CidLink {
+        let digest: [u8; 32] = std::array::from_fn(|i| seed.wrapping_add(i as u8));
+        let mh = multihash::Multihash::<64>::wrap(0x12, &digest).unwrap();
+        let c = cid::Cid::new_v1(0x71, mh);
+        tranquil_types::CidLink::from_cid(&c)
+    }
+
     fn create_repo(h: &TestHarness, name: &str, seed: u8) -> (Uuid, UserHash) {
         let user_id = Uuid::new_v4();
-        let did = Did::from(format!("did:plc:{name}"));
-        let handle = Handle::from(format!("{name}.test.invalid"));
+        let did = Did::new(format!("did:plc:{name}")).expect("test DID is well-formed");
+        let handle = Handle::new(format!("{name}.oyster.cafe")).expect("test handle is valid");
         let cid = test_cid_link(seed);
         h.metastore
             .repo_ops()
@@ -414,7 +415,7 @@ mod tests {
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         }];
 
-        let collection = Nsid::from("app.bsky.feed.like".to_string());
+        let collection = Nsid::new("app.bsky.feed.like").expect("test collection is a valid NSID");
         let conflicts = ops
             .get_backlink_conflicts(user_id, &collection, &proposed)
             .unwrap();
@@ -449,7 +450,8 @@ mod tests {
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         }];
 
-        let collection = Nsid::from("app.bsky.feed.repost".to_string());
+        let collection =
+            Nsid::new("app.bsky.feed.repost").expect("test collection is a valid NSID");
         let conflicts = ops
             .get_backlink_conflicts(user_id, &collection, &proposed)
             .unwrap();
@@ -480,7 +482,8 @@ mod tests {
             link_to: "did:plc:target".to_string(),
         }];
 
-        let collection = Nsid::from("app.bsky.graph.follow".to_string());
+        let collection =
+            Nsid::new("app.bsky.graph.follow").expect("test collection is a valid NSID");
         let conflicts = ops
             .get_backlink_conflicts(user_id, &collection, &proposed)
             .unwrap();
@@ -512,7 +515,7 @@ mod tests {
             link_to: "at://did:plc:target/app.bsky.feed.post/3k2p1".to_string(),
         }];
 
-        let collection = Nsid::from("app.bsky.feed.like".to_string());
+        let collection = Nsid::new("app.bsky.feed.like").expect("test collection is a valid NSID");
         let conflicts = ops
             .get_backlink_conflicts(user_id_b, &collection, &proposed)
             .unwrap();
@@ -543,7 +546,7 @@ mod tests {
             link_to: "at://did:plc:someone/app.bsky.feed.post/3k2p1".to_string(),
         }];
 
-        let collection = Nsid::from("app.bsky.feed.like".to_string());
+        let collection = Nsid::new("app.bsky.feed.like").expect("test collection is a valid NSID");
         let conflicts = ops
             .get_backlink_conflicts(user_id, &collection, &proposed)
             .unwrap();
@@ -557,7 +560,7 @@ mod tests {
         let ops = h.metastore.backlink_ops();
         let (user_id, _user_hash) = create_repo(&h, "bailey", 9);
 
-        let collection = Nsid::from("app.bsky.feed.like".to_string());
+        let collection = Nsid::new("app.bsky.feed.like").expect("test collection is a valid NSID");
         let conflicts = ops
             .get_backlink_conflicts(user_id, &collection, &[])
             .unwrap();
@@ -647,7 +650,7 @@ mod tests {
             },
         ];
 
-        let collection = Nsid::from("app.bsky.feed.like".to_string());
+        let collection = Nsid::new("app.bsky.feed.like").expect("test collection is a valid NSID");
         let conflicts = ops
             .get_backlink_conflicts(user_id, &collection, &proposed)
             .unwrap();

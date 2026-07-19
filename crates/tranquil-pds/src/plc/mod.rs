@@ -561,7 +561,8 @@ pub fn did_for_genesis_op(signed_op: &Value) -> Result<Did, PlcError> {
     let hash = hasher.finalize();
     let encoded = base32::encode(Alphabet::Rfc4648Lower { padding: false }, &hash);
     let truncated = &encoded[..24];
-    Ok(Did::from(format!("did:plc:{}", truncated)))
+    Ok(Did::new(format!("did:plc:{}", truncated))
+        .expect("did:plc with 24 base32 characters of a sha256 digest is a valid DID"))
 }
 
 pub fn validate_plc_operation(op: &Value) -> Result<PlcOpType, PlcError> {
@@ -784,7 +785,7 @@ mod tests {
         let result = create_genesis_operation(
             &key,
             Some(operator_key),
-            &crate::types::Handle::from("whelk.nel.pet".to_string()),
+            &crate::types::Handle::new("whelk.nel.pet").expect("valid handle"),
             "https://nel.pet",
         )
         .unwrap();

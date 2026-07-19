@@ -6,7 +6,7 @@ use tranquil_pds::oauth::scopes::{
 use tranquil_types::Nsid;
 
 fn c(s: &str) -> Nsid {
-    Nsid::from(s.to_string())
+    Nsid::new(s).expect("valid NSID")
 }
 
 #[test]

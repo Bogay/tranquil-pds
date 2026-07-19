@@ -12,7 +12,16 @@ pub async fn register_complete(
     _rate_limit: OAuthRateLimited<OAuthRegisterCompleteLimit>,
     Json(form): Json<RegisterCompleteInput>,
 ) -> Response {
-    let did = Did::from(form.did.clone());
+    let Ok(did) = Did::new(form.did.as_str()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Invalid DID."
+            })),
+        )
+            .into_response();
+    };
 
     let request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
@@ -97,12 +106,12 @@ pub async fn register_complete(
     }
 
     if let Some(existing_did) = &request_data.did
-        && existing_did != &form.did
+        && existing_did != &did
     {
         tracing::warn!(
             request_uri = %form.request_uri,
             existing_did = %existing_did,
-            attempted_did = %form.did,
+            attempted_did = %did,
             "register_complete attempted with different DID than already bound"
         );
         return (
