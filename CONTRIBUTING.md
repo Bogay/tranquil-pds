@@ -4,6 +4,7 @@
 
 In order of importance:
 
+- If your change involves how Tranquil implements atproto make sure its correct! See more below.
 - **You must run your change! Every contribution that says "here's xyz. untested." does not help the project.**
 - Relevant tests to your PR must pass. The whole suite doesn't have to be proven to have run, because there are a *ton* of tests and they're quite heavy, but hopefully there are existing tests for whatever you're PRing, and if there aren't, please add those too.
 - Run cargo fmt :P
@@ -15,6 +16,60 @@ In order of importance:
 Things that would also be nice but aren't like, a pain in our side:
 
 - Big changes should be stacked PRs that are broken up into digestible pieces. Those stacked PRs should hopefully be able to be merged individually if necessary.
+
+### How we define a "correct" PDS implementation
+
+The atproto specs are notoriously imprecise, ambiguious,
+lacks specifications for large parts of the protocol and network (even including what implementing a PDS entails!)
+and is generally none specific.
+This is bad.
+We won't waste time here describing all the ways in which that is problematic,
+the important thing for Tranquil is that this means that "follows spec" is not sufficient to describe a "correct" PDS implementation.
+Thus we need to come up with a description of "correct".
+In order of importance the following rules describe what "correct" means for Tranquil:
+
+- The specs take precedence.
+  If the spec *is* specific enough then follow it.
+  Even if the reference implementation doesn't.
+- If the specs aren't sufficiently specific
+  rely on the reference implementation, potential supporting documents or discussions,
+  and/or community sentiment or common sense.
+  If the matter is still debated and/or PBCs opinion differs from community sentiment we generally side with the community.
+  - Examples here include what features and APIs to implement,
+    here we look at what the reference implementation implements
+    as well as https://github.com/bluesky-social/atproto/discussions/2350 as a supporting document.
+    Another example is whether `include` scopes are allowed to use a `*` `aud` parameter.
+    Discussion here has happened in https://github.com/bluesky-social/atproto/issues/4490.
+    PBC has voiced an opinion that this should be disallowed,
+    community sentiment seems to strongly lean to allowing it. Tranquil allows it.
+  - Please mark locations like this with a `// SPECAMB: ...` comment explaining the ambiguity
+    and what parts of the reference implementation and/or supporting documents have been used as reference.
+- If the reference implementation has behaviour that is only ever relevant for the Bluesky application.
+  Implementions of such behaviour **must** be gated behind a `bsky-support` cargo feature of the implementing crate.
+  - Examples here include bluesky feedgen specific service proxying behaviour,
+    the `app.bsky.actor.getPreferences` and `app.bsky.actor.putPreferences` APIs,
+    and special handling of the `X-BSKY-TOPICS` HTTP header during service proxying.
+  - Please add a comment next to these implementations with an explanation of the behaviour.
+  - Most of these behaviours are required for proper functioning of the official Bluesky client, though not all.
+    If the behaviour isn't required for the official client consider not implementing it.
+  - One such behaviour that we have a *hard rule* to never implement is default proxying to a configured Bluesky appview
+    for `app.bsky.*` APIs and as fallback for `com.atproto.repo.getRecord`.
+    Many third-party Bluesky clients rely on this behaviour, the official client used to do the same but does not anymore.
+    Third-party clients breaking because they don't specify an `atproto-proxy` header is thus *not* a Tranquil bug but a bug in said clients.
+  - Bluesky is the only application that will ever recieve application specific behaviour like this.
+    It does so only because such a big section of atproto usage is Bluesky
+    and because Bluesky is the only application that can practically rely on application specific behaviour.
+    Application specific behaviour for other applications may still be added to Tranquil if such behaviour is a Tranquil feature,
+    for example for Tranquils rudimentary banned content moderation feature,
+    and not something said application relies on for proper functioning.
+
+There is bound to be edge cases that these rules don't fully cover.
+Here common sense, community sentiment, furthering the goals of atproto itself, and ultimately maintainer opinion take precedence over support for any individual applicaion.
+Even Bluesky.
+
+The rules above are meant to capture Tranquils goals of being correct while being community oriented and avoiding as much "Bluesky-defaultism" as possible.
+Tranquil is a community atproto PDS, *not* a company-led Bluesky (or other atproto app) PDS.
+See also "Tranquil & the world" in docs/1_WELCOME_TO_TRANQUIL_PDS.md.
 
 ## Local Development
 
