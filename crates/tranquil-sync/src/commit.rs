@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -12,6 +12,7 @@ use std::str::FromStr;
 use tracing::error;
 use tranquil_db_traits::AccountStatus;
 use tranquil_pds::api::error::ApiError;
+use tranquil_pds::api::query::XrpcQuery;
 use tranquil_pds::state::AppState;
 use tranquil_pds::sync::util::{
     RepoAccessLevel, assert_repo_availability, get_account_with_status,
@@ -22,7 +23,7 @@ async fn get_rev_from_commit(state: &AppState, cid_str: &str) -> Option<Tid> {
     let cid = Cid::from_str(cid_str).ok()?;
     let block = state.block_store.get(&cid).await.ok()??;
     let commit = Commit::from_cbor(&block).ok()?;
-    Some(Tid::from(commit.rev().to_string()))
+    Some(Tid::from(commit.rev().clone()))
 }
 
 #[derive(Deserialize)]
@@ -38,7 +39,7 @@ pub struct GetLatestCommitOutput {
 
 pub async fn get_latest_commit(
     State(state): State<AppState>,
-    Query(params): Query<GetLatestCommitParams>,
+    XrpcQuery(params): XrpcQuery<GetLatestCommitParams>,
 ) -> Response {
     let did = params.did;
 
@@ -98,7 +99,7 @@ pub struct ListReposOutput {
 
 pub async fn list_repos(
     State(state): State<AppState>,
-    Query(params): Query<ListReposParams>,
+    XrpcQuery(params): XrpcQuery<ListReposParams>,
 ) -> Response {
     let limit = params.limit.unwrap_or(50).clamp(1, 1000);
     let cursor_did: Option<Did> = params.cursor.as_ref().and_then(|s| s.parse().ok());
@@ -173,7 +174,7 @@ pub struct GetRepoStatusOutput {
 
 pub async fn get_repo_status(
     State(state): State<AppState>,
-    Query(params): Query<GetRepoStatusParams>,
+    XrpcQuery(params): XrpcQuery<GetRepoStatusParams>,
 ) -> Response {
     let did = params.did;
 

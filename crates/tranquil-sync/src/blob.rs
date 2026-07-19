@@ -1,7 +1,7 @@
 use axum::{
     Json,
     body::Body,
-    extract::{Query, State},
+    extract::State,
     http::StatusCode,
     http::header,
     response::{IntoResponse, Response},
@@ -9,6 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use tranquil_pds::api::error::ApiError;
+use tranquil_pds::api::query::XrpcQuery;
 use tranquil_pds::state::AppState;
 use tranquil_pds::sync::util::{RepoAccessLevel, assert_repo_availability};
 use tranquil_types::{CidLink, Did, Tid};
@@ -21,7 +22,7 @@ pub struct GetBlobParams {
 
 pub async fn get_blob(
     State(state): State<AppState>,
-    Query(params): Query<GetBlobParams>,
+    XrpcQuery(params): XrpcQuery<GetBlobParams>,
 ) -> Response {
     let did = params.did;
     let cid = params.cid;
@@ -61,7 +62,7 @@ pub async fn get_blob(
 #[derive(Deserialize)]
 pub struct ListBlobsParams {
     pub did: Did,
-    pub since: Option<String>,
+    pub since: Option<Tid>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
@@ -75,7 +76,7 @@ pub struct ListBlobsOutput {
 
 pub async fn list_blobs(
     State(state): State<AppState>,
-    Query(params): Query<ListBlobsParams>,
+    XrpcQuery(params): XrpcQuery<ListBlobsParams>,
 ) -> Response {
     let did = params.did;
 
@@ -95,7 +96,7 @@ pub async fn list_blobs(
         state
             .repos
             .blob
-            .list_blobs_since_rev(&did, &Tid::from(since.clone()))
+            .list_blobs_since_rev(&did, since)
             .await
             .map(|cids| {
                 let mut cids = cids;
