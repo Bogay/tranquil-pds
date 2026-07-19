@@ -106,6 +106,10 @@ pub async fn introspect_token(
         Ok(info) => info,
         Err(_) => return Ok(Json(inactive_response)),
     };
+    let jwt_info = match tranquil_pds::oauth::verify::extract_oauth_token_info(&request.token) {
+        Ok(info) => info,
+        Err(_) => return Ok(Json(inactive_response)),
+    };
     let token_id = TokenId::from(token_info.sid.clone());
     let token_data = match state.repos.oauth.get_token_by_id(&token_id).await {
         Ok(Some(data)) => data,
@@ -118,7 +122,7 @@ pub async fn introspect_token(
     let issuer = format!("https://{}", pds_hostname);
     Ok(Json(IntrospectResponse {
         active: true,
-        scope: token_data.scope,
+        scope: jwt_info.scope,
         client_id: Some(token_data.client_id),
         username: None,
         token_type: if token_data.parameters.dpop_jkt.is_some() {
@@ -129,7 +133,7 @@ pub async fn introspect_token(
         exp: Some(token_info.exp),
         iat: Some(token_info.iat),
         nbf: Some(token_info.iat),
-        sub: Some(token_data.did.to_string()),
+        sub: Some(jwt_info.did.to_string()),
         aud: Some(issuer.clone()),
         iss: Some(issuer),
         jti: Some(token_info.jti),

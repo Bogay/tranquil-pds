@@ -7859,6 +7859,7 @@ dependencies = [
 name = "tranquil-oauth-server"
 version = "0.6.5"
 dependencies = [
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "bcrypt",
@@ -7882,6 +7883,7 @@ dependencies = [
  "tranquil-crypto",
  "tranquil-db-traits",
  "tranquil-pds",
+ "tranquil-scopes",
  "tranquil-types",
  "urlencoding",
  "uuid",

@@ -96,7 +96,7 @@ pub async fn verify_oauth_access_token(
         did: token_data.did,
         token_id,
         client_id: token_data.client_id,
-        scope: token_data.scope,
+        scope: token_info.scope,
     })
 }
 

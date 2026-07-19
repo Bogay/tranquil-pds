@@ -7,12 +7,10 @@ use axum::http::{HeaderMap, Method};
 use chrono::{Duration, Utc};
 use tranquil_db_traits::RefreshTokenLookup;
 use tranquil_pds::config::AuthConfig;
-use tranquil_pds::delegation::intersect_scopes;
 use tranquil_pds::oauth::{
     AuthFlow, ClientAuth, ClientMetadataCache, DPoPVerifier, OAuthError, RefreshToken, TokenData,
     TokenId,
     db::{enforce_token_limit_for_user, lookup_refresh_token},
-    scopes::expand_include_scopes,
     verify_client_auth,
 };
 use tranquil_pds::state::AppState;
@@ -132,46 +130,54 @@ pub async fn handle_authorization_code_grant(
     let refresh_token = RefreshToken::generate();
     let now = Utc::now();
 
-    let (raw_scope, controller_did) = if let Some(ref controller) = authorized.controller_did {
+    let controller_did = authorized.controller_did.clone();
+    let requested_scope = authorized.parameters.scope.clone();
+
+    let granted_scopes: Option<String> = if let Some(ref controller) = controller_did {
         let grant = state
             .repos
             .delegation
             .get_delegation(&did, controller)
             .await
             .ok()
-            .flatten();
-        let granted_scopes = match grant {
-            Some(g) => g.granted_scopes,
-            None => {
-                return Err(OAuthError::InvalidGrant(
-                    "Delegation grant not found or revoked".to_string(),
-                ));
-            }
-        };
-        let requested = authorized.parameters.scope.as_deref().unwrap_or("atproto");
-        let intersected = intersect_scopes(requested, granted_scopes.as_str());
-        (Some(intersected), Some(controller.clone()))
+            .flatten()
+            .ok_or_else(|| {
+                OAuthError::InvalidGrant("Delegation grant not found or revoked".to_string())
+            })?;
+        Some(grant.granted_scopes.as_str().to_string())
     } else {
-        (authorized.parameters.scope.clone(), None)
+        None
     };
-
-    let final_scope = if let Some(ref scope) = raw_scope {
-        if scope.contains("include:") {
-            Some(expand_include_scopes(scope).await.map_err(|e| {
-                OAuthError::InvalidScope(format!("Failed to expand permission set: {e}"))
-            })?)
-        } else {
-            raw_scope
-        }
-    } else {
-        raw_scope
+    let authority = match granted_scopes.as_deref() {
+        Some(g) => crate::endpoints::authorize::scope_resolution::Authority::Delegated(g),
+        None => crate::endpoints::authorize::scope_resolution::Authority::FullSelf,
     };
+    let requested_for_resolve = requested_scope.as_deref().unwrap_or("atproto");
+    let effective = crate::endpoints::authorize::scope_resolution::resolve_effective_scopes(
+        &*state.cache,
+        requested_for_resolve,
+        authority,
+    )
+    .await;
+    if !effective.outcome.failures.is_empty() {
+        let names: Vec<String> = effective
+            .outcome
+            .failures
+            .iter()
+            .map(|f| f.nsid.clone())
+            .collect();
+        return Err(OAuthError::InvalidScope(format!(
+            "Could not resolve permission set(s): {}",
+            names.join(", ")
+        )));
+    }
+    let resolved_scope = effective.resolved;
 
     let access_token = create_access_token_with_delegation(
         &token_id,
         &did,
         dpop_jkt.as_ref(),
-        final_scope.as_deref(),
+        Some(resolved_scope.as_str()),
         controller_did.as_ref(),
     )?;
     let stored_client_auth = authorized.client_auth.unwrap_or(ClientAuth::None);
@@ -195,7 +201,7 @@ pub async fn handle_authorization_code_grant(
         details: None,
         code: None,
         current_refresh_token: Some(refresh_token.clone()),
-        scope: final_scope.clone(),
+        scope: requested_scope.clone(),
         controller_did: controller_did.clone(),
     };
     state
@@ -237,10 +243,55 @@ pub async fn handle_authorization_code_grant(
             },
             expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
             refresh_token: Some(refresh_token),
-            scope: final_scope,
+            scope: Some(resolved_scope.clone()),
             sub: Some(did),
         }),
     ))
+}
+
+async fn recompute_resolved_scope(
+    state: &AppState,
+    token_data: &TokenData,
+) -> Result<String, OAuthError> {
+    let requested = token_data.scope.as_deref().unwrap_or("atproto");
+    let granted_scopes: Option<String> = if let Some(ref controller) = token_data.controller_did {
+        let grant = state
+            .repos
+            .delegation
+            .get_delegation(&token_data.did, controller)
+            .await
+            .ok()
+            .flatten()
+            .ok_or_else(|| {
+                OAuthError::InvalidGrant("Delegation grant not found or revoked".to_string())
+            })?;
+        Some(grant.granted_scopes.as_str().to_string())
+    } else {
+        None
+    };
+    let authority = match granted_scopes.as_deref() {
+        Some(g) => crate::endpoints::authorize::scope_resolution::Authority::Delegated(g),
+        None => crate::endpoints::authorize::scope_resolution::Authority::FullSelf,
+    };
+    let effective = crate::endpoints::authorize::scope_resolution::resolve_effective_scopes(
+        &*state.cache,
+        requested,
+        authority,
+    )
+    .await;
+    if !effective.outcome.failures.is_empty() {
+        let names: Vec<String> = effective
+            .outcome
+            .failures
+            .iter()
+            .map(|f| f.nsid.clone())
+            .collect();
+        return Err(OAuthError::InvalidScope(format!(
+            "Permission set(s) expired and unresolvable: {}",
+            names.join(", ")
+        )));
+    }
+    Ok(effective.resolved)
 }
 
 pub async fn handle_refresh_token_grant(
@@ -282,11 +333,12 @@ pub async fn handle_refresh_token_grant(
                 "Refresh token reuse within grace period, returning existing tokens"
             );
             let dpop_jkt = token_data.parameters.dpop_jkt.as_ref();
+            let resolved = recompute_resolved_scope(&state, &token_data).await?;
             let access_token = create_access_token_with_delegation(
                 &token_data.token_id,
                 &token_data.did,
                 dpop_jkt,
-                token_data.scope.as_deref(),
+                Some(resolved.as_str()),
                 token_data.controller_did.as_ref(),
             )?;
             let mut response_headers = HeaderMap::new();
@@ -307,7 +359,7 @@ pub async fn handle_refresh_token_grant(
                     },
                     expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
                     refresh_token: token_data.current_refresh_token,
-                    scope: token_data.scope,
+                    scope: Some(resolved),
                     sub: Some(token_data.did),
                 }),
             ));
@@ -396,11 +448,12 @@ pub async fn handle_refresh_token_grant(
         new_expires_at = %new_expires_at,
         "Refresh token rotated successfully"
     );
+    let resolved = recompute_resolved_scope(&state, &token_data).await?;
     let access_token = create_access_token_with_delegation(
         &token_data.token_id,
         &token_data.did,
         dpop_jkt.as_ref(),
-        token_data.scope.as_deref(),
+        Some(resolved.as_str()),
         token_data.controller_did.as_ref(),
     )?;
     let mut response_headers = HeaderMap::new();
@@ -421,7 +474,7 @@ pub async fn handle_refresh_token_grant(
             },
             expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
             refresh_token: Some(new_refresh_token),
-            scope: token_data.scope,
+            scope: Some(resolved),
             sub: Some(token_data.did),
         }),
     ))

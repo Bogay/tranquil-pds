@@ -15,7 +15,7 @@ use tranquil_pds::auth::{BareLoginIdentifier, NormalizedLoginIdentifier};
 use tranquil_pds::comms::comms_repo::enqueue_2fa_code;
 use tranquil_pds::oauth::{
     AuthFlow, ClientMetadataCache, DeviceData, DeviceId, OAuthError, Prompt, SessionId,
-    db::should_show_consent, scopes::expand_include_scopes,
+    db::should_show_consent,
 };
 use tranquil_pds::rate_limit::{
     OAuthAuthorizeLimit, OAuthRateLimited, OAuthRegisterCompleteLimit, TotpVerifyLimit,
@@ -300,6 +300,7 @@ mod consent;
 mod login;
 mod passkey;
 mod registration;
+pub mod scope_resolution;
 mod two_factor;
 
 pub use consent::*;

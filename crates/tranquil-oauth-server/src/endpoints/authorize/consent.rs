@@ -116,26 +116,30 @@ pub async fn consent_get(
         None
     };
 
-    let effective_scope_str = if let Some(ref grant) = delegation_grant {
-        tranquil_pds::delegation::intersect_scopes(
-            requested_scope_str,
-            grant.granted_scopes.as_str(),
-        )
-    } else {
-        requested_scope_str.to_string()
+    let authority = match delegation_grant.as_ref() {
+        Some(grant) => scope_resolution::Authority::Delegated(grant.granted_scopes.as_str()),
+        None => scope_resolution::Authority::FullSelf,
     };
-
-    let expanded_scope_str = match expand_include_scopes(&effective_scope_str).await {
-        Ok(s) => s,
-        Err(e) => {
-            return json_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_scope",
-                &format!("Failed to expand permission set: {e}"),
-            );
-        }
-    };
-    let requested_scopes: Vec<&str> = expanded_scope_str.split_whitespace().collect();
+    let effective = scope_resolution::resolve_effective_scopes(
+        &*state.cache,
+        requested_scope_str,
+        authority,
+    )
+    .await;
+    if !effective.outcome.failures.is_empty() {
+        let names: Vec<String> = effective
+            .outcome
+            .failures
+            .iter()
+            .map(|f| f.nsid.clone())
+            .collect();
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_scope",
+            &format!("Could not resolve permission set(s): {}", names.join(", ")),
+        );
+    }
+    let requested_scopes: Vec<&str> = effective.resolved.split_whitespace().collect();
     let preferences = state
         .repos
         .oauth
@@ -342,15 +346,30 @@ pub async fn consent_post(
         None => None,
     };
 
-    let effective_scope_str = if let Some(ref grant) = delegation_grant {
-        tranquil_pds::delegation::intersect_scopes(
-            original_scope_str,
-            grant.granted_scopes.as_str(),
-        )
-    } else {
-        original_scope_str.to_string()
+    let authority = match delegation_grant.as_ref() {
+        Some(grant) => scope_resolution::Authority::Delegated(grant.granted_scopes.as_str()),
+        None => scope_resolution::Authority::FullSelf,
     };
-    let requested_scopes: Vec<&str> = effective_scope_str.split_whitespace().collect();
+    let effective = scope_resolution::resolve_effective_scopes(
+        &*state.cache,
+        original_scope_str,
+        authority,
+    )
+    .await;
+    if !effective.outcome.failures.is_empty() {
+        let names: Vec<String> = effective
+            .outcome
+            .failures
+            .iter()
+            .map(|f| f.nsid.clone())
+            .collect();
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_scope",
+            &format!("Could not resolve permission set(s): {}", names.join(", ")),
+        );
+    }
+    let requested_scopes: Vec<&str> = effective.resolved.split_whitespace().collect();
     let atproto_was_requested = requested_scopes.contains(&"atproto");
     if atproto_was_requested && !form.approved_scopes.contains(&"atproto".to_string()) {
         return json_error(
