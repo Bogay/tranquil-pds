@@ -1,0 +1,182 @@
+use crate::cache::Cache;
+use crate::cache_keys::permission_set_key;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tranquil_scopes::{
+    fetch_and_expand, parse_include_scope, ExpansionOutcome, FailedSet, ResolveFailure,
+    ResolvedSetGroup, ScopeExpansionError,
+};
+use tranquil_types::Nsid;
+
+#[derive(Serialize, Deserialize)]
+struct CachedPermissionSet {
+    scope: String,
+    title: Option<String>,
+    detail: Option<String>,
+}
+
+const PERMISSION_SET_CACHE_TTL_SECS: u64 = 24 * 60 * 60;
+
+pub async fn expand_scopes(cache: &dyn Cache, scope_string: &str) -> ExpansionOutcome {
+    let mut outcome = ExpansionOutcome::default();
+    for tok in scope_string.split_whitespace() {
+        match tok.strip_prefix("include:") {
+            None => outcome.passthrough.push(tok.to_string()),
+            Some(rest) => {
+                let (nsid, aud) = parse_include_scope(rest);
+                match resolve_one(cache, nsid, aud).await {
+                    Ok(group) => outcome.sets.push(group),
+                    Err(reason) => outcome.failures.push(FailedSet {
+                        nsid: nsid.to_string(),
+                        aud: aud.map(str::to_string),
+                        reason,
+                    }),
+                }
+            }
+        }
+    }
+    outcome
+}
+
+async fn resolve_one(
+    cache: &dyn Cache,
+    nsid: &str,
+    aud: Option<&str>,
+) -> Result<ResolvedSetGroup, ResolveFailure> {
+    let key = permission_set_key(nsid, aud);
+    // Cache hit
+    if let Some(json) = cache.get(&key).await
+        && let Ok(v) = serde_json::from_str::<CachedPermissionSet>(&json)
+    {
+        return Ok(group_from(nsid, aud, v.scope, v.title, v.detail));
+    }
+    // Miss → network fetch → cache
+    let parsed = Nsid::new(nsid).map_err(|_| ResolveFailure::Invalid)?;
+    match fetch_and_expand(&parsed, aud).await {
+        Ok(fetched) => {
+            let stored = CachedPermissionSet {
+                scope: fetched.expanded.clone(),
+                title: fetched.title.clone(),
+                detail: fetched.detail.clone(),
+            };
+            if let Ok(json) = serde_json::to_string(&stored) {
+                let _ = cache
+                    .set(&key, &json, Duration::from_secs(PERMISSION_SET_CACHE_TTL_SECS))
+                    .await;
+            }
+            Ok(group_from(nsid, aud, fetched.expanded, fetched.title, fetched.detail))
+        }
+        Err(e) => Err(map_err(&e)),
+    }
+}
+
+fn group_from(
+    nsid: &str,
+    aud: Option<&str>,
+    scope: String,
+    title: Option<String>,
+    detail: Option<String>,
+) -> ResolvedSetGroup {
+    ResolvedSetGroup {
+        nsid: nsid.to_string(),
+        aud: aud.map(str::to_string),
+        title,
+        detail,
+        expanded: scope.split_whitespace().map(str::to_string).collect(),
+    }
+}
+
+fn map_err(e: &ScopeExpansionError) -> ResolveFailure {
+    use ScopeExpansionError as E;
+    match e {
+        E::InvalidNsid(_) | E::UnexpectedType(_) | E::EmptyPermissions | E::MissingDefinition(_) => {
+            ResolveFailure::Invalid
+        }
+        E::DnsResolution(_) | E::HttpFailed(_) | E::DidResolution(_) => ResolveFailure::NetworkError,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::{Cache, CacheError};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    #[derive(Default)]
+    struct MapCache(Mutex<HashMap<String, String>>);
+
+    #[async_trait::async_trait]
+    impl Cache for MapCache {
+        async fn get(&self, key: &str) -> Option<String> {
+            self.0.lock().unwrap().get(key).cloned()
+        }
+        async fn set(&self, key: &str, value: &str, _ttl: Duration) -> Result<(), CacheError> {
+            self.0
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), value.to_string());
+            Ok(())
+        }
+        async fn delete(&self, key: &str) -> Result<(), CacheError> {
+            self.0.lock().unwrap().remove(key);
+            Ok(())
+        }
+        async fn get_bytes(&self, _key: &str) -> Option<Vec<u8>> {
+            None
+        }
+        async fn set_bytes(&self, _k: &str, _v: &[u8], _t: Duration) -> Result<(), CacheError> {
+            Ok(())
+        }
+    }
+
+    fn seed(cache: &MapCache, nsid: &str, scope: &str) {
+        let key = crate::cache_keys::permission_set_key(nsid, None);
+        let val = serde_json::to_string(&CachedPermissionSet {
+            scope: scope.to_string(),
+            title: Some("Basic".into()),
+            detail: None,
+        })
+        .unwrap();
+        cache.0.lock().unwrap().insert(key, val);
+    }
+
+    #[tokio::test]
+    async fn cache_hit_expands_without_network() {
+        let cache = MapCache::default();
+        seed(
+            &cache,
+            "io.atcr.authFullApp",
+            "repo:io.atcr.manifest?action=create identity:*",
+        );
+        let out = expand_scopes(&cache, "atproto include:io.atcr.authFullApp").await;
+        assert!(out.failures.is_empty());
+        assert_eq!(out.passthrough, vec!["atproto".to_string()]);
+        assert_eq!(out.sets.len(), 1);
+        assert_eq!(out.sets[0].nsid, "io.atcr.authFullApp");
+        assert!(
+            out.flat_scopes()
+                .iter()
+                .any(|s| s == "repo:io.atcr.manifest?action=create")
+        );
+    }
+
+    #[tokio::test]
+    async fn passthrough_scopes_untouched() {
+        let cache = MapCache::default();
+        let out = expand_scopes(&cache, "atproto repo:app.bsky.feed.post?action=create").await;
+        assert!(out.failures.is_empty());
+        assert!(out.sets.is_empty());
+        assert_eq!(out.flat_scopes().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn cache_miss_unresolvable_is_a_failure() {
+        let cache = MapCache::default(); // empty → miss → network fetch of a fake NSID fails fast
+        let out = expand_scopes(&cache, "include:nonexistent.fake.permissionSet").await;
+        assert_eq!(out.sets.len(), 0);
+        assert_eq!(out.failures.len(), 1);
+        assert_eq!(out.failures[0].nsid, "nonexistent.fake.permissionSet");
+    }
+}

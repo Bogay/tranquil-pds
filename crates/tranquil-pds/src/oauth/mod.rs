@@ -1,5 +1,6 @@
 pub mod client;
 pub mod db;
+pub mod permission_set_resolver;
 pub mod scopes;
 pub mod verify;
 
@@ -20,6 +21,7 @@ pub use tranquil_oauth::{
     compute_pkce_challenge, verify_client_auth,
 };
 
+pub use permission_set_resolver::expand_scopes;
 pub use scopes::{AccountAction, AccountAttr, RepoAction, ScopeError, ScopePermissions};
 pub use verify::{
     OAuthAuthError, OAuthUser, VerifyResult, generate_dpop_nonce, verify_oauth_access_token,

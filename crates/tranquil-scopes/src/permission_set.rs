@@ -26,6 +26,50 @@ pub enum ScopeExpansionError {
     EmptyPermissions,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolveFailure {
+    NotFound,
+    NetworkError,
+    Invalid,
+}
+
+#[derive(Debug, Clone)]
+pub struct FailedSet {
+    pub nsid: String,
+    pub aud: Option<String>,
+    pub reason: ResolveFailure,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedSetGroup {
+    pub nsid: String,
+    pub aud: Option<String>,
+    pub title: Option<String>,
+    pub detail: Option<String>,
+    pub expanded: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ExpansionOutcome {
+    pub passthrough: Vec<String>,
+    pub sets: Vec<ResolvedSetGroup>,
+    pub failures: Vec<FailedSet>,
+}
+
+impl ExpansionOutcome {
+    pub fn flat_scopes(&self) -> Vec<String> {
+        let mut out = self.passthrough.clone();
+        for s in &self.sets {
+            out.extend(s.expanded.iter().cloned());
+        }
+        out
+    }
+    /// Space-joined `flat_scopes`.
+    pub fn to_scope_string(&self) -> String {
+        self.flat_scopes().join(" ")
+    }
+}
+
 static LEXICON_CACHE: LazyLock<RwLock<HashMap<String, CachedLexicon>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
@@ -63,6 +107,10 @@ struct LexiconDoc {
 struct LexiconDef {
     #[serde(rename = "type")]
     def_type: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    detail: Option<String>,
     permissions: Option<Vec<PermissionEntry>>,
 }
 
@@ -98,7 +146,7 @@ pub async fn expand_include_scopes(scope_string: &str) -> Result<String, ScopeEx
         .map(|v| v.join(" "))
 }
 
-fn parse_include_scope(rest: &str) -> (&str, Option<&str>) {
+pub fn parse_include_scope(rest: &str) -> (&str, Option<&str>) {
     rest.split_once('?')
         .map(|(nsid, params)| {
             let aud = params.split('&').find_map(|p| p.strip_prefix("aud="));
@@ -126,33 +174,8 @@ async fn expand_permission_set(
         }
     }
 
-    let lexicon = fetch_lexicon_via_atproto(nsid).await?;
-
-    let main_def = lexicon
-        .defs
-        .get("main")
-        .ok_or(ScopeExpansionError::MissingDefinition("main".to_string()))?;
-
-    if main_def.def_type != "permission-set" {
-        return Err(ScopeExpansionError::UnexpectedType(
-            main_def.def_type.clone(),
-        ));
-    }
-
-    let permissions =
-        main_def
-            .permissions
-            .as_ref()
-            .ok_or(ScopeExpansionError::MissingDefinition(
-                "permissions".to_string(),
-            ))?;
-
-    let namespace_authority = extract_namespace_authority(nsid);
-    let expanded = build_expanded_scopes(permissions, aud, &namespace_authority);
-
-    if expanded.is_empty() {
-        return Err(ScopeExpansionError::EmptyPermissions);
-    }
+    let fetched = fetch_and_expand(nsid, aud).await?;
+    let expanded = fetched.expanded;
 
     {
         let mut cache = LEXICON_CACHE.write().await;
@@ -167,6 +190,44 @@ async fn expand_permission_set(
 
     debug!(nsid = %nsid, expanded = %expanded, "Successfully expanded permission set");
     Ok(expanded)
+}
+
+pub struct FetchedSet {
+    pub expanded: String,
+    pub title: Option<String>,
+    pub detail: Option<String>,
+}
+
+pub async fn fetch_and_expand(
+    nsid: &Nsid,
+    aud: Option<&str>,
+) -> Result<FetchedSet, ScopeExpansionError> {
+    let lexicon = fetch_lexicon_via_atproto(nsid).await?;
+    let main_def = lexicon
+        .defs
+        .get("main")
+        .ok_or(ScopeExpansionError::MissingDefinition("main".to_string()))?;
+    if main_def.def_type != "permission-set" {
+        return Err(ScopeExpansionError::UnexpectedType(
+            main_def.def_type.clone(),
+        ));
+    }
+    let permissions = main_def
+        .permissions
+        .as_ref()
+        .ok_or(ScopeExpansionError::MissingDefinition(
+            "permissions".to_string(),
+        ))?;
+    let namespace_authority = extract_namespace_authority(nsid);
+    let expanded = build_expanded_scopes(permissions, aud, &namespace_authority);
+    if expanded.is_empty() {
+        return Err(ScopeExpansionError::EmptyPermissions);
+    }
+    Ok(FetchedSet {
+        expanded,
+        title: main_def.title.clone(),
+        detail: main_def.detail.clone(),
+    })
 }
 
 async fn fetch_lexicon_via_atproto(nsid: &Nsid) -> Result<LexiconDoc, ScopeExpansionError> {
@@ -677,5 +738,56 @@ mod tests {
             dns_authority("community.lexicon.bookmarks.authManageBookmarks"),
             "bookmarks.lexicon.community"
         );
+    }
+
+    #[test]
+    fn expansion_outcome_flat_scopes_and_string() {
+        let out = ExpansionOutcome {
+            passthrough: vec!["atproto".into()],
+            sets: vec![ResolvedSetGroup {
+                nsid: "io.atcr.authFullApp".into(),
+                aud: None,
+                title: Some("T".into()),
+                detail: None,
+                expanded: vec![
+                    "repo:io.atcr.manifest?action=create".into(),
+                    "rpc:io.atcr.getManifest".into(),
+                ],
+            }],
+            failures: vec![FailedSet {
+                nsid: "nonexistent.fake.permissionSet".into(),
+                aud: None,
+                reason: ResolveFailure::NotFound,
+            }],
+        };
+        let flat = out.flat_scopes();
+        assert_eq!(
+            flat,
+            vec![
+                "atproto",
+                "repo:io.atcr.manifest?action=create",
+                "rpc:io.atcr.getManifest"
+            ]
+        );
+        assert_eq!(
+            out.to_scope_string(),
+            "atproto repo:io.atcr.manifest?action=create rpc:io.atcr.getManifest"
+        );
+    }
+
+    #[test]
+    fn test_lexicon_def_captures_title_and_detail() {
+        let json = serde_json::json!({
+            "defs": { "main": {
+                "type": "permission-set",
+                "title": "Basic App",
+                "detail": "Posts and interactions",
+                "permissions": [{ "resource": "repo", "collection": ["io.atcr.manifest"] }]
+            }}
+        });
+        let doc: LexiconDoc = serde_json::from_value(json).unwrap();
+        let main = doc.defs.get("main").unwrap();
+        assert_eq!(main.title.as_deref(), Some("Basic App"));
+        assert_eq!(main.detail.as_deref(), Some("Posts and interactions"));
     }
 }

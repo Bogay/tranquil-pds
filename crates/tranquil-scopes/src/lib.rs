@@ -15,5 +15,8 @@ pub use parser::{
     AccountAction, AccountAttr, AccountScope, BlobScope, IdentityAttr, IdentityScope, IncludeScope,
     ParsedScope, RepoAction, RepoScope, RpcScope, parse_scope, parse_scope_string,
 };
-pub use permission_set::{ScopeExpansionError, expand_include_scopes};
+pub use permission_set::{
+    ExpansionOutcome, FailedSet, FetchedSet, ResolveFailure, ResolvedSetGroup,
+    ScopeExpansionError, expand_include_scopes, fetch_and_expand, parse_include_scope,
+};
 pub use permissions::ScopePermissions;
