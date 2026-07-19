@@ -480,6 +480,69 @@ pub fn get_multikey_from_signing_key(signing_key: &k256::ecdsa::SigningKey) -> S
     multibase::encode(multibase::Base::Base58Btc, buf)
 }
 
+async fn reachable_blocks(user_id: uuid::Uuid) -> std::collections::BTreeSet<cid::Cid> {
+    use jacquard_repo::storage::BlockStore;
+
+    let repos = super::common::get_test_repos().await;
+    let store = super::common::get_test_block_store().await;
+
+    let root_str = repos
+        .repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
+        .expect("DB error fetching repo root")
+        .expect("repo root not found");
+    let root_cid = cid::Cid::try_from(root_str.as_str()).expect("repo root isn't a valid CID");
+    let commit_bytes = store
+        .get(&root_cid)
+        .await
+        .expect("block store error fetching commit")
+        .expect("commit block not in block store");
+    let data_cid = jacquard_repo::commit::Commit::from_cbor(&commit_bytes)
+        .expect("commit block doesn't parse")
+        .data;
+
+    let mst = jacquard_repo::mst::Mst::load(std::sync::Arc::new(store.clone()), data_cid, None);
+    let mut cids = tranquil_pds::repo_ops::reachable_tree_cids(&mst)
+        .await
+        .expect("walking the new MST failed");
+    cids.insert(root_cid);
+    cids
+}
+
+async fn recorded_blocks(user_id: uuid::Uuid) -> std::collections::BTreeSet<cid::Cid> {
+    super::common::get_test_repos()
+        .await
+        .repo
+        .get_user_block_cids_since_rev(user_id, None)
+        .await
+        .expect("get_user_block_cids_since_rev failed")
+        .iter()
+        .map(|b| cid::Cid::try_from(b.as_slice()).expect("invalid CID in user_blocks"))
+        .collect()
+}
+
+#[allow(dead_code)]
+pub async fn assert_user_blocks_matches_repo(user_id: uuid::Uuid, phase: &str) {
+    let reachable = reachable_blocks(user_id).await;
+    let recorded = recorded_blocks(user_id).await;
+    let missing: Vec<String> = reachable
+        .difference(&recorded)
+        .map(cid::Cid::to_string)
+        .collect();
+    let stale: Vec<String> = recorded
+        .difference(&reachable)
+        .map(cid::Cid::to_string)
+        .collect();
+    assert!(
+        missing.is_empty() && stale.is_empty(),
+        "user_blocks doesn't match the blocks reachable from the repo root after {phase}. \
+         reachable={} recorded={} missing={missing:?} stale={stale:?}",
+        reachable.len(),
+        recorded.len(),
+    );
+}
+
 #[allow(dead_code)]
 pub async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
     let repos = super::common::get_test_repos().await;
