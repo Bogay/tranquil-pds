@@ -75,6 +75,16 @@ async fn main() -> ExitCode {
                     eprintln!("TLS material invalid: {e}");
                     return ExitCode::FAILURE;
                 }
+                config
+                    .server
+                    .user_handle_domain_list()
+                    .iter()
+                    .filter(|d| !tranquil_pds::api::validation::domain_forms_valid_handles(d))
+                    .for_each(|d| {
+                        eprintln!(
+                            "account creation under handle domain {d} will be rejected because its TLD is reserved"
+                        );
+                    });
                 println!("Configuration is valid.");
                 ExitCode::SUCCESS
             }
@@ -104,6 +114,8 @@ async fn main() -> ExitCode {
     }
 
     tranquil_config::init(config);
+
+    tranquil_pds::api::validation::warn_unusable_handle_domains();
 
     tranquil_pds::metrics::init_metrics();
 

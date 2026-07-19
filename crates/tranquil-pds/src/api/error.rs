@@ -763,6 +763,8 @@ impl From<crate::api::validation::HandleValidationError> for ApiError {
             HandleValidationError::BannedWord => {
                 Self::InvalidHandle(Some("Inappropriate language in handle".to_string()))
             }
+            HandleValidationError::UnusableHandleDomain
+            | HandleValidationError::NoHandleDomains => Self::InternalError(Some(e.to_string())),
             _ => Self::InvalidHandle(Some(e.to_string())),
         }
     }

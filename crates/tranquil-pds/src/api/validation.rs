@@ -101,13 +101,17 @@ fn validate_email_detailed(email: &str) -> Result<(), EmailValidationError> {
 pub enum HandleValidationError {
     Empty,
     TooShort,
-    TooLong,
+    TooLong { max: usize },
     InvalidCharacters,
     StartsWithInvalidChar,
     EndsWithInvalidChar,
     ContainsSpaces,
     BannedWord,
     Reserved,
+    InvalidSyntax,
+    DisallowedTld,
+    UnusableHandleDomain,
+    NoHandleDomains,
 }
 
 impl std::fmt::Display for HandleValidationError {
@@ -119,11 +123,9 @@ impl std::fmt::Display for HandleValidationError {
                 "Handle must be at least {} characters",
                 MIN_HANDLE_LENGTH
             ),
-            Self::TooLong => write!(
-                f,
-                "Handle exceeds maximum length of {} characters",
-                MAX_SERVICE_HANDLE_LOCAL_PART
-            ),
+            Self::TooLong { max } => {
+                write!(f, "Handle exceeds maximum length of {} characters", max)
+            }
             Self::InvalidCharacters => write!(
                 f,
                 "Handle contains invalid characters. Only alphanumeric characters and hyphens are allowed"
@@ -135,6 +137,15 @@ impl std::fmt::Display for HandleValidationError {
             Self::ContainsSpaces => write!(f, "Handle cannot contain spaces"),
             Self::BannedWord => write!(f, "Inappropriate language in handle"),
             Self::Reserved => write!(f, "Reserved handle"),
+            Self::InvalidSyntax => write!(f, "Handle does not match atproto handle syntax"),
+            Self::DisallowedTld => write!(f, "Handle uses a reserved TLD and cannot resolve"),
+            Self::UnusableHandleDomain => write!(
+                f,
+                "This server's handle domain has a reserved TLD, so no handle under it is a valid atproto handle"
+            ),
+            Self::NoHandleDomains => {
+                write!(f, "No handle domains are configured on this server")
+            }
         }
     }
 }
@@ -159,7 +170,9 @@ pub fn validate_full_domain_handle(handle: &str) -> Result<Handle, HandleValidat
     }
 
     if handle.len() > MAX_HANDLE_LENGTH {
-        return Err(HandleValidationError::TooLong);
+        return Err(HandleValidationError::TooLong {
+            max: MAX_HANDLE_LENGTH,
+        });
     }
 
     if handle
@@ -190,7 +203,11 @@ pub fn validate_full_domain_handle(handle: &str) -> Result<Handle, HandleValidat
         return Err(HandleValidationError::BannedWord);
     }
 
-    Ok(Handle::from(handle_lower))
+    let handle = Handle::new(handle_lower).map_err(|_| HandleValidationError::InvalidSyntax)?;
+    match handle.has_disallowed_tld() {
+        true => Err(HandleValidationError::DisallowedTld),
+        false => Ok(handle),
+    }
 }
 
 pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationError> {
@@ -210,14 +227,38 @@ pub fn resolve_handle_input(input: &str) -> Result<Handle, HandleValidationError
             None => input,
         };
         let validated = validate_short_handle(handle_to_validate)?;
-        Ok(Handle::from(format!(
-            "{}.{}",
-            validated,
-            matched_domain.unwrap_or(&available_domains[0])
-        )))
+        let domain = matched_domain
+            .or_else(|| available_domains.first())
+            .ok_or(HandleValidationError::NoHandleDomains)?;
+        let handle = Handle::new(format!("{}.{}", validated, domain))
+            .map_err(|_| HandleValidationError::InvalidSyntax)?;
+        match handle.has_disallowed_tld() {
+            true => Err(HandleValidationError::UnusableHandleDomain),
+            false => Ok(handle),
+        }
     } else {
         validate_full_domain_handle(input)
     }
+}
+
+pub fn domain_forms_valid_handles(domain: &str) -> bool {
+    Handle::new(format!("whelk.{domain}")).is_ok_and(|h| !h.has_disallowed_tld())
+}
+
+pub fn warn_unusable_handle_domains() {
+    tranquil_config::get()
+        .server
+        .user_handle_domain_list()
+        .iter()
+        .filter(|domain| !domain_forms_valid_handles(domain))
+        .for_each(|domain| {
+            tracing::error!(
+                domain = %domain,
+                "configured handle domain can't form a valid atproto handle, so every account \
+                 creation under it will be rejected. Set server.user_handle_domains to a domain \
+                 whose TLD isn't reserved."
+            );
+        });
 }
 
 pub fn validate_service_handle(
@@ -239,7 +280,9 @@ pub fn validate_service_handle(
     }
 
     if handle.len() > MAX_SERVICE_HANDLE_LOCAL_PART {
-        return Err(HandleValidationError::TooLong);
+        return Err(HandleValidationError::TooLong {
+            max: MAX_SERVICE_HANDLE_LOCAL_PART,
+        });
     }
 
     if let Some(first_char) = handle.chars().next()
@@ -312,6 +355,19 @@ mod tests {
             Ok("mixedcase123".to_string())
         );
         assert_eq!(validate_short_handle("abc"), Ok("abc".to_string()));
+    }
+
+    #[test]
+    fn full_domain_handles_with_reserved_tlds_are_rejected() {
+        assert!(validate_full_domain_handle("whelk.oyster.cafe").is_ok());
+        assert_eq!(
+            validate_full_domain_handle("whelk.pds.internal"),
+            Err(HandleValidationError::DisallowedTld)
+        );
+        assert_eq!(
+            validate_full_domain_handle("handle.invalid"),
+            Err(HandleValidationError::DisallowedTld)
+        );
     }
 
     #[test]
@@ -388,11 +444,15 @@ mod tests {
         );
         assert_eq!(
             validate_short_handle("exactly19characters"),
-            Err(HandleValidationError::TooLong)
+            Err(HandleValidationError::TooLong {
+                max: MAX_SERVICE_HANDLE_LOCAL_PART
+            })
         );
         assert_eq!(
             validate_short_handle("waytoolongusername123456789"),
-            Err(HandleValidationError::TooLong)
+            Err(HandleValidationError::TooLong {
+                max: MAX_SERVICE_HANDLE_LOCAL_PART
+            })
         );
     }
 

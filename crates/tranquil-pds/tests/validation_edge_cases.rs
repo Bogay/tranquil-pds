@@ -217,7 +217,9 @@ fn test_handle_boundary_lengths() {
     let over_max = "a".repeat(MAX_SERVICE_HANDLE_LOCAL_PART + 1);
     assert!(matches!(
         validate_short_handle(&over_max),
-        Err(HandleValidationError::TooLong)
+        Err(HandleValidationError::TooLong {
+            max: MAX_SERVICE_HANDLE_LOCAL_PART
+        })
     ));
 }
 
