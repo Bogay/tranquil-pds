@@ -20,7 +20,7 @@ pub use delegation::{
     AuditLogEntry, ControllerInfo, DelegatedAccountInfo, DelegationActionType, DelegationGrant,
     DelegationRepository,
 };
-pub use error::DbError;
+pub use error::{ColumnRef, DbError};
 pub use infra::{
     AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DeletionRequest,
     DeletionRequestWithToken, InfraRepository, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder,

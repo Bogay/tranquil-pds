@@ -1,5 +1,31 @@
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ColumnRef {
+    table: &'static str,
+    column: &'static str,
+}
+
+impl ColumnRef {
+    pub const fn new(table: &'static str, column: &'static str) -> Self {
+        Self { table, column }
+    }
+
+    pub const fn table(&self) -> &'static str {
+        self.table
+    }
+
+    pub const fn column(&self) -> &'static str {
+        self.column
+    }
+}
+
+impl std::fmt::Display for ColumnRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.table, self.column)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum DbError {
     #[error("Database query error: {0}")]
@@ -28,6 +54,9 @@ pub enum DbError {
 
     #[error("Corrupt data in column: {0}")]
     CorruptData(&'static str),
+
+    #[error("Column {0} has a value that isn't valid for its type")]
+    InvalidColumn(ColumnRef),
 
     #[error("Other database error: {0}")]
     Other(String),
