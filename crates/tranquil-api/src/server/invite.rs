@@ -43,7 +43,7 @@ pub async fn create_invite_code(
     match state
         .repos
         .infra
-        .create_invite_code(&code, input.use_count, Some(&for_account))
+        .create_invite_code(&code, input.use_count, &for_account)
         .await
     {
         Ok(true) => Ok(Json(CreateInviteCodeOutput { code })),
@@ -115,7 +115,7 @@ pub async fn create_invite_codes(
         async move {
             let codes: Vec<InviteCodeValue> = (0..code_count).map(|_| gen_invite_code()).collect();
             infra_repo
-                .create_invite_codes_batch(&codes, use_count, admin_user_id, Some(&account))
+                .create_invite_codes_batch(&codes, use_count, admin_user_id, &account)
                 .await
                 .map(|_| AccountCodes { account, codes })
         }
@@ -188,27 +188,24 @@ pub async fn get_account_invite_codes(
     let codes = futures::future::join_all(filtered_codes.into_iter().map(|info| {
         let infra_repo = state.repos.infra.clone();
         async move {
-            let uses = infra_repo
+            let uses: Vec<InviteCodeUse> = infra_repo
                 .get_invite_code_uses(&info.code)
                 .await
-                .map(|use_rows| {
-                    use_rows
-                        .into_iter()
-                        .map(|u| InviteCodeUse {
-                            used_by: u.used_by_did.to_string(),
-                            used_by_handle: u.used_by_handle.map(|h| h.to_string()),
-                            used_at: u.used_at.to_rfc3339(),
-                        })
-                        .collect::<Vec<_>>()
+                .log_db_err("fetching invite code uses")?
+                .into_iter()
+                .map(|u| InviteCodeUse {
+                    used_by: u.used_by_did.to_string(),
+                    used_by_handle: u.used_by_handle.map(|h| h.to_string()),
+                    used_at: u.used_at.to_rfc3339(),
                 })
-                .unwrap_or_default();
+                .collect();
 
             let use_count = i32::try_from(uses.len()).unwrap_or(i32::MAX);
             if !include_used && use_count >= info.available_uses {
-                return None;
+                return Ok(None);
             }
 
-            Some(InviteCode {
+            Ok(Some(InviteCode {
                 code: info.code,
                 available: info.available_uses,
                 disabled: false,
@@ -219,11 +216,16 @@ pub async fn get_account_invite_codes(
                     .unwrap_or_else(|| "admin".to_string()),
                 created_at: info.created_at.to_rfc3339(),
                 uses,
-            })
+            }))
         }
     }))
     .await;
 
-    let codes: Vec<InviteCode> = codes.into_iter().flatten().collect();
+    let codes: Vec<InviteCode> = codes
+        .into_iter()
+        .collect::<Result<Vec<Option<InviteCode>>, ApiError>>()?
+        .into_iter()
+        .flatten()
+        .collect();
     Ok(Json(GetAccountInviteCodesOutput { codes }))
 }

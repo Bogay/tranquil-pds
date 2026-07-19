@@ -362,7 +362,7 @@ impl InfraOps {
         &self,
         code: &InviteCode,
         use_count: i32,
-        for_account: Option<&Did>,
+        for_account: &Did,
     ) -> Result<bool, MetastoreError> {
         let key = invite_code_key(code);
         let existing = self
@@ -377,7 +377,7 @@ impl InfraOps {
             code: code.as_str().to_owned(),
             available_uses: use_count,
             disabled: false,
-            for_account: for_account.map(|d| d.to_string()),
+            for_account: Some(for_account.to_string()),
             created_by: None,
             created_at_ms: Utc::now().timestamp_millis(),
         };
@@ -393,7 +393,7 @@ impl InfraOps {
         codes: &[InviteCode],
         use_count: i32,
         created_by_user: Uuid,
-        for_account: Option<&Did>,
+        for_account: &Did,
     ) -> Result<(), MetastoreError> {
         let now_ms = Utc::now().timestamp_millis();
         let mut batch = self.db.batch();
@@ -403,7 +403,7 @@ impl InfraOps {
                 code: code.as_str().to_owned(),
                 available_uses: use_count,
                 disabled: false,
-                for_account: for_account.map(|d| d.to_string()),
+                for_account: Some(for_account.to_string()),
                 created_by: Some(created_by_user),
                 created_at_ms: now_ms,
             };
@@ -1458,14 +1458,19 @@ impl InfraOps {
             SigningKeyValue::deserialize,
             "corrupt signing key",
         )?;
-        Ok(val.map(|v| ReservedSigningKeyFull {
-            id: v.id,
-            did: v.did.and_then(|d| Did::new(d).ok()),
-            public_key_did_key: Did::from(v.public_key_did_key),
-            private_key_bytes: v.private_key_bytes,
-            expires_at: DateTime::from_timestamp_millis(v.expires_at_ms).unwrap_or_default(),
-            used_at: v.used_at_ms.and_then(DateTime::from_timestamp_millis),
-        }))
+        val.map(|v| {
+            Ok(ReservedSigningKeyFull {
+                id: v.id,
+                did: v.did.and_then(|d| Did::new(d).ok()),
+                public_key_did_key: Did::new(v.public_key_did_key).map_err(|_| {
+                    MetastoreError::CorruptData("corrupt reserved signing key public_key_did_key")
+                })?,
+                private_key_bytes: v.private_key_bytes,
+                expires_at: DateTime::from_timestamp_millis(v.expires_at_ms).unwrap_or_default(),
+                used_at: v.used_at_ms.and_then(DateTime::from_timestamp_millis),
+            })
+        })
+        .transpose()
     }
 
     pub fn get_plc_tokens_for_user(

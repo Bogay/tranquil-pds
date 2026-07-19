@@ -1828,14 +1828,14 @@ pub enum InfraRequest {
     CreateInviteCode {
         code: InviteCode,
         use_count: i32,
-        for_account: Option<Did>,
+        for_account: Did,
         tx: Tx<bool>,
     },
     CreateInviteCodesBatch {
         codes: Vec<InviteCode>,
         use_count: i32,
         created_by_user: Uuid,
-        for_account: Option<Did>,
+        for_account: Did,
         tx: Tx<()>,
     },
     GetInviteCodeAvailableUses {
@@ -3911,7 +3911,7 @@ fn dispatch_infra<S: StorageIO>(state: &HandlerState<S>, req: InfraRequest) {
             let result = state
                 .metastore
                 .infra_ops()
-                .create_invite_code(&code, use_count, for_account.as_ref())
+                .create_invite_code(&code, use_count, &for_account)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
@@ -3925,7 +3925,7 @@ fn dispatch_infra<S: StorageIO>(state: &HandlerState<S>, req: InfraRequest) {
             let result = state
                 .metastore
                 .infra_ops()
-                .create_invite_codes_batch(&codes, use_count, created_by_user, for_account.as_ref())
+                .create_invite_codes_batch(&codes, use_count, created_by_user, &for_account)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
@@ -6206,7 +6206,7 @@ mod tests {
         let owner = Did::new("did:plc:whelk").expect("valid DID");
         let whelk = InviteCode::new("whelk");
 
-        assert!(infra.create_invite_code(&squid, 1, Some(&owner)).unwrap());
+        assert!(infra.create_invite_code(&squid, 1, &owner).unwrap());
 
         infra.reserve_invite_code(&squid).unwrap();
         assert_eq!(
@@ -6245,7 +6245,7 @@ mod tests {
         let owner = Did::new("did:plc:whelk").expect("valid DID");
         let whelk = InviteCode::new("whelk");
 
-        assert!(infra.create_invite_code(&squid, 1, Some(&owner)).unwrap());
+        assert!(infra.create_invite_code(&squid, 1, &owner).unwrap());
 
         infra.reserve_invite_code(&squid).unwrap();
         infra.refund_invite_code(&squid).unwrap();

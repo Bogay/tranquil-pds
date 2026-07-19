@@ -1836,14 +1836,14 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         &self,
         code: &InviteCode,
         use_count: i32,
-        for_account: Option<&Did>,
+        for_account: &Did,
     ) -> Result<bool, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::CreateInviteCode {
                 code: code.clone(),
                 use_count,
-                for_account: for_account.cloned(),
+                for_account: for_account.clone(),
                 tx,
             }))?;
         recv(rx).await
@@ -1854,7 +1854,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         codes: &[InviteCode],
         use_count: i32,
         created_by_user: Uuid,
-        for_account: Option<&Did>,
+        for_account: &Did,
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(
@@ -1862,7 +1862,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
                 codes: codes.to_vec(),
                 use_count,
                 created_by_user,
-                for_account: for_account.cloned(),
+                for_account: for_account.clone(),
                 tx,
             },
         ))?;

@@ -117,7 +117,7 @@ fn test_handle(suffix: &str) -> Handle {
 }
 
 fn test_cid(seed: u8) -> CidLink {
-    CidLink::from(helpers::make_cid(&[seed]))
+    CidLink::from_cid(&helpers::make_cid(&[seed]))
 }
 
 fn test_nsid(name: &str) -> Nsid {
@@ -139,7 +139,7 @@ fn test_at_uri(did: &Did, collection: &Nsid, rkey: &Rkey) -> AtUri {
 }
 
 async fn seed_user(repos: &PostgresRepositories, did: &Did, handle: &Handle) -> Uuid {
-    let commit_cid = CidLink::from(helpers::make_cid(did.as_str().as_bytes()).to_string());
+    let commit_cid = CidLink::from_cid(&helpers::make_cid(did.as_str().as_bytes()));
     let input = tranquil_db_traits::CreatePasswordAccountInput {
         handle: handle.clone(),
         email: None,
@@ -155,7 +155,7 @@ async fn seed_user(repos: &PostgresRepositories, did: &Did, handle: &Handle) -> 
         encryption_version: 0,
         reserved_key_id: None,
         commit_cid,
-        repo_rev: Tid::from("rev0".to_string()),
+        repo_rev: Tid::new("3k2aaaaaaaaaa").expect("valid TID"),
         genesis_block_cids: vec![],
         invite_code: None,
         birthdate_pref: None,
@@ -190,7 +190,7 @@ async fn seed_records(
             &collections,
             &rkeys,
             &cids,
-            &Tid::from("rev1".to_string()),
+            &Tid::new("3k2aaaaaaaaab").expect("valid TID"),
         )
         .await
         .unwrap();
@@ -1109,15 +1109,11 @@ async fn parity_invite_codes() {
     let _ = seed_repos(&f, &did, &handle).await;
     let code = tranquil_types::InviteCode::from(format!("parity-invite-{}", Uuid::new_v4()));
 
-    let pg_created =
-        f.pg.infra
-            .create_invite_code(&code, 5, Some(&did))
-            .await
-            .unwrap();
+    let pg_created = f.pg.infra.create_invite_code(&code, 5, &did).await.unwrap();
     let store_created = f
         .store
         .infra
-        .create_invite_code(&code, 5, Some(&did))
+        .create_invite_code(&code, 5, &did)
         .await
         .unwrap();
     assert_eq!(pg_created, store_created);
@@ -1359,7 +1355,7 @@ async fn parity_signing_key_reservation() {
     let f = ParityFixture::new().await;
     let did = test_did("sigkey");
     let expires = chrono::Utc::now() + chrono::Duration::hours(1);
-    let pub_key = Did::from(format!("did:key:z6Mk{}", Uuid::new_v4().simple()));
+    let pub_key = Did::new(format!("did:key:z6Mk{}", Uuid::new_v4().simple())).expect("valid DID");
     let priv_bytes = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
 
     f.pg.infra
@@ -1418,7 +1414,7 @@ async fn parity_repo_root_operations() {
     assert_eq!(pg_root, store_root);
 
     let new_root = test_cid(99);
-    let rev1 = Tid::from("rev1".to_string());
+    let rev1 = Tid::new("3k2aaaaaaaaab").expect("valid TID");
     f.pg.repo
         .update_repo_root(pg_uid, &new_root, &rev1)
         .await
@@ -1632,7 +1628,7 @@ async fn parity_prune_events_older_than() {
         blobs: None,
         blocks: None,
         prev_data_cid: None,
-        rev: Some(Tid::from("rev0".to_string())),
+        rev: Some(Tid::new("3k2aaaaaaaaaa").expect("valid TID")),
     };
 
     let baseline = f.pg.repo.get_max_seq().await.unwrap();

@@ -7,10 +7,12 @@ use tranquil_db_traits::{
     InviteCodeSortOrder, InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo,
     QueuedComms, ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
-use tranquil_types::{CidLink, Did, Handle, InviteCode};
+use tranquil_types::{CidLink, Did, InviteCode};
 use uuid::Uuid;
 
+use super::col;
 use super::user::map_sqlx_error;
+use super::{column, legacy_column, opt_column};
 
 pub struct PostgresInfraRepository {
     pool: PgPool,
@@ -153,9 +155,9 @@ impl InfraRepository for PostgresInfraRepository {
         &self,
         code: &InviteCode,
         use_count: i32,
-        for_account: Option<&Did>,
+        for_account: &Did,
     ) -> Result<bool, DbError> {
-        let for_account_str = for_account.map(|d| d.as_str());
+        let for_account_str = for_account.as_str();
         let result = sqlx::query!(
             r#"INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)
                SELECT $1, $2, id, $3 FROM users WHERE is_admin = true LIMIT 1"#,
@@ -175,9 +177,9 @@ impl InfraRepository for PostgresInfraRepository {
         codes: &[InviteCode],
         use_count: i32,
         created_by_user: Uuid,
-        for_account: Option<&Did>,
+        for_account: &Did,
     ) -> Result<(), DbError> {
-        let for_account_str = for_account.map(|d| d.as_str());
+        let for_account_str = for_account.as_str();
         let code_strs: Vec<String> = codes.iter().map(|c| c.to_string()).collect();
         sqlx::query!(
             r#"INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)
@@ -250,17 +252,19 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(results
+        results
             .into_iter()
-            .map(|r| InviteCodeInfo {
-                code: InviteCode::from(r.code),
-                available_uses: r.available_uses,
-                state: InviteCodeState::from_optional_disabled_flag(r.disabled),
-                for_account: Some(Did::from(r.for_account)),
-                created_at: r.created_at,
-                created_by: None,
+            .map(|r| {
+                Ok(InviteCodeInfo {
+                    code: InviteCode::from(r.code),
+                    available_uses: r.available_uses,
+                    state: InviteCodeState::from_optional_disabled_flag(r.disabled),
+                    for_account: legacy_column(r.for_account, col::INVITE_CODES_FOR_ACCOUNT),
+                    created_at: r.created_at,
+                    created_by: None,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn get_invite_code_uses(&self, code: &InviteCode) -> Result<Vec<InviteCodeUse>, DbError> {
@@ -278,11 +282,13 @@ impl InfraRepository for PostgresInfraRepository {
 
         Ok(results
             .into_iter()
-            .map(|r| InviteCodeUse {
-                code: code.clone(),
-                used_by_did: Did::from(r.did),
-                used_by_handle: Some(Handle::from(r.handle)),
-                used_at: r.used_at,
+            .filter_map(|r| {
+                Some(InviteCodeUse {
+                    code: code.clone(),
+                    used_by_did: legacy_column(r.did, col::USERS_DID)?,
+                    used_by_handle: legacy_column(r.handle, col::USERS_HANDLE),
+                    used_at: r.used_at,
+                })
             })
             .collect())
     }
@@ -436,10 +442,10 @@ impl InfraRepository for PostgresInfraRepository {
             .await
             .map_err(map_sqlx_error)?;
 
-        Ok(results
+        results
             .into_iter()
-            .map(|r| (r.id, Did::from(r.did)))
-            .collect())
+            .map(|r| Ok((r.id, column(r.did, col::USERS_DID)?)))
+            .collect()
     }
 
     async fn get_invite_code_uses_batch(
@@ -459,15 +465,17 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(results
+        results
             .into_iter()
-            .map(|r| InviteCodeUse {
-                code: InviteCode::from(r.code),
-                used_by_did: Did::from(r.did),
-                used_by_handle: None,
-                used_at: r.used_at,
+            .map(|r| {
+                Ok(InviteCodeUse {
+                    code: InviteCode::from(r.code),
+                    used_by_did: column(r.did, col::USERS_DID)?,
+                    used_by_handle: None,
+                    used_at: r.used_at,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn get_invites_created_by_user(
@@ -485,17 +493,19 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(results
+        results
             .into_iter()
-            .map(|r| InviteCodeInfo {
-                code: InviteCode::from(r.code),
-                available_uses: r.available_uses,
-                state: InviteCodeState::from_optional_disabled_flag(r.disabled),
-                for_account: Some(Did::from(r.for_account)),
-                created_at: r.created_at,
-                created_by: Some(Did::from(r.created_by)),
+            .map(|r| {
+                Ok(InviteCodeInfo {
+                    code: InviteCode::from(r.code),
+                    available_uses: r.available_uses,
+                    state: InviteCodeState::from_optional_disabled_flag(r.disabled),
+                    for_account: legacy_column(r.for_account, col::INVITE_CODES_FOR_ACCOUNT),
+                    created_at: r.created_at,
+                    created_by: Some(column(r.created_by, col::USERS_DID)?),
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn get_invite_code_info(
@@ -513,14 +523,18 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(result.map(|r| InviteCodeInfo {
-            code: InviteCode::from(r.code),
-            available_uses: r.available_uses,
-            state: InviteCodeState::from_optional_disabled_flag(r.disabled),
-            for_account: Some(Did::from(r.for_account)),
-            created_at: r.created_at,
-            created_by: Some(Did::from(r.created_by)),
-        }))
+        result
+            .map(|r| {
+                Ok(InviteCodeInfo {
+                    code: InviteCode::from(r.code),
+                    available_uses: r.available_uses,
+                    state: InviteCodeState::from_optional_disabled_flag(r.disabled),
+                    for_account: legacy_column(r.for_account, col::INVITE_CODES_FOR_ACCOUNT),
+                    created_at: r.created_at,
+                    created_by: Some(column(r.created_by, col::USERS_DID)?),
+                })
+            })
+            .transpose()
     }
 
     async fn get_invite_codes_by_users(
@@ -539,22 +553,22 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(results
+        results
             .into_iter()
             .map(|r| {
-                (
+                Ok((
                     r.created_by_user,
                     InviteCodeInfo {
                         code: InviteCode::from(r.code),
                         available_uses: r.available_uses,
                         state: InviteCodeState::from_optional_disabled_flag(r.disabled),
-                        for_account: Some(Did::from(r.for_account)),
+                        for_account: legacy_column(r.for_account, col::INVITE_CODES_FOR_ACCOUNT),
                         created_at: r.created_at,
-                        created_by: Some(Did::from(r.created_by)),
+                        created_by: Some(column(r.created_by, col::USERS_DID)?),
                     },
-                )
+                ))
             })
-            .collect())
+            .collect()
     }
 
     async fn get_invite_code_used_by_user(
@@ -683,10 +697,14 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(result.map(|r| DeletionRequest {
-            did: Did::from(r.did),
-            expires_at: r.expires_at,
-        }))
+        result
+            .map(|r| {
+                Ok(DeletionRequest {
+                    did: column(r.did, col::ACCOUNT_DELETION_REQUESTS_DID)?,
+                    expires_at: r.expires_at,
+                })
+            })
+            .transpose()
     }
 
     async fn delete_deletion_request(&self, token: &str) -> Result<(), DbError> {
@@ -1027,16 +1045,20 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(result.map(|r| AdminAccountInfo {
-            id: r.id,
-            did: Did::from(r.did),
-            handle: Handle::from(r.handle),
-            email: r.email,
-            created_at: r.created_at,
-            invites_disabled: r.invites_disabled.unwrap_or(false),
-            email_verified: r.email_verified,
-            deactivated_at: r.deactivated_at,
-        }))
+        result
+            .map(|r| {
+                Ok(AdminAccountInfo {
+                    id: r.id,
+                    did: column(r.did, col::USERS_DID)?,
+                    handle: column(r.handle, col::USERS_HANDLE)?,
+                    email: r.email,
+                    created_at: r.created_at,
+                    invites_disabled: r.invites_disabled.unwrap_or(false),
+                    email_verified: r.email_verified,
+                    deactivated_at: r.deactivated_at,
+                })
+            })
+            .transpose()
     }
 
     async fn get_admin_account_infos_by_dids(
@@ -1058,15 +1080,17 @@ impl InfraRepository for PostgresInfraRepository {
 
         Ok(results
             .into_iter()
-            .map(|r| AdminAccountInfo {
-                id: r.id,
-                did: Did::from(r.did),
-                handle: Handle::from(r.handle),
-                email: r.email,
-                created_at: r.created_at,
-                invites_disabled: r.invites_disabled.unwrap_or(false),
-                email_verified: r.email_verified,
-                deactivated_at: r.deactivated_at,
+            .filter_map(|r| {
+                Some(AdminAccountInfo {
+                    id: r.id,
+                    did: legacy_column(r.did, col::USERS_DID)?,
+                    handle: legacy_column(r.handle, col::USERS_HANDLE)?,
+                    email: r.email,
+                    created_at: r.created_at,
+                    invites_disabled: r.invites_disabled.unwrap_or(false),
+                    email_verified: r.email_verified,
+                    deactivated_at: r.deactivated_at,
+                })
             })
             .collect())
     }
@@ -1105,11 +1129,14 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| DeletionRequestWithToken {
-            token: r.token,
-            did: Did::new(r.did).expect("valid DID in database"),
-            expires_at: r.expires_at,
-        }))
+        row.map(|r| {
+            Ok(DeletionRequestWithToken {
+                token: r.token,
+                did: column(r.did, col::ACCOUNT_DELETION_REQUESTS_DID)?,
+                expires_at: r.expires_at,
+            })
+        })
+        .transpose()
     }
 
     async fn get_latest_comms_for_user(
@@ -1202,14 +1229,20 @@ impl InfraRepository for PostgresInfraRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| ReservedSigningKeyFull {
-            id: r.id,
-            did: r.did.map(|d| Did::new(d).expect("valid DID in database")),
-            public_key_did_key: Did::from(r.public_key_did_key),
-            private_key_bytes: r.private_key_bytes,
-            expires_at: r.expires_at,
-            used_at: r.used_at,
-        }))
+        row.map(|r| {
+            Ok(ReservedSigningKeyFull {
+                id: r.id,
+                did: opt_column(r.did, col::RESERVED_SIGNING_KEYS_DID)?,
+                public_key_did_key: column(
+                    r.public_key_did_key,
+                    col::RESERVED_SIGNING_KEYS_PUBLIC_KEY_DID_KEY,
+                )?,
+                private_key_bytes: r.private_key_bytes,
+                expires_at: r.expires_at,
+                used_at: r.used_at,
+            })
+        })
+        .transpose()
     }
 
     async fn get_plc_tokens_by_did(&self, did: &Did) -> Result<Vec<PlcTokenInfo>, DbError> {

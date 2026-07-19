@@ -250,7 +250,7 @@ pub trait InfraRepository: Send + Sync {
         &self,
         code: &InviteCode,
         use_count: i32,
-        for_account: Option<&Did>,
+        for_account: &Did,
     ) -> Result<bool, DbError>;
 
     async fn create_invite_codes_batch(
@@ -258,7 +258,7 @@ pub trait InfraRepository: Send + Sync {
         codes: &[InviteCode],
         use_count: i32,
         created_by_user: Uuid,
-        for_account: Option<&Did>,
+        for_account: &Did,
     ) -> Result<(), DbError>;
 
     async fn get_invite_code_available_uses(
