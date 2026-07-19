@@ -86,7 +86,22 @@ fn test_cid_bytes(seed: u8) -> Vec<u8> {
 }
 
 fn make_rev(n: u64) -> Tid {
-    Tid::from(format!("rev{n:010}"))
+    const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+    let value = n << 40;
+    let s: String = (0..13)
+        .rev()
+        .map(|i| ALPHABET[((value >> (i * 5)) & 0x1F) as usize] as char)
+        .collect();
+    Tid::new(s).expect("generated TID is valid")
+}
+
+fn post_collection() -> Nsid {
+    Nsid::new("app.bsky.feed.post").expect("app.bsky.feed.post is a valid NSID")
+}
+
+fn bench_handle(user_id: Uuid) -> Handle {
+    Handle::new(format!("bench{}.oyster.cafe", user_id.as_simple()))
+        .expect("generated handle is valid")
 }
 
 struct BenchHarness {
@@ -141,9 +156,9 @@ async fn create_user(pool: &HandlerPool, user_id: Uuid, did: &Did, cid: &CidLink
     pool.send(MetastoreRequest::Repo(RepoRequest::CreateRepoFull {
         user_id,
         did: did.clone(),
-        handle: Handle::from(format!("bench.{}.invalid", user_id.as_simple())),
+        handle: bench_handle(user_id),
         repo_root_cid: cid.clone(),
-        repo_rev: Tid::from("rev0000000000".to_string()),
+        repo_rev: make_rev(0),
         tx,
     }))
     .unwrap();
@@ -167,7 +182,7 @@ fn make_commit_input(
         obsolete_block_cids: vec![],
         record_upserts: vec![RecordUpsert {
             collection: collection.clone(),
-            rkey: Rkey::from(format!("r{rev_n:010}")),
+            rkey: Rkey::new(format!("r{rev_n:010}")).expect("generated rkey is valid"),
             cid: test_cid(cid_seed),
         }],
         record_deletes: vec![],
@@ -213,7 +228,7 @@ async fn seed_records(
                 let record_upserts: Vec<RecordUpsert> = (batch_start..batch_end)
                     .map(|i| RecordUpsert {
                         collection: collection.clone(),
-                        rkey: Rkey::from(format!("rec{i:08}")),
+                        rkey: Rkey::new(format!("rec{i:08}")).expect("generated rkey is valid"),
                         cid: test_cid(((i * 7 + 3) & 0xFF) as u8),
                     })
                     .collect();
@@ -265,7 +280,9 @@ async fn bench_apply_commit(pool: &Arc<HandlerPool>, concurrency: usize, ops_per
     let user_ids: Vec<Uuid> = (0..concurrency).map(|_| Uuid::new_v4()).collect();
     let dids: Vec<Did> = user_ids
         .iter()
-        .map(|u| Did::from(format!("did:plc:bench{}", u.as_simple())))
+        .map(|u| {
+            Did::new(format!("did:plc:bench{}", u.as_simple())).expect("generated DID is valid")
+        })
         .collect();
 
     futures::stream::iter(user_ids.iter().zip(dids.iter()))
@@ -274,7 +291,7 @@ async fn bench_apply_commit(pool: &Arc<HandlerPool>, concurrency: usize, ops_per
         })
         .await;
 
-    let collection = Nsid::from("app.bsky.feed.post".to_string());
+    let collection = post_collection();
     let start = Instant::now();
     let handles: Vec<_> = (0..concurrency)
         .map(|task_id| {
@@ -321,8 +338,9 @@ async fn bench_apply_commit(pool: &Arc<HandlerPool>, concurrency: usize, ops_per
 
 async fn bench_get_record_cid(pool: &Arc<HandlerPool>, concurrency: usize, ops_per_task: usize) {
     let user_id = Uuid::new_v4();
-    let did = Did::from(format!("did:plc:getrecord{}", user_id.as_simple()));
-    let collection = Nsid::from("app.bsky.feed.post".to_string());
+    let did = Did::new(format!("did:plc:getrecord{}", user_id.as_simple()))
+        .expect("generated DID is valid");
+    let collection = post_collection();
     create_user(pool, user_id, &did, &test_cid(1)).await;
     seed_records(pool, user_id, &did, &collection, 1000).await;
 
@@ -339,7 +357,8 @@ async fn bench_get_record_cid(pool: &Arc<HandlerPool>, concurrency: usize, ops_p
                         let collection = &collection;
                         async move {
                             let rec_idx = (task_id * 7 + i * 13) % total_records;
-                            let rkey = Rkey::from(format!("rec{rec_idx:08}"));
+                            let rkey = Rkey::new(format!("rec{rec_idx:08}"))
+                                .expect("generated rkey is valid");
                             let t = Instant::now();
                             let (tx, rx) = oneshot::channel();
                             pool.send(MetastoreRequest::Record(RecordRequest::GetRecordCid {
@@ -369,8 +388,9 @@ async fn bench_get_record_cid(pool: &Arc<HandlerPool>, concurrency: usize, ops_p
 
 async fn bench_list_records(pool: &Arc<HandlerPool>, concurrency: usize, ops_per_task: usize) {
     let user_id = Uuid::new_v4();
-    let did = Did::from(format!("did:plc:listrecords{}", user_id.as_simple()));
-    let collection = Nsid::from("app.bsky.feed.post".to_string());
+    let did = Did::new(format!("did:plc:listrecords{}", user_id.as_simple()))
+        .expect("generated DID is valid");
+    let collection = post_collection();
     create_user(pool, user_id, &did, &test_cid(1)).await;
     seed_records(pool, user_id, &did, &collection, 1000).await;
 
@@ -485,7 +505,7 @@ async fn setup_pg_bench_schema(pool: &sqlx::PgPool) {
 async fn pg_create_user(pg: &sqlx::PgPool, user_id: Uuid, did: &str) {
     sqlx::query("INSERT INTO users (id, handle, did) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
         .bind(user_id)
-        .bind(format!("bench.{}.invalid", Uuid::new_v4().as_simple()))
+        .bind(format!("bench{}.oyster.cafe", Uuid::new_v4().as_simple()))
         .bind(did)
         .execute(pg)
         .await
@@ -507,21 +527,15 @@ async fn bench_pg_upsert_records(
     futures::stream::iter(user_ids.iter().zip(dids.iter()))
         .fold((), |(), (uid, did)| async {
             pg_create_user(pg, *uid, did).await;
-            let did = Did::from(did.clone());
-            let handle = Handle::from(format!("bench.{}.invalid", uid.as_simple()));
-            repo.create_repo(
-                *uid,
-                &did,
-                &handle,
-                &test_cid(1),
-                &Tid::from("rev0000000000".to_string()),
-            )
-            .await
-            .unwrap();
+            let did = Did::new(did.clone()).expect("generated DID is valid");
+            let handle = bench_handle(*uid);
+            repo.create_repo(*uid, &did, &handle, &test_cid(1), &make_rev(0))
+                .await
+                .unwrap();
         })
         .await;
 
-    let collection = Nsid::from("app.bsky.feed.post".to_string());
+    let collection = post_collection();
     let start = Instant::now();
     let handles: Vec<_> = (0..concurrency)
         .map(|task_id| {
@@ -537,7 +551,8 @@ async fn bench_pg_upsert_records(
                         async move {
                             let rev_n = (task_id * ops_per_task + i + 1) as u64;
                             let cid_seed = ((task_id * 31 + i * 7) & 0xFF) as u8;
-                            let rkey = Rkey::from(format!("r{rev_n:010}"));
+                            let rkey = Rkey::new(format!("r{rev_n:010}"))
+                                .expect("generated rkey is valid");
                             let t = Instant::now();
                             repo.upsert_records(
                                 user_id,
@@ -587,7 +602,7 @@ async fn pg_seed_records(
                     .map(|_| collection.clone())
                     .collect();
                 let rkeys: Vec<Rkey> = (batch_start..batch_end)
-                    .map(|i| Rkey::from(format!("rec{i:08}")))
+                    .map(|i| Rkey::new(format!("rec{i:08}")).expect("generated rkey is valid"))
                     .collect();
                 let cids: Vec<CidLink> = (batch_start..batch_end)
                     .map(|i| test_cid(((i * 7 + 3) & 0xFF) as u8))
@@ -609,20 +624,14 @@ async fn pg_seed_records(
 async fn bench_pg_get_record_cid(pg: &sqlx::PgPool, concurrency: usize, ops_per_task: usize) {
     let user_id = Uuid::new_v4();
     let did = format!("did:plc:pgget{}", user_id.as_simple());
-    let collection = Nsid::from("app.bsky.feed.post".to_string());
+    let collection = post_collection();
     pg_create_user(pg, user_id, &did).await;
     let repo = tranquil_db::postgres::PostgresRepoRepository::new(pg.clone());
-    let did = Did::from(did);
-    let handle = Handle::from(format!("bench.{}.invalid", user_id.as_simple()));
-    repo.create_repo(
-        user_id,
-        &did,
-        &handle,
-        &test_cid(1),
-        &Tid::from("rev0000000000".to_string()),
-    )
-    .await
-    .unwrap();
+    let did = Did::new(did).expect("generated DID is valid");
+    let handle = bench_handle(user_id);
+    repo.create_repo(user_id, &did, &handle, &test_cid(1), &make_rev(0))
+        .await
+        .unwrap();
     pg_seed_records(&repo, user_id, &collection, 1000).await;
 
     let total_records = 1000usize;
@@ -639,7 +648,8 @@ async fn bench_pg_get_record_cid(pg: &sqlx::PgPool, concurrency: usize, ops_per_
                         let collection = &collection;
                         async move {
                             let rec_idx = (task_id * 7 + i * 13) % total_records;
-                            let rkey = Rkey::from(format!("rec{rec_idx:08}"));
+                            let rkey = Rkey::new(format!("rec{rec_idx:08}"))
+                                .expect("generated rkey is valid");
                             let t = Instant::now();
                             let result = repo
                                 .get_record_cid(user_id, collection, &rkey)
@@ -665,20 +675,14 @@ async fn bench_pg_get_record_cid(pg: &sqlx::PgPool, concurrency: usize, ops_per_
 async fn bench_pg_list_records(pg: &sqlx::PgPool, concurrency: usize, ops_per_task: usize) {
     let user_id = Uuid::new_v4();
     let did = format!("did:plc:pglist{}", user_id.as_simple());
-    let collection = Nsid::from("app.bsky.feed.post".to_string());
+    let collection = post_collection();
     pg_create_user(pg, user_id, &did).await;
     let repo = tranquil_db::postgres::PostgresRepoRepository::new(pg.clone());
-    let did = Did::from(did);
-    let handle = Handle::from(format!("bench.{}.invalid", user_id.as_simple()));
-    repo.create_repo(
-        user_id,
-        &did,
-        &handle,
-        &test_cid(1),
-        &Tid::from("rev0000000000".to_string()),
-    )
-    .await
-    .unwrap();
+    let did = Did::new(did).expect("generated DID is valid");
+    let handle = bench_handle(user_id);
+    repo.create_repo(user_id, &did, &handle, &test_cid(1), &make_rev(0))
+        .await
+        .unwrap();
     pg_seed_records(&repo, user_id, &collection, 1000).await;
 
     let start = Instant::now();

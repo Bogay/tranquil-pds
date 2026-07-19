@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT block_cid AS \"block_cid!\" FROM user_blocks\n                    WHERE user_id = $1\n                    ORDER BY repo_rev ASC\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "block_cid!",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "85cc0cd1e62a30fa67d415b7a01164f962a422513e8f0737553321fd9987a56c"
+}

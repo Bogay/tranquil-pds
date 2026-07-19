@@ -27,6 +27,20 @@ fn test_cid_bytes(seed: u8) -> Vec<u8> {
     cid::Cid::new_v1(0x71, mh).to_bytes()
 }
 
+fn test_rev(sequence: u64, discriminator: u64) -> Tid {
+    const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+    let value = (sequence << 40) | (discriminator & 0xFF_FFFF_FFFF);
+    let s: String = (0..13)
+        .rev()
+        .map(|i| ALPHABET[((value >> (i * 5)) & 0x1F) as usize] as char)
+        .collect();
+    Tid::new(s).expect("generated TID is valid")
+}
+
+fn post_collection() -> Nsid {
+    Nsid::new("app.bsky.feed.post").expect("app.bsky.feed.post is a valid NSID")
+}
+
 struct UserInfo {
     user_id: Uuid,
     did: Did,
@@ -37,7 +51,8 @@ async fn seed_users(pool: &HandlerPool, count: usize) -> Vec<UserInfo> {
         .map(|i| {
             let user_id = Uuid::new_v4();
             UserInfo {
-                did: Did::from(format!("did:plc:prof{i:06x}{}", user_id.as_simple())),
+                did: Did::new(format!("did:plc:squid{i:06x}{}", user_id.as_simple()))
+                    .expect("generated DID is valid"),
                 user_id,
             }
         })
@@ -54,9 +69,13 @@ async fn seed_users(pool: &HandlerPool, count: usize) -> Vec<UserInfo> {
                     pool.send(MetastoreRequest::Repo(RepoRequest::CreateRepoFull {
                         user_id: user.user_id,
                         did: user.did.clone(),
-                        handle: Handle::from(format!("u{}.prof.invalid", user.user_id.as_simple())),
+                        handle: Handle::new(format!(
+                            "squid{}.oyster.cafe",
+                            user.user_id.as_simple()
+                        ))
+                        .expect("generated handle is valid"),
                         repo_root_cid: test_cid(1),
-                        repo_rev: Tid::from("rev0000000000".to_string()),
+                        repo_rev: test_rev(0, 0),
                         tx,
                     }))
                     .unwrap();
@@ -87,7 +106,7 @@ async fn seed_records(pool: &Arc<HandlerPool>, users: &[UserInfo], records_per_u
     let total = users.len();
     let batch_size = 500;
     let total_batches = total.div_ceil(batch_size);
-    let collection = Nsid::from("app.bsky.feed.post".to_string());
+    let collection = post_collection();
 
     futures::stream::iter(users.chunks(batch_size).enumerate())
         .fold((), |(), (chunk_idx, chunk)| {
@@ -102,7 +121,8 @@ async fn seed_records(pool: &Arc<HandlerPool>, users: &[UserInfo], records_per_u
                             let record_upserts: Vec<RecordUpsert> = (0..records_per_user)
                                 .map(|i| RecordUpsert {
                                     collection: collection.clone(),
-                                    rkey: Rkey::from(format!("rec{i:08}")),
+                                    rkey: Rkey::new(format!("rec{i:08}"))
+                                        .expect("generated rkey is valid"),
                                     cid: test_cid(((i * 7 + 3) & 0xFF) as u8),
                                 })
                                 .collect();
@@ -114,7 +134,7 @@ async fn seed_records(pool: &Arc<HandlerPool>, users: &[UserInfo], records_per_u
                                 did: user.did.clone(),
                                 expected_root_cid: None,
                                 new_root_cid: test_cid(2),
-                                new_rev: Tid::from("rev0000000001".to_string()),
+                                new_rev: test_rev(1, 0),
                                 new_block_cids,
                                 obsolete_block_cids: vec![],
                                 record_upserts,
@@ -130,7 +150,7 @@ async fn seed_records(pool: &Arc<HandlerPool>, users: &[UserInfo], records_per_u
                                     blobs: None,
                                     blocks: None,
                                     prev_data_cid: None,
-                                    rev: Some(Tid::from("rev0000000001".to_string())),
+                                    rev: Some(test_rev(1, 0)),
                                 },
                             };
                             let (tx, rx) = oneshot::channel();
@@ -190,7 +210,7 @@ async fn profile_list_records(
                         let (tx, rx) = oneshot::channel();
                         pool.send(MetastoreRequest::Record(RecordRequest::ListRecords {
                             repo_id: user_ids[idx],
-                            collection: Nsid::from("app.bsky.feed.post".to_string()),
+                            collection: post_collection(),
                             cursor: None,
                             limit: 50,
                             reverse: false,
@@ -238,11 +258,12 @@ async fn profile_get_record_cid(
                     async move {
                         let user_idx = (task_id * 997 + i * 31) % user_count;
                         let rec_idx = (task_id * 13 + i * 7) % records_per_user;
-                        let rkey = Rkey::from(format!("rec{rec_idx:08}"));
+                        let rkey =
+                            Rkey::new(format!("rec{rec_idx:08}")).expect("generated rkey is valid");
                         let (tx, rx) = oneshot::channel();
                         pool.send(MetastoreRequest::Record(RecordRequest::GetRecordCid {
                             repo_id: user_ids[user_idx],
-                            collection: Nsid::from("app.bsky.feed.post".to_string()),
+                            collection: post_collection(),
                             rkey,
                             tx,
                         }))

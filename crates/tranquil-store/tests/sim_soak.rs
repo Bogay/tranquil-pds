@@ -9,7 +9,7 @@ use tranquil_store::sim_single_seed;
 
 use common::{
     Rng, TestStores, block_data, compact_all_sealed, open_test_stores, test_cid, test_cid_link,
-    test_did, test_handle, test_uuid,
+    test_did, test_handle, test_rev, test_uuid,
 };
 use tranquil_db_traits::{RepoEventType, SequenceNumber, SequencedEvent};
 
@@ -235,7 +235,7 @@ fn sim_soak_continuous_operations_with_crash_recovery() {
                         &did,
                         &handle,
                         &cid_link,
-                        &format!("rev{idx}"),
+                        &test_rev(idx, 0),
                     )
                     .unwrap();
                 oracle.add_repo(idx);
@@ -257,7 +257,7 @@ fn sim_soak_continuous_operations_with_crash_recovery() {
                     handle: None,
                     active: None,
                     status: None,
-                    rev: Some(tranquil_types::Tid::from(format!("soak-rev-{event_idx}"))),
+                    rev: Some(test_rev(event_idx, 0)),
                 };
                 s.eventlog
                     .append_event(&did, RepoEventType::Commit, &event)

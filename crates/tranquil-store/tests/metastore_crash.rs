@@ -1,5 +1,8 @@
+mod common;
+
 use std::path::Path;
 
+use common::test_rev;
 use proptest::prelude::*;
 use rayon::prelude::*;
 use tranquil_store::metastore::recovery::{
@@ -7,7 +10,7 @@ use tranquil_store::metastore::recovery::{
 };
 use tranquil_store::metastore::{Metastore, MetastoreConfig};
 use tranquil_store::{sim_proptest_cases, sim_seed_range};
-use tranquil_types::{CidLink, Did, Handle};
+use tranquil_types::{CidLink, Did, Handle, Tid};
 use uuid::Uuid;
 
 const NAMES: &[&str] = &["olaren", "teq", "nel", "lyna", "bailey"];
@@ -43,6 +46,8 @@ fn test_uuid(seed: u64) -> Uuid {
     Uuid::from_u128(seed as u128 | 0x4000_0000_0000_0000_8000_0000_0000_0000)
 }
 
+const TID_PATTERN: &str = "[234567abcdefghij][234567abcdefghijklmnopqrstuvwxyz]{12}";
+
 fn arb_mutation_set() -> impl Strategy<Value = CommitMutationSet> {
     let arb_upsert = (
         "[a-z\\.]{5,20}",
@@ -67,7 +72,7 @@ fn arb_mutation_set() -> impl Strategy<Value = CommitMutationSet> {
 
     (
         prop::collection::vec(any::<u8>(), 0..64),
-        "[a-z0-9]{1,16}",
+        TID_PATTERN.prop_map(|rev| Tid::new(rev).expect("generated TID is valid")),
         prop::collection::vec(arb_upsert, 0..20),
         prop::collection::vec(arb_delete, 0..20),
         prop::collection::vec(prop::collection::vec(any::<u8>(), 4..36), 0..20),
@@ -155,7 +160,7 @@ fn metastore_survives_abrupt_drop() {
                 let did = test_did(idx);
                 let handle = test_handle(idx);
                 let cid = test_cid_link((idx & 0xFF) as u8);
-                let rev = format!("rev{idx}");
+                let rev = test_rev(idx, 0);
                 repo_ops
                     .create_repo(db, uid, &did, &handle, &cid, &rev)
                     .unwrap();
@@ -173,9 +178,10 @@ fn metastore_survives_abrupt_drop() {
                     "seed={seed} user {i} repo_meta missing after abrupt drop"
                 );
                 let (_, meta) = result.unwrap();
-                let expected_rev = format!("rev{}", seed * 100 + i as u64);
+                let expected_rev = test_rev(seed * 100 + i as u64, 0);
                 assert_eq!(
-                    meta.repo_rev, expected_rev,
+                    meta.repo_rev,
+                    expected_rev.as_str(),
                     "seed={seed} user {i} rev mismatch"
                 );
             });
@@ -213,7 +219,7 @@ fn metastore_multi_crash_cycle() {
                     let handle = test_handle(idx);
                     let cid = test_cid_link((idx & 0xFF) as u8);
                     repo_ops
-                        .create_repo(db, uid, &did, &handle, &cid, &format!("rev{idx}"))
+                        .create_repo(db, uid, &did, &handle, &cid, &test_rev(idx, 0))
                         .unwrap();
                     expected_repos.push((uid, idx));
                 });
@@ -253,7 +259,7 @@ fn metastore_persisted_survives_unpersisted_lost() {
                         &test_did(idx),
                         &test_handle(idx),
                         &test_cid_link((idx & 0xFF) as u8),
-                        &format!("rev{idx}"),
+                        &test_rev(idx, 0),
                     )
                     .unwrap();
             });
@@ -268,7 +274,7 @@ fn metastore_persisted_survives_unpersisted_lost() {
                     &test_did(extra_idx),
                     &test_handle(extra_idx),
                     &test_cid_link((extra_idx & 0xFF) as u8),
-                    &format!("rev{extra_idx}"),
+                    &test_rev(extra_idx, 0),
                 )
                 .unwrap();
         }
@@ -316,7 +322,7 @@ fn metastore_user_hashes_reload_after_crash() {
                         &test_did(idx),
                         &test_handle(idx),
                         &test_cid_link((idx & 0xFF) as u8),
-                        &format!("rev{idx}"),
+                        &test_rev(idx, 0),
                     )
                     .unwrap();
             });
@@ -354,7 +360,7 @@ fn metastore_handle_lookup_survives_crash() {
                     &did,
                     &handle,
                     &test_cid_link((idx & 0xFF) as u8),
-                    &format!("rev{idx}"),
+                    &test_rev(idx, 0),
                 )
                 .unwrap();
         }

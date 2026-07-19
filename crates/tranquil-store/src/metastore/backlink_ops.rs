@@ -243,6 +243,15 @@ mod tests {
         tranquil_types::CidLink::from_cid(&c)
     }
 
+    fn test_rev(seq: u64) -> tranquil_types::Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        tranquil_types::Tid::new(s).expect("generated TID is valid")
+    }
+
     fn create_repo(h: &TestHarness, name: &str, seed: u8) -> (Uuid, UserHash) {
         let user_id = Uuid::new_v4();
         let did = Did::from(format!("did:plc:{name}"));
@@ -250,7 +259,14 @@ mod tests {
         let cid = test_cid_link(seed);
         h.metastore
             .repo_ops()
-            .create_repo(h.metastore.database(), user_id, &did, &handle, &cid, "rev0")
+            .create_repo(
+                h.metastore.database(),
+                user_id,
+                &did,
+                &handle,
+                &cid,
+                &test_rev(0),
+            )
             .unwrap();
         let user_hash = h.metastore.user_hashes().get(&user_id).unwrap();
         (user_id, user_hash)

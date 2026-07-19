@@ -203,7 +203,7 @@ impl<S: StorageIO + 'static> CommitOps<S> {
 
         let mutation_set = CommitMutationSet {
             new_root_cid: new_cid_bytes.clone(),
-            new_rev: input.new_rev.to_string(),
+            new_rev: input.new_rev.clone(),
             record_upserts: input
                 .record_upserts
                 .iter()
@@ -534,6 +534,15 @@ mod tests {
         Handle::from(format!("{name}.test.invalid"))
     }
 
+    fn test_rev(seq: u64) -> Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        Tid::new(s).expect("generated TID is valid")
+    }
+
     fn make_commit_ops(h: &TestHarness) -> CommitOps<RealIO> {
         use crate::metastore::partitions::Partition;
         CommitOps::new(
@@ -552,7 +561,14 @@ mod tests {
         let cid = test_cid_link(seed);
         h.metastore
             .repo_ops()
-            .create_repo(h.metastore.database(), user_id, &did, &handle, &cid, "rev0")
+            .create_repo(
+                h.metastore.database(),
+                user_id,
+                &did,
+                &handle,
+                &cid,
+                &test_rev(0),
+            )
             .unwrap();
         (user_id, did, cid)
     }
@@ -1110,7 +1126,7 @@ mod tests {
                     &did,
                     &handle,
                     &initial_root,
-                    "rev0",
+                    &test_rev(0),
                 )
                 .unwrap();
             metastore.persist().unwrap();
@@ -1235,7 +1251,7 @@ mod tests {
                     &did,
                     &handle,
                     &initial_root,
-                    "rev0",
+                    &test_rev(0),
                 )
                 .unwrap();
             metastore.persist().unwrap();
@@ -1243,7 +1259,7 @@ mod tests {
             let event_ops = metastore.event_ops(Arc::clone(&bridge));
             let mutation_set = super::CommitMutationSet {
                 new_root_cid: super::cid_link_to_bytes(&new_root).unwrap(),
-                new_rev: "rev1".to_string(),
+                new_rev: test_rev(1),
                 record_upserts: vec![super::RecordMutationUpsert {
                     collection: collection.as_str().to_owned(),
                     rkey: rkey.as_str().to_owned(),

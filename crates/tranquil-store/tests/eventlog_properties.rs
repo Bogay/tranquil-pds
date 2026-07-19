@@ -1,3 +1,5 @@
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -222,14 +224,12 @@ fn payload_round_trip() {
                 ops: Some(
                     serde_json::json!([{"action": "create", "path": "app.bsky.feed.post/abc"}]),
                 ),
-                blobs: Some(vec![tranquil_types::CidLink::from(
-                    "bafkreibtest".to_owned(),
-                )]),
+                blobs: Some(vec![common::test_cid_link(7)]),
                 blocks: None,
                 handle: None,
                 active: None,
                 status: None,
-                rev: Some(tranquil_types::Tid::from("rev1".to_owned())),
+                rev: Some(common::test_rev(1, 0)),
             },
         ),
         (

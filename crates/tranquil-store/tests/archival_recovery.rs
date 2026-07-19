@@ -11,8 +11,8 @@ use tranquil_store::archival::{
 use tranquil_store::eventlog::{EventLog, EventLogConfig, SegmentId};
 use tranquil_store::sim_seed_range;
 
+use common::{test_did, test_rev};
 use tranquil_db_traits::{RepoEventType, SequenceNumber, SequencedEvent};
-use tranquil_types::Did;
 
 struct FlakyDestination {
     inner: LocalArchivalDestination,
@@ -42,7 +42,7 @@ fn build_segments(segments_dir: &std::path::Path, n_events: u32) {
     )
     .unwrap();
     (0..n_events).for_each(|i| {
-        let did = Did::from(format!("did:plc:archive{}", i % 8));
+        let did = test_did((i % 8) as u64);
         let event = SequencedEvent {
             seq: SequenceNumber::from_raw(0),
             did: did.clone(),
@@ -57,7 +57,7 @@ fn build_segments(segments_dir: &std::path::Path, n_events: u32) {
             handle: None,
             active: None,
             status: None,
-            rev: Some(tranquil_types::Tid::from(format!("rev{i}"))),
+            rev: Some(test_rev(i as u64, 0)),
         };
         el.append_event(&did, RepoEventType::Commit, &event)
             .unwrap();

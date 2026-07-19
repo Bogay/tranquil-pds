@@ -1,3 +1,7 @@
+mod common;
+
+use common::test_rev;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -95,8 +99,9 @@ fn seed_blocks(store: &TestStore, range: std::ops::Range<u16>) {
 }
 
 fn seed_repo(store: &TestStore, name: &str, seed: u8) {
-    let did = tranquil_types::Did::from(format!("did:plc:{name}"));
-    let handle = tranquil_types::Handle::from(format!("{name}.test.invalid"));
+    let did = tranquil_types::Did::new(format!("did:plc:{name}")).expect("seed DID is valid");
+    let handle =
+        tranquil_types::Handle::new(format!("{name}.oyster.cafe")).expect("seed handle is valid");
     let digest: [u8; 32] = std::array::from_fn(|i| seed.wrapping_add(i as u8));
     let mh = multihash::Multihash::<64>::wrap(0x12, &digest).unwrap();
     let cid = cid::Cid::new_v1(0x71, mh);
@@ -111,13 +116,13 @@ fn seed_repo(store: &TestStore, name: &str, seed: u8) {
             &did,
             &handle,
             &cid_link,
-            &format!("rev_{seed}"),
+            &test_rev(0, seed as u64),
         )
         .unwrap();
 }
 
 fn seed_events(store: &TestStore, count: u16) {
-    let did = tranquil_types::Did::from("did:plc:evtest".to_string());
+    let did = tranquil_types::Did::new("did:plc:anemone").expect("did:plc:anemone is a valid DID");
     (0..count).for_each(|i| {
         let event = tranquil_db_traits::SequencedEvent {
             seq: tranquil_db_traits::SequenceNumber::from_raw(i as i64 + 1),
@@ -133,7 +138,7 @@ fn seed_events(store: &TestStore, count: u16) {
             handle: None,
             active: None,
             status: None,
-            rev: Some(tranquil_types::Tid::from(format!("rev{i}"))),
+            rev: Some(common::test_rev(i as u64, 0)),
         };
         store
             .eventlog
@@ -221,7 +226,7 @@ fn verify_restored_metastore(restored_dir: &Path, repo_names: &[&str]) {
 
     let ops = ms.repo_ops();
     repo_names.iter().for_each(|name| {
-        let did = tranquil_types::Did::from(format!("did:plc:{name}"));
+        let did = tranquil_types::Did::new(format!("did:plc:{name}")).expect("seed DID is valid");
         let root = ops.get_repo_root_by_did(&did).unwrap();
         assert!(
             root.is_some(),
@@ -395,7 +400,7 @@ fn full_backup_and_restore_cycle() {
             },
         )
         .unwrap();
-        let nel_did = tranquil_types::Did::from("did:plc:nel".to_string());
+        let nel_did = tranquil_types::Did::new("did:plc:nel").expect("did:plc:nel is a valid DID");
         assert!(
             ms.repo_ops()
                 .get_repo_root_by_did(&nel_did)
@@ -536,7 +541,7 @@ fn point_in_time_recovery_to_exact_sequence() {
         let store = open_test_store();
 
         seed_blocks(&store, 0..20);
-        seed_repo(&store, "pitr_user", 1);
+        seed_repo(&store, "limpet", 1);
         seed_events(&store, 30);
         store.metastore.persist().unwrap();
 
@@ -572,7 +577,7 @@ fn point_in_time_recovery_to_exact_sequence() {
         assert!(pitr_result.events_replayed > 0);
 
         verify_restored_blocks(restore_dir.path(), 0..20);
-        verify_restored_metastore(restore_dir.path(), &["pitr_user"]);
+        verify_restored_metastore(restore_dir.path(), &["limpet"]);
 
         let restored_el = EventLog::open(
             EventLogConfig {
@@ -621,7 +626,7 @@ fn crash_during_backup_does_not_corrupt_live_store() {
     with_runtime(|| {
         let store = open_test_store();
         seed_blocks(&store, 0..50);
-        seed_repo(&store, "crash_test", 1);
+        seed_repo(&store, "whelk", 1);
         seed_events(&store, 20);
         store.metastore.persist().unwrap();
 
@@ -641,9 +646,10 @@ fn crash_during_backup_does_not_corrupt_live_store() {
         seed_events(&store, 10);
         assert!(store.eventlog.max_seq().raw() >= 30);
 
-        seed_repo(&store, "post_backup", 2);
+        seed_repo(&store, "scallop", 2);
         store.metastore.persist().unwrap();
-        let did = tranquil_types::Did::from("did:plc:post_backup".to_string());
+        let did =
+            tranquil_types::Did::new("did:plc:scallop").expect("did:plc:scallop is a valid DID");
         assert!(
             store
                 .metastore
@@ -685,7 +691,7 @@ fn backup_during_concurrent_writes_produces_consistent_snapshot() {
     let el_clone = Arc::clone(&store.eventlog);
     let flag_clone2 = Arc::clone(&writer_flag);
     let event_handle = std::thread::spawn(move || {
-        let did = tranquil_types::Did::from("did:plc:concurrent".to_string());
+        let did = tranquil_types::Did::new("did:plc:conch").expect("did:plc:conch is a valid DID");
         let mut i = 0u32;
         while flag_clone2.load(std::sync::atomic::Ordering::Relaxed) {
             let event = tranquil_db_traits::SequencedEvent {
@@ -702,7 +708,7 @@ fn backup_during_concurrent_writes_produces_consistent_snapshot() {
                 handle: None,
                 active: None,
                 status: None,
-                rev: Some(tranquil_types::Tid::from(format!("concurrent-{i}"))),
+                rev: Some(common::test_rev(i as u64, 0)),
             };
             let _ = el_clone.append_event(&did, tranquil_db_traits::RepoEventType::Commit, &event);
             let _ = el_clone.sync();

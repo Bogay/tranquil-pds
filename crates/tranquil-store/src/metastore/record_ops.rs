@@ -506,13 +506,22 @@ mod tests {
         tranquil_types::Handle::from(format!("{name}.test.invalid"))
     }
 
+    fn test_rev(seq: u64) -> tranquil_types::Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        tranquil_types::Tid::new(s).expect("generated TID is valid")
+    }
+
     fn setup_user(ms: &Metastore) -> (Uuid, super::super::keys::UserHash) {
         let user_id = Uuid::new_v4();
         let did = test_did("testuser");
         let handle = test_handle("testuser");
         let cid = test_cid_link(0);
         ms.repo_ops()
-            .create_repo(ms.database(), user_id, &did, &handle, &cid, "rev0")
+            .create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(0))
             .unwrap();
         let user_hash = ms.user_hashes().get(&user_id).unwrap();
         (user_id, user_hash)
@@ -976,7 +985,7 @@ mod tests {
                 &did1,
                 &handle1,
                 &test_cid_link(0),
-                "r",
+                &test_rev(0),
             )
             .unwrap();
         let hash1 = ms.user_hashes().get(&user1).unwrap();
@@ -991,7 +1000,7 @@ mod tests {
                 &did2,
                 &handle2,
                 &test_cid_link(0),
-                "r",
+                &test_rev(0),
             )
             .unwrap();
         let hash2 = ms.user_hashes().get(&user2).unwrap();
@@ -1165,7 +1174,7 @@ mod tests {
                     &did,
                     &handle,
                     &test_cid_link(0),
-                    "r",
+                    &test_rev(0),
                 )
                 .unwrap();
             let user_hash = ms.user_hashes().get(&user_id).unwrap();

@@ -9,7 +9,7 @@ use tranquil_store::blockstore::{
 use tranquil_store::eventlog::{EventLog, EventLogConfig};
 use tranquil_store::metastore::{Metastore, MetastoreConfig};
 use tranquil_store::{RealIO, SystemClock};
-use tranquil_types::{CidLink, Did, Handle};
+use tranquil_types::{CidLink, Did, Handle, Tid};
 use uuid::Uuid;
 
 pub const NAMES: &[&str] = &["olaren", "teq", "nel", "lyna", "bailey"];
@@ -33,7 +33,17 @@ pub fn block_data(seed: u32) -> Vec<u8> {
 
 pub fn test_did(seed: u64) -> Did {
     let name = NAMES[(seed as usize) % NAMES.len()];
-    Did::from(format!("did:plc:{name}{seed}"))
+    Did::new(format!("did:plc:{name}{seed}")).expect("generated DID is valid")
+}
+
+pub fn test_rev(sequence: u64, discriminator: u64) -> Tid {
+    const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+    let value = (sequence << 40) | (discriminator & 0xFF_FFFF_FFFF);
+    let s: String = (0..13)
+        .rev()
+        .map(|i| ALPHABET[((value >> (i * 5)) & 0x1F) as usize] as char)
+        .collect();
+    Tid::new(s).expect("generated TID is valid")
 }
 
 pub fn test_handle(seed: u64) -> Handle {

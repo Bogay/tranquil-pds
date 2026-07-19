@@ -43,7 +43,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
 
     pub fn insert_commit_event(&self, data: &CommitEventData) -> Result<SequenceNumber, DbError> {
         let event = Self::build_commit_event(data);
-        self.append_and_index(&event, &data.did, data.rev.as_deref())
+        self.append_and_index(&event, &data.did, data.rev.as_ref())
     }
 
     pub fn append_commit_event_into_batch(
@@ -151,7 +151,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
         &self,
         did: &Did,
         commit_cid: &CidLink,
-        rev: Option<&str>,
+        rev: Option<&Tid>,
         commit_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError> {
         let inline = tranquil_db_traits::EventBlockInline {
@@ -175,7 +175,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
             handle: None,
             active: None,
             status: None,
-            rev: rev.map(|r| Tid::from(r.to_owned())),
+            rev: rev.cloned(),
         };
 
         self.append_and_index(&event, did, rev)
@@ -186,7 +186,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
         did: &Did,
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
-        rev: &str,
+        rev: &Tid,
         commit_bytes: &[u8],
         mst_root_bytes: &[u8],
     ) -> Result<SequenceNumber, DbError> {
@@ -221,7 +221,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
             handle: None,
             active: None,
             status: None,
-            rev: Some(Tid::from(rev.to_owned())),
+            rev: Some(rev.clone()),
         };
 
         self.append_and_index(&event, did, Some(rev))
@@ -281,7 +281,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
     pub fn get_blob_cids_since_rev(
         &self,
         did: &Did,
-        since_rev: &str,
+        since_rev: &Tid,
     ) -> Result<Vec<CidLink>, DbError> {
         let user_hash = UserHash::from_did(did.as_str());
 
@@ -489,11 +489,24 @@ impl<S: StorageIO + 'static> EventOps<S> {
                         self.stage_rev_to_seq(&mut batch, user_hash, rev, seq_u64);
                     }
 
-                    if let Some(ms_bytes) = &ewm.mutation_set {
-                        let ms = CommitMutationSet::deserialize(ms_bytes).ok_or_else(|| {
-                            DbError::Query(format!("corrupt CommitMutationSet at seq {seq_u64}"))
-                        })?;
+                    let mutation_set = match &ewm.mutation_set {
+                        None => None,
+                        Some(ms_bytes) => match CommitMutationSet::deserialize(ms_bytes) {
+                            Some(ms) => Some(ms),
+                            None => {
+                                tracing::error!(
+                                    seq = seq_u64,
+                                    did = %ewm.event.did,
+                                    "skipping a CommitMutationSet that does not decode; the \
+                                     metastore stays behind the eventlog for this commit until a \
+                                     structural repair rewrites it"
+                                );
+                                None
+                            }
+                        },
+                    };
 
+                    if let Some(ms) = mutation_set {
                         let meta_key = super::repo_meta::repo_meta_key(user_hash);
                         let current_meta = self
                             .repo_data
@@ -586,7 +599,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
         batch: &mut fjall::OwnedWriteBatch,
         event: &SequencedEvent,
         did: &Did,
-        rev: Option<&str>,
+        rev: Option<&Tid>,
     ) -> Result<SequenceNumber, DbError> {
         let seq = self
             .bridge
@@ -608,7 +621,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
         &self,
         event: &SequencedEvent,
         did: &Did,
-        rev: Option<&str>,
+        rev: Option<&Tid>,
     ) -> Result<SequenceNumber, DbError> {
         let mut batch = self.db.batch();
         let seq = self.append_and_stage_indexes(&mut batch, event, did, rev)?;
@@ -625,7 +638,7 @@ impl<S: StorageIO + 'static> EventOps<S> {
         &self,
         batch: &mut fjall::OwnedWriteBatch,
         user_hash: UserHash,
-        rev: &str,
+        rev: &Tid,
         seq: u64,
     ) {
         let key = rev_to_seq_key(user_hash, rev);
@@ -727,8 +740,13 @@ mod tests {
     use sha2::Digest;
     use tranquil_db_traits::RepoEventType;
 
-    fn tid(s: &str) -> Tid {
-        Tid::from(s.to_owned())
+    fn test_rev(seq: u64) -> Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        Tid::new(s).expect("generated TID is valid")
     }
 
     struct TestHarness {
@@ -793,7 +811,7 @@ mod tests {
             blobs: None,
             blocks: None,
             prev_data_cid: None,
-            rev: Some(tid("3k2abcde")),
+            rev: Some(test_rev(1)),
         };
 
         let seq = h.event_ops.insert_commit_event(&data).unwrap();
@@ -803,7 +821,7 @@ mod tests {
         assert_eq!(event.did.as_str(), test_did().as_str());
         assert_eq!(event.event_type, RepoEventType::Commit);
         assert_eq!(event.commit_cid, Some(cid));
-        assert_eq!(event.rev, Some(tid("3k2abcde")));
+        assert_eq!(event.rev, Some(test_rev(1)));
     }
 
     #[test]
@@ -847,14 +865,14 @@ mod tests {
 
         let seq = h
             .event_ops
-            .insert_sync_event(&test_did(), &cid, Some("rev1"), b"sync_commit_bytes")
+            .insert_sync_event(&test_did(), &cid, Some(&test_rev(2)), b"sync_commit_bytes")
             .unwrap();
         assert!(seq.as_i64() > 0);
 
         let event = h.event_ops.get_event_by_seq(seq).unwrap().unwrap();
         assert_eq!(event.event_type, RepoEventType::Sync);
         assert_eq!(event.commit_cid, Some(cid));
-        assert_eq!(event.rev, Some(tid("rev1")));
+        assert_eq!(event.rev, Some(test_rev(2)));
     }
 
     #[test]
@@ -869,7 +887,7 @@ mod tests {
                 &test_did(),
                 &commit_cid,
                 &mst_cid,
-                "genesis_rev",
+                &test_rev(3),
                 b"genesis_commit_bytes",
                 b"genesis_mst_bytes",
             )
@@ -880,7 +898,7 @@ mod tests {
         assert_eq!(event.event_type, RepoEventType::Commit);
         assert_eq!(event.commit_cid, Some(commit_cid));
         assert_eq!(event.prev_data_cid, Some(mst_cid));
-        assert_eq!(event.rev, Some(tid("genesis_rev")));
+        assert_eq!(event.rev, Some(test_rev(3)));
     }
 
     #[test]
@@ -1002,7 +1020,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_a")),
+                rev: Some(test_rev(4)),
             })
             .unwrap();
 
@@ -1017,7 +1035,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_b")),
+                rev: Some(test_rev(5)),
             })
             .unwrap();
 
@@ -1044,7 +1062,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_x")),
+                rev: Some(test_rev(6)),
             })
             .unwrap();
 
@@ -1059,7 +1077,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_y")),
+                rev: Some(test_rev(7)),
             })
             .unwrap();
 
@@ -1145,7 +1163,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("r1")),
+                rev: Some(test_rev(8)),
             })
             .unwrap();
         let s2 = h.event_ops.insert_identity_event(&did, None).unwrap();
@@ -1155,7 +1173,7 @@ mod tests {
             .unwrap();
         let s4 = h
             .event_ops
-            .insert_sync_event(&did, &cid, Some("r2"), b"sync_commit_bytes")
+            .insert_sync_event(&did, &cid, Some(&test_rev(9)), b"sync_commit_bytes")
             .unwrap();
 
         let events = h
@@ -1190,7 +1208,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_keep")),
+                rev: Some(test_rev(10)),
             })
             .unwrap();
 
@@ -1203,7 +1221,7 @@ mod tests {
 
         let keep_seq = h
             .event_ops
-            .insert_sync_event(&did, &cid, Some("rev_sync"), b"sync_commit_bytes")
+            .insert_sync_event(&did, &cid, Some(&test_rev(11)), b"sync_commit_bytes")
             .unwrap();
 
         h.event_ops.delete_sequences_except(&did, keep_seq).unwrap();
@@ -1245,7 +1263,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_old")),
+                rev: Some(test_rev(12)),
             })
             .unwrap();
 
@@ -1260,11 +1278,11 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_keep")),
+                rev: Some(test_rev(10)),
             })
             .unwrap();
 
-        let old_key = super::super::event_keys::rev_to_seq_key(user_hash, "rev_old");
+        let old_key = super::super::event_keys::rev_to_seq_key(user_hash, &test_rev(12));
         assert!(
             h.event_ops
                 .repo_data
@@ -1283,7 +1301,7 @@ mod tests {
                 .is_none()
         );
 
-        let keep_key = super::super::event_keys::rev_to_seq_key(user_hash, "rev_keep");
+        let keep_key = super::super::event_keys::rev_to_seq_key(user_hash, &test_rev(10));
         assert!(
             h.event_ops
                 .repo_data
@@ -1311,7 +1329,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_a")),
+                rev: Some(test_rev(4)),
             })
             .unwrap();
 
@@ -1326,7 +1344,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_b")),
+                rev: Some(test_rev(5)),
             })
             .unwrap();
 
@@ -1368,7 +1386,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_1")),
+                rev: Some(test_rev(13)),
             })
             .unwrap();
 
@@ -1397,7 +1415,7 @@ mod tests {
                 blobs: None,
                 blocks: None,
                 prev_data_cid: None,
-                rev: Some(tid("rev_1")),
+                rev: Some(test_rev(13)),
             })
             .unwrap();
 
@@ -1419,7 +1437,7 @@ mod tests {
             handle: None,
             active: None,
             status: None,
-            rev: Some(tid("rev_2")),
+            rev: Some(test_rev(14)),
         };
         h.event_ops.bridge.insert_event(&crash_event).unwrap();
 
@@ -1455,12 +1473,12 @@ mod tests {
             handle: None,
             active: None,
             status: None,
-            rev: Some(tid("rev_3")),
+            rev: Some(test_rev(15)),
         };
         h.event_ops.bridge.insert_event(&crash_event_3).unwrap();
 
         let user_hash = super::UserHash::from_did(did.as_str());
-        let rev2_key = super::super::event_keys::rev_to_seq_key(user_hash, "rev_2");
+        let rev2_key = super::super::event_keys::rev_to_seq_key(user_hash, &test_rev(14));
         assert!(
             h.event_ops
                 .repo_data

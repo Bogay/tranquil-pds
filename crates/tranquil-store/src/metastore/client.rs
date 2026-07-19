@@ -185,7 +185,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
             .send(MetastoreRequest::Repo(RepoRequest::UpdateRepoRoot {
                 user_id,
                 repo_root_cid: repo_root_cid.clone(),
-                repo_rev: repo_rev.to_string(),
+                repo_rev: repo_rev.clone(),
                 tx,
             }))?;
         recv(rx).await
@@ -196,7 +196,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         self.pool
             .send(MetastoreRequest::Repo(RepoRequest::UpdateRepoRev {
                 user_id,
-                repo_rev: repo_rev.to_string(),
+                repo_rev: repo_rev.clone(),
                 tx,
             }))?;
         recv(rx).await
@@ -270,7 +270,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
                 collections: collections.to_vec(),
                 rkeys: rkeys.to_vec(),
                 record_cids: record_cids.to_vec(),
-                repo_rev: repo_rev.to_string(),
+                repo_rev: repo_rev.clone(),
                 tx,
             }))?;
         recv(rx).await
@@ -427,7 +427,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
             UserBlockRequest::InsertUserBlocks {
                 user_id,
                 block_cids: block_cids.to_vec(),
-                repo_rev: repo_rev.to_string(),
+                repo_rev: repo_rev.clone(),
                 tx,
             },
         ))?;
@@ -453,13 +453,13 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
     async fn get_user_block_cids_since_rev(
         &self,
         user_id: Uuid,
-        since_rev: &Tid,
+        since_rev: Option<&Tid>,
     ) -> Result<Vec<Vec<u8>>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::UserBlock(
             UserBlockRequest::GetUserBlockCidsSinceRev {
                 user_id,
-                since_rev: since_rev.to_string(),
+                since_rev: since_rev.cloned(),
                 tx,
             },
         ))?;
@@ -522,7 +522,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
             .send(MetastoreRequest::Event(EventRequest::InsertSyncEvent {
                 did: did.clone(),
                 commit_cid: commit_cid.clone(),
-                rev: rev.map(|r| r.to_string()),
+                rev: rev.cloned(),
                 commit_bytes: commit_bytes.to_vec(),
                 tx,
             }))?;
@@ -544,7 +544,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
                 did: did.clone(),
                 commit_cid: commit_cid.clone(),
                 mst_root_cid: mst_root_cid.clone(),
-                rev: rev.to_string(),
+                rev: rev.clone(),
                 commit_bytes: commit_bytes.to_vec(),
                 mst_root_bytes: mst_root_bytes.to_vec(),
                 tx,
@@ -916,7 +916,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::BlobRepository for MetastoreCli
         self.pool
             .send(MetastoreRequest::Blob(BlobRequest::ListBlobsSinceRev {
                 did: did.clone(),
-                since: since.to_string(),
+                since: since.clone(),
                 tx,
             }))?;
         recv(rx).await

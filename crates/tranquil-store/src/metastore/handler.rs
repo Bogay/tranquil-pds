@@ -198,12 +198,12 @@ pub enum RepoRequest {
     UpdateRepoRoot {
         user_id: Uuid,
         repo_root_cid: CidLink,
-        repo_rev: String,
+        repo_rev: Tid,
         tx: Tx<()>,
     },
     UpdateRepoRev {
         user_id: Uuid,
-        repo_rev: String,
+        repo_rev: Tid,
         tx: Tx<()>,
     },
     DeleteRepo {
@@ -276,7 +276,7 @@ pub enum RecordRequest {
         collections: Vec<Nsid>,
         rkeys: Vec<Rkey>,
         record_cids: Vec<CidLink>,
-        repo_rev: String,
+        repo_rev: Tid,
         tx: Tx<()>,
     },
     DeleteRecords {
@@ -357,7 +357,7 @@ pub enum UserBlockRequest {
     InsertUserBlocks {
         user_id: Uuid,
         block_cids: Vec<Vec<u8>>,
-        repo_rev: String,
+        repo_rev: Tid,
         tx: Tx<()>,
     },
     DeleteUserBlocks {
@@ -367,7 +367,7 @@ pub enum UserBlockRequest {
     },
     GetUserBlockCidsSinceRev {
         user_id: Uuid,
-        since_rev: String,
+        since_rev: Option<Tid>,
         tx: Tx<Vec<Vec<u8>>>,
     },
     CountUserBlocks {
@@ -405,7 +405,7 @@ pub enum EventRequest {
     InsertSyncEvent {
         did: Did,
         commit_cid: CidLink,
-        rev: Option<String>,
+        rev: Option<Tid>,
         commit_bytes: Vec<u8>,
         tx: Tx<SequenceNumber>,
     },
@@ -413,7 +413,7 @@ pub enum EventRequest {
         did: Did,
         commit_cid: CidLink,
         mst_root_cid: CidLink,
-        rev: String,
+        rev: Tid,
         commit_bytes: Vec<u8>,
         mst_root_bytes: Vec<u8>,
         tx: Tx<SequenceNumber>,
@@ -579,7 +579,7 @@ pub enum BlobRequest {
     },
     ListBlobsSinceRev {
         did: Did,
-        since: String,
+        since: Tid,
         tx: Tx<Vec<CidLink>>,
     },
     CountBlobsByUser {
@@ -2446,12 +2446,19 @@ impl OAuthRequest {
     }
 }
 
-fn convert_repo_info(r: super::repo_ops::RepoInfo) -> tranquil_db_traits::RepoInfo {
-    tranquil_db_traits::RepoInfo {
+fn convert_repo_info(
+    r: super::repo_ops::RepoInfo,
+) -> Result<tranquil_db_traits::RepoInfo, DbError> {
+    Ok(tranquil_db_traits::RepoInfo {
         user_id: r.user_id,
         repo_root_cid: r.repo_root_cid,
-        repo_rev: r.repo_rev.map(Tid::from),
-    }
+        repo_rev: r
+            .repo_rev
+            .map(|rev| {
+                Tid::new(rev).map_err(|_| DbError::CorruptData("corrupt repo_meta repo_rev"))
+            })
+            .transpose()?,
+    })
 }
 
 fn convert_repo_account(
@@ -2473,11 +2480,16 @@ fn convert_repo_list_entry(
         .did
         .ok_or(DbError::CorruptData("repo_meta missing DID field"))?;
     Ok(tranquil_db_traits::RepoListItem {
-        did: Did::from(did),
+        did: Did::new(did).map_err(|_| DbError::CorruptData("corrupt repo_meta did"))?,
         deactivated_at: r.deactivated_at,
         takedown_ref: r.takedown_ref,
         repo_root_cid: r.repo_root_cid,
-        repo_rev: r.repo_rev.map(Tid::from),
+        repo_rev: r
+            .repo_rev
+            .map(|rev| {
+                Tid::new(rev).map_err(|_| DbError::CorruptData("corrupt repo_meta repo_rev"))
+            })
+            .transpose()?,
     })
 }
 
@@ -2597,8 +2609,8 @@ fn dispatch_repo<S: StorageIO>(state: &HandlerState<S>, req: RepoRequest) {
                 .metastore
                 .repo_ops()
                 .get_repo(user_id)
-                .map(|opt| opt.map(convert_repo_info))
-                .map_err(metastore_to_db);
+                .map_err(metastore_to_db)
+                .and_then(|opt| opt.map(convert_repo_info).transpose());
             let _ = tx.send(result);
         }
         RepoRequest::GetRepoRootByDid { did, tx } => {
@@ -2712,7 +2724,7 @@ fn dispatch_record<S: StorageIO>(state: &HandlerState<S>, req: RecordRequest) {
                     .record_ops()
                     .upsert_records(&mut batch, user_hash, &writes)
                     .map_err(metastore_to_db)?;
-                meta.repo_rev = repo_rev;
+                meta.repo_rev = repo_rev.as_str().to_owned();
                 state
                     .metastore
                     .repo_ops()
@@ -2923,7 +2935,7 @@ fn dispatch_user_block<S: StorageIO>(state: &HandlerState<S>, req: UserBlockRequ
             let result = state
                 .metastore
                 .user_block_ops()
-                .get_user_block_cids_since_rev(user_id, &since_rev)
+                .get_user_block_cids_since_rev(user_id, since_rev.as_ref())
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
@@ -2962,7 +2974,7 @@ fn dispatch_event<S: StorageIO + 'static>(state: &HandlerState<S>, req: EventReq
             let result =
                 state
                     .event_ops
-                    .insert_sync_event(&did, &commit_cid, rev.as_deref(), &commit_bytes);
+                    .insert_sync_event(&did, &commit_cid, rev.as_ref(), &commit_bytes);
             let _ = tx.send(result);
         }
         EventRequest::InsertGenesisCommitEvent {
@@ -6139,13 +6151,23 @@ mod tests {
         CidLink::from_cid(&c)
     }
 
+    fn test_rev(seq: u64) -> Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        Tid::new(s).expect("generated TID is valid")
+    }
+
     #[tokio::test]
     async fn create_and_get_roundtrip() {
         let h = setup();
         let user_id = Uuid::new_v4();
-        let did = Did::from("did:plc:handler_test".to_string());
-        let handle = Handle::from("handler.test.invalid".to_string());
+        let did = Did::new("did:plc:whelk").expect("test DID is well-formed");
+        let handle = Handle::new("whelk.oyster.cafe").expect("test handle is valid");
         let cid = test_cid_link(1);
+        let rev = test_rev(1);
 
         let (tx, rx) = oneshot::channel();
         h.pool
@@ -6154,7 +6176,7 @@ mod tests {
                 did,
                 handle,
                 repo_root_cid: cid.clone(),
-                repo_rev: Tid::from("rev1".to_string()),
+                repo_rev: rev.clone(),
                 tx,
             }))
             .unwrap();
@@ -6166,7 +6188,7 @@ mod tests {
             .unwrap();
         let repo = rx.await.unwrap().unwrap().unwrap();
         assert_eq!(repo.repo_root_cid, cid);
-        assert_eq!(repo.repo_rev.as_deref(), Some("rev1"));
+        assert_eq!(repo.repo_rev.as_deref(), Some(rev.as_str()));
     }
 
     #[test]
@@ -6181,9 +6203,10 @@ mod tests {
         .unwrap();
         let infra = metastore.infra_ops();
         let squid = InviteCode::new("squid-invite");
+        let owner = Did::new("did:plc:whelk").expect("valid DID");
         let whelk = InviteCode::new("whelk");
 
-        assert!(infra.create_invite_code(&squid, 1, None).unwrap());
+        assert!(infra.create_invite_code(&squid, 1, Some(&owner)).unwrap());
 
         infra.reserve_invite_code(&squid).unwrap();
         assert_eq!(
@@ -6219,9 +6242,10 @@ mod tests {
         .unwrap();
         let infra = metastore.infra_ops();
         let squid = InviteCode::new("squid-invite");
+        let owner = Did::new("did:plc:whelk").expect("valid DID");
         let whelk = InviteCode::new("whelk");
 
-        assert!(infra.create_invite_code(&squid, 1, None).unwrap());
+        assert!(infra.create_invite_code(&squid, 1, Some(&owner)).unwrap());
 
         infra.reserve_invite_code(&squid).unwrap();
         infra.refund_invite_code(&squid).unwrap();
@@ -6275,7 +6299,7 @@ mod tests {
         )
         .unwrap();
         let user_hashes = ms.user_hashes().as_ref();
-        let did = Did::from("did:plc:limpet".to_string());
+        let did = Did::new("did:plc:limpet").expect("test DID is well-formed");
         let expected = did_to_routing(&did);
         let sid = SessionId::new(7);
 
@@ -6320,8 +6344,8 @@ mod tests {
     async fn shutdown_completes_inflight() {
         let h = setup();
         let user_id = Uuid::new_v4();
-        let did = Did::from("did:plc:shutdown_test".to_string());
-        let handle = Handle::from("shutdown.test.invalid".to_string());
+        let did = Did::new("did:plc:scallop").expect("test DID is well-formed");
+        let handle = Handle::new("scallop.oyster.cafe").expect("test handle is valid");
         let cid = test_cid_link(2);
 
         let (tx, rx) = oneshot::channel();
@@ -6331,7 +6355,7 @@ mod tests {
                 did,
                 handle,
                 repo_root_cid: cid,
-                repo_rev: Tid::from("rev1".to_string()),
+                repo_rev: test_rev(1),
                 tx,
             }))
             .unwrap();

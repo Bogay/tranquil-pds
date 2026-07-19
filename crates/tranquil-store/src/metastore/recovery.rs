@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
-use tranquil_types::{Nsid, Rkey};
+use tranquil_types::{Nsid, Rkey, Tid};
 
 use super::backlink_ops::remove_backlinks_for_record;
 use super::backlinks::{BacklinkValue, backlink_by_user_key, backlink_key, discriminant_to_path};
@@ -17,7 +17,7 @@ const MUTATION_SET_VERSION: u8 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitMutationSet {
     pub new_root_cid: Vec<u8>,
-    pub new_rev: String,
+    pub new_rev: Tid,
     pub record_upserts: Vec<RecordMutationUpsert>,
     pub record_deletes: Vec<RecordMutationDelete>,
     pub block_inserts: Vec<Vec<u8>>,
@@ -111,7 +111,7 @@ pub fn replay_mutation_set(
 
     let updated_meta = RepoMetaValue {
         repo_root_cid: mutation_set.new_root_cid.clone(),
-        repo_rev: mutation_set.new_rev.clone(),
+        repo_rev: mutation_set.new_rev.as_str().to_owned(),
         ..current_meta.clone()
     };
     let meta_key = repo_meta_key(user_hash);
@@ -254,7 +254,7 @@ mod tests {
     fn mutation_set_roundtrip() {
         let ms = CommitMutationSet {
             new_root_cid: vec![0x01, 0x71, 0x12, 0x20],
-            new_rev: "rev1".to_owned(),
+            new_rev: Tid::new("3k2abcdefghij").unwrap(),
             record_upserts: vec![RecordMutationUpsert {
                 collection: "app.bsky.feed.post".to_owned(),
                 rkey: "3k2abc".to_owned(),
@@ -284,7 +284,7 @@ mod tests {
     fn mutation_set_empty_roundtrip() {
         let ms = CommitMutationSet {
             new_root_cid: vec![],
-            new_rev: String::new(),
+            new_rev: Tid::new("3k2abcdefghij").unwrap(),
             record_upserts: vec![],
             record_deletes: vec![],
             block_inserts: vec![],
@@ -301,7 +301,7 @@ mod tests {
     fn unknown_version_returns_none() {
         let ms = CommitMutationSet {
             new_root_cid: vec![],
-            new_rev: String::new(),
+            new_rev: Tid::new("3k2abcdefghij").unwrap(),
             record_upserts: vec![],
             record_deletes: vec![],
             block_inserts: vec![],

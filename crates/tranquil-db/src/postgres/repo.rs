@@ -793,22 +793,37 @@ impl RepoRepository for PostgresRepoRepository {
     async fn get_user_block_cids_since_rev(
         &self,
         user_id: Uuid,
-        since_rev: &Tid,
+        since_rev: Option<&Tid>,
     ) -> Result<Vec<Vec<u8>>, DbError> {
-        let rows: Vec<(Vec<u8>,)> = sqlx::query_as(
-            r#"
-            SELECT block_cid FROM user_blocks
-            WHERE user_id = $1 AND repo_rev > $2
-            ORDER BY repo_rev ASC
-            "#,
-        )
-        .bind(user_id)
-        .bind(since_rev.as_str())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
+        let rows = match since_rev {
+            None => {
+                sqlx::query_scalar!(
+                    r#"
+                    SELECT block_cid AS "block_cid!" FROM user_blocks
+                    WHERE user_id = $1
+                    ORDER BY repo_rev ASC
+                    "#,
+                    user_id
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+            Some(rev) => {
+                sqlx::query_scalar!(
+                    r#"
+                    SELECT block_cid AS "block_cid!" FROM user_blocks
+                    WHERE user_id = $1 AND repo_rev > $2
+                    ORDER BY repo_rev ASC
+                    "#,
+                    user_id,
+                    rev.as_str()
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+        };
 
-        Ok(rows.into_iter().map(|(cid,)| cid).collect())
+        rows.map_err(map_sqlx_error)
     }
 
     async fn insert_commit_event(&self, data: &CommitEventData) -> Result<(), DbError> {

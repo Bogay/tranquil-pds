@@ -14,7 +14,7 @@ use super::scan::{count_prefix, delete_all_by_prefix, point_lookup};
 use super::user_blocks::user_block_user_prefix;
 use super::user_hash::UserHashMap;
 
-use tranquil_types::{CidLink, Did, Handle};
+use tranquil_types::{CidLink, Did, Handle, Tid};
 
 pub struct RepoOps {
     repo_data: Keyspace,
@@ -36,7 +36,7 @@ impl RepoOps {
         did: &Did,
         handle: &Handle,
         repo_root_cid: &CidLink,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), MetastoreError> {
         let user_hash = UserHash::from_did(did.as_str());
         let mut batch = db.batch();
@@ -49,7 +49,7 @@ impl RepoOps {
 
         let value = RepoMetaValue {
             repo_root_cid: cid_bytes,
-            repo_rev: repo_rev.to_string(),
+            repo_rev: repo_rev.as_str().to_owned(),
             handle: handle_lower.clone(),
             status: RepoStatus::Active,
             deactivated_at_ms: None,
@@ -114,7 +114,7 @@ impl RepoOps {
         db: &fjall::Database,
         user_id: Uuid,
         repo_root_cid: &CidLink,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), MetastoreError> {
         let user_hash = self.resolve_user_hash(user_id)?;
         let key = repo_meta_key(user_hash);
@@ -122,7 +122,7 @@ impl RepoOps {
         let mut value = self.get_meta_value(key.as_slice())?;
         let cid_bytes = cid_link_to_bytes(repo_root_cid)?;
         value.repo_root_cid = cid_bytes;
-        value.repo_rev = repo_rev.to_string();
+        value.repo_rev = repo_rev.as_str().to_owned();
 
         let mut batch = db.batch();
         batch.insert(&self.repo_data, key.as_slice(), value.serialize());
@@ -133,13 +133,13 @@ impl RepoOps {
         &self,
         db: &fjall::Database,
         user_id: Uuid,
-        repo_rev: &str,
+        repo_rev: &Tid,
     ) -> Result<(), MetastoreError> {
         let user_hash = self.resolve_user_hash(user_id)?;
         let key = repo_meta_key(user_hash);
 
         let mut value = self.get_meta_value(key.as_slice())?;
-        value.repo_rev = repo_rev.to_string();
+        value.repo_rev = repo_rev.as_str().to_owned();
 
         let mut batch = db.batch();
         batch.insert(&self.repo_data, key.as_slice(), value.serialize());
@@ -316,7 +316,10 @@ impl RepoOps {
             Ok(RepoInfo {
                 user_id,
                 repo_root_cid: cid,
-                repo_rev: Some(value.repo_rev),
+                repo_rev: match value.repo_rev.is_empty() {
+                    true => None,
+                    false => Some(value.repo_rev),
+                },
             })
         })
         .transpose()
@@ -651,11 +654,20 @@ mod tests {
     }
 
     fn test_did(name: &str) -> Did {
-        Did::from(format!("did:plc:{name}"))
+        Did::new(format!("did:plc:{name}")).expect("test DID is well-formed")
     }
 
     fn test_handle(name: &str) -> Handle {
-        Handle::from(format!("{name}.test.invalid"))
+        Handle::new(format!("{name}.oyster.cafe")).expect("test handle is valid")
+    }
+
+    fn test_rev(seq: u64) -> Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        Tid::new(s).expect("generated TID is valid")
     }
 
     #[test]
@@ -667,13 +679,13 @@ mod tests {
         let handle = test_handle("olaren");
         let cid = test_cid_link(1);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
 
         let repo = ops.get_repo(user_id).unwrap().unwrap();
         assert_eq!(repo.user_id, user_id);
         assert_eq!(repo.repo_root_cid, cid);
-        assert_eq!(repo.repo_rev.as_deref(), Some("rev1"));
+        assert_eq!(repo.repo_rev.as_deref(), Some(test_rev(1).as_str()));
     }
 
     #[test]
@@ -693,14 +705,14 @@ mod tests {
         let cid1 = test_cid_link(1);
         let cid2 = test_cid_link(2);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid1, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid1, &test_rev(1))
             .unwrap();
-        ops.update_repo_root(ms.database(), user_id, &cid2, "rev2")
+        ops.update_repo_root(ms.database(), user_id, &cid2, &test_rev(2))
             .unwrap();
 
         let repo = ops.get_repo(user_id).unwrap().unwrap();
         assert_eq!(repo.repo_root_cid, cid2);
-        assert_eq!(repo.repo_rev.as_deref(), Some("rev2"));
+        assert_eq!(repo.repo_rev.as_deref(), Some(test_rev(2).as_str()));
     }
 
     #[test]
@@ -712,14 +724,14 @@ mod tests {
         let handle = test_handle("nel");
         let cid = test_cid_link(3);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
-        ops.update_repo_rev(ms.database(), user_id, "rev_updated")
+        ops.update_repo_rev(ms.database(), user_id, &test_rev(3))
             .unwrap();
 
         let repo = ops.get_repo(user_id).unwrap().unwrap();
         assert_eq!(repo.repo_root_cid, cid);
-        assert_eq!(repo.repo_rev.as_deref(), Some("rev_updated"));
+        assert_eq!(repo.repo_rev.as_deref(), Some(test_rev(3).as_str()));
     }
 
     #[test]
@@ -731,7 +743,7 @@ mod tests {
         let handle = test_handle("lyna");
         let cid = test_cid_link(4);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
         assert!(ops.get_repo(user_id).unwrap().is_some());
         assert!(ops.lookup_handle(&handle).unwrap().is_some());
@@ -750,7 +762,7 @@ mod tests {
         let handle = test_handle("mapped");
         let cid = test_cid_link(4);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
         assert!(ms.user_hashes().get(&user_id).is_some());
 
@@ -763,22 +775,22 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let did = test_did("recreate");
-        let handle_a = test_handle("recreate_a");
-        let handle_b = test_handle("recreate_b");
+        let handle_a = test_handle("recreate-a");
+        let handle_b = test_handle("recreate-b");
         let uid_a = uuid::Uuid::new_v4();
         let uid_b = uuid::Uuid::new_v4();
         let cid = test_cid_link(70);
 
-        ops.create_repo(ms.database(), uid_a, &did, &handle_a, &cid, "r1")
+        ops.create_repo(ms.database(), uid_a, &did, &handle_a, &cid, &test_rev(1))
             .unwrap();
         ops.delete_repo(ms.database(), uid_a).unwrap();
 
-        ops.create_repo(ms.database(), uid_b, &did, &handle_b, &cid, "r2")
+        ops.create_repo(ms.database(), uid_b, &did, &handle_b, &cid, &test_rev(2))
             .unwrap();
 
         let repo = ops.get_repo(uid_b).unwrap().unwrap();
         assert_eq!(repo.user_id, uid_b);
-        assert_eq!(repo.repo_rev.as_deref(), Some("r2"));
+        assert_eq!(repo.repo_rev.as_deref(), Some(test_rev(2).as_str()));
         assert!(ops.get_repo(uid_a).unwrap().is_none());
     }
 
@@ -800,7 +812,7 @@ mod tests {
             &orphan_did,
             &orphan_handle,
             &cid,
-            "rev1",
+            &test_rev(1),
         )
         .unwrap();
         ops.create_repo(
@@ -809,7 +821,7 @@ mod tests {
             &live_did,
             &live_handle,
             &cid,
-            "rev1",
+            &test_rev(1),
         )
         .unwrap();
 
@@ -853,7 +865,7 @@ mod tests {
             &orphan_did,
             &orphan_handle,
             &cid,
-            "rev1",
+            &test_rev(1),
         )
         .unwrap();
         ops.create_repo(
@@ -862,7 +874,7 @@ mod tests {
             &live_did,
             &live_handle,
             &cid,
-            "rev1",
+            &test_rev(1),
         )
         .unwrap();
 
@@ -914,10 +926,10 @@ mod tests {
         let handle = test_handle("bailey");
         let cid = test_cid_link(5);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
 
-        let upper_handle = Handle::from("BAILEY.TEST.INVALID".to_string());
+        let upper_handle = Handle::new("BAILEY.OYSTER.CAFE").expect("test handle is valid");
         let found = ops.lookup_handle(&upper_handle).unwrap();
         assert_eq!(found, Some(user_id));
     }
@@ -931,7 +943,7 @@ mod tests {
         let handle = test_handle("olaren");
         let cid = test_cid_link(6);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
 
         let root = ops.get_repo_root_by_did(&did).unwrap().unwrap();
@@ -950,7 +962,7 @@ mod tests {
         let handle = test_handle("teq");
         let cid = test_cid_link(7);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
 
         let root = ops.get_repo_root_for_update(user_id).unwrap().unwrap();
@@ -969,7 +981,7 @@ mod tests {
             let did = test_did(&format!("user{i}"));
             let handle = test_handle(&format!("user{i}"));
             let cid = test_cid_link(i);
-            ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+            ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
                 .unwrap();
         });
 
@@ -985,7 +997,7 @@ mod tests {
         let handle = test_handle("nel");
         let cid = test_cid_link(8);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
 
         let account = ops.get_account_with_repo(&did).unwrap().unwrap();
@@ -1012,7 +1024,7 @@ mod tests {
                 &did,
                 &handle,
                 &cid,
-                &format!("rev{i}"),
+                &test_rev(i as u64),
             )
             .unwrap();
         });
@@ -1041,7 +1053,7 @@ mod tests {
                 &did,
                 &handle,
                 &cid,
-                &format!("rev{i}"),
+                &test_rev(i as u64),
             )
             .unwrap();
         });
@@ -1074,7 +1086,7 @@ mod tests {
         {
             let ms = Metastore::open(dir.path(), test_config()).unwrap();
             let ops = ms.repo_ops();
-            ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev_persist")
+            ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(4))
                 .unwrap();
             ms.persist().unwrap();
         }
@@ -1084,7 +1096,7 @@ mod tests {
             let ops = ms.repo_ops();
             let repo = ops.get_repo(user_id).unwrap().unwrap();
             assert_eq!(repo.repo_root_cid, cid);
-            assert_eq!(repo.repo_rev.as_deref(), Some("rev_persist"));
+            assert_eq!(repo.repo_rev.as_deref(), Some(test_rev(4).as_str()));
 
             let found = ops.lookup_handle(&handle).unwrap();
             assert_eq!(found, Some(user_id));
@@ -1097,30 +1109,37 @@ mod tests {
         let ops = ms.repo_ops();
 
         let uid_with = uuid::Uuid::new_v4();
-        let did_with = test_did("with_rev");
-        let handle_with = test_handle("with_rev");
+        let did_with = test_did("with-rev");
+        let handle_with = test_handle("with-rev");
         ops.create_repo(
             ms.database(),
             uid_with,
             &did_with,
             &handle_with,
             &test_cid_link(40),
-            "some_rev",
+            &test_rev(6),
         )
         .unwrap();
 
         let uid_without = uuid::Uuid::new_v4();
-        let did_without = test_did("without_rev");
-        let handle_without = test_handle("without_rev");
+        let did_without = test_did("without-rev");
+        let handle_without = test_handle("without-rev");
         ops.create_repo(
             ms.database(),
             uid_without,
             &did_without,
             &handle_without,
             &test_cid_link(41),
-            "",
+            &test_rev(7),
         )
         .unwrap();
+
+        let (user_hash_without, mut meta_without) =
+            ops.get_repo_meta(uid_without).unwrap().unwrap();
+        meta_without.repo_rev = String::new();
+        let mut batch = ms.database().batch();
+        ops.write_repo_meta(&mut batch, user_hash_without, &meta_without);
+        batch.commit().unwrap();
 
         let result = ops.get_repos_without_rev(100).unwrap();
         assert_eq!(result.len(), 1);
@@ -1132,11 +1151,11 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("root_cid");
-        let handle = test_handle("root_cid");
+        let did = test_did("root-cid");
+        let handle = test_handle("root-cid");
         let cid = test_cid_link(50);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
 
         let root = ops.get_repo_root_cid_by_user_id(user_id).unwrap().unwrap();
@@ -1155,28 +1174,28 @@ mod tests {
         let ops = ms.repo_ops();
 
         let uid_a = uuid::Uuid::new_v4();
-        let did_a = test_did("keep_a");
-        let handle_a = test_handle("keep_a");
+        let did_a = test_did("keep-a");
+        let handle_a = test_handle("keep-a");
         ops.create_repo(
             ms.database(),
             uid_a,
             &did_a,
             &handle_a,
             &test_cid_link(60),
-            "r",
+            &test_rev(1),
         )
         .unwrap();
 
         let uid_b = uuid::Uuid::new_v4();
-        let did_b = test_did("delete_b");
-        let handle_b = test_handle("delete_b");
+        let did_b = test_did("delete-b");
+        let handle_b = test_handle("delete-b");
         ops.create_repo(
             ms.database(),
             uid_b,
             &did_b,
             &handle_b,
             &test_cid_link(61),
-            "r",
+            &test_rev(1),
         )
         .unwrap();
 
@@ -1193,17 +1212,17 @@ mod tests {
         let ops = ms.repo_ops();
 
         let uid_a = uuid::Uuid::new_v4();
-        let did_a = test_did("collision_a");
-        let handle_a = test_handle("collision_a");
+        let did_a = test_did("collision-a");
+        let handle_a = test_handle("collision-a");
         let cid = test_cid_link(80);
 
-        ops.create_repo(ms.database(), uid_a, &did_a, &handle_a, &cid, "r1")
+        ops.create_repo(ms.database(), uid_a, &did_a, &handle_a, &cid, &test_rev(1))
             .unwrap();
 
         let uid_b = uuid::Uuid::new_v4();
-        let handle_b = test_handle("collision_b");
+        let handle_b = test_handle("collision-b");
 
-        let result = ops.create_repo(ms.database(), uid_b, &did_a, &handle_b, &cid, "r2");
+        let result = ops.create_repo(ms.database(), uid_b, &did_a, &handle_b, &cid, &test_rev(2));
 
         match result {
             Ok(()) => {
@@ -1213,7 +1232,7 @@ mod tests {
             Err(MetastoreError::UserHashCollision { .. }) => {
                 let repo = ops.get_repo(uid_a).unwrap().unwrap();
                 assert_eq!(repo.repo_root_cid, cid);
-                assert_eq!(repo.repo_rev.as_deref(), Some("r1"));
+                assert_eq!(repo.repo_rev.as_deref(), Some(test_rev(1).as_str()));
             }
             Err(e) => panic!("unexpected error: {e}"),
         }
@@ -1224,17 +1243,17 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("meta_raw");
-        let handle = test_handle("meta_raw");
+        let did = test_did("meta-raw");
+        let handle = test_handle("meta-raw");
         let cid = test_cid_link(81);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "rev_meta")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(5))
             .unwrap();
 
         let (user_hash, value) = ops.get_repo_meta(user_id).unwrap().unwrap();
         assert_eq!(user_hash, UserHash::from_did(did.as_str()));
-        assert_eq!(value.repo_rev, "rev_meta");
-        assert_eq!(value.handle, "meta_raw.test.invalid");
+        assert_eq!(value.repo_rev, test_rev(5).as_str());
+        assert_eq!(value.handle, "meta-raw.oyster.cafe");
         assert_eq!(value.status, RepoStatus::Active);
     }
 
@@ -1250,17 +1269,17 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("batch_write");
-        let handle = test_handle("batch_write");
+        let did = test_did("batch-write");
+        let handle = test_handle("batch-write");
         let cid1 = test_cid_link(82);
         let cid2 = test_cid_link(83);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid1, "rev1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid1, &test_rev(1))
             .unwrap();
 
         let (user_hash, mut value) = ops.get_repo_meta(user_id).unwrap().unwrap();
         value.repo_root_cid = cid_link_to_bytes(&cid2).unwrap();
-        value.repo_rev = "rev2".to_string();
+        value.repo_rev = test_rev(2).to_string();
 
         let mut batch = ms.database().batch();
         ops.write_repo_meta(&mut batch, user_hash, &value);
@@ -1268,7 +1287,7 @@ mod tests {
 
         let repo = ops.get_repo(user_id).unwrap().unwrap();
         assert_eq!(repo.repo_root_cid, cid2);
-        assert_eq!(repo.repo_rev.as_deref(), Some("rev2"));
+        assert_eq!(repo.repo_rev.as_deref(), Some(test_rev(2).as_str()));
     }
 
     #[test]
@@ -1276,13 +1295,20 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("handle_swap");
-        let old_handle = test_handle("old_name");
-        let new_handle = test_handle("new_name");
+        let did = test_did("handle-swap");
+        let old_handle = test_handle("old-name");
+        let new_handle = test_handle("new-name");
         let cid = test_cid_link(84);
 
-        ops.create_repo(ms.database(), user_id, &did, &old_handle, &cid, "r1")
-            .unwrap();
+        ops.create_repo(
+            ms.database(),
+            user_id,
+            &did,
+            &old_handle,
+            &cid,
+            &test_rev(1),
+        )
+        .unwrap();
         assert!(ops.lookup_handle(&old_handle).unwrap().is_some());
 
         ops.update_handle(ms.database(), user_id, &new_handle)
@@ -1292,7 +1318,7 @@ mod tests {
         assert_eq!(ops.lookup_handle(&new_handle).unwrap(), Some(user_id));
 
         let (_, meta) = ops.get_repo_meta(user_id).unwrap().unwrap();
-        assert_eq!(meta.handle, "new_name.test.invalid");
+        assert_eq!(meta.handle, "new-name.oyster.cafe");
     }
 
     #[test]
@@ -1300,18 +1326,18 @@ mod tests {
         let (_dir, ms) = open_fresh();
         let ops = ms.repo_ops();
         let user_id = uuid::Uuid::new_v4();
-        let did = test_did("handle_case");
+        let did = test_did("handle-case");
         let handle = test_handle("original");
         let cid = test_cid_link(85);
 
-        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, "r1")
+        ops.create_repo(ms.database(), user_id, &did, &handle, &cid, &test_rev(1))
             .unwrap();
 
-        let mixed_case = Handle::from("UPPER.TEST.INVALID".to_string());
+        let mixed_case = Handle::new("UPPER.OYSTER.CAFE").expect("test handle is valid");
         ops.update_handle(ms.database(), user_id, &mixed_case)
             .unwrap();
 
-        let lower_lookup = Handle::from("upper.test.invalid".to_string());
+        let lower_lookup = Handle::new("upper.oyster.cafe").expect("test handle is valid");
         assert_eq!(ops.lookup_handle(&lower_lookup).unwrap(), Some(user_id));
         assert!(ops.lookup_handle(&handle).unwrap().is_none());
     }

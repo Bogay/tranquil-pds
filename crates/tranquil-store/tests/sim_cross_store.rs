@@ -16,7 +16,7 @@ use tranquil_store::{RealIO, SimClock, SimulatedIO, SystemClock, sim_seed_range,
 
 use common::{
     TestStores, assert_store_consistent, block_data, open_test_stores, test_cid, test_cid_link,
-    test_did, test_handle, test_uuid, with_runtime,
+    test_did, test_handle, test_rev, test_uuid, with_runtime,
 };
 use tranquil_db_traits::{
     ImportBlock, ImportRecord, RepoEventType, SequenceNumber, SequencedEvent,
@@ -45,7 +45,7 @@ fn seed_repo(stores: &TestStores, idx: u64) -> Uuid {
             &did,
             &handle,
             &cid,
-            &format!("rev{idx}"),
+            &test_rev(idx, 0),
         )
         .unwrap();
     uid
@@ -66,7 +66,7 @@ fn make_commit_event(did: &Did, idx: u64) -> SequencedEvent {
         handle: None,
         active: None,
         status: None,
-        rev: Some(tranquil_types::Tid::from(format!("rev{idx}"))),
+        rev: Some(test_rev(idx, 0)),
     }
 }
 
@@ -477,7 +477,7 @@ fn sim_backup_during_concurrent_block_and_event_writes() {
             });
 
             let event_handle = s.spawn(|| {
-                let did = Did::from("did:plc:concurrent_writer".to_string());
+                let did = Did::new("did:plc:conch").expect("did:plc:conch is a valid DID");
                 std::iter::from_fn(|| writer_flag.load(Ordering::Relaxed).then_some(())).fold(
                     100u32,
                     |i, ()| {
@@ -495,7 +495,7 @@ fn sim_backup_during_concurrent_block_and_event_writes() {
                             handle: None,
                             active: None,
                             status: None,
-                            rev: Some(tranquil_types::Tid::from(format!("concurrent-{i}"))),
+                            rev: Some(test_rev(i as u64, 0)),
                         };
                         let _ = stores
                             .eventlog
@@ -639,7 +639,7 @@ fn create_import_dirs(dir: &std::path::Path) {
 
 fn import_fixture(seed: u64) -> (Vec<ImportBlock>, Vec<ImportRecord>) {
     let block_count = ((seed % 12) + 4) as u32;
-    let collection = Nsid::from("app.bsky.feed.post".to_string());
+    let collection = Nsid::new("app.bsky.feed.post").expect("app.bsky.feed.post is a valid NSID");
     let blocks: Vec<ImportBlock> = (0..block_count)
         .map(|i| ImportBlock {
             cid_bytes: test_cid(i).to_vec(),
@@ -651,7 +651,7 @@ fn import_fixture(seed: u64) -> (Vec<ImportBlock>, Vec<ImportRecord>) {
             let cid = cid::Cid::try_from(&test_cid(i)[..]).unwrap();
             ImportRecord {
                 collection: collection.clone(),
-                rkey: Rkey::from(format!("3kimport{i:04}")),
+                rkey: Rkey::new(format!("3kimport{i:04}")).expect("generated rkey is valid"),
                 record_cid: CidLink::from_cid(&cid),
             }
         })
@@ -714,7 +714,14 @@ fn run_import_crash_scenario(seed: u64) {
     {
         let ms = import_metastore(dir.path());
         ms.repo_ops()
-            .create_repo(ms.database(), user_id, &did, &handle, &root_cid, "rev0")
+            .create_repo(
+                ms.database(),
+                user_id,
+                &did,
+                &handle,
+                &root_cid,
+                &test_rev(0, 0),
+            )
             .unwrap();
         ms.persist().unwrap();
     }
@@ -855,7 +862,7 @@ fn commit_block_records(stores: &SimStores, uid: Uuid, collection: &Nsid, block_
     };
     let rkeys: Vec<Rkey> = block_ids
         .iter()
-        .map(|i| Rkey::from(format!("3k{i:08}")))
+        .map(|i| Rkey::new(format!("3k{i:08}")).expect("generated rkey is valid"))
         .collect();
     let links: Vec<CidLink> = block_ids.iter().map(|&i| block_cid_link(i)).collect();
     let writes: Vec<RecordWrite<'_>> = rkeys
@@ -887,7 +894,7 @@ fn run_cross_store_fault_scenario(seed: u64) {
     let repo_count = ((seed % 4) + 1) as u32;
     let blocks_per_round = ((seed % 6) + 3) as u32;
     let rounds = ((seed % 4) + 2) as u32;
-    let collection = Nsid::from("app.bsky.feed.post".to_string());
+    let collection = Nsid::new("app.bsky.feed.post").expect("app.bsky.feed.post is a valid NSID");
     let root_base = (seed as u32).wrapping_mul(100_000);
 
     let mut acked_blocks: Vec<u32> = Vec::new();
@@ -921,7 +928,7 @@ fn run_cross_store_fault_scenario(seed: u64) {
                 &did,
                 &handle,
                 &root,
-                &format!("rev{idx}"),
+                &test_rev(idx, 0),
             )
             .unwrap();
         committed_repos.push((idx, uid));

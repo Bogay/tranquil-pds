@@ -10,7 +10,7 @@ use tranquil_store::metastore::repo_meta::RepoStatus;
 use tranquil_store::metastore::{Metastore, MetastoreConfig};
 use tranquil_store::sim_seed_range;
 
-use common::{test_cid_link, test_did, test_handle, test_uuid};
+use common::{test_cid_link, test_did, test_handle, test_rev, test_uuid};
 use tranquil_db_traits::{RepoEventType, SequenceNumber, SequencedEvent};
 use tranquil_types::{Did, Handle, Nsid, Rkey};
 use uuid::Uuid;
@@ -35,7 +35,7 @@ fn seed_one_repo(ms: &Metastore, user_id: Uuid, did: &Did, handle: &Handle) {
             did,
             handle,
             &test_cid_link(7),
-            "rev0",
+            &test_rev(0, 0),
         )
         .unwrap();
 }
@@ -204,11 +204,12 @@ fn sim_list_records_range_scan_survives_restart() {
         let user_id = test_uuid(seed);
         let did = test_did(seed);
         let handle = test_handle(seed);
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
+        let collection =
+            Nsid::new("app.bsky.feed.post").expect("app.bsky.feed.post is a valid NSID");
         let count = ((seed % 30) + 10) as usize;
 
         let rkeys: Vec<Rkey> = (0..count)
-            .map(|i| Rkey::from(format!("3k{i:04}")))
+            .map(|i| Rkey::new(format!("3k{i:04}")).expect("generated rkey is valid"))
             .collect();
 
         {
@@ -337,10 +338,11 @@ fn sim_major_compact_preserves_data() {
         let user_id = test_uuid(seed);
         let did = test_did(seed);
         let handle = test_handle(seed);
-        let collection = Nsid::from("app.bsky.feed.post".to_string());
+        let collection =
+            Nsid::new("app.bsky.feed.post").expect("app.bsky.feed.post is a valid NSID");
         let count = ((seed % 40) + 20) as usize;
         let rkeys: Vec<Rkey> = (0..count)
-            .map(|i| Rkey::from(format!("3k{i:04}")))
+            .map(|i| Rkey::new(format!("3k{i:04}")).expect("generated rkey is valid"))
             .collect();
         let cids: Vec<_> = (0..count).map(|i| test_cid_link((i % 200) as u8)).collect();
         let blob_cid = test_cid_link(123);
@@ -444,7 +446,7 @@ fn open_eventlog(dir: &std::path::Path, max_segment_size: u64) -> Arc<EventLog<R
 
 fn append_n_events(el: &EventLog<RealIO>, n: u32) {
     (0..n).for_each(|i| {
-        let did = Did::from(format!("did:plc:contiguity{i}"));
+        let did = test_did(i as u64);
         let event = SequencedEvent {
             seq: SequenceNumber::from_raw(0),
             did: did.clone(),
@@ -459,7 +461,7 @@ fn append_n_events(el: &EventLog<RealIO>, n: u32) {
             handle: None,
             active: None,
             status: None,
-            rev: Some(tranquil_types::Tid::from(format!("rev{i}"))),
+            rev: Some(test_rev(i as u64, 0)),
         };
         el.append_event(&did, RepoEventType::Commit, &event)
             .unwrap();

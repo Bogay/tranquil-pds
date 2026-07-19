@@ -15,7 +15,7 @@ use tranquil_store::{sim_seed_range, sim_single_seed};
 use tranquil_types::{AtUri, CidLink, Nsid, Rkey};
 
 use common::{
-    NAMES, open_test_stores, test_cid_link, test_did, test_handle, test_uuid, with_runtime,
+    open_test_stores, test_cid_link, test_did, test_handle, test_rev, test_uuid, with_runtime,
 };
 
 const CACHE_SIZE: u64 = 16 * 1024 * 1024;
@@ -55,7 +55,7 @@ fn build_commit_event(
     did: &tranquil_types::Did,
     prev_cid: &CidLink,
     new_cid: &CidLink,
-    rev: &str,
+    rev: &tranquil_types::Tid,
 ) -> CommitEventData {
     CommitEventData {
         did: did.clone(),
@@ -66,7 +66,7 @@ fn build_commit_event(
         blobs: None,
         blocks: None,
         prev_data_cid: None,
-        rev: Some(tranquil_types::Tid::from(rev.to_owned())),
+        rev: Some(rev.clone()),
     }
 }
 
@@ -110,7 +110,7 @@ impl MetastoreTestHarness {
                 &did,
                 &handle,
                 &cid,
-                &format!("rev0_{idx}"),
+                &test_rev(0, idx),
             )
             .unwrap_or_else(|e| panic!("create_repo idx={idx}: {e:?}"));
         (uid, did, cid)
@@ -135,7 +135,6 @@ fn sim_apply_commit_crash_before_batch_commit_is_invisible() {
     with_runtime(|| {
         sim_seed_range().into_par_iter().for_each(|seed| {
             let dir = tempfile::TempDir::new().unwrap();
-            let name = NAMES[(seed as usize) % NAMES.len()];
             let record_count = (seed % 5) + 1;
 
             {
@@ -146,7 +145,7 @@ fn sim_apply_commit_crash_before_batch_commit_is_invisible() {
                     .unwrap_or_else(|e| panic!("seed={seed} persist after create: {e:?}"));
 
                 let new_cid = test_cid_link(((seed + 50) & 0xFF) as u8);
-                let rev = format!("rev1_{name}{seed}");
+                let rev = test_rev(1, seed);
 
                 let upserts: Vec<RecordUpsert> = (0..record_count)
                     .map(|i| {
@@ -164,7 +163,7 @@ fn sim_apply_commit_crash_before_batch_commit_is_invisible() {
                     did: did.clone(),
                     expected_root_cid: Some(root_cid.clone()),
                     new_root_cid: new_cid.clone(),
-                    new_rev: tranquil_types::Tid::from(rev.to_owned()),
+                    new_rev: rev.clone(),
                     record_upserts: upserts,
                     record_deletes: vec![],
                     backlinks_to_add: vec![],
@@ -202,7 +201,7 @@ fn sim_apply_commit_crash_before_batch_commit_is_invisible() {
                         let (_, repo_meta) = meta.unwrap();
                         assert_eq!(
                             repo_meta.repo_rev,
-                            format!("rev0_{seed}"),
+                            test_rev(0, seed).as_str(),
                             "seed={seed} repo rev must be initial if eventlog empty"
                         );
                     }
@@ -244,8 +243,6 @@ fn sim_apply_commit_atomicity_all_or_nothing() {
         sim_seed_range().into_par_iter().for_each(|seed| {
             let dir = tempfile::TempDir::new().unwrap();
             let record_count = (seed % 8) + 2;
-            let name = NAMES[(seed as usize) % NAMES.len()];
-
             {
                 let h = MetastoreTestHarness::open(dir.path());
                 let (uid, did, root_cid) = h.create_repo(seed);
@@ -254,7 +251,7 @@ fn sim_apply_commit_atomicity_all_or_nothing() {
                     .unwrap_or_else(|e| panic!("seed={seed} persist after create: {e:?}"));
 
                 let new_cid = test_cid_link(((seed + 77) & 0xFF) as u8);
-                let rev = format!("rev1_{name}{seed}");
+                let rev = test_rev(1, seed);
                 let collection = collection_nsid(seed);
 
                 let upserts: Vec<RecordUpsert> = (0..record_count)
@@ -294,7 +291,7 @@ fn sim_apply_commit_atomicity_all_or_nothing() {
                     did: did.clone(),
                     expected_root_cid: Some(root_cid.clone()),
                     new_root_cid: new_cid.clone(),
-                    new_rev: tranquil_types::Tid::from(rev.to_owned()),
+                    new_rev: rev.clone(),
                     record_upserts: upserts,
                     record_deletes: vec![],
                     backlinks_to_add: backlinks,
@@ -326,7 +323,7 @@ fn sim_apply_commit_atomicity_all_or_nothing() {
                     .get_repo_meta(uid)
                     .unwrap_or_else(|e| panic!("seed={seed} get_repo_meta: {e:?}"))
                     .unwrap_or_else(|| panic!("seed={seed} repo meta missing"));
-                let rev = format!("rev1_{name}{seed}");
+                let rev = test_rev(1, seed);
                 assert_eq!(
                     repo_meta.repo_rev, rev,
                     "seed={seed} repo rev must match committed value"
@@ -378,7 +375,7 @@ fn sim_crash_recovery_cursor_tracks_last_durable_commit() {
                     .fold((root_cid, 0i64), |(prev_cid, persisted), commit_idx| {
                         let new_cid =
                             test_cid_link(((seed + commit_idx + 50) & 0xFF) as u8);
-                        let rev = format!("rev{commit_idx}_{seed}");
+                        let rev = test_rev(commit_idx, seed);
                         let collection = collection_nsid(seed + commit_idx);
                         let rkey = test_rkey(seed * 1000 + commit_idx);
 
@@ -387,7 +384,7 @@ fn sim_crash_recovery_cursor_tracks_last_durable_commit() {
                             did: did.clone(),
                             expected_root_cid: Some(prev_cid.clone()),
                             new_root_cid: new_cid.clone(),
-                            new_rev: tranquil_types::Tid::from(rev.to_owned()),
+                            new_rev: rev.clone(),
                             record_upserts: vec![RecordUpsert {
                                 collection,
                                 rkey,
@@ -480,7 +477,7 @@ fn sim_multi_commit_crash_cycle_consistency() {
             };
 
             let (total_records, last_rev) = (0..cycles).fold(
-                (0i64, String::new()),
+                (0i64, test_rev(0, seed)),
                 |(prev_total, _), cycle| {
                     let records_this_cycle = (seed.wrapping_add(cycle as u64) % 4) + 1;
 
@@ -526,14 +523,14 @@ fn sim_multi_commit_crash_cycle_consistency() {
 
                     let new_cid =
                         test_cid_link(((seed + cycle as u64 + 100) & 0xFF) as u8);
-                    let rev = format!("rev{cycle}_{seed}");
+                    let rev = test_rev(cycle as u64, seed);
 
                     let input = ApplyCommitInput {
                         user_id: uid,
                         did: did.clone(),
                         expected_root_cid: Some(current_cid.clone()),
                         new_root_cid: new_cid.clone(),
-                        new_rev: tranquil_types::Tid::from(rev.to_owned()),
+                        new_rev: rev.clone(),
                         record_upserts: upserts,
                         record_deletes: vec![],
                         backlinks_to_add: vec![],
@@ -571,7 +568,8 @@ fn sim_multi_commit_crash_cycle_consistency() {
                     .unwrap_or_else(|e| panic!("seed={seed} final get_repo_meta: {e:?}"))
                     .unwrap_or_else(|| panic!("seed={seed} final repo meta missing"));
                 assert_eq!(
-                    repo_meta.repo_rev, last_rev,
+                    repo_meta.repo_rev,
+                    last_rev.as_str(),
                     "seed={seed} final rev must match last committed"
                 );
 
@@ -612,8 +610,6 @@ fn sim_handler_pool_shutdown_with_inflight_commits() {
         let dir = tempfile::TempDir::new().unwrap();
         let stores = open_test_stores(dir.path(), MAX_FILE_SIZE, CACHE_SIZE);
         let bridge = Arc::new(EventLogBridge::new(Arc::clone(&stores.eventlog)));
-        let name = NAMES[(seed as usize) % NAMES.len()];
-
         let repo_count = (seed % 5) + 2;
         let repos: Vec<(uuid::Uuid, tranquil_types::Did, CidLink)> = (0..repo_count)
             .map(|i| {
@@ -631,7 +627,7 @@ fn sim_handler_pool_shutdown_with_inflight_commits() {
                         &did,
                         &handle,
                         &cid,
-                        &format!("rev0_{name}{idx}"),
+                        &test_rev(0, idx),
                     )
                     .unwrap_or_else(|e| panic!("seed={seed} create_repo idx={idx}: {e:?}"));
                 (uid, did, cid)
@@ -651,13 +647,13 @@ fn sim_handler_pool_shutdown_with_inflight_commits() {
             .map(|(i, (uid, did, root_cid))| {
                 let idx = seed * 100 + i as u64;
                 let new_cid = test_cid_link(((seed + i as u64 + 50) & 0xFF) as u8);
-                let rev = format!("rev1_{name}{idx}");
+                let rev = test_rev(1, idx);
                 let input = ApplyCommitInput {
                     user_id: *uid,
                     did: did.clone(),
                     expected_root_cid: Some(root_cid.clone()),
                     new_root_cid: new_cid.clone(),
-                    new_rev: tranquil_types::Tid::from(rev.to_owned()),
+                    new_rev: rev.clone(),
                     record_upserts: vec![RecordUpsert {
                         collection: collection_nsid(seed + i as u64),
                         rkey: test_rkey(idx),
@@ -716,7 +712,7 @@ fn sim_handler_pool_shutdown_with_inflight_commits() {
         (0..repo_count).for_each(|i| {
             let idx = seed * 100 + i;
             let uid = test_uuid(idx);
-            let expected_rev = format!("rev1_{name}{idx}");
+            let expected_rev = test_rev(1, idx);
 
             let meta = h
                 .metastore
@@ -775,13 +771,13 @@ fn sim_record_deletes_through_crash_recovery() {
                     .collect();
 
                 let mid_cid = test_cid_link(((seed + 60) & 0xFF) as u8);
-                let rev1 = format!("rev1_{seed}");
+                let rev1 = test_rev(1, seed);
                 let insert_input = ApplyCommitInput {
                     user_id: uid,
                     did: did.clone(),
                     expected_root_cid: Some(root_cid.clone()),
                     new_root_cid: mid_cid.clone(),
-                    new_rev: tranquil_types::Tid::from(rev1.clone()),
+                    new_rev: rev1.clone(),
                     record_upserts: upserts,
                     record_deletes: vec![],
                     backlinks_to_add: vec![],
@@ -810,13 +806,13 @@ fn sim_record_deletes_through_crash_recovery() {
                     .collect();
 
                 let final_cid = test_cid_link(((seed + 70) & 0xFF) as u8);
-                let rev2 = format!("rev2_{seed}");
+                let rev2 = test_rev(2, seed);
                 let delete_input = ApplyCommitInput {
                     user_id: uid,
                     did: did.clone(),
                     expected_root_cid: Some(mid_cid.clone()),
                     new_root_cid: final_cid.clone(),
-                    new_rev: tranquil_types::Tid::from(rev2.clone()),
+                    new_rev: rev2.clone(),
                     record_upserts: vec![],
                     record_deletes: deletes,
                     backlinks_to_add: vec![],
@@ -849,7 +845,7 @@ fn sim_record_deletes_through_crash_recovery() {
                     true => {
                         assert_eq!(
                             repo_meta.repo_rev,
-                            format!("rev2_{seed}"),
+                            test_rev(2, seed).as_str(),
                             "seed={seed} rev must reflect delete commit after recovery"
                         );
 
@@ -935,13 +931,13 @@ fn sim_obsolete_block_cids_through_crash_recovery() {
                     .collect();
 
                 let mid_cid = test_cid_link(((seed + 60) & 0xFF) as u8);
-                let rev1 = format!("rev1_{seed}");
+                let rev1 = test_rev(1, seed);
                 let insert_input = ApplyCommitInput {
                     user_id: uid,
                     did: did.clone(),
                     expected_root_cid: Some(root_cid.clone()),
                     new_root_cid: mid_cid.clone(),
-                    new_rev: tranquil_types::Tid::from(rev1.clone()),
+                    new_rev: rev1.clone(),
                     record_upserts: vec![RecordUpsert {
                         collection: collection_nsid(seed),
                         rkey: test_rkey(seed),
@@ -968,13 +964,13 @@ fn sim_obsolete_block_cids_through_crash_recovery() {
                     .collect();
 
                 let final_cid = test_cid_link(((seed + 70) & 0xFF) as u8);
-                let rev2 = format!("rev2_{seed}");
+                let rev2 = test_rev(2, seed);
                 let obsolete_input = ApplyCommitInput {
                     user_id: uid,
                     did: did.clone(),
                     expected_root_cid: Some(mid_cid.clone()),
                     new_root_cid: final_cid.clone(),
-                    new_rev: tranquil_types::Tid::from(rev2.clone()),
+                    new_rev: rev2.clone(),
                     record_upserts: vec![],
                     record_deletes: vec![],
                     backlinks_to_add: vec![],
@@ -1012,7 +1008,7 @@ fn sim_obsolete_block_cids_through_crash_recovery() {
                     true => {
                         assert_eq!(
                             repo_meta.repo_rev,
-                            format!("rev2_{seed}"),
+                            test_rev(2, seed).as_str(),
                             "seed={seed} rev must reflect obsolete commit after recovery"
                         );
 

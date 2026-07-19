@@ -432,7 +432,7 @@ pub trait RepoRepository: Send + Sync {
     async fn get_user_block_cids_since_rev(
         &self,
         user_id: Uuid,
-        since_rev: &Tid,
+        since_rev: Option<&Tid>,
     ) -> Result<Vec<Vec<u8>>, DbError>;
 
     async fn count_user_blocks(&self, user_id: Uuid) -> Result<i64, DbError>;

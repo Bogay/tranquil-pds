@@ -7,9 +7,8 @@ use rayon::prelude::*;
 use tranquil_store::eventlog::{EventLog, EventLogConfig, EventSequence};
 use tranquil_store::{FaultConfig, SimulatedIO, sim_seed_range};
 
-use common::with_runtime;
+use common::{test_did, test_rev, with_runtime};
 use tranquil_db_traits::{RepoEventType, SequenceNumber, SequencedEvent};
-use tranquil_types::Did;
 
 fn open_sim_eventlog(
     dir: &std::path::Path,
@@ -29,7 +28,7 @@ fn open_sim_eventlog(
 }
 
 fn append_seq(el: &EventLog<Arc<SimulatedIO>>, idx: u32) {
-    let did = Did::from(format!("did:plc:firehose{}", idx % 16));
+    let did = test_did((idx % 16) as u64);
     let event = SequencedEvent {
         seq: SequenceNumber::from_raw(0),
         did: did.clone(),
@@ -44,7 +43,7 @@ fn append_seq(el: &EventLog<Arc<SimulatedIO>>, idx: u32) {
         handle: None,
         active: None,
         status: None,
-        rev: Some(tranquil_types::Tid::from(format!("rev{idx}"))),
+        rev: Some(test_rev(idx as u64, 0)),
     };
     el.append_event(&did, RepoEventType::Commit, &event)
         .unwrap();

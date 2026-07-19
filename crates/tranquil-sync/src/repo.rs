@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, RawQuery, State},
+    extract::{RawQuery, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -9,6 +9,7 @@ use serde::Deserialize;
 use std::str::FromStr;
 use tracing::error;
 use tranquil_pds::api::error::ApiError;
+use tranquil_pds::api::query::XrpcQuery;
 use tranquil_pds::scheduled::generate_repo_car_from_user_blocks;
 use tranquil_pds::state::AppState;
 use tranquil_pds::sync::car::{encode_car_block, encode_car_header};
@@ -114,12 +115,12 @@ pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery
 #[derive(Deserialize)]
 pub struct GetRepoQuery {
     pub did: Did,
-    pub since: Option<String>,
+    pub since: Option<Tid>,
 }
 
 pub async fn get_repo(
     State(state): State<AppState>,
-    Query(query): Query<GetRepoQuery>,
+    XrpcQuery(query): XrpcQuery<GetRepoQuery>,
 ) -> Response {
     let did = query.did;
     let account =
@@ -139,7 +140,7 @@ pub async fn get_repo(
     };
 
     if let Some(since) = &query.since {
-        return get_repo_since(&state, &did, &head_cid, &Tid::from(since.clone())).await;
+        return get_repo_since(&state, &did, &head_cid, since).await;
     }
 
     let _permit = match state.repo_export_semaphore.try_acquire() {
@@ -195,7 +196,7 @@ async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &Tid
     let block_cid_bytes = match state
         .repos
         .repo
-        .get_user_block_cids_since_rev(user_id, since)
+        .get_user_block_cids_since_rev(user_id, Some(since))
         .await
     {
         Ok(cids) => cids,
@@ -266,7 +267,7 @@ pub struct GetRecordQuery {
 
 pub async fn get_record(
     State(state): State<AppState>,
-    Query(query): Query<GetRecordQuery>,
+    XrpcQuery(query): XrpcQuery<GetRecordQuery>,
 ) -> Response {
     use jacquard_repo::commit::Commit;
     use jacquard_repo::mst::Mst;

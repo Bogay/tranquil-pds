@@ -2,8 +2,9 @@ use smallvec::SmallVec;
 
 use super::encoding::KeyBuilder;
 use super::keys::{KeyTag, UserHash};
+use tranquil_types::Tid;
 
-pub fn rev_to_seq_key(user_hash: UserHash, rev: &str) -> SmallVec<[u8; 128]> {
+pub fn rev_to_seq_key(user_hash: UserHash, rev: &Tid) -> SmallVec<[u8; 128]> {
     KeyBuilder::new()
         .tag(KeyTag::REV_TO_SEQ)
         .u64(user_hash.raw())
@@ -52,14 +53,24 @@ mod tests {
     use super::*;
     use crate::metastore::encoding::KeyReader;
 
+    fn test_rev(seq: u64) -> Tid {
+        const ALPHABET: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+        let s: String = (0..13)
+            .rev()
+            .map(|i| ALPHABET[((seq >> (i * 5)) & 0x1F) as usize] as char)
+            .collect();
+        Tid::new(s).expect("generated TID is valid")
+    }
+
     #[test]
     fn rev_to_seq_key_roundtrip() {
         let hash = UserHash::from_raw(0xDEAD_BEEF_CAFE_BABE);
-        let key = rev_to_seq_key(hash, "3k2abcde");
+        let rev = test_rev(10);
+        let key = rev_to_seq_key(hash, &rev);
         let mut reader = KeyReader::new(&key);
         assert_eq!(reader.tag(), Some(KeyTag::REV_TO_SEQ.raw()));
         assert_eq!(reader.u64(), Some(0xDEAD_BEEF_CAFE_BABE));
-        assert_eq!(reader.string(), Some("3k2abcde".to_owned()));
+        assert_eq!(reader.string(), Some(rev.as_str().to_owned()));
         assert!(reader.is_empty());
     }
 
@@ -67,9 +78,9 @@ mod tests {
     fn rev_to_seq_keys_sort_by_user_then_rev() {
         let h1 = UserHash::from_raw(1);
         let h2 = UserHash::from_raw(2);
-        let k1 = rev_to_seq_key(h1, "abc");
-        let k2 = rev_to_seq_key(h1, "def");
-        let k3 = rev_to_seq_key(h2, "abc");
+        let k1 = rev_to_seq_key(h1, &test_rev(10));
+        let k2 = rev_to_seq_key(h1, &test_rev(20));
+        let k3 = rev_to_seq_key(h2, &test_rev(10));
         assert!(k1.as_slice() < k2.as_slice());
         assert!(k2.as_slice() < k3.as_slice());
     }
@@ -78,7 +89,7 @@ mod tests {
     fn rev_to_seq_user_prefix_is_prefix_of_full_key() {
         let hash = UserHash::from_raw(42);
         let prefix = rev_to_seq_user_prefix(hash);
-        let full = rev_to_seq_key(hash, "some_rev");
+        let full = rev_to_seq_key(hash, &test_rev(10));
         assert!(full.as_slice().starts_with(prefix.as_slice()));
     }
 
