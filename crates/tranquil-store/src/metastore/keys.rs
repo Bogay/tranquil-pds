@@ -53,6 +53,8 @@ impl KeyTag {
 
     pub const RECORD_BLOBS: Self = Self(0x30);
     pub const BACKLINK_BY_USER: Self = Self(0x31);
+    pub const RECORD_BY_CID: Self = Self(0x32);
+    pub const RECORD_BY_CID_BUILT: Self = Self(0x33);
 
     pub const USER_PRIMARY: Self = Self(0x40);
     pub const USER_BY_HANDLE: Self = Self(0x41);
@@ -185,6 +187,8 @@ mod tests {
             KeyTag::DID_EVENTS,
             KeyTag::RECORD_BLOBS,
             KeyTag::BACKLINK_BY_USER,
+            KeyTag::RECORD_BY_CID,
+            KeyTag::RECORD_BY_CID_BUILT,
             KeyTag::USER_PRIMARY,
             KeyTag::USER_BY_HANDLE,
             KeyTag::USER_BY_EMAIL,
