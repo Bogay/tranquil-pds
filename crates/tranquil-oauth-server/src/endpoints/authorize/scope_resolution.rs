@@ -52,7 +52,13 @@ mod tests {
     fn cache_with(nsid: &str, scopes: &str) -> MapCache {
         let c = MapCache::default();
         let key = tranquil_pds::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
-        let json = serde_json::json!({ "scope": scopes, "title": null, "detail": null }).to_string();
+        let json = serde_json::json!({
+            "scope": scopes,
+            "title": null,
+            "detail": null,
+            "refreshed_at": chrono::Utc::now().timestamp(),
+        })
+        .to_string();
         c.0.lock().unwrap().insert(key, json);
         c
     }

@@ -13,9 +13,20 @@ struct CachedPermissionSet {
     scope: String,
     title: Option<String>,
     detail: Option<String>,
+    #[serde(default)]
+    refreshed_at: i64,
 }
 
-const PERMISSION_SET_CACHE_TTL_SECS: u64 = 24 * 60 * 60;
+const STALE_AFTER_SECS: i64 = 24 * 60 * 60;
+const PERMISSION_SET_CACHE_TTL_SECS: u64 = 90 * 24 * 60 * 60;
+
+fn now_secs() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+fn is_stale(refreshed_at: i64) -> bool {
+    now_secs().saturating_sub(refreshed_at) >= STALE_AFTER_SECS
+}
 
 pub async fn expand_scopes(cache: &dyn Cache, scope_string: &str) -> ExpansionOutcome {
     let mut outcome = ExpansionOutcome::default();
@@ -46,10 +57,21 @@ async fn resolve_one(
     let parsed = Nsid::new(nsid).map_err(|_| ResolveFailure::Malformed)?;
     let key = permission_set_key(&parsed, aud);
 
-    if let Some(json) = cache.get(&key).await
-        && let Ok(v) = serde_json::from_str::<CachedPermissionSet>(&json)
+    let cached = cache
+        .get(&key)
+        .await
+        .and_then(|json| serde_json::from_str::<CachedPermissionSet>(&json).ok());
+
+    if let Some(v) = &cached
+        && !is_stale(v.refreshed_at)
     {
-        return Ok(group_from(parsed, aud, v.scope, v.title, v.detail));
+        return Ok(group_from(
+            parsed,
+            aud,
+            v.scope.clone(),
+            v.title.clone(),
+            v.detail.clone(),
+        ));
     }
 
     match fetch_and_expand(&parsed, aud).await {
@@ -58,6 +80,7 @@ async fn resolve_one(
                 scope: fetched.expanded.clone(),
                 title: fetched.title.clone(),
                 detail: fetched.detail.clone(),
+                refreshed_at: now_secs(),
             };
             if let Ok(json) = serde_json::to_string(&stored) {
                 let _ = cache
@@ -66,7 +89,10 @@ async fn resolve_one(
             }
             Ok(group_from(parsed, aud, fetched.expanded, fetched.title, fetched.detail))
         }
-        Err(e) => Err(map_err(&e)),
+        Err(e) => match cached {
+            Some(v) => Ok(group_from(parsed, aud, v.scope, v.title, v.detail)),
+            None => Err(map_err(&e)),
+        },
     }
 }
 
@@ -133,15 +159,20 @@ mod tests {
         }
     }
 
-    fn seed(cache: &MapCache, nsid: &str, scope: &str) {
+    fn seed_at(cache: &MapCache, nsid: &str, scope: &str, refreshed_at: i64) {
         let key = crate::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
         let val = serde_json::to_string(&CachedPermissionSet {
             scope: scope.to_string(),
             title: Some("Basic".into()),
             detail: None,
+            refreshed_at,
         })
         .unwrap();
         cache.0.lock().unwrap().insert(key, val);
+    }
+
+    fn seed(cache: &MapCache, nsid: &str, scope: &str) {
+        seed_at(cache, nsid, scope, now_secs());
     }
 
     #[tokio::test]
@@ -162,6 +193,43 @@ mod tests {
                 .iter()
                 .any(|s| s == "repo:io.atcr.manifest?action=create")
         );
+    }
+
+    #[tokio::test]
+    async fn stale_entry_is_served_when_refresh_fails() {
+        let cache = MapCache::default();
+        seed_at(
+            &cache,
+            "nonexistent.fake.permissionSet",
+            "repo:nonexistent.fake.record?action=create",
+            now_secs() - STALE_AFTER_SECS - 1,
+        );
+        let out = expand_scopes(&cache, "include:nonexistent.fake.permissionSet").await;
+        assert!(
+            out.failures.is_empty(),
+            "stale entry should survive an unresolvable publisher"
+        );
+        assert_eq!(out.sets.len(), 1);
+        assert!(
+            out.flat_scopes()
+                .iter()
+                .any(|s| s == "repo:nonexistent.fake.record?action=create")
+        );
+    }
+
+    #[tokio::test]
+    async fn entry_without_refreshed_at_is_treated_as_stale_but_usable() {
+        let cache = MapCache::default();
+        let key = crate::cache_keys::permission_set_key(
+            &tranquil_types::Nsid::new("nonexistent.fake.permissionSet").unwrap(),
+            None,
+        );
+        // Shape written before `refreshed_at` existed.
+        let legacy = r#"{"scope":"repo:nonexistent.fake.record?action=create","title":null,"detail":null}"#;
+        cache.0.lock().unwrap().insert(key, legacy.to_string());
+        let out = expand_scopes(&cache, "include:nonexistent.fake.permissionSet").await;
+        assert!(out.failures.is_empty());
+        assert_eq!(out.sets.len(), 1);
     }
 
     #[tokio::test]
