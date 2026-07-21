@@ -11,6 +11,28 @@ pub struct ScopeInfo {
 }
 
 #[derive(Debug, Serialize)]
+pub struct PermissionSetInfo {
+    pub nsid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aud: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub include_scope: String,
+    pub expanded: Vec<ScopeInfo>,
+    pub granted: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FailedSetInfo {
+    pub nsid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aud: Option<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ConsentResponse {
     pub request_uri: String,
     pub client_id: ClientId,
@@ -18,6 +40,8 @@ pub struct ConsentResponse {
     pub client_uri: Option<String>,
     pub logo_uri: Option<String>,
     pub scopes: Vec<ScopeInfo>,
+    pub permission_sets: Vec<PermissionSetInfo>,
+    pub failed_sets: Vec<FailedSetInfo>,
     pub show_consent: bool,
     pub did: Did,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -126,19 +150,6 @@ pub async fn consent_get(
         authority,
     )
     .await;
-    if !effective.outcome.failures.is_empty() {
-        let names: Vec<String> = effective
-            .outcome
-            .failures
-            .iter()
-            .map(|f| f.nsid.clone())
-            .collect();
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_scope",
-            &format!("Could not resolve permission set(s): {}", names.join(", ")),
-        );
-    }
     let requested_scopes: Vec<&str> = effective.resolved.split_whitespace().collect();
     let preferences = state
         .repos
@@ -150,30 +161,36 @@ pub async fn consent_get(
         .iter()
         .map(|p| (p.scope.as_str(), p.granted))
         .collect();
-    let requested_scope_strings: Vec<String> =
-        requested_scopes.iter().map(|s| s.to_string()).collect();
+    let presented_item_strings: Vec<String> = effective
+        .outcome
+        .passthrough
+        .iter()
+        .cloned()
+        .chain(effective.outcome.sets.iter().map(|g| match &g.aud {
+            Some(a) => format!("include:{}?aud={}", g.nsid, a),
+            None => format!("include:{}", g.nsid),
+        }))
+        .collect();
     let show_consent = should_show_consent(
         state.repos.oauth.as_ref(),
         &did,
         &request_data.parameters.client_id,
-        &requested_scope_strings,
+        &presented_item_strings,
     )
     .await
     .unwrap_or(true);
     let has_granular_scopes = requested_scopes.iter().any(|s| is_granular_scope(s));
-    let scopes: Vec<ScopeInfo> = requested_scopes
-        .iter()
-        .map(|scope| {
-            let (category, required, description, display_name) = if let Some(def) =
-                tranquil_pds::oauth::scopes::SCOPE_DEFINITIONS.get(*scope)
-            {
-                let desc = if *scope == "atproto" && has_granular_scopes {
+
+    let make_scope_info = |scope: &str| -> ScopeInfo {
+        let (category, required, description, display_name) =
+            if let Some(def) = tranquil_pds::oauth::scopes::SCOPE_DEFINITIONS.get(scope) {
+                let desc = if scope == "atproto" && has_granular_scopes {
                     "AT Protocol baseline scope (permissions determined by selected options below)"
                         .to_string()
                 } else {
                     def.description.to_string()
                 };
-                let name = if *scope == "atproto" && has_granular_scopes {
+                let name = if scope == "atproto" && has_granular_scopes {
                     "AT Protocol Access".to_string()
                 } else {
                     def.display_name.to_string()
@@ -199,15 +216,58 @@ pub async fn consent_get(
                     scope.to_string(),
                 )
             };
-            let granted = pref_map.get(*scope).copied();
-            ScopeInfo {
-                scope: scope.to_string(),
-                category,
-                required,
-                description,
-                display_name,
-                granted,
+        let granted = pref_map.get(scope).copied();
+        ScopeInfo {
+            scope: scope.to_string(),
+            category,
+            required,
+            description,
+            display_name,
+            granted,
+        }
+    };
+
+    let scopes: Vec<ScopeInfo> = effective
+        .outcome
+        .passthrough
+        .iter()
+        .map(|s| make_scope_info(s))
+        .collect();
+
+    let permission_sets: Vec<PermissionSetInfo> = effective
+        .outcome
+        .sets
+        .iter()
+        .map(|g| {
+            let include_scope = match &g.aud {
+                Some(a) => format!("include:{}?aud={}", g.nsid, a),
+                None => format!("include:{}", g.nsid),
+            };
+            PermissionSetInfo {
+                nsid: g.nsid.clone(),
+                aud: g.aud.clone(),
+                title: g.title.clone(),
+                detail: g.detail.clone(),
+                granted: pref_map.get(include_scope.as_str()).copied(),
+                include_scope,
+                expanded: g.expanded.iter().map(|s| make_scope_info(s)).collect(),
             }
+        })
+        .collect();
+
+    let failed_sets: Vec<FailedSetInfo> = effective
+        .outcome
+        .failures
+        .iter()
+        .map(|f| FailedSetInfo {
+            nsid: f.nsid.clone(),
+            aud: f.aud.clone(),
+            reason: match f.reason {
+                tranquil_scopes::ResolveFailure::NotFound => "not_found",
+                tranquil_scopes::ResolveFailure::NetworkError => "unreachable",
+                tranquil_scopes::ResolveFailure::Invalid => "invalid",
+            }
+            .to_string(),
         })
         .collect();
 
@@ -259,6 +319,8 @@ pub async fn consent_get(
         client_uri: client_metadata.as_ref().and_then(|m| m.client_uri.clone()),
         logo_uri: client_metadata.as_ref().and_then(|m| m.logo_uri.clone()),
         scopes,
+        permission_sets,
+        failed_sets,
         show_consent,
         did: did.clone(),
         handle: account_handle,
@@ -356,21 +418,43 @@ pub async fn consent_post(
         authority,
     )
     .await;
-    if !effective.outcome.failures.is_empty() {
-        let names: Vec<String> = effective
-            .outcome
-            .failures
-            .iter()
-            .map(|f| f.nsid.clone())
-            .collect();
+    let include_token = |nsid: &str, aud: &Option<String>| -> String {
+        match aud {
+            Some(a) => format!("include:{}?aud={}", nsid, a),
+            None => format!("include:{}", nsid),
+        }
+    };
+    let approved_failed_sets: Vec<String> = effective
+        .outcome
+        .failures
+        .iter()
+        .filter(|f| form.approved_scopes.contains(&include_token(&f.nsid, &f.aud)))
+        .map(|f| f.nsid.clone())
+        .collect();
+    if !approved_failed_sets.is_empty() {
         return json_error(
             StatusCode::BAD_REQUEST,
             "invalid_scope",
-            &format!("Could not resolve permission set(s): {}", names.join(", ")),
+            &format!(
+                "Could not resolve approved permission set(s): {}",
+                approved_failed_sets.join(", ")
+            ),
         );
     }
-    let requested_scopes: Vec<&str> = effective.resolved.split_whitespace().collect();
-    let atproto_was_requested = requested_scopes.contains(&"atproto");
+    let presented_items: Vec<String> = effective
+        .outcome
+        .passthrough
+        .iter()
+        .cloned()
+        .chain(
+            effective
+                .outcome
+                .sets
+                .iter()
+                .map(|g| include_token(&g.nsid, &g.aud)),
+        )
+        .collect();
+    let atproto_was_requested = presented_items.iter().any(|s| s == "atproto");
     if atproto_was_requested && !form.approved_scopes.contains(&"atproto".to_string()) {
         return json_error(
             StatusCode::BAD_REQUEST,
@@ -378,7 +462,8 @@ pub async fn consent_post(
             "The atproto scope was requested and must be approved",
         );
     }
-    let final_approved: Vec<String> = form.approved_scopes.clone();
+    let mut final_approved: Vec<String> = form.approved_scopes.clone();
+    final_approved.retain(|s| presented_items.iter().any(|p| p == s) || s == "atproto");
     if final_approved.is_empty() {
         return json_error(
             StatusCode::BAD_REQUEST,
@@ -396,11 +481,11 @@ pub async fn consent_post(
         );
     }
     if form.remember {
-        let preferences: Vec<ScopePreference> = requested_scopes
+        let preferences: Vec<ScopePreference> = presented_items
             .iter()
             .map(|s| ScopePreference {
-                scope: s.to_string(),
-                granted: form.approved_scopes.contains(&s.to_string()),
+                scope: s.clone(),
+                granted: form.approved_scopes.contains(s),
             })
             .collect();
         let _ = state

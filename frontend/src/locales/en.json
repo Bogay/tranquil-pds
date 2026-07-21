@@ -597,6 +597,22 @@
       "permissionsRequested": "Permissions Requested",
       "required": "Required",
       "rememberChoiceLabel": "Remember my choice for this application",
+      "permissionSets": "Permission bundles",
+      "unavailableSets": "Unavailable permission bundles",
+      "showIncludedScopes": "Show included permissions ({count})",
+      "setFailureReason": {
+        "not_found": "This bundle could not be found and cannot be granted.",
+        "unreachable": "The bundle's publisher could not be reached; it cannot be granted right now.",
+        "invalid": "This bundle is invalid and cannot be granted."
+      },
+      "permTable": {
+        "data": "Data",
+        "create": "Create",
+        "update": "Update",
+        "delete": "Delete",
+        "allData": "All collections",
+        "apiAccess": "API access"
+      },
       "scopes": {
         "atproto": {
           "name": "AT Protocol Access",

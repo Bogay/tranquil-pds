@@ -32,6 +32,22 @@
            scope.startsWith('identity:')
   }
 
+  interface PermissionSetInfo {
+    nsid: string
+    aud?: string
+    title?: string
+    detail?: string
+    include_scope: string
+    expanded: ScopeInfo[]
+    granted: boolean | null
+  }
+
+  interface FailedSetInfo {
+    nsid: string
+    aud?: string
+    reason: string
+  }
+
   interface ConsentData {
     request_uri: string
     client_id: string
@@ -39,6 +55,8 @@
     client_uri: string | null
     logo_uri: string | null
     scopes: ScopeInfo[]
+    permission_sets: PermissionSetInfo[]
+    failed_sets: FailedSetInfo[]
     show_consent: boolean
     did: string
     handle?: string
@@ -130,6 +148,10 @@
         ])
       )
 
+      for (const set of data.permission_sets ?? []) {
+        scopeSelections[set.include_scope] = set.granted ?? true
+      }
+
       if (!data.show_consent) {
         await submitConsent()
       }
@@ -152,7 +174,11 @@
       .filter(([_, approved]) => approved)
       .map(([scope]) => scope)
 
-    if (approvedScopes.length === 0 && consentData.scopes.length === 0) {
+    if (
+      approvedScopes.length === 0 &&
+      consentData.scopes.length === 0 &&
+      (consentData.permission_sets?.length ?? 0) === 0
+    ) {
       approvedScopes = ['atproto']
     }
 
@@ -249,7 +275,10 @@
   })
 
   let scopeGroups = $derived(consentData ? groupScopesByCategory(consentData.scopes) : [])
-  let hasGranularScopes = $derived(consentData?.scopes.some(s => isGranularScope(s.scope)) ?? false)
+  let hasGranularScopes = $derived(
+    (consentData?.scopes.some(s => isGranularScope(s.scope)) ?? false) ||
+    ((consentData?.permission_sets?.length ?? 0) > 0)
+  )
 
   function getLocalizedScopeName(scope: ScopeInfo): string {
     const localeKey = SCOPE_LOCALE_MAP[scope.scope]
@@ -275,6 +304,36 @@
 
     const localized = $_(`oauth.consent.scopes.${localeKey}.description`)
     return localized !== `oauth.consent.scopes.${localeKey}.description` ? localized : scope.description
+  }
+
+  type RepoRow = { collection: string; create: boolean; update: boolean; delete: boolean }
+  function describeExpanded(expanded: ScopeInfo[]): {
+    repo: RepoRow[]
+    rpc: string[]
+    other: ScopeInfo[]
+  } {
+    const repo = new Map<string, RepoRow>()
+    const rpc: string[] = []
+    const other: ScopeInfo[] = []
+    for (const s of expanded) {
+      const [base, query = ''] = s.scope.split('?')
+      const params = new URLSearchParams(query)
+      if (base.startsWith('repo:')) {
+        const collection = base.slice('repo:'.length) || '*'
+        const requested = params.getAll('action')
+        const actions = requested.length > 0 ? requested : ['create', 'update', 'delete']
+        const row = repo.get(collection) ?? { collection, create: false, update: false, delete: false }
+        for (const a of actions) {
+          if (a === 'create' || a === 'update' || a === 'delete') row[a] = true
+        }
+        repo.set(collection, row)
+      } else if (base.startsWith('rpc:')) {
+        rpc.push(base.slice('rpc:'.length))
+      } else {
+        other.push(s)
+      }
+    }
+    return { repo: [...repo.values()], rpc, other }
   }
 </script>
 
@@ -384,6 +443,79 @@
                 {/each}
               </div>
             {/each}
+          {/if}
+
+          {#if consentData.permission_sets?.length}
+            <div class="scope-group">
+              <h3 class="category-title">{$_('oauth.consent.permissionSets')}</h3>
+              {#each consentData.permission_sets as set}
+                {@const desc = describeExpanded(set.expanded)}
+                <label class="scope-item">
+                  <input
+                    type="checkbox"
+                    checked={scopeSelections[set.include_scope]}
+                    disabled={submitting}
+                    onchange={() => handleScopeToggle(set.include_scope)}
+                  />
+                  <div class="scope-info">
+                    <span class="scope-name">{set.title ?? set.nsid}</span>
+                    {#if set.detail}<span class="scope-description">{set.detail}</span>{/if}
+                    <details class="scope-set-details">
+                      <summary>{$_('oauth.consent.showIncludedScopes', { values: { count: set.expanded.length } })}</summary>
+                      {#if desc.repo.length}
+                        <table class="perm-table">
+                          <thead>
+                            <tr>
+                              <th scope="col">{$_('oauth.consent.permTable.data')}</th>
+                              <th scope="col" class="perm-col">{$_('oauth.consent.permTable.create')}</th>
+                              <th scope="col" class="perm-col">{$_('oauth.consent.permTable.update')}</th>
+                              <th scope="col" class="perm-col">{$_('oauth.consent.permTable.delete')}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {#each desc.repo as r}
+                              <tr>
+                                <td class="perm-nsid">{r.collection === '*' ? $_('oauth.consent.permTable.allData') : r.collection}</td>
+                                <td class="perm-col" class:on={r.create} aria-label={r.create ? $_('oauth.consent.permTable.create') : undefined}>{r.create ? '✓' : ''}</td>
+                                <td class="perm-col" class:on={r.update} aria-label={r.update ? $_('oauth.consent.permTable.update') : undefined}>{r.update ? '✓' : ''}</td>
+                                <td class="perm-col" class:on={r.delete} aria-label={r.delete ? $_('oauth.consent.permTable.delete') : undefined}>{r.delete ? '✓' : ''}</td>
+                              </tr>
+                            {/each}
+                          </tbody>
+                        </table>
+                      {/if}
+                      {#if desc.rpc.length}
+                        <div class="perm-rpc">
+                          <span class="perm-subhead">{$_('oauth.consent.permTable.apiAccess')}</span>
+                          <ul class="scope-set-list">
+                            {#each desc.rpc as lxm}<li><span class="scope-raw">{lxm}</span></li>{/each}
+                          </ul>
+                        </div>
+                      {/if}
+                      {#if desc.other.length}
+                        <ul class="scope-set-list">
+                          {#each desc.other as s}<li>{getLocalizedScopeName(s)} <span class="scope-raw">{s.scope}</span></li>{/each}
+                        </ul>
+                      {/if}
+                    </details>
+                  </div>
+                </label>
+              {/each}
+            </div>
+          {/if}
+
+          {#if consentData.failed_sets?.length}
+            <div class="scope-group failed-sets">
+              <h3 class="category-title">{$_('oauth.consent.unavailableSets')}</h3>
+              {#each consentData.failed_sets as f}
+                <div class="scope-item failed">
+                  <div class="scope-info">
+                    <span class="scope-name">{f.nsid}{#if f.aud} ({f.aud}){/if}</span>
+                    <span class="scope-description">{$_(`oauth.consent.setFailureReason.${f.reason}`)}</span>
+                  </div>
+                </div>
+              {/each}
+            </div>
           {/if}
         </div>
 

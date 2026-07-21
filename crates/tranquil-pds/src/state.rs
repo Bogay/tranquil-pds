@@ -30,6 +30,10 @@ pub fn init_rate_limit_override() {
     }
 }
 
+pub fn set_rate_limiting_disabled(disabled: bool) {
+    RATE_LIMITING_DISABLED.store(disabled, Ordering::Relaxed);
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub repos: Arc<PostgresRepositories>,

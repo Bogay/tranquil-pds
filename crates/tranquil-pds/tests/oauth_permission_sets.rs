@@ -16,6 +16,11 @@ const PERMISSION_SET_NSID: &str = "io.atcr.authFullApp";
 const PERMISSION_SET_GRANULAR_SCOPE: &str =
     "repo:io.atcr.manifest?action=create rpc:io.atcr.getManifest?aud=*";
 
+fn disable_rate_limiting_once() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| tranquil_pds::state::set_rate_limiting_disabled(true));
+}
+
 fn generate_pkce() -> (String, String) {
     let verifier_bytes: [u8; 32] = rand::random();
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
@@ -94,6 +99,7 @@ async fn create_delegated_session_with_scope(
     scope: &str,
 ) -> (DelegatedSession, Value, MockServer) {
     let url = base_url().await;
+    disable_rate_limiting_once();
     let http_client = client();
 
     let (controller_jwt, controller_did) = create_account_and_login(&http_client).await;
@@ -251,28 +257,47 @@ async fn test_delegated_include_scope_shows_granular_on_consent() {
     )
     .await;
 
-    let scopes = consent_body["scopes"]
+    let permission_sets = consent_body["permission_sets"]
         .as_array()
-        .expect("consent response should have a scopes array");
-    assert!(!scopes.is_empty(), "consent scopes should not be empty");
+        .expect("consent response should have a permission_sets array");
+    assert!(
+        !permission_sets.is_empty(),
+        "consent permission_sets should not be empty. Got: {:?}",
+        consent_body
+    );
 
-    let has_granular = scopes
+    let set_entry = permission_sets
+        .iter()
+        .find(|s| s["nsid"].as_str() == Some(PERMISSION_SET_NSID))
+        .unwrap_or_else(|| {
+            panic!(
+                "permission_sets should contain an entry for nsid '{}'. Got: {:?}",
+                PERMISSION_SET_NSID, permission_sets
+            )
+        });
+
+    assert_eq!(
+        set_entry["include_scope"].as_str(),
+        Some(format!("include:{}", PERMISSION_SET_NSID).as_str()),
+        "permission_sets entry should carry the include: token the frontend submits"
+    );
+
+    let expanded = set_entry["expanded"]
+        .as_array()
+        .expect("permission_sets entry should have an expanded array");
+    let has_granular = expanded
         .iter()
         .any(|s| s["scope"].as_str() == Some("repo:io.atcr.manifest?action=create"));
     assert!(
         has_granular,
-        "consent scopes[] should list the expanded granular scope \
-         'repo:io.atcr.manifest?action=create', not just 'atproto'. Got: {:?}",
-        scopes
+        "permission_sets entry's expanded[] should list the granular scope \
+         'repo:io.atcr.manifest?action=create'. Got: {:?}",
+        expanded
     );
 
-    let only_atproto = scopes
-        .iter()
-        .all(|s| s["scope"].as_str() == Some("atproto"));
-    assert!(
-        !only_atproto,
-        "consent scopes[] should not collapse to just 'atproto'"
-    );
+    let scopes = consent_body["scopes"]
+        .as_array()
+        .expect("consent response should have a scopes array");
 
     let has_raw_include = scopes.iter().any(|s| {
         s["scope"]
@@ -282,7 +307,7 @@ async fn test_delegated_include_scope_shows_granular_on_consent() {
     });
     assert!(
         !has_raw_include,
-        "consent scopes[] should list the expanded set, not the raw include: token"
+        "consent scopes[] should not carry the raw include: token"
     );
 }
 
@@ -422,6 +447,7 @@ async fn test_consent_post_errors_when_set_unresolvable() {
     seed_permission_set(UNRESOLVABLE_NSID, PERMISSION_SET_GRANULAR_SCOPE).await;
 
     let url = base_url().await;
+    disable_rate_limiting_once();
     let http_client = client();
 
     let (controller_jwt, controller_did) = create_account_and_login(&http_client).await;
@@ -541,8 +567,366 @@ async fn test_consent_post_errors_when_set_unresolvable() {
 }
 
 #[tokio::test]
+async fn test_consent_post_succeeds_when_unapproved_set_fails() {
+    const GOOD_SET_NSID: &str = "io.atcr.goodSet";
+    const BAD_SET_NSID: &str = "io.atcr.badSet";
+    seed_permission_set(GOOD_SET_NSID, PERMISSION_SET_GRANULAR_SCOPE).await;
+
+    let url = base_url().await;
+    disable_rate_limiting_once();
+    let http_client = client();
+
+    let (controller_jwt, controller_did) = create_account_and_login(&http_client).await;
+
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    let delegated_handle = format!("psg{}", suffix);
+    let delegated_res = http_client
+        .post(format!("{}/xrpc/_delegation.createDelegatedAccount", url))
+        .bearer_auth(&controller_jwt)
+        .json(&json!({
+            "handle": delegated_handle,
+            "controllerScopes": tranquil_pds::delegation::OWNER_FULL_SCOPES
+        }))
+        .send()
+        .await
+        .expect("createDelegatedAccount request failed");
+    if delegated_res.status() != StatusCode::OK {
+        let error_body = delegated_res.text().await.unwrap();
+        panic!("Failed to create delegated account: {}", error_body);
+    }
+    let delegated_account: Value = delegated_res.json().await.unwrap();
+    let delegated_did = delegated_account["did"].as_str().unwrap().to_string();
+
+    let redirect_uri = "https://example.com/permset-partial-fail-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (_code_verifier, code_challenge) = generate_pkce();
+
+    let scope = format!(
+        "atproto include:{} include:{}",
+        GOOD_SET_NSID, BAD_SET_NSID
+    );
+    let par_res = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", scope.as_str()),
+            ("login_hint", delegated_did.as_str()),
+        ])
+        .send()
+        .await
+        .expect("PAR failed");
+    assert!(
+        par_res.status() == StatusCode::OK || par_res.status() == StatusCode::CREATED,
+        "PAR should succeed, got {}",
+        par_res.status()
+    );
+    let par_body: Value = par_res.json().await.unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap().to_string();
+
+    let auth_res = http_client
+        .post(format!("{}/oauth/delegation/auth", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "delegated_did": delegated_did,
+            "controller_did": controller_did,
+            "password": "Testpass123!",
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .expect("Delegation auth request failed");
+    if auth_res.status() != StatusCode::OK {
+        let error_body = auth_res.text().await.unwrap();
+        panic!("Delegation auth failed: {}", error_body);
+    }
+    let auth_body: Value = auth_res.json().await.unwrap();
+    assert!(
+        auth_body["success"].as_bool().unwrap_or(false),
+        "Delegation auth should succeed: {:?}",
+        auth_body
+    );
+
+    let consent_get_res = http_client
+        .get(format!("{}/oauth/authorize/consent", url))
+        .query(&[("request_uri", request_uri.as_str())])
+        .send()
+        .await
+        .expect("Consent GET failed");
+    assert_eq!(
+        consent_get_res.status(),
+        StatusCode::OK,
+        "Consent GET should succeed"
+    );
+    let consent_get_body: Value = consent_get_res.json().await.unwrap();
+
+    let permission_sets = consent_get_body["permission_sets"]
+        .as_array()
+        .expect("consent response should have a permission_sets array");
+    assert!(
+        permission_sets
+            .iter()
+            .any(|s| s["nsid"].as_str() == Some(GOOD_SET_NSID)),
+        "the resolvable set should be presented as a permission set. Got: {:?}",
+        consent_get_body
+    );
+    let failed_sets = consent_get_body["failed_sets"]
+        .as_array()
+        .expect("consent response should have a failed_sets array");
+    assert!(
+        failed_sets
+            .iter()
+            .any(|s| s["nsid"].as_str() == Some(BAD_SET_NSID)),
+        "the unresolvable set should be presented as a failed set. Got: {:?}",
+        consent_get_body
+    );
+
+    let approved_scopes = vec!["atproto".to_string(), format!("include:{}", GOOD_SET_NSID)];
+    let consent_post_res = http_client
+        .post(format!("{}/oauth/authorize/consent", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "approved_scopes": approved_scopes,
+            "remember": false
+        }))
+        .send()
+        .await
+        .expect("Consent POST failed");
+    let status = consent_post_res.status();
+    let consent_post_body: Value = consent_post_res.json().await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "Consent POST must succeed when the user approves only the resolvable set and \
+         leaves the unresolvable set unapproved. Got: {:?}",
+        consent_post_body
+    );
+    assert!(
+        consent_post_body["redirect_uri"].as_str().is_some(),
+        "Consent POST should return a redirect_uri. Got: {:?}",
+        consent_post_body
+    );
+}
+
+#[tokio::test]
+async fn test_consent_remember_persists_set_preference() {
+    const REMEMBER_SET_NSID: &str = "io.atcr.rememberSet";
+    seed_permission_set(REMEMBER_SET_NSID, PERMISSION_SET_GRANULAR_SCOPE).await;
+
+    let url = base_url().await;
+    disable_rate_limiting_once();
+    let http_client = client();
+
+    let (controller_jwt, controller_did) = create_account_and_login(&http_client).await;
+
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    let delegated_handle = format!("psr{}", suffix);
+    let delegated_res = http_client
+        .post(format!("{}/xrpc/_delegation.createDelegatedAccount", url))
+        .bearer_auth(&controller_jwt)
+        .json(&json!({
+            "handle": delegated_handle,
+            "controllerScopes": tranquil_pds::delegation::OWNER_FULL_SCOPES
+        }))
+        .send()
+        .await
+        .expect("createDelegatedAccount request failed");
+    if delegated_res.status() != StatusCode::OK {
+        let error_body = delegated_res.text().await.unwrap();
+        panic!("Failed to create delegated account: {}", error_body);
+    }
+    let delegated_account: Value = delegated_res.json().await.unwrap();
+    let delegated_did = delegated_account["did"].as_str().unwrap().to_string();
+
+    let redirect_uri = "https://example.com/permset-remember-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (_code_verifier, code_challenge) = generate_pkce();
+
+    let scope = format!("atproto include:{}", REMEMBER_SET_NSID);
+    let par_res = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", scope.as_str()),
+            ("login_hint", delegated_did.as_str()),
+        ])
+        .send()
+        .await
+        .expect("PAR failed");
+    assert!(
+        par_res.status() == StatusCode::OK || par_res.status() == StatusCode::CREATED,
+        "PAR should succeed, got {}",
+        par_res.status()
+    );
+    let par_body: Value = par_res.json().await.unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap().to_string();
+
+    let auth_res = http_client
+        .post(format!("{}/oauth/delegation/auth", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "delegated_did": delegated_did,
+            "controller_did": controller_did,
+            "password": "Testpass123!",
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .expect("Delegation auth request failed");
+    if auth_res.status() != StatusCode::OK {
+        let error_body = auth_res.text().await.unwrap();
+        panic!("Delegation auth failed: {}", error_body);
+    }
+    let auth_body: Value = auth_res.json().await.unwrap();
+    assert!(
+        auth_body["success"].as_bool().unwrap_or(false),
+        "Delegation auth should succeed: {:?}",
+        auth_body
+    );
+
+    let consent_get_res = http_client
+        .get(format!("{}/oauth/authorize/consent", url))
+        .query(&[("request_uri", request_uri.as_str())])
+        .send()
+        .await
+        .expect("Consent GET failed");
+    assert_eq!(
+        consent_get_res.status(),
+        StatusCode::OK,
+        "Consent GET should succeed"
+    );
+
+    let approved_scopes = vec![
+        "atproto".to_string(),
+        format!("include:{}", REMEMBER_SET_NSID),
+    ];
+    let consent_post_res = http_client
+        .post(format!("{}/oauth/authorize/consent", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "approved_scopes": approved_scopes,
+            "remember": true
+        }))
+        .send()
+        .await
+        .expect("Consent POST failed");
+    if consent_post_res.status() != StatusCode::OK {
+        let error_body = consent_post_res.text().await.unwrap();
+        panic!("Consent POST with remember:true failed: {}", error_body);
+    }
+
+    let did: tranquil_types::Did = delegated_did.parse().expect("valid did");
+    let client_id_typed = tranquil_types::ClientId::new(client_id.clone());
+    let stored_prefs = common::get_test_repos()
+        .await
+        .oauth
+        .get_scope_preferences(&did, &client_id_typed)
+        .await
+        .expect("get_scope_preferences query failed");
+    let include_token = format!("include:{}", REMEMBER_SET_NSID);
+    let set_pref = stored_prefs
+        .iter()
+        .find(|p| p.scope == include_token)
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a stored scope preference for '{}', got: {:?}",
+                include_token, stored_prefs
+            )
+        });
+    assert!(
+        set_pref.granted,
+        "the remembered set preference should be granted: true, got: {:?}",
+        set_pref
+    );
+    assert!(
+        !stored_prefs
+            .iter()
+            .any(|p| p.scope.starts_with("repo:") || p.scope.starts_with("rpc:")),
+        "remember must not store the expanded granular scopes as preferences, got: {:?}",
+        stored_prefs
+    );
+
+    let (code_verifier2, code_challenge2) = generate_pkce();
+    let par_res2 = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge2),
+            ("code_challenge_method", "S256"),
+            ("scope", scope.as_str()),
+            ("login_hint", delegated_did.as_str()),
+        ])
+        .send()
+        .await
+        .expect("second PAR failed");
+    let _ = code_verifier2;
+    assert!(par_res2.status() == StatusCode::OK || par_res2.status() == StatusCode::CREATED);
+    let par_body2: Value = par_res2.json().await.unwrap();
+    let request_uri2 = par_body2["request_uri"].as_str().unwrap().to_string();
+
+    let auth_res2 = http_client
+        .post(format!("{}/oauth/delegation/auth", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri2,
+            "delegated_did": delegated_did,
+            "controller_did": controller_did,
+            "password": "Testpass123!",
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .expect("second delegation auth failed");
+    assert_eq!(auth_res2.status(), StatusCode::OK);
+
+    let consent_get_res2 = http_client
+        .get(format!("{}/oauth/authorize/consent", url))
+        .query(&[("request_uri", request_uri2.as_str())])
+        .send()
+        .await
+        .expect("second consent GET failed");
+    assert_eq!(consent_get_res2.status(), StatusCode::OK);
+    let consent_get_body2: Value = consent_get_res2.json().await.unwrap();
+    let permission_sets2 = consent_get_body2["permission_sets"]
+        .as_array()
+        .expect("consent response should have a permission_sets array");
+    let set_entry2 = permission_sets2
+        .iter()
+        .find(|s| s["nsid"].as_str() == Some(REMEMBER_SET_NSID))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected permission_sets to contain '{}', got: {:?}",
+                REMEMBER_SET_NSID, consent_get_body2
+            )
+        });
+    assert_eq!(
+        set_entry2["granted"].as_bool(),
+        Some(true),
+        "the remembered set's include: token preference should round-trip as granted: true \
+         on a subsequent consent_get. Got: {:?}",
+        set_entry2
+    );
+}
+
+#[tokio::test]
 async fn test_legacy_granular_token_survives_refresh() {
     let url = base_url().await;
+    disable_rate_limiting_once();
     let http_client = client();
     let redirect_uri = "https://example.com/permset-legacy-callback";
     let scope = "atproto repo:*?action=create";
@@ -691,5 +1075,165 @@ async fn test_legacy_granular_token_survives_refresh() {
         new_jwt_scope.contains("repo:*?action=create"),
         "New JWT scope claim should still contain the granular scope after refresh, got: {}",
         new_jwt_scope
+    );
+}
+
+#[tokio::test]
+async fn test_consent_post_drops_unpresented_scope() {
+    seed_permission_set(PERMISSION_SET_NSID, PERMISSION_SET_GRANULAR_SCOPE).await;
+
+    let url = base_url().await;
+    disable_rate_limiting_once();
+    let http_client = client();
+
+    let (controller_jwt, controller_did) = create_account_and_login(&http_client).await;
+
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    let delegated_handle = format!("psd{}", suffix);
+    let delegated_res = http_client
+        .post(format!("{}/xrpc/_delegation.createDelegatedAccount", url))
+        .bearer_auth(&controller_jwt)
+        .json(&json!({
+            "handle": delegated_handle,
+            "controllerScopes": tranquil_pds::delegation::OWNER_FULL_SCOPES
+        }))
+        .send()
+        .await
+        .expect("createDelegatedAccount request failed");
+    if delegated_res.status() != StatusCode::OK {
+        let error_body = delegated_res.text().await.unwrap();
+        panic!("Failed to create delegated account: {}", error_body);
+    }
+    let delegated_account: Value = delegated_res.json().await.unwrap();
+    let delegated_did = delegated_account["did"].as_str().unwrap().to_string();
+
+    let redirect_uri = "https://example.com/permset-unpresented-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (code_verifier, code_challenge) = generate_pkce();
+
+    let scope = format!("atproto include:{}", PERMISSION_SET_NSID);
+    let par_res = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", scope.as_str()),
+            ("login_hint", delegated_did.as_str()),
+        ])
+        .send()
+        .await
+        .expect("PAR failed");
+    assert!(
+        par_res.status() == StatusCode::OK || par_res.status() == StatusCode::CREATED,
+        "PAR should succeed, got {}",
+        par_res.status()
+    );
+    let par_body: Value = par_res.json().await.unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap().to_string();
+
+    let auth_res = http_client
+        .post(format!("{}/oauth/delegation/auth", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "delegated_did": delegated_did,
+            "controller_did": controller_did,
+            "password": "Testpass123!",
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .expect("Delegation auth request failed");
+    if auth_res.status() != StatusCode::OK {
+        let error_body = auth_res.text().await.unwrap();
+        panic!("Delegation auth failed: {}", error_body);
+    }
+    let auth_body: Value = auth_res.json().await.unwrap();
+    assert!(
+        auth_body["success"].as_bool().unwrap_or(false),
+        "Delegation auth should succeed: {:?}",
+        auth_body
+    );
+
+    let approved_scopes = vec![
+        "atproto".to_string(),
+        format!("include:{}", PERMISSION_SET_NSID),
+        "repo:com.evil.collection?action=create".to_string(),
+    ];
+    let consent_post_res = http_client
+        .post(format!("{}/oauth/authorize/consent", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "approved_scopes": approved_scopes,
+            "remember": false
+        }))
+        .send()
+        .await
+        .expect("Consent POST failed");
+    if consent_post_res.status() != StatusCode::OK {
+        let error_body = consent_post_res.text().await.unwrap();
+        panic!("Consent POST failed: {}", error_body);
+    }
+    let consent_post_body: Value = consent_post_res.json().await.unwrap();
+    let location = consent_post_body["redirect_uri"]
+        .as_str()
+        .expect("Expected redirect_uri from consent")
+        .to_string();
+
+    let code = location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
+
+    let token_res = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
+        .expect("Token request failed");
+    assert_eq!(
+        token_res.status(),
+        StatusCode::OK,
+        "Token exchange should succeed"
+    );
+    let token_body: Value = token_res.json().await.unwrap();
+    let access_token = token_body["access_token"].as_str().unwrap().to_string();
+
+    let token_id = token_id_from_jwt(&access_token);
+    let token_data = common::get_test_repos()
+        .await
+        .oauth
+        .get_token_by_id(&token_id)
+        .await
+        .expect("get_token_by_id query failed")
+        .expect("token row should exist");
+    let row_scope = token_data
+        .scope
+        .expect("stored token row should have a scope");
+    assert!(
+        !row_scope.contains("com.evil.collection"),
+        "Stored oauth_token.scope row must not contain a scope that was never presented \
+         to the resource owner, got: {}",
+        row_scope
+    );
+    assert!(
+        row_scope.contains(&format!("include:{}", PERMISSION_SET_NSID)),
+        "Stored oauth_token.scope row should still preserve the legitimately approved \
+         include: token, got: {}",
+        row_scope
     );
 }
