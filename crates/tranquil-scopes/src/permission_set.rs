@@ -364,13 +364,15 @@ fn build_expanded_scopes(
                 if let Some(lxms) = &perm.lxm {
                     let perm_aud = perm.aud.as_deref().or(default_aud);
 
-                    lxms.iter().for_each(|lxm| {
-                        let scope = match perm_aud {
-                            Some(aud) => format!("rpc:{}?aud={}", lxm, aud),
-                            None => format!("rpc:{}", lxm),
-                        };
-                        scopes.push(scope);
-                    });
+                    lxms.iter()
+                        .filter(|lxm| is_under_authority(lxm, namespace_authority))
+                        .for_each(|lxm| {
+                            let scope = match perm_aud {
+                                Some(aud) => format!("rpc:{}?aud={}", lxm, aud),
+                                None => format!("rpc:{}", lxm),
+                            };
+                            scopes.push(scope);
+                        });
                 }
             }
             _ => {}
@@ -492,7 +494,7 @@ mod tests {
 
         let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
         assert!(expanded.contains("rpc:io.atcr.getManifest?aud=*"));
-        assert!(expanded.contains("rpc:com.atproto.repo.getRecord?aud=*"));
+        assert!(!expanded.contains("com.atproto.repo.getRecord"));
     }
 
     #[test]
@@ -545,7 +547,42 @@ mod tests {
 
         let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
         assert!(expanded.contains("repo:io.atcr.manifest?action=create"));
-        assert!(expanded.contains("rpc:com.atproto.repo.getRecord?aud=*"));
+        assert!(!expanded.contains("com.atproto.repo.getRecord"));
+    }
+
+    #[test]
+    fn test_build_expanded_scopes_rpc_cannot_escape_namespace() {
+        let permissions = vec![PermissionEntry {
+            resource: "rpc".to_string(),
+            action: None,
+            collection: None,
+            lxm: Some(vec![
+                "com.atproto.repo.deleteRecord".to_string(),
+                "chat.bsky.convo.sendMessage".to_string(),
+                "io.atcrEVIL.getManifest".to_string(),
+            ]),
+            aud: Some("*".to_string()),
+        }];
+
+        let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
+        assert!(
+            expanded.is_empty(),
+            "cross-namespace lxm values must all be dropped, got: {expanded}"
+        );
+    }
+
+    #[test]
+    fn test_build_expanded_scopes_rpc_allows_child_namespace() {
+        let permissions = vec![PermissionEntry {
+            resource: "rpc".to_string(),
+            action: None,
+            collection: None,
+            lxm: Some(vec!["io.atcr.sailor.star.getThing".to_string()]),
+            aud: None,
+        }];
+
+        let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
+        assert_eq!(expanded, "rpc:io.atcr.sailor.star.getThing");
     }
 
     #[test]
