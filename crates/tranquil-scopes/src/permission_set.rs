@@ -40,7 +40,7 @@ pub struct FailedSet {
 
 #[derive(Debug, Clone)]
 pub struct ResolvedSetGroup {
-    pub nsid: String,
+    pub nsid: Nsid,
     pub aud: Option<String>,
     pub title: Option<String>,
     pub detail: Option<String>,
@@ -568,7 +568,7 @@ mod tests {
         let out = ExpansionOutcome {
             passthrough: vec!["atproto".into()],
             sets: vec![ResolvedSetGroup {
-                nsid: "io.atcr.authFullApp".into(),
+                nsid: Nsid::new("io.atcr.authFullApp").unwrap(),
                 aud: None,
                 title: Some("T".into()),
                 detail: None,
@@ -603,7 +603,7 @@ mod tests {
         let out = ExpansionOutcome {
             passthrough: vec!["repo:x".into()],
             sets: vec![ResolvedSetGroup {
-                nsid: "io.atcr.authFullApp".into(),
+                nsid: Nsid::new("io.atcr.authFullApp").unwrap(),
                 aud: None,
                 title: None,
                 detail: None,

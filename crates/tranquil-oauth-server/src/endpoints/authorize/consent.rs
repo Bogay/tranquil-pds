@@ -1,4 +1,5 @@
 use super::*;
+use tranquil_types::Nsid;
 
 #[derive(Debug, Serialize)]
 pub struct ScopeInfo {
@@ -12,7 +13,7 @@ pub struct ScopeInfo {
 
 #[derive(Debug, Serialize)]
 pub struct PermissionSetInfo {
-    pub nsid: String,
+    pub nsid: Nsid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aud: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -43,15 +43,15 @@ async fn resolve_one(
     nsid: &str,
     aud: Option<&str>,
 ) -> Result<ResolvedSetGroup, ResolveFailure> {
+    let parsed = Nsid::new(nsid).map_err(|_| ResolveFailure::Invalid)?;
     let key = permission_set_key(nsid, aud);
 
     if let Some(json) = cache.get(&key).await
         && let Ok(v) = serde_json::from_str::<CachedPermissionSet>(&json)
     {
-        return Ok(group_from(nsid, aud, v.scope, v.title, v.detail));
+        return Ok(group_from(parsed, aud, v.scope, v.title, v.detail));
     }
 
-    let parsed = Nsid::new(nsid).map_err(|_| ResolveFailure::Invalid)?;
     match fetch_and_expand(&parsed, aud).await {
         Ok(fetched) => {
             let stored = CachedPermissionSet {
@@ -64,21 +64,21 @@ async fn resolve_one(
                     .set(&key, &json, Duration::from_secs(PERMISSION_SET_CACHE_TTL_SECS))
                     .await;
             }
-            Ok(group_from(nsid, aud, fetched.expanded, fetched.title, fetched.detail))
+            Ok(group_from(parsed, aud, fetched.expanded, fetched.title, fetched.detail))
         }
         Err(e) => Err(map_err(&e)),
     }
 }
 
 fn group_from(
-    nsid: &str,
+    nsid: Nsid,
     aud: Option<&str>,
     scope: String,
     title: Option<String>,
     detail: Option<String>,
 ) -> ResolvedSetGroup {
     ResolvedSetGroup {
-        nsid: nsid.to_string(),
+        nsid,
         aud: aud.map(str::to_string),
         title,
         detail,
