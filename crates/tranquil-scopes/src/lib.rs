@@ -17,6 +17,6 @@ pub use parser::{
 };
 pub use permission_set::{
     ExpansionOutcome, FailedSet, FetchedSet, ResolveFailure, ResolvedSetGroup,
-    ScopeExpansionError, expand_include_scopes, fetch_and_expand, parse_include_scope,
+    ScopeExpansionError, fetch_and_expand, parse_include_scope,
 };
 pub use permissions::ScopePermissions;

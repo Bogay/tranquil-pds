@@ -44,13 +44,13 @@ async fn resolve_one(
     aud: Option<&str>,
 ) -> Result<ResolvedSetGroup, ResolveFailure> {
     let key = permission_set_key(nsid, aud);
-    // Cache hit
+
     if let Some(json) = cache.get(&key).await
         && let Ok(v) = serde_json::from_str::<CachedPermissionSet>(&json)
     {
         return Ok(group_from(nsid, aud, v.scope, v.title, v.detail));
     }
-    // Miss → network fetch → cache
+
     let parsed = Nsid::new(nsid).map_err(|_| ResolveFailure::Invalid)?;
     match fetch_and_expand(&parsed, aud).await {
         Ok(fetched) => {
@@ -173,7 +173,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_miss_unresolvable_is_a_failure() {
-        let cache = MapCache::default(); // empty → miss → network fetch of a fake NSID fails fast
+        let cache = MapCache::default();
         let out = expand_scopes(&cache, "include:nonexistent.fake.permissionSet").await;
         assert_eq!(out.sets.len(), 0);
         assert_eq!(out.failures.len(), 1);

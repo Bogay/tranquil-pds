@@ -3,8 +3,6 @@ use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::LazyLock;
-use tokio::sync::RwLock;
 use tracing::debug;
 use tranquil_types::{Did, Nsid};
 
@@ -58,28 +56,24 @@ pub struct ExpansionOutcome {
 
 impl ExpansionOutcome {
     pub fn flat_scopes(&self) -> Vec<String> {
-        let mut out = self.passthrough.clone();
-        for s in &self.sets {
-            out.extend(s.expanded.iter().cloned());
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for s in self.passthrough.iter().chain(
+            self.sets
+                .iter()
+                .flat_map(|group| group.expanded.iter()),
+        ) {
+            if seen.insert(s.as_str()) {
+                out.push(s.clone());
+            }
         }
         out
     }
-    /// Space-joined `flat_scopes`.
+
     pub fn to_scope_string(&self) -> String {
         self.flat_scopes().join(" ")
     }
 }
-
-static LEXICON_CACHE: LazyLock<RwLock<HashMap<String, CachedLexicon>>> =
-    LazyLock::new(|| RwLock::new(HashMap::new()));
-
-#[derive(Clone)]
-struct CachedLexicon {
-    expanded_scope: String,
-    cached_at: std::time::Instant,
-}
-
-const CACHE_TTL_SECS: u64 = 3600;
 
 #[derive(Debug, Deserialize)]
 struct PlcDocument {
@@ -123,29 +117,6 @@ struct PermissionEntry {
     aud: Option<String>,
 }
 
-pub async fn expand_include_scopes(scope_string: &str) -> Result<String, ScopeExpansionError> {
-    let futures: Vec<_> = scope_string
-        .split_whitespace()
-        .map(|scope| async move {
-            match scope.strip_prefix("include:") {
-                Some(rest) => {
-                    let (nsid_base, aud) = parse_include_scope(rest);
-                    let nsid = Nsid::new(nsid_base)
-                        .map_err(|_| ScopeExpansionError::InvalidNsid(nsid_base.to_string()))?;
-                    expand_permission_set(&nsid, aud).await
-                }
-                None => Ok(scope.to_string()),
-            }
-        })
-        .collect();
-
-    futures::future::join_all(futures)
-        .await
-        .into_iter()
-        .collect::<Result<Vec<String>, ScopeExpansionError>>()
-        .map(|v| v.join(" "))
-}
-
 pub fn parse_include_scope(rest: &str) -> (&str, Option<&str>) {
     rest.split_once('?')
         .map(|(nsid, params)| {
@@ -153,43 +124,6 @@ pub fn parse_include_scope(rest: &str) -> (&str, Option<&str>) {
             (nsid, aud)
         })
         .unwrap_or((rest, None))
-}
-
-async fn expand_permission_set(
-    nsid: &Nsid,
-    aud: Option<&str>,
-) -> Result<String, ScopeExpansionError> {
-    let cache_key = match aud {
-        Some(a) => format!("{}?aud={}", nsid, a),
-        None => nsid.to_string(),
-    };
-
-    {
-        let cache = LEXICON_CACHE.read().await;
-        if let Some(cached) = cache.get(&cache_key)
-            && cached.cached_at.elapsed().as_secs() < CACHE_TTL_SECS
-        {
-            debug!(nsid = %nsid, "Using cached permission set expansion");
-            return Ok(cached.expanded_scope.clone());
-        }
-    }
-
-    let fetched = fetch_and_expand(nsid, aud).await?;
-    let expanded = fetched.expanded;
-
-    {
-        let mut cache = LEXICON_CACHE.write().await;
-        cache.insert(
-            cache_key,
-            CachedLexicon {
-                expanded_scope: expanded.clone(),
-                cached_at: std::time::Instant::now(),
-            },
-        );
-    }
-
-    debug!(nsid = %nsid, expanded = %expanded, "Successfully expanded permission set");
-    Ok(expanded)
 }
 
 pub struct FetchedSet {
@@ -609,117 +543,6 @@ mod tests {
         assert!(expanded.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_expand_include_scopes_passthrough_non_include() {
-        let result = expand_include_scopes("atproto transition:generic")
-            .await
-            .unwrap();
-        assert_eq!(result, "atproto transition:generic");
-    }
-
-    #[tokio::test]
-    async fn test_expand_include_scopes_mixed_with_regular() {
-        let result = expand_include_scopes("atproto repo:app.bsky.feed.post?action=create")
-            .await
-            .unwrap();
-        assert!(result.contains("atproto"));
-        assert!(result.contains("repo:app.bsky.feed.post?action=create"));
-    }
-
-    #[tokio::test]
-    async fn test_expand_include_scopes_fails_on_unresolvable_nsid() {
-        let result = expand_include_scopes("atproto include:nonexistent.fake.permissionSet").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_expand_include_scopes_fails_even_with_valid_scopes_present() {
-        let result = expand_include_scopes(
-            "atproto include:nonexistent.fake.permissionSet repo:app.bsky.feed.post?action=create",
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_cache_population_and_retrieval() {
-        let cache_key = "test.cached.scope";
-        let cached_value = "repo:test.cached.collection?action=create";
-
-        {
-            let mut cache = LEXICON_CACHE.write().await;
-            cache.insert(
-                cache_key.to_string(),
-                CachedLexicon {
-                    expanded_scope: cached_value.to_string(),
-                    cached_at: std::time::Instant::now(),
-                },
-            );
-        }
-
-        let result = expand_permission_set(&nsid(cache_key), None).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), cached_value);
-
-        {
-            let mut cache = LEXICON_CACHE.write().await;
-            cache.remove(cache_key);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_cache_with_aud_parameter() {
-        let nsid = "test.aud.scope";
-        let aud = "did:web:example.com";
-        let cache_key = format!("{}?aud={}", nsid, aud);
-        let cached_value = "rpc:test.aud.method?aud=did:web:example.com";
-
-        {
-            let mut cache = LEXICON_CACHE.write().await;
-            cache.insert(
-                cache_key.clone(),
-                CachedLexicon {
-                    expanded_scope: cached_value.to_string(),
-                    cached_at: std::time::Instant::now(),
-                },
-            );
-        }
-
-        let result = expand_permission_set(&nsid.parse().unwrap(), Some(aud)).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), cached_value);
-
-        {
-            let mut cache = LEXICON_CACHE.write().await;
-            cache.remove(&cache_key);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_expired_cache_triggers_refresh() {
-        let cache_key = "test.expired.scope";
-
-        {
-            let mut cache = LEXICON_CACHE.write().await;
-            cache.insert(
-                cache_key.to_string(),
-                CachedLexicon {
-                    expanded_scope: "old_value".to_string(),
-                    cached_at: std::time::Instant::now()
-                        - std::time::Duration::from_secs(CACHE_TTL_SECS + 1),
-                },
-            );
-        }
-
-        let result = expand_permission_set(&nsid(cache_key), None).await;
-        assert!(result.is_err());
-
-        {
-            let mut cache = LEXICON_CACHE.write().await;
-            cache.remove(cache_key);
-        }
-    }
-
     fn dns_authority(nsid: &str) -> String {
         let parts: Vec<&str> = nsid.split('.').collect();
         parts[..parts.len() - 1]
@@ -773,6 +596,24 @@ mod tests {
             out.to_scope_string(),
             "atproto repo:io.atcr.manifest?action=create rpc:io.atcr.getManifest"
         );
+    }
+
+    #[test]
+    fn flat_scopes_dedupes() {
+        let out = ExpansionOutcome {
+            passthrough: vec!["repo:x".into()],
+            sets: vec![ResolvedSetGroup {
+                nsid: "io.atcr.authFullApp".into(),
+                aud: None,
+                title: None,
+                detail: None,
+                expanded: vec!["repo:x".into(), "rpc:io.atcr.getManifest".into()],
+            }],
+            failures: vec![],
+        };
+        let flat = out.flat_scopes();
+        assert_eq!(flat, vec!["repo:x", "rpc:io.atcr.getManifest"]);
+        assert_eq!(out.to_scope_string(), "repo:x rpc:io.atcr.getManifest");
     }
 
     #[test]

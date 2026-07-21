@@ -3,8 +3,6 @@ use crate::parser::{
     RepoScope, RpcScope,
 };
 
-/// Returns true if the `granted` scope authorizes everything the `requested` scope asks for.
-/// Typed replacement for the old string-prefix `scope_covers`.
 pub fn covers(granted: &ParsedScope, requested: &ParsedScope) -> bool {
     use ParsedScope::*;
     match (granted, requested) {
@@ -25,16 +23,15 @@ pub fn covers(granted: &ParsedScope, requested: &ParsedScope) -> bool {
 
 fn repo_covers(g: &RepoScope, r: &RepoScope) -> bool {
     let collection_ok = match &g.collection {
-        None => true, // repo:* — any collection
+        None => true,
         Some(gc) => match &r.collection {
-            None => false, // a specific grant cannot cover a wildcard request
+            None => false,
             Some(rc) => match gc.strip_suffix(".*") {
                 Some(prefix) => rc.starts_with(prefix) && rc.as_bytes().get(prefix.len()) == Some(&b'.'),
                 None => gc == rc,
             },
         },
     };
-    // parse_scope expands a missing ?action to all three actions, so subset is exact.
     collection_ok && r.actions.is_subset(&g.actions)
 }
 
@@ -42,7 +39,6 @@ fn blob_covers(g: &BlobScope, r: &BlobScope) -> bool {
     if g.accept.is_empty() || g.accept.contains("*/*") {
         return true;
     }
-    // every accept pattern the request wants must be matched by the grant
     !r.accept.is_empty() && r.accept.iter().all(|pat| g.matches_mime(pat))
 }
 
@@ -63,7 +59,7 @@ fn rpc_covers(g: &RpcScope, r: &RpcScope) -> bool {
 fn account_covers(g: &AccountScope, r: &AccountScope) -> bool {
     let attr_ok = g.attr == AccountAttr::Wildcard || g.attr == r.attr;
     let action_ok = match (g.action, r.action) {
-        (AccountAction::Manage, _) => true,          // manage ⊇ read
+        (AccountAction::Manage, _) => true,
         (AccountAction::Read, AccountAction::Read) => true,
         (AccountAction::Read, AccountAction::Manage) => false,
     };
@@ -96,7 +92,6 @@ mod tests {
 
     #[test]
     fn repo_action_subset_required() {
-        // granted no ?action == all three actions
         assert!(c("repo:*", "repo:*?action=create"));
         assert!(!c("repo:*?action=create", "repo:*?action=delete"));
         assert!(c("repo:*?action=create&action=delete", "repo:*?action=create"));
@@ -105,8 +100,6 @@ mod tests {
 
     #[test]
     fn repo_partial_action_grant_does_not_cover_actionless_request() {
-        // SECURITY: actionless requested repo == all three actions; a create+delete
-        // grant must NOT cover it (previously the string engine wrongly did).
         assert!(!c("repo:*?action=create&action=delete", "repo:app.bsky.feed.post"));
     }
 
@@ -166,7 +159,7 @@ mod tests {
     fn repo_prefix_wildcard_respects_dot_boundary() {
         assert!(!c("repo:app.bsky.*", "repo:app.bskyEXTRA"));
         assert!(c("repo:app.bsky.*", "repo:app.bsky.feed.post"));
-        assert!(!c("repo:app.bsky.*", "repo:app.bsky")); // no trailing segment
+        assert!(!c("repo:app.bsky.*", "repo:app.bsky"));
     }
 
     #[test]
