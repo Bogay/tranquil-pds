@@ -133,7 +133,7 @@ pub async fn handle_authorization_code_grant(
     let controller_did = authorized.controller_did.clone();
     let requested_scope = authorized.parameters.scope.clone();
 
-    let granted_scopes: Option<String> = if let Some(ref controller) = controller_did {
+    let granted_scopes: Option<tranquil_db_traits::DbScope> = if let Some(ref controller) = controller_did {
         let grant = state
             .repos
             .delegation
@@ -144,11 +144,11 @@ pub async fn handle_authorization_code_grant(
             .ok_or_else(|| {
                 OAuthError::InvalidGrant("Delegation grant not found or revoked".to_string())
             })?;
-        Some(grant.granted_scopes.as_str().to_string())
+        Some(grant.granted_scopes.clone())
     } else {
         None
     };
-    let authority = match granted_scopes.as_deref() {
+    let authority = match granted_scopes.as_ref() {
         Some(g) => crate::endpoints::authorize::scope_resolution::Authority::Delegated(g),
         None => crate::endpoints::authorize::scope_resolution::Authority::FullSelf,
     };
@@ -254,7 +254,7 @@ async fn recompute_resolved_scope(
     token_data: &TokenData,
 ) -> Result<String, OAuthError> {
     let requested = token_data.scope.as_deref().unwrap_or("atproto");
-    let granted_scopes: Option<String> = if let Some(ref controller) = token_data.controller_did {
+    let granted_scopes: Option<tranquil_db_traits::DbScope> = if let Some(ref controller) = token_data.controller_did {
         let grant = state
             .repos
             .delegation
@@ -265,11 +265,11 @@ async fn recompute_resolved_scope(
             .ok_or_else(|| {
                 OAuthError::InvalidGrant("Delegation grant not found or revoked".to_string())
             })?;
-        Some(grant.granted_scopes.as_str().to_string())
+        Some(grant.granted_scopes.clone())
     } else {
         None
     };
-    let authority = match granted_scopes.as_deref() {
+    let authority = match granted_scopes.as_ref() {
         Some(g) => crate::endpoints::authorize::scope_resolution::Authority::Delegated(g),
         None => crate::endpoints::authorize::scope_resolution::Authority::FullSelf,
     };

@@ -1,7 +1,7 @@
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::debug;
 use tranquil_types::{Did, Nsid};
@@ -20,15 +20,27 @@ pub enum ScopeExpansionError {
     HttpFailed(String),
     #[error("DID resolution failed: {0}")]
     DidResolution(String),
+    #[error("Lexicon record not found")]
+    RecordNotFound,
     #[error("No valid permissions found in permission-set")]
     EmptyPermissions,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ResolveFailure {
+    // Couldn't connect to PDS
+    Unreachable,
+    // Connected to PDS, but the lexicon record doesn't exist
     NotFound,
-    NetworkError,
-    Invalid,
+    // The NSID is malformed
+    Malformed,
+    // A lexicon exists, but it isn't a `permission-set` (e.g. a query or record type).
+    NotAPermissionSet,
+    // Lexicon doc was malformed (no main, no permissions)
+    MalformedLexicon,
+    // The doc is valid, but grants nothing usable (i.e. empty permissions, or permissions are from a different namespace)
+    EmptyPermissions,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +97,11 @@ struct PlcService {
     id: String,
     #[serde(rename = "serviceEndpoint")]
     service_endpoint: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct XrpcError {
+    error: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,16 +217,25 @@ async fn fetch_lexicon_via_atproto(nsid: &Nsid) -> Result<LexiconDoc, ScopeExpan
         .await
         .map_err(|e| ScopeExpansionError::HttpFailed(e.to_string()))?;
 
-    if !response.status().is_success() {
-        return Err(ScopeExpansionError::HttpFailed(format!(
-            "HTTP {}",
-            response.status()
-        )));
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| ScopeExpansionError::HttpFailed(e.to_string()))?;
+
+    if !status.is_success() {
+        let not_found = status == reqwest::StatusCode::NOT_FOUND
+            || serde_json::from_str::<XrpcError>(&body)
+                .map(|e| e.error.eq_ignore_ascii_case("RecordNotFound"))
+                .unwrap_or(false);
+        return Err(if not_found {
+            ScopeExpansionError::RecordNotFound
+        } else {
+            ScopeExpansionError::HttpFailed(format!("HTTP {}", status))
+        });
     }
 
-    let record: GetRecordResponse = response
-        .json()
-        .await
+    let record: GetRecordResponse = serde_json::from_str(&body)
         .map_err(|e| ScopeExpansionError::HttpFailed(e.to_string()))?;
 
     Ok(record.value)

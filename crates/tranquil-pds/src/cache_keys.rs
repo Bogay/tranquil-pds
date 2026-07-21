@@ -40,7 +40,7 @@ pub fn auto_verify_sent_key(did: &Did) -> String {
     format!("auto_verify_sent:{}", did)
 }
 
-pub fn permission_set_key(nsid: &str, aud: Option<&str>) -> String {
+pub fn permission_set_key(nsid: &tranquil_types::Nsid, aud: Option<&str>) -> String {
     match aud {
         Some(a) => format!("permset:{}:{}", nsid, a),
         None => format!("permset:{}", nsid),

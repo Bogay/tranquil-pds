@@ -43,8 +43,8 @@ async fn resolve_one(
     nsid: &str,
     aud: Option<&str>,
 ) -> Result<ResolvedSetGroup, ResolveFailure> {
-    let parsed = Nsid::new(nsid).map_err(|_| ResolveFailure::Invalid)?;
-    let key = permission_set_key(nsid, aud);
+    let parsed = Nsid::new(nsid).map_err(|_| ResolveFailure::Malformed)?;
+    let key = permission_set_key(&parsed, aud);
 
     if let Some(json) = cache.get(&key).await
         && let Ok(v) = serde_json::from_str::<CachedPermissionSet>(&json)
@@ -89,10 +89,12 @@ fn group_from(
 fn map_err(e: &ScopeExpansionError) -> ResolveFailure {
     use ScopeExpansionError as E;
     match e {
-        E::InvalidNsid(_) | E::UnexpectedType(_) | E::EmptyPermissions | E::MissingDefinition(_) => {
-            ResolveFailure::Invalid
-        }
-        E::DnsResolution(_) | E::HttpFailed(_) | E::DidResolution(_) => ResolveFailure::NetworkError,
+        E::InvalidNsid(_) => ResolveFailure::Malformed,
+        E::RecordNotFound => ResolveFailure::NotFound,
+        E::UnexpectedType(_) => ResolveFailure::NotAPermissionSet,
+        E::MissingDefinition(_) => ResolveFailure::MalformedLexicon,
+        E::EmptyPermissions => ResolveFailure::EmptyPermissions,
+        E::DnsResolution(_) | E::HttpFailed(_) | E::DidResolution(_) => ResolveFailure::Unreachable,
     }
 }
 
@@ -132,7 +134,7 @@ mod tests {
     }
 
     fn seed(cache: &MapCache, nsid: &str, scope: &str) {
-        let key = crate::cache_keys::permission_set_key(nsid, None);
+        let key = crate::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
         let val = serde_json::to_string(&CachedPermissionSet {
             scope: scope.to_string(),
             title: Some("Basic".into()),

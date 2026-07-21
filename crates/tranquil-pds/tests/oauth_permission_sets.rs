@@ -53,7 +53,7 @@ async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
 
 async fn seed_permission_set(nsid: &str, granular_scope: &str) {
     let state = common::get_test_app_state().await;
-    let key = tranquil_pds::cache_keys::permission_set_key(nsid, None);
+    let key = tranquil_pds::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
     let val = json!({
         "scope": granular_scope,
         "title": "Basic",
@@ -536,7 +536,7 @@ async fn test_consent_post_errors_when_set_unresolvable() {
     );
 
     let state = common::get_test_app_state().await;
-    let key = tranquil_pds::cache_keys::permission_set_key(UNRESOLVABLE_NSID, None);
+    let key = tranquil_pds::cache_keys::permission_set_key(&tranquil_types::Nsid::new(UNRESOLVABLE_NSID).unwrap(), None);
     state.cache.delete(&key).await.unwrap();
 
     let approved_scopes: Vec<&str> = scope.split_whitespace().collect();

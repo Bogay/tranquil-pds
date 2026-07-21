@@ -1,3 +1,4 @@
+use tranquil_db_traits::DbScope;
 use tranquil_pds::cache::Cache;
 use tranquil_pds::delegation::intersect_scopes;
 use tranquil_pds::oauth::permission_set_resolver::expand_scopes;
@@ -5,7 +6,7 @@ use tranquil_scopes::ExpansionOutcome;
 
 pub enum Authority<'a> {
     FullSelf,
-    Delegated(&'a str),
+    Delegated(&'a DbScope),
 }
 
 pub struct EffectiveScopes {
@@ -22,7 +23,7 @@ pub async fn resolve_effective_scopes(
     let expanded = outcome.to_scope_string();
     let resolved = match authority {
         Authority::FullSelf => expanded,
-        Authority::Delegated(granted) => intersect_scopes(&expanded, granted),
+        Authority::Delegated(granted) => intersect_scopes(&expanded, granted.as_str()),
     };
     EffectiveScopes { resolved, outcome }
 }
@@ -50,7 +51,7 @@ mod tests {
 
     fn cache_with(nsid: &str, scopes: &str) -> MapCache {
         let c = MapCache::default();
-        let key = tranquil_pds::cache_keys::permission_set_key(nsid, None);
+        let key = tranquil_pds::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
         let json = serde_json::json!({ "scope": scopes, "title": null, "detail": null }).to_string();
         c.0.lock().unwrap().insert(key, json);
         c
@@ -69,9 +70,10 @@ mod tests {
     #[tokio::test]
     async fn delegated_intersects_expanded_against_grant() {
         let c = cache_with("io.atcr.authFullApp", "repo:io.atcr.manifest?action=create identity:*");
+        let granted = DbScope::new("atproto repo:* blob:*/* account:*?action=manage").unwrap();
         let eff = resolve_effective_scopes(
             &c, "atproto include:io.atcr.authFullApp",
-            Authority::Delegated("atproto repo:* blob:*/* account:*?action=manage"),
+            Authority::Delegated(&granted),
         ).await;
         assert!(eff.resolved.contains("atproto"));
         assert!(eff.resolved.contains("repo:io.atcr.manifest?action=create"));

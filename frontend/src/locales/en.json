@@ -603,7 +603,10 @@
       "setFailureReason": {
         "not_found": "This bundle could not be found and cannot be granted.",
         "unreachable": "The bundle's publisher could not be reached; it cannot be granted right now.",
-        "invalid": "This bundle is invalid and cannot be granted."
+        "malformed": "This bundle's name is not a valid identifier, so it cannot be granted.",
+        "not_a_permission_set": "This identifier does not refer to a permission bundle, so it cannot be granted.",
+        "malformed_lexicon": "This bundle is published incorrectly and cannot be granted.",
+        "empty_permissions": "This bundle does not currently grant any permissions."
       },
       "permTable": {
         "data": "Data",

@@ -30,7 +30,7 @@ pub struct FailedSetInfo {
     pub nsid: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aud: Option<String>,
-    pub reason: String,
+    pub reason: tranquil_scopes::ResolveFailure,
 }
 
 #[derive(Debug, Serialize)]
@@ -142,7 +142,7 @@ pub async fn consent_get(
     };
 
     let authority = match delegation_grant.as_ref() {
-        Some(grant) => scope_resolution::Authority::Delegated(grant.granted_scopes.as_str()),
+        Some(grant) => scope_resolution::Authority::Delegated(&grant.granted_scopes),
         None => scope_resolution::Authority::FullSelf,
     };
     let effective = scope_resolution::resolve_effective_scopes(
@@ -263,12 +263,7 @@ pub async fn consent_get(
         .map(|f| FailedSetInfo {
             nsid: f.nsid.clone(),
             aud: f.aud.clone(),
-            reason: match f.reason {
-                tranquil_scopes::ResolveFailure::NotFound => "not_found",
-                tranquil_scopes::ResolveFailure::NetworkError => "unreachable",
-                tranquil_scopes::ResolveFailure::Invalid => "invalid",
-            }
-            .to_string(),
+            reason: f.reason.clone(),
         })
         .collect();
 
@@ -410,7 +405,7 @@ pub async fn consent_post(
     };
 
     let authority = match delegation_grant.as_ref() {
-        Some(grant) => scope_resolution::Authority::Delegated(grant.granted_scopes.as_str()),
+        Some(grant) => scope_resolution::Authority::Delegated(&grant.granted_scopes),
         None => scope_resolution::Authority::FullSelf,
     };
     let effective = scope_resolution::resolve_effective_scopes(
