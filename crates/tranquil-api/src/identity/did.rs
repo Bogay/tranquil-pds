@@ -425,10 +425,15 @@ pub async fn verify_did_web(
     let expected_multibase = expected_signing_key
         .strip_prefix("did:key:")
         .ok_or(DidWebVerifyError::InvalidSigningKey)?;
+    let did_prefixed_key_id = format!("{}#atproto", did);
     let has_matching_key = verification_methods.iter().any(|vm| {
-        vm["publicKeyMultibase"]
+        let is_atproto_method = vm["id"]
             .as_str()
-            .is_some_and(|pk| pk == expected_multibase)
+            .is_some_and(|id| id == "#atproto" || id == did_prefixed_key_id);
+        is_atproto_method
+            && vm["publicKeyMultibase"]
+                .as_str()
+                .is_some_and(|pk| pk == expected_multibase)
     });
     if !has_matching_key {
         return Err(DidWebVerifyError::KeyMismatch(

@@ -175,6 +175,136 @@ async fn test_external_did_web_no_local_doc() {
     );
 }
 
+async fn reserve_signing_key(client: &reqwest::Client, base: &str, did: &str) -> String {
+    let res = client
+        .post(format!("{}/xrpc/com.atproto.server.reserveSigningKey", base))
+        .json(&json!({ "did": did }))
+        .send()
+        .await
+        .expect("Failed to reserve signing key");
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response wasn't JSON");
+    body["signingKey"]
+        .as_str()
+        .expect("No signingKey returned")
+        .to_string()
+}
+
+async fn assert_reserved_key_placement_rejected(
+    build_methods: impl FnOnce(&str, &str, &str) -> Value,
+) {
+    let client = client();
+    let base = base_url().await;
+    let mock_server = MockServer::start().await;
+    let mock_uri = mock_server.uri();
+    let mock_addr = mock_uri.trim_start_matches("http://");
+    let did = format!("did:web:{}", mock_addr.replace(":", "%3A"));
+    let handle = format!("wm{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let pds_endpoint = common::pds_endpoint();
+
+    let signing_key = reserve_signing_key(&client, base, &did).await;
+    let signing_multibase = signing_key
+        .strip_prefix("did:key:")
+        .expect("signingKey should start with did:key:");
+
+    let decoy_did = format!(
+        "did:web:{}.nel.pet",
+        &uuid::Uuid::new_v4().simple().to_string()[..12]
+    );
+    let decoy_key = reserve_signing_key(&client, base, &decoy_did).await;
+    let decoy_multibase = decoy_key
+        .strip_prefix("did:key:")
+        .expect("decoy signingKey should start with did:key:");
+
+    let did_doc = json!({
+        "@context": ["https://www.w3.org/ns/did/v1"],
+        "id": did,
+        "verificationMethod": build_methods(signing_multibase, decoy_multibase, &did),
+        "service": [{
+            "id": "#atproto_pds",
+            "type": "AtprotoPersonalDataServer",
+            "serviceEndpoint": pds_endpoint
+        }]
+    });
+    Mock::given(method("GET"))
+        .and(path("/.well-known/did.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(did_doc))
+        .mount(&mock_server)
+        .await;
+
+    let payload = json!({
+        "handle": handle,
+        "email": format!("{}@nel.pet", handle),
+        "password": "Testpass123!",
+        "didType": "web-external",
+        "did": did,
+        "signingKey": signing_key
+    });
+    let res = client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
+        .json(&payload)
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_ne!(
+        res.status(),
+        StatusCode::OK,
+        "createAccount must reject a did:web doc whose #atproto method isn't the reserved signing key"
+    );
+    let body: Value = res.json().await.expect("Response was not JSON");
+    let message = body["message"]
+        .as_str()
+        .or_else(|| body["error"].as_str())
+        .unwrap_or("");
+    assert!(
+        message.contains("reserved signing key"),
+        "error should report signing-key mismatch, got: {:?}",
+        body
+    );
+}
+
+#[tokio::test]
+async fn test_external_did_web_signing_key_under_wrong_method_rejected() {
+    assert_reserved_key_placement_rejected(|signing_multibase, decoy_multibase, did| {
+        json!([
+            {
+                "id": format!("{}#atproto", did),
+                "type": "Multikey",
+                "controller": did,
+                "publicKeyMultibase": decoy_multibase
+            },
+            {
+                "id": format!("{}#atproto_reserved", did),
+                "type": "Multikey",
+                "controller": did,
+                "publicKeyMultibase": signing_multibase
+            }
+        ])
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn test_external_did_web_signing_key_under_foreign_atproto_fragment_rejected() {
+    assert_reserved_key_placement_rejected(|signing_multibase, decoy_multibase, did| {
+        json!([
+            {
+                "id": "did:web:squid.nel.pet#atproto",
+                "type": "Multikey",
+                "controller": did,
+                "publicKeyMultibase": signing_multibase
+            },
+            {
+                "id": format!("{}#atproto", did),
+                "type": "Multikey",
+                "controller": did,
+                "publicKeyMultibase": decoy_multibase
+            }
+        ])
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn test_plc_operations_blocked_for_did_web() {
     let client = client();
