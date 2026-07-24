@@ -6,7 +6,7 @@ pub use roles::{
 };
 pub use scopes::{
     EDITOR_FULL_SCOPES, InvalidDelegationScopeError, OWNER_FULL_SCOPES, SCOPE_PRESETS, ScopePreset,
-    ValidatedDelegationScope, intersect_scopes,
+    ValidatedDelegationScope, grant_covers, intersect_scopes,
 };
 pub use tranquil_db_traits::DelegationActionType;
 

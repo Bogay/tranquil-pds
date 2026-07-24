@@ -9,6 +9,7 @@ pub struct ScopeInfo {
     pub description: String,
     pub display_name: String,
     pub granted: Option<bool>,
+    pub restricted: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -23,6 +24,7 @@ pub struct PermissionSetInfo {
     pub include_scope: String,
     pub expanded: Vec<ScopeInfo>,
     pub granted: Option<bool>,
+    pub restricted: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -182,6 +184,13 @@ pub async fn consent_get(
     .unwrap_or(true);
     let has_granular_scopes = requested_scopes.iter().any(|s| is_granular_scope(s));
 
+    let grant_scope_str: Option<&str> = delegation_grant
+        .as_ref()
+        .map(|g| g.granted_scopes.as_str());
+    let is_restricted = |scope: &str| -> bool {
+        grant_scope_str.is_some_and(|g| !tranquil_pds::delegation::grant_covers(g, scope))
+    };
+
     let make_scope_info = |scope: &str| -> ScopeInfo {
         let (category, required, description, display_name) =
             if let Some(def) = tranquil_pds::oauth::scopes::SCOPE_DEFINITIONS.get(scope) {
@@ -225,6 +234,7 @@ pub async fn consent_get(
             description,
             display_name,
             granted,
+            restricted: is_restricted(scope),
         }
     };
 
@@ -244,6 +254,9 @@ pub async fn consent_get(
                 Some(a) => format!("include:{}?aud={}", g.nsid, a),
                 None => format!("include:{}", g.nsid),
             };
+            let expanded: Vec<ScopeInfo> =
+                g.expanded.iter().map(|s| make_scope_info(s)).collect();
+            let restricted = !expanded.is_empty() && expanded.iter().all(|s| s.restricted);
             PermissionSetInfo {
                 nsid: g.nsid.clone(),
                 aud: g.aud.clone(),
@@ -251,7 +264,8 @@ pub async fn consent_get(
                 detail: g.detail.clone(),
                 granted: pref_map.get(include_scope.as_str()).copied(),
                 include_scope,
-                expanded: g.expanded.iter().map(|s| make_scope_info(s)).collect(),
+                expanded,
+                restricted,
             }
         })
         .collect();

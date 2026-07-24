@@ -598,8 +598,11 @@
       "required": "Required",
       "rememberChoiceLabel": "Remember my choice for this application",
       "permissionSets": "Permission bundles",
-      "unavailableSets": "Unavailable permission bundles",
       "showIncludedScopes": "Show included permissions ({count})",
+      "unavailablePermissions": "Unavailable permissions",
+      "unavailableLimited": "Limited by delegation",
+      "unavailableFailed": "Failed to load",
+      "setPartiallyLimited": "Some permissions in this bundle are limited by your delegation; see \"Unavailable Permissions\" to find out which permissions weren't allowed.",
       "setFailureReason": {
         "not_found": "This bundle could not be found and cannot be granted.",
         "unreachable": "The bundle's publisher could not be reached; it cannot be granted right now.",

@@ -63,6 +63,15 @@ pub fn intersect_scopes(requested: &str, granted: &str) -> String {
     scopes.join(" ")
 }
 
+pub fn grant_covers(granted: &str, scope: &str) -> bool {
+    if scope == "atproto" {
+        return true;
+    }
+    let granted_parsed: Vec<tranquil_scopes::ParsedScope> =
+        granted.split_whitespace().map(parse_scope).collect();
+    any_granted_covers(scope, &granted_parsed)
+}
+
 fn any_granted_covers(requested: &str, granted: &[tranquil_scopes::ParsedScope]) -> bool {
     let requested_parsed = parse_scope(requested);
     granted.iter().any(|g| covers(g, &requested_parsed))
@@ -250,5 +259,33 @@ mod tests {
                 )
             });
         });
+    }
+
+    #[test]
+    fn test_grant_covers_matches_intersection() {
+        let granted = "atproto repo:* blob:*/* account:*?action=manage";
+        let intersected = intersect_scopes(
+            "repo:app.bsky.feed.post?action=create identity:* account:*?action=manage",
+            granted,
+        );
+        assert!(grant_covers(granted, "repo:app.bsky.feed.post?action=create"));
+        assert!(grant_covers(granted, "account:*?action=manage"));
+        assert!(!grant_covers(granted, "identity:*"));
+        assert_eq!(
+            grant_covers(granted, "identity:*"),
+            intersected.contains("identity")
+        );
+    }
+
+    #[test]
+    fn test_grant_covers_atproto_always_true() {
+        assert!(grant_covers("", "atproto"));
+        assert!(grant_covers("repo:*", "atproto"));
+    }
+
+    #[test]
+    fn test_grant_covers_empty_grant_covers_nothing_else() {
+        assert!(!grant_covers("", "repo:app.bsky.feed.post?action=create"));
+        assert!(!grant_covers("", "identity:*"));
     }
 }

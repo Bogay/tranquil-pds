@@ -9,6 +9,7 @@
     description: string
     display_name: string
     granted: boolean | null
+    restricted?: boolean
   }
 
   const SCOPE_LOCALE_MAP: Record<string, string> = {
@@ -40,6 +41,7 @@
     include_scope: string
     expanded: ScopeInfo[]
     granted: boolean | null
+    restricted?: boolean
   }
 
   interface FailedSetInfo {
@@ -142,13 +144,16 @@
       consentData = data
 
       scopeSelections = Object.fromEntries(
-        data.scopes.map((scope) => [
-          scope.scope,
-          scope.required ? true : scope.granted ?? true,
-        ])
+        data.scopes
+          .filter((scope) => !scope.restricted)
+          .map((scope) => [
+            scope.scope,
+            scope.required ? true : scope.granted ?? true,
+          ])
       )
 
       for (const set of data.permission_sets ?? []) {
+        if (set.restricted) continue
         scopeSelections[set.include_scope] = set.granted ?? true
       }
 
@@ -274,7 +279,19 @@
     fetchConsentData()
   })
 
-  let scopeGroups = $derived(consentData ? groupScopesByCategory(consentData.scopes) : [])
+  let grantedScopes = $derived(consentData ? consentData.scopes.filter(s => !s.restricted) : [])
+  let approvableSets = $derived(consentData ? (consentData.permission_sets ?? []).filter(s => !s.restricted) : [])
+  let scopeGroups = $derived(groupScopesByCategory(grantedScopes))
+
+  let restrictedScopes = $derived(consentData ? consentData.scopes.filter(s => s.restricted) : [])
+  let limitedBundles = $derived(
+    consentData ? (consentData.permission_sets ?? []).filter(s => s.expanded.some(e => e.restricted)) : []
+  )
+  let failedSets = $derived(consentData?.failed_sets ?? [])
+  let hasUnavailable = $derived(
+    restrictedScopes.length > 0 || limitedBundles.length > 0 || failedSets.length > 0
+  )
+
   let hasGranularScopes = $derived(
     (consentData?.scopes.some(s => isGranularScope(s.scope)) ?? false) ||
     ((consentData?.permission_sets?.length ?? 0) > 0)
@@ -334,6 +351,20 @@
       }
     }
     return { repo: [...repo.values()], rpc, other }
+  }
+
+  const grantedExpanded = (set: PermissionSetInfo) => set.expanded.filter(s => !s.restricted)
+  const withheldExpanded = (set: PermissionSetInfo) => set.expanded.filter(s => s.restricted)
+  function scopeLabel(scope: string): string {
+    const base = scope.split('?')[0]
+    if (base.startsWith('repo:')) {
+      const params = new URLSearchParams(scope.split('?')[1] ?? '')
+      const actions = params.getAll('action')
+      const coll = base.slice('repo:'.length) || '*'
+      return actions.length ? `${coll} (${actions.join(', ')})` : coll
+    }
+    if (base.startsWith('rpc:')) return base.slice('rpc:'.length)
+    return base
   }
 </script>
 
@@ -445,11 +476,13 @@
             {/each}
           {/if}
 
-          {#if consentData.permission_sets?.length}
+          {#if approvableSets.length}
             <div class="scope-group">
               <h3 class="category-title">{$_('oauth.consent.permissionSets')}</h3>
-              {#each consentData.permission_sets as set}
-                {@const desc = describeExpanded(set.expanded)}
+              {#each approvableSets as set}
+                {@const granted = grantedExpanded(set)}
+                {@const desc = describeExpanded(granted)}
+                {@const partiallyLimited = set.expanded.some(s => s.restricted)}
                 <label class="scope-item">
                   <input
                     type="checkbox"
@@ -460,8 +493,11 @@
                   <div class="scope-info">
                     <span class="scope-name">{set.title ?? set.nsid}</span>
                     {#if set.detail}<span class="scope-description">{set.detail}</span>{/if}
+                    {#if partiallyLimited}
+                      <span class="restricted-note">{$_('oauth.consent.setPartiallyLimited')}</span>
+                    {/if}
                     <details class="scope-set-details">
-                      <summary>{$_('oauth.consent.showIncludedScopes', { values: { count: set.expanded.length } })}</summary>
+                      <summary>{$_('oauth.consent.showIncludedScopes', { values: { count: granted.length } })}</summary>
                       {#if desc.repo.length}
                         <table class="perm-table">
                           <thead>
@@ -504,17 +540,43 @@
             </div>
           {/if}
 
-          {#if consentData.failed_sets?.length}
-            <div class="scope-group failed-sets">
-              <h3 class="category-title">{$_('oauth.consent.unavailableSets')}</h3>
-              {#each consentData.failed_sets as f}
-                <div class="scope-item failed">
-                  <div class="scope-info">
-                    <span class="scope-name">{f.nsid}{#if f.aud} ({f.aud}){/if}</span>
-                    <span class="scope-description">{$_(`oauth.consent.setFailureReason.${f.reason}`)}</span>
+          {#if hasUnavailable}
+            <div class="scope-group unavailable">
+              <h3 class="category-title">{$_('oauth.consent.unavailablePermissions')}</h3>
+
+              {#if restrictedScopes.length || limitedBundles.length}
+                <p class="unavailable-subhead">{$_('oauth.consent.unavailableLimited')}</p>
+                {#each restrictedScopes as scope}
+                  <div class="scope-item restricted">
+                    <div class="scope-info">
+                      <span class="scope-name">{getLocalizedScopeName(scope)}</span>
+                      <span class="scope-description scope-raw">{scope.scope}</span>
+                    </div>
                   </div>
-                </div>
-              {/each}
+                {/each}
+                {#each limitedBundles as set}
+                  <div class="scope-item restricted">
+                    <div class="scope-info">
+                      <span class="scope-name">{set.title ?? set.nsid}</span>
+                      <ul class="scope-set-list">
+                        {#each withheldExpanded(set) as s}<li><span class="scope-raw">{scopeLabel(s.scope)}</span></li>{/each}
+                      </ul>
+                    </div>
+                  </div>
+                {/each}
+              {/if}
+
+              {#if failedSets.length}
+                <p class="unavailable-subhead">{$_('oauth.consent.unavailableFailed')}</p>
+                {#each failedSets as f}
+                  <div class="scope-item failed">
+                    <div class="scope-info">
+                      <span class="scope-name">{f.nsid}{#if f.aud} ({f.aud}){/if}</span>
+                      <span class="scope-description">{$_(`oauth.consent.setFailureReason.${f.reason}`)}</span>
+                    </div>
+                  </div>
+                {/each}
+              {/if}
             </div>
           {/if}
         </div>

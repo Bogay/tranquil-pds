@@ -642,7 +642,7 @@ button.forget-btn:hover {
 
   .method-divider::before,
   .method-divider::after {
-    content: '';
+    content: "";
     flex: 1;
     height: 1px;
     background: var(--border-color);
@@ -711,7 +711,7 @@ button.forget-btn:hover {
 
 .sso-divider::before,
 .sso-divider::after {
-  content: '';
+  content: "";
   flex: 1;
   height: 1px;
   background: var(--border-color);
@@ -1054,8 +1054,9 @@ button.forget-btn:hover {
   margin-bottom: 0.1rem;
 }
 
-.scope-group.failed-sets .scope-item.failed {
+.scope-item.failed {
   opacity: 0.7;
+  cursor: default;
 }
 
 .required-badge {
@@ -1068,6 +1069,27 @@ button.forget-btn:hover {
   letter-spacing: 0.05em;
   margin-top: var(--space-1);
   width: fit-content;
+}
+
+.scope-item.restricted {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.unavailable-subhead {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.restricted-note {
+  display: block;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  margin-top: var(--space-1);
 }
 
 .remember-choice {
@@ -1543,7 +1565,7 @@ button.forget-btn:hover {
 
   .method-divider::before,
   .method-divider::after {
-    content: '';
+    content: "";
     width: 1px;
     height: var(--space-6);
     background: var(--border-color);

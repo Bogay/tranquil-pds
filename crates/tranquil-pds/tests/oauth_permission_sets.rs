@@ -54,10 +54,15 @@ async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
 async fn seed_permission_set(nsid: &str, granular_scope: &str) {
     let state = common::get_test_app_state().await;
     let key = tranquil_pds::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let val = json!({
         "scope": granular_scope,
         "title": "Basic",
-        "detail": null
+        "detail": null,
+        "refreshed_at": now
     })
     .to_string();
     state
@@ -243,6 +248,62 @@ async fn create_delegated_session_with_scope(
         client_id,
     };
     (session, consent_get_body, mock_client)
+}
+
+#[tokio::test]
+async fn test_delegated_consent_marks_restricted_scopes() {
+    seed_permission_set(PERMISSION_SET_NSID, PERMISSION_SET_GRANULAR_SCOPE).await;
+
+    let scope = format!("atproto include:{}", PERMISSION_SET_NSID);
+    let (_session, consent_body, _mock) = create_delegated_session_with_scope(
+        "psr",
+        "https://example.com/permset-restricted-callback",
+        &scope,
+    )
+    .await;
+
+    let set_entry = consent_body["permission_sets"]
+        .as_array()
+        .and_then(|sets| {
+            sets.iter()
+                .find(|s| s["nsid"].as_str() == Some(PERMISSION_SET_NSID))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a permission_sets entry for '{}'. Got: {:?}",
+                PERMISSION_SET_NSID, consent_body
+            )
+        });
+
+    assert_eq!(
+        set_entry["restricted"].as_bool(),
+        Some(false),
+        "a partially-covered set must not be flagged fully restricted"
+    );
+
+    let expanded = set_entry["expanded"]
+        .as_array()
+        .expect("permission_sets entry should have an expanded array");
+
+    let repo = expanded
+        .iter()
+        .find(|s| s["scope"].as_str() == Some("repo:io.atcr.manifest?action=create"))
+        .expect("expanded[] should list the repo scope");
+    assert_eq!(
+        repo["restricted"].as_bool(),
+        Some(false),
+        "repo scope is covered by the repo:* grant and must not be restricted"
+    );
+
+    let rpc = expanded
+        .iter()
+        .find(|s| s["scope"].as_str() == Some("rpc:io.atcr.getManifest?aud=*"))
+        .expect("expanded[] should list the rpc scope");
+    assert_eq!(
+        rpc["restricted"].as_bool(),
+        Some(true),
+        "rpc scope is not conferred by the OWNER grant and must be restricted"
+    );
 }
 
 #[tokio::test]
