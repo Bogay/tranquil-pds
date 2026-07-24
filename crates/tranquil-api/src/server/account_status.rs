@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tranquil_pds::api::EmptyResponse;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Auth, NotTakendown, Permissive, require_legacy_session_mfa};
@@ -212,9 +212,10 @@ async fn assert_valid_did_document_for_service(
         if let Some(ref expected_rotation_key) = server_rotation_key
             && !doc_rotation_keys.contains(&expected_rotation_key.as_str())
         {
-            return Err(ApiError::InvalidRequest(
-                "Server rotation key not included in PLC DID data".into(),
-            ));
+            debug!(
+                "DID {} rotation keys {:?} omit the PDS-managed server rotation key {}",
+                did, doc_rotation_keys, expected_rotation_key
+            );
         }
 
         let doc_signing_key = doc_data
@@ -251,13 +252,10 @@ async fn assert_valid_did_document_for_service(
             }
 
             if !doc_rotation_keys.contains(&expected_did_key.as_str()) {
-                warn!(
+                debug!(
                     "DID {} rotation keys {:?} omit the PDS-managed signing key {}",
                     did, doc_rotation_keys, expected_did_key
                 );
-                return Err(ApiError::InvalidRequest(
-                    "PLC rotation keys omit the PDS-managed signing key required to sign operations for this identity".into(),
-                ));
             }
         }
     } else if let Some(host_and_path) = did.as_str().strip_prefix("did:web:") {
