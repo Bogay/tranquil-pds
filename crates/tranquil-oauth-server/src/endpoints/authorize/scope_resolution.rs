@@ -10,7 +10,9 @@ pub enum Authority<'a> {
 }
 
 pub struct EffectiveScopes {
-    pub resolved: String,
+    // The expanded set of scopes, minus any denied by delegation
+    pub permitted: String,
+    // The expanded set of scopes, before delegation processing
     pub outcome: ExpansionOutcome,
 }
 
@@ -21,11 +23,11 @@ pub async fn resolve_effective_scopes(
 ) -> EffectiveScopes {
     let outcome = expand_scopes(cache, requested).await;
     let expanded = outcome.to_scope_string();
-    let resolved = match authority {
+    let permitted = match authority {
         Authority::FullSelf => expanded,
         Authority::Delegated(granted) => intersect_scopes(&expanded, granted.as_str()),
     };
-    EffectiveScopes { resolved, outcome }
+    EffectiveScopes { permitted, outcome }
 }
 
 #[cfg(test)]
@@ -40,18 +42,31 @@ mod tests {
     struct MapCache(Mutex<HashMap<String, String>>);
     #[async_trait::async_trait]
     impl Cache for MapCache {
-        async fn get(&self, k: &str) -> Option<String> { self.0.lock().unwrap().get(k).cloned() }
-        async fn set(&self, k: &str, v: &str, _t: Duration) -> Result<(), CacheError> {
-            self.0.lock().unwrap().insert(k.into(), v.into()); Ok(())
+        async fn get(&self, k: &str) -> Option<String> {
+            self.0.lock().unwrap().get(k).cloned()
         }
-        async fn delete(&self, k: &str) -> Result<(), CacheError> { self.0.lock().unwrap().remove(k); Ok(()) }
-        async fn get_bytes(&self, _k: &str) -> Option<Vec<u8>> { None }
-        async fn set_bytes(&self, _k: &str, _v: &[u8], _t: Duration) -> Result<(), CacheError> { Ok(()) }
+        async fn set(&self, k: &str, v: &str, _t: Duration) -> Result<(), CacheError> {
+            self.0.lock().unwrap().insert(k.into(), v.into());
+            Ok(())
+        }
+        async fn delete(&self, k: &str) -> Result<(), CacheError> {
+            self.0.lock().unwrap().remove(k);
+            Ok(())
+        }
+        async fn get_bytes(&self, _k: &str) -> Option<Vec<u8>> {
+            None
+        }
+        async fn set_bytes(&self, _k: &str, _v: &[u8], _t: Duration) -> Result<(), CacheError> {
+            Ok(())
+        }
     }
 
     fn cache_with(nsid: &str, scopes: &str) -> MapCache {
         let c = MapCache::default();
-        let key = tranquil_pds::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
+        let key = tranquil_pds::cache_keys::permission_set_key(
+            &tranquil_types::Nsid::new(nsid).unwrap(),
+            None,
+        );
         let json = serde_json::json!({
             "scope": scopes,
             "title": null,
@@ -65,24 +80,43 @@ mod tests {
 
     #[tokio::test]
     async fn full_self_keeps_all_expanded() {
-        let c = cache_with("io.atcr.authFullApp", "repo:io.atcr.manifest?action=create identity:*");
-        let eff = resolve_effective_scopes(&c, "atproto include:io.atcr.authFullApp", Authority::FullSelf).await;
-        assert!(eff.resolved.contains("atproto"));
-        assert!(eff.resolved.contains("repo:io.atcr.manifest?action=create"));
-        assert!(eff.resolved.contains("identity:*"));
+        let c = cache_with(
+            "io.atcr.authFullApp",
+            "repo:io.atcr.manifest?action=create identity:*",
+        );
+        let eff = resolve_effective_scopes(
+            &c,
+            "atproto include:io.atcr.authFullApp",
+            Authority::FullSelf,
+        )
+        .await;
+        assert!(eff.permitted.contains("atproto"));
+        assert!(
+            eff.permitted
+                .contains("repo:io.atcr.manifest?action=create")
+        );
+        assert!(eff.permitted.contains("identity:*"));
         assert!(eff.outcome.failures.is_empty());
     }
 
     #[tokio::test]
     async fn delegated_intersects_expanded_against_grant() {
-        let c = cache_with("io.atcr.authFullApp", "repo:io.atcr.manifest?action=create identity:*");
+        let c = cache_with(
+            "io.atcr.authFullApp",
+            "repo:io.atcr.manifest?action=create identity:*",
+        );
         let granted = DbScope::new("atproto repo:* blob:*/* account:*?action=manage").unwrap();
         let eff = resolve_effective_scopes(
-            &c, "atproto include:io.atcr.authFullApp",
+            &c,
+            "atproto include:io.atcr.authFullApp",
             Authority::Delegated(&granted),
-        ).await;
-        assert!(eff.resolved.contains("atproto"));
-        assert!(eff.resolved.contains("repo:io.atcr.manifest?action=create"));
-        assert!(!eff.resolved.contains("identity"));
+        )
+        .await;
+        assert!(eff.permitted.contains("atproto"));
+        assert!(
+            eff.permitted
+                .contains("repo:io.atcr.manifest?action=create")
+        );
+        assert!(!eff.permitted.contains("identity"));
     }
 }

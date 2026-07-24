@@ -29,9 +29,12 @@ pub struct PermissionSetInfo {
 
 #[derive(Debug, Serialize)]
 pub struct FailedSetInfo {
-    pub nsid: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub aud: Option<String>,
+    // `given_*` is the value as requested by the client.
+    // Left as strings because the value from the client could be malformed.
+    #[serde(rename = "nsid")]
+    pub given_nsid: String,
+    #[serde(rename = "aud", skip_serializing_if = "Option::is_none")]
+    pub given_aud: Option<String>,
     pub reason: tranquil_scopes::ResolveFailure,
 }
 
@@ -147,13 +150,10 @@ pub async fn consent_get(
         Some(grant) => scope_resolution::Authority::Delegated(&grant.granted_scopes),
         None => scope_resolution::Authority::FullSelf,
     };
-    let effective = scope_resolution::resolve_effective_scopes(
-        &*state.cache,
-        requested_scope_str,
-        authority,
-    )
-    .await;
-    let requested_scopes: Vec<&str> = effective.resolved.split_whitespace().collect();
+    let effective =
+        scope_resolution::resolve_effective_scopes(&*state.cache, requested_scope_str, authority)
+            .await;
+    let requested_scopes: Vec<&str> = effective.permitted.split_whitespace().collect();
     let preferences = state
         .repos
         .oauth
@@ -184,9 +184,8 @@ pub async fn consent_get(
     .unwrap_or(true);
     let has_granular_scopes = requested_scopes.iter().any(|s| is_granular_scope(s));
 
-    let grant_scope_str: Option<&str> = delegation_grant
-        .as_ref()
-        .map(|g| g.granted_scopes.as_str());
+    let grant_scope_str: Option<&str> =
+        delegation_grant.as_ref().map(|g| g.granted_scopes.as_str());
     let is_restricted = |scope: &str| -> bool {
         grant_scope_str.is_some_and(|g| !tranquil_pds::delegation::grant_covers(g, scope))
     };
@@ -254,8 +253,7 @@ pub async fn consent_get(
                 Some(a) => format!("include:{}?aud={}", g.nsid, a),
                 None => format!("include:{}", g.nsid),
             };
-            let expanded: Vec<ScopeInfo> =
-                g.expanded.iter().map(|s| make_scope_info(s)).collect();
+            let expanded: Vec<ScopeInfo> = g.expanded.iter().map(|s| make_scope_info(s)).collect();
             let restricted = !expanded.is_empty() && expanded.iter().all(|s| s.restricted);
             PermissionSetInfo {
                 nsid: g.nsid.clone(),
@@ -275,8 +273,8 @@ pub async fn consent_get(
         .failures
         .iter()
         .map(|f| FailedSetInfo {
-            nsid: f.nsid.clone(),
-            aud: f.aud.clone(),
+            given_nsid: f.given_nsid.clone(),
+            given_aud: f.given_aud.clone(),
             reason: f.reason.clone(),
         })
         .collect();
@@ -422,12 +420,9 @@ pub async fn consent_post(
         Some(grant) => scope_resolution::Authority::Delegated(&grant.granted_scopes),
         None => scope_resolution::Authority::FullSelf,
     };
-    let effective = scope_resolution::resolve_effective_scopes(
-        &*state.cache,
-        original_scope_str,
-        authority,
-    )
-    .await;
+    let effective =
+        scope_resolution::resolve_effective_scopes(&*state.cache, original_scope_str, authority)
+            .await;
     let include_token = |nsid: &str, aud: &Option<String>| -> String {
         match aud {
             Some(a) => format!("include:{}?aud={}", nsid, a),
@@ -438,8 +433,11 @@ pub async fn consent_post(
         .outcome
         .failures
         .iter()
-        .filter(|f| form.approved_scopes.contains(&include_token(&f.nsid, &f.aud)))
-        .map(|f| f.nsid.clone())
+        .filter(|f| {
+            form.approved_scopes
+                .contains(&include_token(&f.given_nsid, &f.given_aud))
+        })
+        .map(|f| f.given_nsid.clone())
         .collect();
     if !approved_failed_sets.is_empty() {
         return json_error(

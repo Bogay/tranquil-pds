@@ -27,7 +27,9 @@ fn repo_covers(g: &RepoScope, r: &RepoScope) -> bool {
         Some(gc) => match &r.collection {
             None => false,
             Some(rc) => match gc.strip_suffix(".*") {
-                Some(prefix) => rc.starts_with(prefix) && rc.as_bytes().get(prefix.len()) == Some(&b'.'),
+                Some(prefix) => {
+                    rc.starts_with(prefix) && rc.as_bytes().get(prefix.len()) == Some(&b'.')
+                }
                 None => gc == rc,
             },
         },
@@ -94,13 +96,22 @@ mod tests {
     fn repo_action_subset_required() {
         assert!(c("repo:*", "repo:*?action=create"));
         assert!(!c("repo:*?action=create", "repo:*?action=delete"));
-        assert!(c("repo:*?action=create&action=delete", "repo:*?action=create"));
-        assert!(!c("repo:*?action=create", "repo:*?action=create&action=delete"));
+        assert!(c(
+            "repo:*?action=create&action=delete",
+            "repo:*?action=create"
+        ));
+        assert!(!c(
+            "repo:*?action=create",
+            "repo:*?action=create&action=delete"
+        ));
     }
 
     #[test]
     fn repo_partial_action_grant_does_not_cover_actionless_request() {
-        assert!(!c("repo:*?action=create&action=delete", "repo:app.bsky.feed.post"));
+        assert!(!c(
+            "repo:*?action=create&action=delete",
+            "repo:app.bsky.feed.post"
+        ));
     }
 
     #[test]
@@ -125,15 +136,24 @@ mod tests {
     #[test]
     fn rpc_wildcards() {
         assert!(c("rpc:*?aud=did:web:x", "rpc:app.bsky.getX?aud=did:web:x"));
-        assert!(c("rpc:app.bsky.getX?aud=*", "rpc:app.bsky.getX?aud=did:web:x"));
-        assert!(!c("rpc:app.bsky.getX?aud=did:web:x", "rpc:app.bsky.getY?aud=did:web:x"));
+        assert!(c(
+            "rpc:app.bsky.getX?aud=*",
+            "rpc:app.bsky.getX?aud=did:web:x"
+        ));
+        assert!(!c(
+            "rpc:app.bsky.getX?aud=did:web:x",
+            "rpc:app.bsky.getY?aud=did:web:x"
+        ));
     }
 
     #[test]
     fn account_manage_covers_read_and_wildcard_attr() {
         assert!(c("account:*?action=manage", "account:email?action=read"));
         assert!(c("account:*?action=manage", "account:email?action=manage"));
-        assert!(!c("account:email?action=read", "account:email?action=manage"));
+        assert!(!c(
+            "account:email?action=read",
+            "account:email?action=manage"
+        ));
     }
 
     #[test]

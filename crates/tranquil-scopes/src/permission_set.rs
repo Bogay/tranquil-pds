@@ -45,8 +45,9 @@ pub enum ResolveFailure {
 
 #[derive(Debug, Clone)]
 pub struct FailedSet {
-    pub nsid: String,
-    pub aud: Option<String>,
+    // NSID and aud are left as strings to avoid issues from malformed requests.
+    pub given_nsid: String,
+    pub given_aud: Option<String>,
     pub reason: ResolveFailure,
 }
 
@@ -70,11 +71,11 @@ impl ExpansionOutcome {
     pub fn flat_scopes(&self) -> Vec<String> {
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for s in self.passthrough.iter().chain(
-            self.sets
-                .iter()
-                .flat_map(|group| group.expanded.iter()),
-        ) {
+        for s in self
+            .passthrough
+            .iter()
+            .chain(self.sets.iter().flat_map(|group| group.expanded.iter()))
+        {
             if seen.insert(s.as_str()) {
                 out.push(s.clone());
             }
@@ -163,12 +164,13 @@ pub async fn fetch_and_expand(
             main_def.def_type.clone(),
         ));
     }
-    let permissions = main_def
-        .permissions
-        .as_ref()
-        .ok_or(ScopeExpansionError::MissingDefinition(
-            "permissions".to_string(),
-        ))?;
+    let permissions =
+        main_def
+            .permissions
+            .as_ref()
+            .ok_or(ScopeExpansionError::MissingDefinition(
+                "permissions".to_string(),
+            ))?;
     let namespace_authority = extract_namespace_authority(nsid);
     let expanded = build_expanded_scopes(permissions, aud, &namespace_authority);
     if expanded.is_empty() {
@@ -235,8 +237,8 @@ async fn fetch_lexicon_via_atproto(nsid: &Nsid) -> Result<LexiconDoc, ScopeExpan
         });
     }
 
-    let record: GetRecordResponse = serde_json::from_str(&body)
-        .map_err(|e| ScopeExpansionError::HttpFailed(e.to_string()))?;
+    let record: GetRecordResponse =
+        serde_json::from_str(&body).map_err(|e| ScopeExpansionError::HttpFailed(e.to_string()))?;
 
     Ok(record.value)
 }
@@ -641,8 +643,8 @@ mod tests {
                 ],
             }],
             failures: vec![FailedSet {
-                nsid: "nonexistent.fake.permissionSet".into(),
-                aud: None,
+                given_nsid: "nonexistent.fake.permissionSet".into(),
+                given_aud: None,
                 reason: ResolveFailure::NotFound,
             }],
         };

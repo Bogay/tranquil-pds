@@ -133,21 +133,22 @@ pub async fn handle_authorization_code_grant(
     let controller_did = authorized.controller_did.clone();
     let requested_scope = authorized.parameters.scope.clone();
 
-    let granted_scopes: Option<tranquil_db_traits::DbScope> = if let Some(ref controller) = controller_did {
-        let grant = state
-            .repos
-            .delegation
-            .get_delegation(&did, controller)
-            .await
-            .ok()
-            .flatten()
-            .ok_or_else(|| {
-                OAuthError::InvalidGrant("Delegation grant not found or revoked".to_string())
-            })?;
-        Some(grant.granted_scopes.clone())
-    } else {
-        None
-    };
+    let granted_scopes: Option<tranquil_db_traits::DbScope> =
+        if let Some(ref controller) = controller_did {
+            let grant = state
+                .repos
+                .delegation
+                .get_delegation(&did, controller)
+                .await
+                .ok()
+                .flatten()
+                .ok_or_else(|| {
+                    OAuthError::InvalidGrant("Delegation grant not found or revoked".to_string())
+                })?;
+            Some(grant.granted_scopes.clone())
+        } else {
+            None
+        };
     let authority = match granted_scopes.as_ref() {
         Some(g) => crate::endpoints::authorize::scope_resolution::Authority::Delegated(g),
         None => crate::endpoints::authorize::scope_resolution::Authority::FullSelf,
@@ -164,14 +165,14 @@ pub async fn handle_authorization_code_grant(
             .outcome
             .failures
             .iter()
-            .map(|f| f.nsid.clone())
+            .map(|f| f.given_nsid.clone())
             .collect();
         return Err(OAuthError::InvalidScope(format!(
             "Could not resolve permission set(s): {}",
             names.join(", ")
         )));
     }
-    let resolved_scope = effective.resolved;
+    let resolved_scope = effective.permitted;
 
     let access_token = create_access_token_with_delegation(
         &token_id,
@@ -254,21 +255,22 @@ async fn recompute_resolved_scope(
     token_data: &TokenData,
 ) -> Result<String, OAuthError> {
     let requested = token_data.scope.as_deref().unwrap_or("atproto");
-    let granted_scopes: Option<tranquil_db_traits::DbScope> = if let Some(ref controller) = token_data.controller_did {
-        let grant = state
-            .repos
-            .delegation
-            .get_delegation(&token_data.did, controller)
-            .await
-            .ok()
-            .flatten()
-            .ok_or_else(|| {
-                OAuthError::InvalidGrant("Delegation grant not found or revoked".to_string())
-            })?;
-        Some(grant.granted_scopes.clone())
-    } else {
-        None
-    };
+    let granted_scopes: Option<tranquil_db_traits::DbScope> =
+        if let Some(ref controller) = token_data.controller_did {
+            let grant = state
+                .repos
+                .delegation
+                .get_delegation(&token_data.did, controller)
+                .await
+                .ok()
+                .flatten()
+                .ok_or_else(|| {
+                    OAuthError::InvalidGrant("Delegation grant not found or revoked".to_string())
+                })?;
+            Some(grant.granted_scopes.clone())
+        } else {
+            None
+        };
     let authority = match granted_scopes.as_ref() {
         Some(g) => crate::endpoints::authorize::scope_resolution::Authority::Delegated(g),
         None => crate::endpoints::authorize::scope_resolution::Authority::FullSelf,
@@ -284,14 +286,14 @@ async fn recompute_resolved_scope(
             .outcome
             .failures
             .iter()
-            .map(|f| f.nsid.clone())
+            .map(|f| f.given_nsid.clone())
             .collect();
         return Err(OAuthError::InvalidScope(format!(
             "Permission set(s) expired and unresolvable: {}",
             names.join(", ")
         )));
     }
-    Ok(effective.resolved)
+    Ok(effective.permitted)
 }
 
 pub async fn handle_refresh_token_grant(

@@ -16,7 +16,7 @@ pub use parser::{
     ParsedScope, RepoAction, RepoScope, RpcScope, parse_scope, parse_scope_string,
 };
 pub use permission_set::{
-    ExpansionOutcome, FailedSet, FetchedSet, ResolveFailure, ResolvedSetGroup,
-    ScopeExpansionError, fetch_and_expand, parse_include_scope,
+    ExpansionOutcome, FailedSet, FetchedSet, ResolveFailure, ResolvedSetGroup, ScopeExpansionError,
+    fetch_and_expand, parse_include_scope,
 };
 pub use permissions::ScopePermissions;

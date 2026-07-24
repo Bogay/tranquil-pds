@@ -268,7 +268,10 @@ mod tests {
             "repo:app.bsky.feed.post?action=create identity:* account:*?action=manage",
             granted,
         );
-        assert!(grant_covers(granted, "repo:app.bsky.feed.post?action=create"));
+        assert!(grant_covers(
+            granted,
+            "repo:app.bsky.feed.post?action=create"
+        ));
         assert!(grant_covers(granted, "account:*?action=manage"));
         assert!(!grant_covers(granted, "identity:*"));
         assert_eq!(

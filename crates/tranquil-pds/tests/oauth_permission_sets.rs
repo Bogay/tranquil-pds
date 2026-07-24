@@ -53,7 +53,10 @@ async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
 
 async fn seed_permission_set(nsid: &str, granular_scope: &str) {
     let state = common::get_test_app_state().await;
-    let key = tranquil_pds::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
+    let key = tranquil_pds::cache_keys::permission_set_key(
+        &tranquil_types::Nsid::new(nsid).unwrap(),
+        None,
+    );
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -597,7 +600,10 @@ async fn test_consent_post_errors_when_set_unresolvable() {
     );
 
     let state = common::get_test_app_state().await;
-    let key = tranquil_pds::cache_keys::permission_set_key(&tranquil_types::Nsid::new(UNRESOLVABLE_NSID).unwrap(), None);
+    let key = tranquil_pds::cache_keys::permission_set_key(
+        &tranquil_types::Nsid::new(UNRESOLVABLE_NSID).unwrap(),
+        None,
+    );
     state.cache.delete(&key).await.unwrap();
 
     let approved_scopes: Vec<&str> = scope.split_whitespace().collect();
@@ -663,10 +669,7 @@ async fn test_consent_post_succeeds_when_unapproved_set_fails() {
     let client_id = mock_client.uri();
     let (_code_verifier, code_challenge) = generate_pkce();
 
-    let scope = format!(
-        "atproto include:{} include:{}",
-        GOOD_SET_NSID, BAD_SET_NSID
-    );
+    let scope = format!("atproto include:{} include:{}", GOOD_SET_NSID, BAD_SET_NSID);
     let par_res = http_client
         .post(format!("{}/oauth/par", url))
         .form(&[

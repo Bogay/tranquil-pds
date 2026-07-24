@@ -3,8 +3,8 @@ use crate::cache_keys::permission_set_key;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tranquil_scopes::{
-    fetch_and_expand, parse_include_scope, ExpansionOutcome, FailedSet, ResolveFailure,
-    ResolvedSetGroup, ScopeExpansionError,
+    ExpansionOutcome, FailedSet, ResolveFailure, ResolvedSetGroup, ScopeExpansionError,
+    fetch_and_expand, parse_include_scope,
 };
 use tranquil_types::Nsid;
 
@@ -38,8 +38,8 @@ pub async fn expand_scopes(cache: &dyn Cache, scope_string: &str) -> ExpansionOu
                 match resolve_one(cache, nsid, aud).await {
                     Ok(group) => outcome.sets.push(group),
                     Err(reason) => outcome.failures.push(FailedSet {
-                        nsid: nsid.to_string(),
-                        aud: aud.map(str::to_string),
+                        given_nsid: nsid.to_string(),
+                        given_aud: aud.map(str::to_string),
                         reason,
                     }),
                 }
@@ -84,10 +84,20 @@ async fn resolve_one(
             };
             if let Ok(json) = serde_json::to_string(&stored) {
                 let _ = cache
-                    .set(&key, &json, Duration::from_secs(PERMISSION_SET_CACHE_TTL_SECS))
+                    .set(
+                        &key,
+                        &json,
+                        Duration::from_secs(PERMISSION_SET_CACHE_TTL_SECS),
+                    )
                     .await;
             }
-            Ok(group_from(parsed, aud, fetched.expanded, fetched.title, fetched.detail))
+            Ok(group_from(
+                parsed,
+                aud,
+                fetched.expanded,
+                fetched.title,
+                fetched.detail,
+            ))
         }
         Err(e) => match cached {
             Some(v) => Ok(group_from(parsed, aud, v.scope, v.title, v.detail)),
@@ -160,7 +170,8 @@ mod tests {
     }
 
     fn seed_at(cache: &MapCache, nsid: &str, scope: &str, refreshed_at: i64) {
-        let key = crate::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
+        let key =
+            crate::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
         let val = serde_json::to_string(&CachedPermissionSet {
             scope: scope.to_string(),
             title: Some("Basic".into()),
@@ -225,7 +236,8 @@ mod tests {
             None,
         );
         // Shape written before `refreshed_at` existed.
-        let legacy = r#"{"scope":"repo:nonexistent.fake.record?action=create","title":null,"detail":null}"#;
+        let legacy =
+            r#"{"scope":"repo:nonexistent.fake.record?action=create","title":null,"detail":null}"#;
         cache.0.lock().unwrap().insert(key, legacy.to_string());
         let out = expand_scopes(&cache, "include:nonexistent.fake.permissionSet").await;
         assert!(out.failures.is_empty());
@@ -247,6 +259,6 @@ mod tests {
         let out = expand_scopes(&cache, "include:nonexistent.fake.permissionSet").await;
         assert_eq!(out.sets.len(), 0);
         assert_eq!(out.failures.len(), 1);
-        assert_eq!(out.failures[0].nsid, "nonexistent.fake.permissionSet");
+        assert_eq!(out.failures[0].given_nsid, "nonexistent.fake.permissionSet");
     }
 }
