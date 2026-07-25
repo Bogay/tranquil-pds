@@ -597,6 +597,29 @@
       "permissionsRequested": "Permissions demandées",
       "required": "Requis",
       "rememberChoiceLabel": "Se souvenir de mon choix pour cette application",
+      "permissionSets": "Ensembles de permissions",
+      "showIncludedScopes": "Afficher les permissions incluses ({count})",
+      "unavailablePermissions": "Permissions indisponibles",
+      "unavailableLimited": "Limité par la délégation",
+      "unavailableFailed": "Échec du chargement",
+      "setPartiallyLimited": "Votre délégation limite certaines permissions de cet ensemble. La section « Permissions indisponibles » indique lesquelles ont été refusées.",
+      "setFailureReason": {
+        "not_found": "Cet ensemble est introuvable et ne peut pas être accordé.",
+        "unreachable": "L'éditeur de cet ensemble est injoignable, il ne peut donc pas être accordé pour le moment.",
+        "malformed": "Le nom de cet ensemble n'est pas un identifiant valide, il ne peut donc pas être accordé.",
+        "not_a_permission_set": "Cet identifiant ne désigne pas un ensemble de permissions, il ne peut donc pas être accordé.",
+        "malformed_lexicon": "Cet ensemble est publié de façon incorrecte et ne peut pas être accordé.",
+        "empty_permissions": "Cet ensemble n'accorde actuellement aucune permission.",
+        "unknown": "Cet ensemble ne peut pas être accordé."
+      },
+      "permTable": {
+        "data": "Données",
+        "create": "Créer",
+        "update": "Modifier",
+        "delete": "Supprimer",
+        "allData": "Toutes les collections",
+        "apiAccess": "Accès API"
+      },
       "scopes": {
         "atproto": {
           "name": "Accès AT Protocol",

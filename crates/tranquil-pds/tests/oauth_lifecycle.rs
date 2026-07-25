@@ -605,6 +605,7 @@ async fn test_oauth_multiple_clients_same_user() {
             ("redirect_uri", "https://client1.example.com/callback"),
             ("code_challenge", &challenge1),
             ("code_challenge_method", "S256"),
+            ("scope", "atproto repo:app.bsky.feed.post?action=create"),
         ])
         .send()
         .await
@@ -631,7 +632,7 @@ async fn test_oauth_multiple_clients_same_user() {
         let consent_res = http_client
             .post(format!("{}/oauth/authorize/consent", url))
             .header("Content-Type", "application/json")
-            .json(&json!({"request_uri": request_uri1, "approved_scopes": ["atproto", "transition:generic"], "remember": false}))
+            .json(&json!({"request_uri": request_uri1, "approved_scopes": ["atproto", "repo:app.bsky.feed.post?action=create"], "remember": false}))
             .send().await.unwrap();
         let consent_body: Value = consent_res.json().await.unwrap();
         location1 = consent_body["redirect_uri"].as_str().unwrap().to_string();
@@ -666,6 +667,7 @@ async fn test_oauth_multiple_clients_same_user() {
             ("redirect_uri", "https://client2.example.com/callback"),
             ("code_challenge", &challenge2),
             ("code_challenge_method", "S256"),
+            ("scope", "atproto repo:app.bsky.feed.post?action=create"),
         ])
         .send()
         .await
@@ -692,7 +694,7 @@ async fn test_oauth_multiple_clients_same_user() {
         let consent_res = http_client
             .post(format!("{}/oauth/authorize/consent", url))
             .header("Content-Type", "application/json")
-            .json(&json!({"request_uri": request_uri2, "approved_scopes": ["atproto", "transition:generic"], "remember": false}))
+            .json(&json!({"request_uri": request_uri2, "approved_scopes": ["atproto", "repo:app.bsky.feed.post?action=create"], "remember": false}))
             .send().await.unwrap();
         let consent_body: Value = consent_res.json().await.unwrap();
         location2 = consent_body["redirect_uri"].as_str().unwrap().to_string();
@@ -763,6 +765,33 @@ async fn test_oauth_multiple_clients_same_user() {
         StatusCode::OK,
         "Client 2 token should work"
     );
+    let ungranted_collection = "app.bsky.graph.follow";
+    let denied_res = http_client
+        .post(format!("{}/xrpc/com.atproto.repo.createRecord", url))
+        .bearer_auth(token1)
+        .json(&json!({
+            "repo": user_did,
+            "collection": ungranted_collection,
+            "record": {
+                "$type": ungranted_collection,
+                "subject": user_did,
+                "createdAt": Utc::now().to_rfc3339()
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        denied_res.status(),
+        StatusCode::FORBIDDEN,
+        "Client 1 token shouldn't write outside its granted collection"
+    );
+    let denied_body: Value = denied_res.json().await.unwrap();
+    assert_eq!(
+        denied_body["error"].as_str(),
+        Some("InsufficientScope"),
+        "Write outside the granted collection should fail on scope"
+    );
     let list_res = http_client
         .get(format!("{}/xrpc/com.atproto.repo.listRecords", url))
         .bearer_auth(token1)
@@ -770,6 +799,7 @@ async fn test_oauth_multiple_clients_same_user() {
         .send()
         .await
         .unwrap();
+    assert_eq!(list_res.status(), StatusCode::OK, "listRecords should work");
     let list_body: Value = list_res.json().await.unwrap();
     let records = list_body["records"].as_array().unwrap();
     assert_eq!(

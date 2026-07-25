@@ -603,6 +603,29 @@
       "permissionsRequested": "Pyydetyt oikeudet",
       "required": "Vaaditaan",
       "rememberChoiceLabel": "Muista valintani tälle sovellukselle",
+      "permissionSets": "Oikeuspaketit",
+      "showIncludedScopes": "Näytä sisältyvät oikeudet ({count})",
+      "unavailablePermissions": "Ei käytettävissä olevat oikeudet",
+      "unavailableLimited": "Delegoinnin rajoittama",
+      "unavailableFailed": "Lataus epäonnistui",
+      "setPartiallyLimited": "Delegointisi rajoittaa osaa tämän paketin oikeuksista. Kohta \"Ei käytettävissä olevat oikeudet\" kertoo, mitä ei sallittu.",
+      "setFailureReason": {
+        "not_found": "Pakettia ei löytynyt, joten sitä ei voi myöntää.",
+        "unreachable": "Paketin julkaisijaan ei saatu yhteyttä, joten sitä ei voi nyt myöntää.",
+        "malformed": "Paketin nimi ei ole kelvollinen tunniste, joten sitä ei voi myöntää.",
+        "not_a_permission_set": "Tunniste ei viittaa oikeuspakettiin, joten sitä ei voi myöntää.",
+        "malformed_lexicon": "Paketti on julkaistu virheellisesti, joten sitä ei voi myöntää.",
+        "empty_permissions": "Paketti ei myönnä tällä hetkellä yhtään oikeutta.",
+        "unknown": "Pakettia ei voi myöntää."
+      },
+      "permTable": {
+        "data": "Tiedot",
+        "create": "Luonti",
+        "update": "Päivitys",
+        "delete": "Poisto",
+        "allData": "Kaikki kokoelmat",
+        "apiAccess": "API-käyttö"
+      },
       "scopes": {
         "atproto": {
           "name": "AT Protocol -käyttöoikeus",

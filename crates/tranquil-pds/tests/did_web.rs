@@ -177,7 +177,10 @@ async fn test_external_did_web_no_local_doc() {
 
 async fn reserve_signing_key(client: &reqwest::Client, base: &str, did: &str) -> String {
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.reserveSigningKey", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.reserveSigningKey",
+            base
+        ))
         .json(&json!({ "did": did }))
         .send()
         .await

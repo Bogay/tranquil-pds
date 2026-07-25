@@ -44,6 +44,28 @@
     restricted?: boolean
   }
 
+  type SetFailureReason =
+    | 'unreachable'
+    | 'not_found'
+    | 'malformed'
+    | 'not_a_permission_set'
+    | 'malformed_lexicon'
+    | 'empty_permissions'
+
+  const SET_FAILURE_LOCALE_KEYS: Record<SetFailureReason, string> = {
+    unreachable: 'oauth.consent.setFailureReason.unreachable',
+    not_found: 'oauth.consent.setFailureReason.not_found',
+    malformed: 'oauth.consent.setFailureReason.malformed',
+    not_a_permission_set: 'oauth.consent.setFailureReason.not_a_permission_set',
+    malformed_lexicon: 'oauth.consent.setFailureReason.malformed_lexicon',
+    empty_permissions: 'oauth.consent.setFailureReason.empty_permissions',
+  }
+
+  function setFailureLocaleKey(reason: string): string {
+    const known: Partial<Record<string, string>> = SET_FAILURE_LOCALE_KEYS
+    return known[reason] ?? 'oauth.consent.setFailureReason.unknown'
+  }
+
   interface FailedSetInfo {
     nsid: string
     aud?: string
@@ -572,7 +594,7 @@
                   <div class="scope-item failed">
                     <div class="scope-info">
                       <span class="scope-name">{f.nsid}{#if f.aud} ({f.aud}){/if}</span>
-                      <span class="scope-description">{$_(`oauth.consent.setFailureReason.${f.reason}`)}</span>
+                      <span class="scope-description">{$_(setFailureLocaleKey(f.reason))}</span>
                     </div>
                   </div>
                 {/each}

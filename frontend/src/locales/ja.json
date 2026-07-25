@@ -603,6 +603,29 @@
       "permissionsRequested": "リクエストされた権限",
       "required": "必須",
       "rememberChoiceLabel": "このアプリに対する選択を記憶する",
+      "permissionSets": "権限バンドル",
+      "showIncludedScopes": "含まれる権限を表示 ({count})",
+      "unavailablePermissions": "利用できない権限",
+      "unavailableLimited": "委任による制限",
+      "unavailableFailed": "読み込み失敗",
+      "setPartiallyLimited": "このバンドルの一部の権限は委任設定により制限されています。許可されなかった権限は「利用できない権限」で確認できます。",
+      "setFailureReason": {
+        "not_found": "このバンドルは見つからないため、付与できません。",
+        "unreachable": "バンドルの公開元に接続できないため、現在は付与できません。",
+        "malformed": "このバンドルの名前が有効な識別子ではないため、付与できません。",
+        "not_a_permission_set": "この識別子は権限バンドルを指していないため、付与できません。",
+        "malformed_lexicon": "このバンドルは正しく公開されていないため、付与できません。",
+        "empty_permissions": "このバンドルは現在、権限を付与しません。",
+        "unknown": "このバンドルは付与できません。"
+      },
+      "permTable": {
+        "data": "データ",
+        "create": "作成",
+        "update": "更新",
+        "delete": "削除",
+        "allData": "すべてのコレクション",
+        "apiAccess": "API アクセス"
+      },
       "scopes": {
         "atproto": {
           "name": "AT Protocol アクセス",

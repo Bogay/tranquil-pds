@@ -603,6 +603,29 @@
       "permissionsRequested": "请求的权限",
       "required": "必需",
       "rememberChoiceLabel": "记住对此应用的授权选择",
+      "permissionSets": "权限包",
+      "showIncludedScopes": "显示包含的权限 ({count})",
+      "unavailablePermissions": "不可用权限",
+      "unavailableLimited": "受委托限制",
+      "unavailableFailed": "加载失败",
+      "setPartiallyLimited": "您的委托设置限制了此权限包中的部分权限。“不可用权限”一节列出了未被允许的权限。",
+      "setFailureReason": {
+        "not_found": "找不到此权限包，无法授予。",
+        "unreachable": "无法连接此权限包的发布方，目前无法授予。",
+        "malformed": "此权限包的名称不是有效标识符，无法授予。",
+        "not_a_permission_set": "此标识符并非指向权限包，无法授予。",
+        "malformed_lexicon": "此权限包发布有误，无法授予。",
+        "empty_permissions": "此权限包目前不授予任何权限。",
+        "unknown": "此权限包无法授予。"
+      },
+      "permTable": {
+        "data": "数据",
+        "create": "创建",
+        "update": "更新",
+        "delete": "删除",
+        "allData": "所有集合",
+        "apiAccess": "API 访问"
+      },
       "scopes": {
         "atproto": {
           "name": "AT Protocol 访问",

@@ -603,6 +603,29 @@
       "permissionsRequested": "Begärda behörigheter",
       "required": "Krävs",
       "rememberChoiceLabel": "Kom ihåg mitt val för denna applikation",
+      "permissionSets": "Behörighetspaket",
+      "showIncludedScopes": "Visa inkluderade behörigheter ({count})",
+      "unavailablePermissions": "Otillgängliga behörigheter",
+      "unavailableLimited": "Begränsad av delegering",
+      "unavailableFailed": "Kunde inte laddas",
+      "setPartiallyLimited": "Din delegering begränsar vissa behörigheter i paketet. Avsnittet \"Otillgängliga behörigheter\" visar vilka som nekades.",
+      "setFailureReason": {
+        "not_found": "Paketet hittades inte och kan inte beviljas.",
+        "unreachable": "Paketets utgivare kunde inte nås, så paketet kan inte beviljas just nu.",
+        "malformed": "Paketets namn är inte en giltig identifierare, så det kan inte beviljas.",
+        "not_a_permission_set": "Identifieraren avser inte ett behörighetspaket, så det kan inte beviljas.",
+        "malformed_lexicon": "Paketet är felaktigt publicerat och kan inte beviljas.",
+        "empty_permissions": "Paketet beviljar för närvarande inga behörigheter.",
+        "unknown": "Paketet kan inte beviljas."
+      },
+      "permTable": {
+        "data": "Data",
+        "create": "Skapa",
+        "update": "Uppdatera",
+        "delete": "Radera",
+        "allData": "Alla samlingar",
+        "apiAccess": "API-åtkomst"
+      },
       "scopes": {
         "atproto": {
           "name": "AT Protocol-åtkomst",

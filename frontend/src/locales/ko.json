@@ -603,6 +603,29 @@
       "permissionsRequested": "요청된 권한",
       "required": "필수",
       "rememberChoiceLabel": "이 앱에 대한 선택 기억하기",
+      "permissionSets": "권한 번들",
+      "showIncludedScopes": "포함된 권한 보기 ({count})",
+      "unavailablePermissions": "사용할 수 없는 권한",
+      "unavailableLimited": "위임으로 제한됨",
+      "unavailableFailed": "불러오기 실패",
+      "setPartiallyLimited": "위임 설정이 이 번들의 일부 권한을 제한합니다. 허용되지 않은 권한은 \"사용할 수 없는 권한\" 항목에서 확인하세요.",
+      "setFailureReason": {
+        "not_found": "이 번들을 찾을 수 없어 부여할 수 없습니다.",
+        "unreachable": "번들 게시자에 연결할 수 없어 지금은 부여할 수 없습니다.",
+        "malformed": "이 번들의 이름이 유효한 식별자가 아니어서 부여할 수 없습니다.",
+        "not_a_permission_set": "이 식별자는 권한 번들을 가리키지 않아 부여할 수 없습니다.",
+        "malformed_lexicon": "이 번들이 잘못 게시되어 부여할 수 없습니다.",
+        "empty_permissions": "이 번들은 현재 어떤 권한도 부여하지 않습니다.",
+        "unknown": "이 번들은 부여할 수 없습니다."
+      },
+      "permTable": {
+        "data": "데이터",
+        "create": "생성",
+        "update": "수정",
+        "delete": "삭제",
+        "allData": "모든 컬렉션",
+        "apiAccess": "API 접근"
+      },
       "scopes": {
         "atproto": {
           "name": "AT Protocol 액세스",
