@@ -1,4 +1,6 @@
-pub use tranquil_infra::{Cache, CacheError, DistributedRateLimiter};
+pub use tranquil_infra::{
+    Cache, CacheError, DistributedRateLimiter, cache_keys, cached_json, read_json, write_json,
+};
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -173,11 +175,10 @@ pub async fn create_cache(
 ) -> Result<(Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>), CacheInitError> {
     let cache_cfg = tranquil_config::try_get().map(|c| &c.cache);
     let backend = cache_cfg.map(|c| c.backend.as_str()).unwrap_or("ripple");
-    let valkey_url = cache_cfg.and_then(|c| c.valkey_url.as_deref());
 
     #[cfg(feature = "valkey")]
     if backend == "valkey" {
-        if let Some(url) = valkey_url {
+        if let Some(url) = cache_cfg.and_then(|c| c.valkey_url.as_deref()) {
             match ValkeyCache::new(url).await {
                 Ok(cache) => {
                     tracing::info!("using valkey cache at {url}");

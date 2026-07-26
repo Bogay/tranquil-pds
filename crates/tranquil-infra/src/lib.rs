@@ -1,6 +1,15 @@
+#[cfg(feature = "cache-keys")]
+pub mod cache_keys;
+
+#[cfg(feature = "testing")]
+mod memory_cache;
+#[cfg(feature = "testing")]
+pub use memory_cache::MemoryCache;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
+use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -54,6 +63,42 @@ pub trait Cache: Send + Sync {
     async fn set_bytes(&self, key: &str, value: &[u8], ttl: Duration) -> Result<(), CacheError>;
     fn is_available(&self) -> bool {
         true
+    }
+}
+
+pub async fn read_json<T: serde::de::DeserializeOwned>(cache: &dyn Cache, key: &str) -> Option<T> {
+    let json = cache.get(key).await?;
+    serde_json::from_str(&json).ok()
+}
+
+pub async fn write_json<T: serde::Serialize>(
+    cache: &dyn Cache,
+    key: &str,
+    value: &T,
+    ttl: Duration,
+) {
+    if let Ok(json) = serde_json::to_string(value) {
+        let _ = cache.set(key, &json, ttl).await;
+    }
+}
+
+pub async fn cached_json<T, E, Fut>(
+    cache: &dyn Cache,
+    key: &str,
+    ttl: Duration,
+    fetch: impl FnOnce() -> Fut,
+) -> Result<T, E>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+    Fut: Future<Output = Result<T, E>>,
+{
+    match read_json(cache, key).await {
+        Some(value) => Ok(value),
+        None => {
+            let value = fetch().await?;
+            write_json(cache, key, &value, ttl).await;
+            Ok(value)
+        }
     }
 }
 

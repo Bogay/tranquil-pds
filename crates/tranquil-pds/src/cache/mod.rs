@@ -1,4 +1,6 @@
-pub use tranquil_cache::{Cache, CacheError, DistributedRateLimiter, NoOpCache, create_cache};
+pub use tranquil_cache::{
+    Cache, CacheError, DistributedRateLimiter, NoOpCache, cached_json, create_cache,
+};
 
 #[cfg(feature = "valkey")]
 pub use tranquil_cache::{RedisRateLimiter, ValkeyCache};

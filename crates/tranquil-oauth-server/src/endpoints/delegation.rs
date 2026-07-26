@@ -13,7 +13,8 @@ use tranquil_pds::rate_limit::{LoginLimit, OAuthRateLimited, TotpVerifyLimit};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::PlainPassword;
 use tranquil_pds::util::ClientIp;
-use tranquil_types::did_doc::{extract_handle, extract_pds_endpoint};
+use tranquil_types::did_doc::{PdsEndpointError, extract_handle, extract_pds_endpoint};
+use tranquil_types::url_kind;
 use tranquil_types::{Did, RequestId};
 
 #[allow(clippy::result_large_err)]
@@ -231,10 +232,16 @@ pub async fn delegation_auth(
             }
         };
 
-        let pds_url = match extract_pds_endpoint(&did_doc) {
-            Some(url) => url,
-            None => {
+        let pds_url = match extract_pds_endpoint::<url_kind::Pds>(&did_doc) {
+            Ok(url) => url,
+            Err(PdsEndpointError::Missing) => {
                 return DelegationAuthResponse::err("Controller has no PDS endpoint");
+            }
+            Err(PdsEndpointError::Invalid(e)) => {
+                tracing::warn!(controller = %controller_did, error = %e, "Controller PDS endpoint rejected");
+                return DelegationAuthResponse::err(
+                    "Controller PDS endpoint isn't a usable https URL",
+                );
             }
         };
 
@@ -447,7 +454,7 @@ pub async fn delegation_auth_token(
 #[derive(Debug, Deserialize)]
 pub struct CrossPdsCallbackParams {
     pub code: tranquil_types::AuthorizationCode,
-    pub state: String,
+    pub state: tranquil_types::CrossPdsState,
     pub iss: Option<String>,
 }
 
@@ -474,7 +481,7 @@ pub async fn delegation_callback(
 
     if let Some(ref expected_issuer) = auth_state.expected_issuer {
         match &params.iss {
-            Some(iss) if iss != expected_issuer => {
+            Some(iss) if iss.as_str() != expected_issuer.as_str() => {
                 tracing::error!(
                     "Cross-PDS issuer mismatch: expected {}, got {}",
                     expected_issuer,

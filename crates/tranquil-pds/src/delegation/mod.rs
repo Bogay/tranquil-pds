@@ -13,6 +13,16 @@ pub use tranquil_db_traits::DelegationActionType;
 use crate::did::DidResolutionError;
 use crate::state::AppState;
 use crate::types::{Did, Handle};
+use tranquil_types::did_doc::{PdsEndpointError, extract_handle, extract_pds_endpoint};
+use tranquil_types::{InvalidHttpUrl, PdsUrl};
+
+#[derive(Debug, thiserror::Error)]
+pub enum IdentityResolutionError {
+    #[error(transparent)]
+    DidResolution(#[from] DidResolutionError),
+    #[error("remote PDS endpoint is unusable: {0}")]
+    PdsEndpoint(InvalidHttpUrl),
+}
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,14 +31,14 @@ pub struct ResolvedIdentity {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<Handle>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub pds_url: Option<String>,
+    pub pds_url: Option<PdsUrl>,
     pub is_local: bool,
 }
 
 pub async fn resolve_identity(
     state: &AppState,
     did: &Did,
-) -> Result<ResolvedIdentity, DidResolutionError> {
+) -> Result<ResolvedIdentity, IdentityResolutionError> {
     let is_local = state
         .repos
         .user
@@ -38,26 +48,23 @@ pub async fn resolve_identity(
         .flatten()
         .is_some();
 
-    let did_doc = state.did_resolver.resolve_did(did).await?;
+    let did_doc = state.did_resolver.fetch_did_document(did).await?;
 
-    let pds_url = did_doc.services.iter().find_map(|svc| {
-        if (svc.id == "#atproto_pds" || svc.id.ends_with("#atproto_pds"))
-            && svc.service_type == "AtprotoPersonalDataServer"
-        {
-            Some(svc.service_endpoint.clone())
-        } else {
+    let pds_url = match (extract_pds_endpoint(&did_doc), is_local) {
+        (Ok(url), _) => Some(url),
+        (Err(PdsEndpointError::Missing), _) => None,
+        (Err(PdsEndpointError::Invalid(e)), true) => {
+            tracing::debug!(did = %did, error = %e, "local account has an unusable PDS endpoint");
             None
         }
-    });
-    let handle = did_doc
-        .also_known_as
-        .iter()
-        .find_map(|alias| alias.strip_prefix("at://"))
-        .and_then(|s| Handle::new(s).ok());
+        (Err(PdsEndpointError::Invalid(e)), false) => {
+            return Err(IdentityResolutionError::PdsEndpoint(e));
+        }
+    };
 
     Ok(ResolvedIdentity {
         did: did.clone(),
-        handle,
+        handle: extract_handle(&did_doc),
         pds_url,
         is_local,
     })

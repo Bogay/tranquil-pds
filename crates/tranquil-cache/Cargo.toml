@@ -9,7 +9,7 @@ valkey = ["dep:redis"]
 
 [dependencies]
 tranquil-config = { workspace = true }
-tranquil-infra = { workspace = true }
+tranquil-infra = { workspace = true, features = ["cache-keys"] }
 tranquil-ripple = { workspace = true }
 
 async-trait = { workspace = true }

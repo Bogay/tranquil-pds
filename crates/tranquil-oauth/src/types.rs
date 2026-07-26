@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tranquil_types::{ClientId, Did};
+use tranquil_types::{AuthServerEndpoint, ClientId, Did, Issuer};
 
 pub use tranquil_types::{AuthorizationCode, DeviceId, RefreshToken, RequestId, TokenId};
 
@@ -195,9 +195,9 @@ pub struct ProtectedResourceMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizationServerMetadata {
-    pub issuer: String,
-    pub authorization_endpoint: String,
-    pub token_endpoint: String,
+    pub issuer: Issuer,
+    pub authorization_endpoint: AuthServerEndpoint,
+    pub token_endpoint: AuthServerEndpoint,
     pub jwks_uri: String,
     pub registration_endpoint: Option<String>,
     pub scopes_supported: Option<Vec<String>>,
@@ -206,7 +206,7 @@ pub struct AuthorizationServerMetadata {
     pub grant_types_supported: Option<Vec<String>>,
     pub token_endpoint_auth_methods_supported: Option<Vec<String>>,
     pub code_challenge_methods_supported: Option<Vec<String>>,
-    pub pushed_authorization_request_endpoint: Option<String>,
+    pub pushed_authorization_request_endpoint: Option<AuthServerEndpoint>,
     pub require_pushed_authorization_requests: Option<bool>,
     pub dpop_signing_alg_values_supported: Option<Vec<String>>,
     pub authorization_response_iss_parameter_supported: Option<bool>,

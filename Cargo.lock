@@ -7838,7 +7838,10 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
+ "tranquil-types",
 ]
 
 [[package]]
@@ -7855,9 +7858,9 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tranquil-infra",
  "tranquil-types",
  "unicode-segmentation",
- "urlencoding",
  "wiremock",
 ]
 
@@ -7880,6 +7883,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "tracing",
+ "tranquil-infra",
  "tranquil-types",
  "uuid",
 ]
@@ -7911,6 +7915,7 @@ dependencies = [
  "tranquil-config",
  "tranquil-crypto",
  "tranquil-db-traits",
+ "tranquil-infra",
  "tranquil-pds",
  "tranquil-scopes",
  "tranquil-types",
@@ -7991,6 +7996,7 @@ dependencies = [
  "tranquil-config",
  "tranquil-db",
  "tranquil-db-traits",
+ "tranquil-infra",
  "tranquil-lexicon",
  "tranquil-oauth",
  "tranquil-oauth-server",
@@ -8221,10 +8227,14 @@ dependencies = [
  "cid",
  "jacquard-common",
  "rand 0.8.5",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
  "uuid",
 ]
 

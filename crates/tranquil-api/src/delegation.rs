@@ -12,8 +12,8 @@ use tranquil_pds::api::{
 };
 use tranquil_pds::auth::{Active, Auth};
 use tranquil_pds::delegation::{
-    DelegationActionType, SCOPE_PRESETS, ValidatedDelegationScope, verify_can_add_controllers,
-    verify_can_control_accounts,
+    DelegationActionType, IdentityResolutionError, SCOPE_PRESETS, ValidatedDelegationScope,
+    verify_can_add_controllers, verify_can_control_accounts,
 };
 use tranquil_pds::rate_limit::{AccountCreationLimit, RateLimited};
 use tranquil_pds::state::AppState;
@@ -65,16 +65,16 @@ pub async fn add_controller(
 ) -> Result<Json<SuccessResponse>, ApiError> {
     let resolved = tranquil_pds::delegation::resolve_identity(&state, &input.controller_did)
         .await
-        .map_err(|_| ApiError::ControllerNotFound)?;
+        .map_err(|e| match e {
+            IdentityResolutionError::PdsEndpoint(_) => ApiError::InvalidDelegation(
+                "Controller PDS endpoint isn't a usable https URL".into(),
+            ),
+            IdentityResolutionError::DidResolution(_) => ApiError::ControllerNotFound,
+        })?;
 
     if !resolved.is_local
         && let Some(ref pds_url) = resolved.pds_url
     {
-        if !pds_url.starts_with("https://") {
-            return Err(ApiError::InvalidDelegation(
-                "Controller PDS must use HTTPS".into(),
-            ));
-        }
         match state
             .cross_pds_oauth
             .check_remote_is_delegated(pds_url, &input.controller_did)
@@ -477,7 +477,12 @@ pub async fn resolve_controller(
 
     let resolved = tranquil_pds::delegation::resolve_identity(&state, &did)
         .await
-        .map_err(|_| ApiError::ControllerNotFound)?;
+        .map_err(|e| match e {
+            IdentityResolutionError::PdsEndpoint(_) => ApiError::InvalidDelegation(
+                "Controller PDS endpoint isn't a usable https URL".into(),
+            ),
+            IdentityResolutionError::DidResolution(_) => ApiError::ControllerNotFound,
+        })?;
 
     Ok(Json(resolved))
 }

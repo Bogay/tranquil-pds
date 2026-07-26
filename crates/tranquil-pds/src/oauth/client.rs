@@ -10,9 +10,11 @@ use tranquil_oauth::{
     AuthorizationServerMetadata, ClientMetadata, compute_es256_jkt, compute_pkce_challenge,
     create_dpop_proof,
 };
-use tranquil_types::{AuthorizationCode, ClientId, Did};
+use tranquil_types::{AuthorizationCode, ClientId, CrossPdsState, Did, Issuer, PdsUrl};
 
 use crate::cache::Cache;
+
+const SERVER_METADATA_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Error, Debug)]
 pub enum CrossPdsError {
@@ -32,11 +34,11 @@ pub enum CrossPdsError {
 pub struct CrossPdsAuthState {
     pub original_request_uri: String,
     pub controller_did: Did,
-    pub controller_pds_url: String,
+    pub controller_pds_url: PdsUrl,
     pub code_verifier: String,
     pub dpop_private_key_der: String,
     pub delegated_did: Did,
-    pub expected_issuer: Option<String>,
+    pub expected_issuer: Option<Issuer>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,17 +72,23 @@ impl CrossPdsOAuthClient {
         let http = Client::builder()
             .timeout(Duration::from_secs(15))
             .connect_timeout(Duration::from_secs(5))
+            .redirect(tranquil_types::redirect_policy(
+                tranquil_types::ReachPolicy::GlobalOnly,
+            ))
+            .dns_resolver(tranquil_types::dns_guard(
+                tranquil_types::ReachPolicy::GlobalOnly,
+            ))
             .build()
-            .unwrap_or_else(|_| Client::new());
+            .expect("failed to build cross-PDS OAuth HTTP client");
         Self { http, cache }
     }
 
     pub async fn store_auth_state(
         &self,
-        state_key: &str,
+        state_key: &CrossPdsState,
         auth_state: &CrossPdsAuthState,
     ) -> Result<(), CrossPdsError> {
-        let cache_key = format!("cross_pds_state:{}", state_key);
+        let cache_key = crate::cache_keys::cross_pds_state_key(state_key);
         let json_bytes = serde_json::to_vec(auth_state)
             .map_err(|e| CrossPdsError::ParFailed(format!("serialize auth state: {}", e)))?;
         let encrypted = crate::config::encrypt_key(&json_bytes)
@@ -93,9 +101,9 @@ impl CrossPdsOAuthClient {
 
     pub async fn retrieve_auth_state(
         &self,
-        state_key: &str,
+        state_key: &CrossPdsState,
     ) -> Result<CrossPdsAuthState, CrossPdsError> {
-        let cache_key = format!("cross_pds_state:{}", state_key);
+        let cache_key = crate::cache_keys::cross_pds_state_key(state_key);
         let encrypted_bytes = self.cache.get_bytes(&cache_key).await.ok_or_else(|| {
             CrossPdsError::TokenExchangeFailed("auth state expired or not found".into())
         })?;
@@ -110,13 +118,11 @@ impl CrossPdsOAuthClient {
         })
     }
 
-    pub async fn check_remote_is_delegated(&self, pds_url: &str, did: &Did) -> Option<bool> {
-        let url = format!(
-            "{}/oauth/security-status?identifier={}",
-            pds_url.trim_end_matches('/'),
-            urlencoding::encode(did.as_str())
-        );
-        let resp = self.http.get(&url).send().await.ok()?;
+    pub async fn check_remote_is_delegated(&self, pds_url: &PdsUrl, did: &Did) -> Option<bool> {
+        let mut url = pds_url.endpoint("oauth/security-status");
+        url.query_pairs_mut()
+            .append_pair("identifier", did.as_str());
+        let resp = self.http.get(url).send().await.ok()?;
         if !resp.status().is_success() {
             return None;
         }
@@ -176,24 +182,12 @@ impl CrossPdsOAuthClient {
         Ok(resp)
     }
 
-    fn require_https(url: &str, label: &str) -> Result<(), CrossPdsError> {
-        if !url.starts_with("https://") {
-            return Err(CrossPdsError::MetadataFetch(format!(
-                "{} must use HTTPS, got: {}",
-                label, url
-            )));
-        }
-        Ok(())
-    }
-
-    async fn resolve_authorization_server(&self, pds_url: &str) -> Result<String, CrossPdsError> {
-        Self::require_https(pds_url, "PDS URL")?;
-
-        let resource_url = format!(
-            "{}/.well-known/oauth-protected-resource",
-            pds_url.trim_end_matches('/')
-        );
-        if let Ok(resp) = self.http.get(&resource_url).send().await
+    async fn resolve_authorization_server(
+        &self,
+        pds_url: &PdsUrl,
+    ) -> Result<Issuer, CrossPdsError> {
+        let resource_url = pds_url.endpoint(".well-known/oauth-protected-resource");
+        if let Ok(resp) = self.http.get(resource_url).send().await
             && resp.status().is_success()
         {
             #[derive(Deserialize)]
@@ -203,30 +197,36 @@ impl CrossPdsOAuthClient {
             if let Ok(pr) = resp.json::<ProtectedResource>().await
                 && let Some(server) = pr.authorization_servers.and_then(|s| s.into_iter().next())
             {
-                Self::require_https(&server, "Authorization server")?;
-                return Ok(server);
+                return Issuer::new(server)
+                    .map_err(|e| CrossPdsError::MetadataFetch(e.to_string()));
             }
         }
-        Ok(pds_url.trim_end_matches('/').to_string())
+        Issuer::new(pds_url.as_str()).map_err(|e| CrossPdsError::MetadataFetch(e.to_string()))
     }
 
     pub async fn fetch_server_metadata(
         &self,
-        pds_url: &str,
+        pds_url: &PdsUrl,
     ) -> Result<AuthorizationServerMetadata, CrossPdsError> {
-        let cache_key = format!("cross_pds_oauth_meta:{}", pds_url);
-        if let Some(cached) = self.cache.get(&cache_key).await
-            && let Ok(meta) = serde_json::from_str(&cached)
-        {
-            return Ok(meta);
-        }
+        crate::cache::cached_json(
+            self.cache.as_ref(),
+            &crate::cache_keys::cross_pds_oauth_meta_key(pds_url),
+            SERVER_METADATA_TTL,
+            || self.fetch_verified_server_metadata(pds_url),
+        )
+        .await
+    }
 
+    async fn fetch_verified_server_metadata(
+        &self,
+        pds_url: &PdsUrl,
+    ) -> Result<AuthorizationServerMetadata, CrossPdsError> {
         let auth_server = self.resolve_authorization_server(pds_url).await?;
 
-        let url = format!("{}/.well-known/oauth-authorization-server", auth_server);
+        let url = auth_server.endpoint(".well-known/oauth-authorization-server");
         let resp = self
             .http
-            .get(&url)
+            .get(url.clone())
             .send()
             .await
             .map_err(|e| CrossPdsError::MetadataFetch(e.to_string()))?;
@@ -244,11 +244,11 @@ impl CrossPdsOAuthClient {
             .await
             .map_err(|e| CrossPdsError::MetadataFetch(e.to_string()))?;
 
-        if let Ok(json_str) = serde_json::to_string(&meta) {
-            let _ = self
-                .cache
-                .set(&cache_key, &json_str, Duration::from_secs(300))
-                .await;
+        if meta.issuer != auth_server {
+            return Err(CrossPdsError::MetadataFetch(format!(
+                "issuer mismatch: {} serves metadata for {}",
+                auth_server, meta.issuer
+            )));
         }
 
         Ok(meta)
@@ -256,22 +256,22 @@ impl CrossPdsOAuthClient {
 
     pub async fn initiate_par(
         &self,
-        pds_url: &str,
+        pds_url: &PdsUrl,
         urls: &DelegationOAuthUrls,
         login_hint: Option<&str>,
         original_request_uri: &str,
         controller_did: &Did,
         delegated_did: &Did,
-    ) -> Result<(ParResult, CrossPdsAuthState, String), CrossPdsError> {
+    ) -> Result<(ParResult, CrossPdsAuthState, CrossPdsState), CrossPdsError> {
         let meta = self.fetch_server_metadata(pds_url).await?;
         let par_endpoint = meta
             .pushed_authorization_request_endpoint
-            .as_deref()
+            .as_ref()
             .ok_or(CrossPdsError::NoParEndpoint)?;
 
         let code_verifier = crate::util::generate_random_token();
         let code_challenge = compute_pkce_challenge(&code_verifier);
-        let state = crate::util::generate_random_token();
+        let state = CrossPdsState::new(crate::util::generate_random_token());
 
         let signing_key = SigningKey::random(&mut OsRng);
         let dpop_key_der = URL_SAFE_NO_PAD.encode(signing_key.to_bytes());
@@ -284,7 +284,7 @@ impl CrossPdsOAuthClient {
             ("client_id", urls.client_id.to_string()),
             ("redirect_uri", urls.redirect_uri.clone()),
             ("scope", "atproto".to_string()),
-            ("state", state.clone()),
+            ("state", state.to_string()),
             ("code_challenge", code_challenge),
             ("code_challenge_method", "S256".to_string()),
             ("dpop_jkt", dpop_jkt),
@@ -294,7 +294,7 @@ impl CrossPdsOAuthClient {
         }
 
         let resp = self
-            .send_with_dpop_retry(&signing_key, "POST", par_endpoint, &params, None)
+            .send_with_dpop_retry(&signing_key, "POST", par_endpoint.as_str(), &params, None)
             .await
             .map_err(|e| CrossPdsError::ParFailed(e.to_string()))?;
 
@@ -313,17 +313,16 @@ impl CrossPdsOAuthClient {
             .await
             .map_err(|e| CrossPdsError::ParFailed(e.to_string()))?;
 
-        let authorize_url = format!(
-            "{}?request_uri={}&client_id={}",
-            meta.authorization_endpoint,
-            urlencoding::encode(&par_resp.request_uri),
-            urlencoding::encode(&urls.client_id)
-        );
+        let mut authorize_url = meta.authorization_endpoint.url().clone();
+        authorize_url
+            .query_pairs_mut()
+            .append_pair("request_uri", &par_resp.request_uri)
+            .append_pair("client_id", &urls.client_id);
 
         let auth_state = CrossPdsAuthState {
             original_request_uri: original_request_uri.to_string(),
             controller_did: controller_did.clone(),
-            controller_pds_url: pds_url.to_string(),
+            controller_pds_url: pds_url.clone(),
             code_verifier,
             dpop_private_key_der: dpop_key_der,
             delegated_did: delegated_did.clone(),
@@ -333,7 +332,7 @@ impl CrossPdsOAuthClient {
         Ok((
             ParResult {
                 request_uri: par_resp.request_uri,
-                authorize_url,
+                authorize_url: authorize_url.into(),
             },
             auth_state,
             state,
@@ -366,7 +365,13 @@ impl CrossPdsOAuthClient {
         ];
 
         let resp = self
-            .send_with_dpop_retry(&signing_key, "POST", &meta.token_endpoint, &params, None)
+            .send_with_dpop_retry(
+                &signing_key,
+                "POST",
+                meta.token_endpoint.as_str(),
+                &params,
+                None,
+            )
             .await
             .map_err(CrossPdsError::TokenExchangeFailed)?;
 

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt;
+use std::hash::Hash;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -813,6 +815,10 @@ simple_string_newtype! {
     pub struct Jti;
 }
 
+simple_string_newtype_no_sqlx! {
+    pub struct CrossPdsState;
+}
+
 simple_string_newtype! {
     pub struct AuthorizationCode;
 }
@@ -881,6 +887,425 @@ impl fmt::Display for CommsChannel {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostReach {
+    Global,
+    Loopback,
+    Private,
+}
+
+fn ipv4_reach(ip: std::net::Ipv4Addr) -> HostReach {
+    let [a, b, c, _] = ip.octets();
+    match ip {
+        _ if ip.is_loopback() => HostReach::Loopback,
+        _ if ip.is_private()
+            || ip.is_link_local()
+            || ip.is_multicast()
+            || ip.is_documentation()
+            || a == 0
+            || a == 100 && (64..128).contains(&b)
+            || a == 192 && b == 0 && c == 0
+            || a == 192 && b == 88 && c == 99
+            || a == 198 && (18..20).contains(&b)
+            || a & 0xf0 == 240 =>
+        {
+            HostReach::Private
+        }
+        _ => HostReach::Global,
+    }
+}
+
+fn ipv6_reach(ip: std::net::Ipv6Addr) -> HostReach {
+    let seg = ip.segments();
+    let embedded_ipv4 =
+        |hi: u16, lo: u16| std::net::Ipv4Addr::from((u32::from(hi) << 16) | u32::from(lo));
+    match ip.to_ipv4_mapped() {
+        Some(mapped) => ipv4_reach(mapped),
+        None => match ip {
+            _ if ip.is_loopback() => HostReach::Loopback,
+            _ if seg[..6] == [0, 0, 0, 0, 0, 0] => ipv4_reach(embedded_ipv4(seg[6], seg[7])),
+            _ if seg[..2] == [0x2001, 0] => ipv4_reach(embedded_ipv4(!seg[6], !seg[7])),
+            _ if seg[0] == 0x2002 => ipv4_reach(embedded_ipv4(seg[1], seg[2])),
+            _ if seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0] => {
+                ipv4_reach(embedded_ipv4(seg[6], seg[7]))
+            }
+            _ if seg[..3] == [0x64, 0xff9b, 1] => HostReach::Private,
+            _ if ip.is_unspecified()
+                || ip.is_multicast()
+                || seg[0] & 0xfe00 == 0xfc00
+                || seg[0] & 0xffc0 == 0xfe80
+                || seg[..2] == [0x2001, 0x0db8] =>
+            {
+                HostReach::Private
+            }
+            _ => HostReach::Global,
+        },
+    }
+}
+
+fn host_reach(host: url::Host<&str>) -> HostReach {
+    match host {
+        url::Host::Ipv4(ip) => ipv4_reach(ip),
+        url::Host::Ipv6(ip) => ipv6_reach(ip),
+        url::Host::Domain(name) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            match name.as_str() {
+                "localhost" => HostReach::Loopback,
+                _ if name.ends_with(".localhost") => HostReach::Loopback,
+                _ if name.ends_with(".local")
+                    || name.ends_with(".internal")
+                    || name.ends_with(".home.arpa")
+                    || name == "home.arpa" =>
+                {
+                    HostReach::Private
+                }
+                _ => HostReach::Global,
+            }
+        }
+    }
+}
+
+pub fn url_reach(url: &url::Url) -> Option<HostReach> {
+    url.host().map(host_reach)
+}
+
+pub fn ip_reach(ip: std::net::IpAddr) -> HostReach {
+    match ip {
+        std::net::IpAddr::V4(v4) => ipv4_reach(v4),
+        std::net::IpAddr::V6(v6) => ipv6_reach(v6),
+    }
+}
+
+pub fn reach_permits(reach: HostReach, policy: ReachPolicy) -> bool {
+    matches!(
+        (reach, policy),
+        (HostReach::Global, _)
+            | (
+                HostReach::Loopback,
+                ReachPolicy::AllowLoopback | ReachPolicy::AllowPrivate,
+            )
+            | (HostReach::Private, ReachPolicy::AllowPrivate)
+    )
+}
+
+pub fn url_reach_permits(url: &url::Url, policy: ReachPolicy) -> bool {
+    let Some(reach) = url_reach(url) else {
+        return false;
+    };
+    let scheme_permits = matches!(
+        (url.scheme(), reach),
+        ("https", _) | ("http", HostReach::Loopback | HostReach::Private)
+    );
+    scheme_permits && reach_permits(reach, policy)
+}
+
+fn parse_http_url(s: &str, policy: ReachPolicy, allow_query: bool) -> Option<url::Url> {
+    let parsed = url::Url::parse(s).ok()?;
+    let rejected = (parsed.query().is_some() && !allow_query)
+        || parsed.fragment().is_some()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || !url_reach_permits(&parsed, policy);
+    match rejected {
+        true => None,
+        false => Some(parsed),
+    }
+}
+
+const REDIRECT_HOP_LIMIT: usize = 5;
+
+pub fn redirect_policy(policy: ReachPolicy) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        let over_limit = attempt.previous().len() > REDIRECT_HOP_LIMIT;
+        let permitted = url_reach_permits(attempt.url(), policy);
+        let target = attempt.url().clone();
+        match (over_limit, permitted) {
+            (true, _) => attempt.error(format!("more than {} redirect hops", REDIRECT_HOP_LIMIT)),
+            (false, false) => attempt.error(format!(
+                "redirect target {} is outside the allowed host reach",
+                target
+            )),
+            (false, true) => attempt.follow(),
+        }
+    })
+}
+
+pub struct ReachGuardedDns(ReachPolicy);
+
+impl reqwest::dns::Resolve for ReachGuardedDns {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let policy = self.0;
+        Box::pin(async move {
+            let host = name.as_str().to_owned();
+            let permitted: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|addr| reach_permits(ip_reach(addr.ip()), policy))
+                .collect();
+            match permitted.is_empty() {
+                true => Err(format!(
+                    "no resolved address for {} is inside the allowed host reach",
+                    host
+                )
+                .into()),
+                false => Ok(Box::new(permitted.into_iter()) as reqwest::dns::Addrs),
+            }
+        })
+    }
+}
+
+pub fn dns_guard(policy: ReachPolicy) -> std::sync::Arc<ReachGuardedDns> {
+    std::sync::Arc::new(ReachGuardedDns(policy))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReachPolicy {
+    AllowLoopback,
+    AllowPrivate,
+    GlobalOnly,
+}
+
+impl ReachPolicy {
+    #[cfg(debug_assertions)]
+    pub const DEBUG_LOOPBACK: ReachPolicy = ReachPolicy::AllowLoopback;
+    #[cfg(not(debug_assertions))]
+    pub const DEBUG_LOOPBACK: ReachPolicy = ReachPolicy::GlobalOnly;
+}
+
+pub trait UrlKind {
+    const LABEL: &'static str;
+    const REACH_POLICY: ReachPolicy;
+    const ALLOW_QUERY: bool;
+}
+
+pub mod url_kind {
+    use super::{ReachPolicy, UrlKind};
+
+    pub struct AuthServerEndpoint;
+    impl UrlKind for AuthServerEndpoint {
+        const LABEL: &'static str = "authorization server endpoint";
+        const REACH_POLICY: ReachPolicy = ReachPolicy::GlobalOnly;
+        const ALLOW_QUERY: bool = true;
+    }
+
+    pub struct Issuer;
+    impl UrlKind for Issuer {
+        const LABEL: &'static str = "issuer";
+        const REACH_POLICY: ReachPolicy = ReachPolicy::GlobalOnly;
+        const ALLOW_QUERY: bool = false;
+    }
+
+    pub struct Jwks;
+    impl UrlKind for Jwks {
+        const LABEL: &'static str = "JWKS URI";
+        const REACH_POLICY: ReachPolicy = ReachPolicy::DEBUG_LOOPBACK;
+        const ALLOW_QUERY: bool = true;
+    }
+
+    pub struct Pds;
+    impl UrlKind for Pds {
+        const LABEL: &'static str = "PDS URL";
+        const REACH_POLICY: ReachPolicy = ReachPolicy::GlobalOnly;
+        const ALLOW_QUERY: bool = false;
+    }
+
+    pub struct SchemaHost;
+    impl UrlKind for SchemaHost {
+        const LABEL: &'static str = "schema host URL";
+        const REACH_POLICY: ReachPolicy = ReachPolicy::DEBUG_LOOPBACK;
+        const ALLOW_QUERY: bool = false;
+    }
+
+    pub struct SsoIssuer;
+    impl UrlKind for SsoIssuer {
+        const LABEL: &'static str = "SSO issuer";
+        const REACH_POLICY: ReachPolicy = ReachPolicy::AllowPrivate;
+        const ALLOW_QUERY: bool = false;
+    }
+
+    pub struct SsoJwks;
+    impl UrlKind for SsoJwks {
+        const LABEL: &'static str = "SSO JWKS URI";
+        const REACH_POLICY: ReachPolicy = ReachPolicy::AllowPrivate;
+        const ALLOW_QUERY: bool = true;
+    }
+}
+
+pub struct HttpUrl<K: UrlKind> {
+    raw: String,
+    parsed: url::Url,
+    kind: PhantomData<fn() -> K>,
+}
+
+pub type AuthServerEndpoint = HttpUrl<url_kind::AuthServerEndpoint>;
+pub type Issuer = HttpUrl<url_kind::Issuer>;
+pub type JwksUri = HttpUrl<url_kind::Jwks>;
+pub type PdsUrl = HttpUrl<url_kind::Pds>;
+pub type SchemaHostUrl = HttpUrl<url_kind::SchemaHost>;
+pub type SsoIssuer = HttpUrl<url_kind::SsoIssuer>;
+pub type SsoJwksUri = HttpUrl<url_kind::SsoJwks>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidHttpUrl {
+    pub kind: &'static str,
+    pub value: String,
+}
+
+impl fmt::Display for InvalidHttpUrl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid {}: {}", self.kind, self.value)
+    }
+}
+
+impl std::error::Error for InvalidHttpUrl {}
+
+impl<K: UrlKind> HttpUrl<K> {
+    pub fn new(s: impl Into<String>) -> Result<Self, InvalidHttpUrl> {
+        let raw = s.into();
+        match parse_http_url(&raw, K::REACH_POLICY, K::ALLOW_QUERY) {
+            Some(parsed) => Ok(Self {
+                raw,
+                parsed,
+                kind: PhantomData,
+            }),
+            None => Err(InvalidHttpUrl {
+                kind: K::LABEL,
+                value: raw,
+            }),
+        }
+    }
+
+    /// The URL as given.
+    /// OIDC & OAuth define issuer comparison as an
+    /// exact string match,
+    /// so anything sent to or compared against a peer uses this.
+    /// Give it to us raw & wriggling!!
+    pub fn as_str(&self) -> &str {
+        &self.raw
+    }
+
+    /// The parsed form: lowercased scheme and host, with `/` for a bare authority.
+    /// Cache keys use this so `https://oyster.cafe` and `https://oyster.cafe/` share one entry.
+    pub fn canonical(&self) -> &str {
+        self.parsed.as_str()
+    }
+
+    pub fn url(&self) -> &url::Url {
+        &self.parsed
+    }
+
+    pub fn endpoint(&self, path: &str) -> url::Url {
+        let mut url = self.parsed.clone();
+        let base = url.path().trim_end_matches('/').to_owned();
+        url.set_path(&format!("{}/{}", base, path.trim_start_matches('/')));
+        url
+    }
+}
+
+pub mod http_url {
+    use super::{HttpUrl, UrlKind};
+    use serde::Deserialize;
+
+    pub fn deserialize_optional<'de, D, K>(deserializer: D) -> Result<Option<HttpUrl<K>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+        K: UrlKind,
+    {
+        Ok(Option::<String>::deserialize(deserializer)?.and_then(|s| {
+            HttpUrl::new(s)
+                .inspect_err(|e| tracing::warn!(error = %e, "discarding unusable URL field"))
+                .ok()
+        }))
+    }
+}
+
+impl<K: UrlKind> FromStr for HttpUrl<K> {
+    type Err = InvalidHttpUrl;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
+    }
+}
+
+impl<K: UrlKind> fmt::Debug for HttpUrl<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}({})", K::LABEL, self.raw)
+    }
+}
+
+impl<K: UrlKind> fmt::Display for HttpUrl<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.raw)
+    }
+}
+
+impl<K: UrlKind> Clone for HttpUrl<K> {
+    fn clone(&self) -> Self {
+        Self {
+            raw: self.raw.clone(),
+            parsed: self.parsed.clone(),
+            kind: PhantomData,
+        }
+    }
+}
+
+impl<K: UrlKind> PartialEq for HttpUrl<K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.parsed == other.parsed
+    }
+}
+
+impl<K: UrlKind> Eq for HttpUrl<K> {}
+
+impl<K: UrlKind> Hash for HttpUrl<K> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.parsed.hash(state);
+    }
+}
+
+impl<K: UrlKind> Serialize for HttpUrl<K> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.raw)
+    }
+}
+
+impl<'de, K: UrlKind> Deserialize<'de> for HttpUrl<K> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::new(s).map_err(|e| serde::de::Error::custom(e.to_string()))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmailTokenPurpose {
+    UpdateEmail,
+    ConfirmEmail,
+    DeleteAccount,
+    ResetPassword,
+    PlcOperation,
+}
+
+impl EmailTokenPurpose {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::UpdateEmail => "update_email",
+            Self::ConfirmEmail => "confirm_email",
+            Self::DeleteAccount => "delete_account",
+            Self::ResetPassword => "reset_password",
+            Self::PlcOperation => "plc_operation",
+        }
+    }
+}
+
+impl fmt::Display for EmailTokenPurpose {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "comms_type", rename_all = "snake_case")]
@@ -894,24 +1319,32 @@ pub enum CommsType {
 }
 
 pub mod did_doc {
-    pub fn extract_pds_endpoint(doc: &serde_json::Value) -> Option<String> {
+    use crate::{HttpUrl, InvalidHttpUrl, UrlKind};
+
+    #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+    pub enum PdsEndpointError {
+        #[error("DID document has no atproto PDS service entry")]
+        Missing,
+        #[error(transparent)]
+        Invalid(#[from] InvalidHttpUrl),
+    }
+
+    pub fn extract_pds_endpoint<K: UrlKind>(
+        doc: &serde_json::Value,
+    ) -> Result<HttpUrl<K>, PdsEndpointError> {
         doc.get("service")
             .and_then(|s| s.as_array())
             .and_then(|services| {
                 services.iter().find_map(|svc| {
                     let id = svc.get("id").and_then(|v| v.as_str()).unwrap_or_default();
                     let svc_type = svc.get("type").and_then(|v| v.as_str()).unwrap_or_default();
-                    if (id == "#atproto_pds" || id.ends_with("#atproto_pds"))
-                        && svc_type == "AtprotoPersonalDataServer"
-                    {
-                        svc.get("serviceEndpoint")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string())
-                    } else {
-                        None
-                    }
+                    ((id == "#atproto_pds" || id.ends_with("#atproto_pds"))
+                        && svc_type == "AtprotoPersonalDataServer")
+                        .then(|| svc.get("serviceEndpoint").and_then(|v| v.as_str()))?
                 })
             })
+            .ok_or(PdsEndpointError::Missing)
+            .and_then(|endpoint| HttpUrl::new(endpoint).map_err(PdsEndpointError::Invalid))
     }
 
     pub fn extract_handle(doc: &serde_json::Value) -> Option<crate::Handle> {
@@ -925,6 +1358,187 @@ pub mod did_doc {
                         .and_then(|h| crate::Handle::new(h).ok())
                 })
             })
+    }
+}
+
+#[cfg(test)]
+mod http_url_tests {
+    use super::did_doc::{PdsEndpointError, extract_pds_endpoint};
+    use super::{
+        AuthServerEndpoint, Issuer, JwksUri, PdsUrl, SchemaHostUrl, SsoIssuer, SsoJwksUri,
+    };
+
+    #[test]
+    fn extract_pds_endpoint_selects_the_pds_service_and_reports_missing_or_invalid() {
+        let labeler = serde_json::json!({
+            "id": "#atproto_labeler",
+            "type": "AtprotoLabeler",
+            "serviceEndpoint": "https://labeler.nel.pet"
+        });
+        let pds = |endpoint: &str| {
+            serde_json::json!({
+                "id": "#atproto_pds",
+                "type": "AtprotoPersonalDataServer",
+                "serviceEndpoint": endpoint
+            })
+        };
+        let both = serde_json::json!({ "service": [labeler.clone(), pds("https://oyster.cafe")] });
+        assert_eq!(
+            extract_pds_endpoint::<super::url_kind::Pds>(&both)
+                .unwrap()
+                .as_str(),
+            "https://oyster.cafe"
+        );
+        [
+            serde_json::json!({ "service": [labeler] }),
+            serde_json::json!({}),
+        ]
+        .iter()
+        .for_each(|doc| {
+            assert_eq!(
+                extract_pds_endpoint::<super::url_kind::Pds>(doc).unwrap_err(),
+                PdsEndpointError::Missing
+            );
+        });
+        let plain_http = serde_json::json!({ "service": [pds("http://oyster.cafe")] });
+        assert!(matches!(
+            extract_pds_endpoint::<super::url_kind::Pds>(&plain_http),
+            Err(PdsEndpointError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn pds_and_jwks_kinds_reject_private_and_reserved_addresses() {
+        [
+            "https://10.0.0.1",
+            "https://192.168.1.1",
+            "https://172.16.0.1",
+            "https://169.254.169.254/latest/meta-data",
+            "https://100.64.0.1",
+            "https://0.1.2.3",
+            "https://192.0.0.8",
+            "https://192.88.99.1",
+            "https://[fd00::1]",
+            "https://[fe80::1]",
+            "https://[ff02::1]",
+            "https://[::ffff:10.0.0.1]",
+            "https://[64:ff9b::a00:1]",
+            "https://[64:ff9b:1::1]",
+            "https://[2002:a00:1::]",
+            "https://[::10.0.0.1]",
+            "https://[2001:0:0:0:0:0:f5ff:fffe]",
+            "https://kelp.internal",
+            "https://whelk.local",
+            "https://limpet.home.arpa",
+        ]
+        .iter()
+        .for_each(|url| {
+            assert!(PdsUrl::new(*url).is_err(), "PdsUrl must reject {url}");
+            assert!(JwksUri::new(*url).is_err(), "JwksUri must reject {url}");
+        });
+        [
+            "https://oyster.cafe",
+            "https://[64:ff9b::808:808]",
+            "https://[::8.8.8.8]",
+            "https://[2001::f7f7:f7f7]",
+        ]
+        .iter()
+        .for_each(|url| assert!(PdsUrl::new(*url).is_ok(), "PdsUrl must accept {url}"));
+    }
+
+    #[test]
+    fn each_kind_applies_its_own_local_host_policy() {
+        assert!(PdsUrl::new("http://127.0.0.1:2583").is_err());
+        assert!(PdsUrl::new("https://localhost").is_err());
+        assert!(Issuer::new("http://localhost:8080").is_err());
+        assert_eq!(
+            JwksUri::new("http://localhost:8080/keys").is_ok(),
+            cfg!(debug_assertions)
+        );
+        assert_eq!(
+            SchemaHostUrl::new("http://127.0.0.1:2583").is_ok(),
+            cfg!(debug_assertions)
+        );
+        assert!(SsoJwksUri::new("http://127.0.0.1:8080/keys").is_ok());
+        assert!(SsoJwksUri::new("http://[::1]:8080/keys").is_ok());
+        assert!(SsoJwksUri::new("http://squid.localhost:8080/keys").is_ok());
+        assert!(SsoJwksUri::new("https://keycloak.internal/keys?client=squid").is_ok());
+        assert!(SsoJwksUri::new("http://oyster.cafe/keys").is_err());
+        assert!(SsoIssuer::new("https://keycloak.internal/realms/uni").is_ok());
+        assert!(SsoIssuer::new("http://10.0.0.5:8080").is_ok());
+        assert!(SsoIssuer::new("http://localhost:8080").is_ok());
+        assert!(SsoIssuer::new("http://oyster.cafe").is_err());
+        assert!(AuthServerEndpoint::new("https://oyster.cafe/oauth/par?tenant=uni").is_ok());
+        [
+            "https://169.254.169.254/oauth/par",
+            "https://[fd00::1]/oauth/par",
+            "http://127.0.0.1:2583/oauth/par",
+            "http://oyster.cafe/oauth/par",
+        ]
+        .iter()
+        .for_each(|url| {
+            assert!(
+                AuthServerEndpoint::new(*url).is_err(),
+                "AuthServerEndpoint must reject {url}"
+            );
+        });
+    }
+
+    #[test]
+    fn canonicalization_keeps_identity_and_rejects_query_fragment_and_userinfo() {
+        assert_eq!(
+            PdsUrl::new("HTTPS://oyster.cafe").unwrap().canonical(),
+            "https://oyster.cafe/"
+        );
+        let bare = PdsUrl::new("https://oyster.cafe").unwrap();
+        let slashed = PdsUrl::new("https://oyster.cafe/").unwrap();
+        assert_eq!(bare, slashed);
+        assert_eq!(bare.canonical(), slashed.canonical());
+        let issuer = Issuer::new("https://accounts.google.com").unwrap();
+        assert_eq!(issuer.as_str(), "https://accounts.google.com");
+        assert_eq!(issuer.canonical(), "https://accounts.google.com/");
+        assert_eq!(
+            PdsUrl::new("https://oyster.cafe/pds/")
+                .unwrap()
+                .endpoint(".well-known/oauth-protected-resource")
+                .as_str(),
+            "https://oyster.cafe/pds/.well-known/oauth-protected-resource"
+        );
+        assert_eq!(
+            JwksUri::new("https://oyster.cafe/keys?appid=abc")
+                .expect("JwksUri keeps the query")
+                .canonical(),
+            "https://oyster.cafe/keys?appid=abc"
+        );
+        assert!(PdsUrl::new("https://oyster.cafe/?x=1").is_err());
+        assert!(PdsUrl::new("https://oyster.cafe/#frag").is_err());
+        assert!(PdsUrl::new("https://nel:pw@oyster.cafe").is_err());
+        assert!(Issuer::new("https://oyster.cafe/?x=1").is_err());
+        assert!(JwksUri::new("https://oyster.cafe/keys#frag").is_err());
+    }
+}
+
+#[cfg(test)]
+mod dns_guard_tests {
+    use super::{ReachPolicy, dns_guard};
+    use reqwest::dns::Resolve;
+
+    #[tokio::test]
+    async fn the_policy_gates_loopback_resolution() {
+        let name = |host: &str| host.parse::<reqwest::dns::Name>().expect("valid hostname");
+        assert!(
+            dns_guard(ReachPolicy::GlobalOnly)
+                .resolve(name("localhost"))
+                .await
+                .is_err()
+        );
+        let addrs: Vec<_> = dns_guard(ReachPolicy::AllowLoopback)
+            .resolve(name("localhost"))
+            .await
+            .expect("localhost resolves")
+            .collect();
+        assert!(!addrs.is_empty());
+        assert!(addrs.iter().all(|a| a.ip().is_loopback()));
     }
 }
 

@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 tranquil-types = { workspace = true }
+tranquil-infra = { workspace = true, features = ["cache-keys"] }
 
 anyhow = { workspace = true }
 sqlx = { workspace = true }

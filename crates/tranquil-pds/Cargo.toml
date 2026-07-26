@@ -15,7 +15,7 @@ tranquil-auth = { workspace = true }
 tranquil-oauth = { workspace = true }
 tranquil-comms = { workspace = true }
 tranquil-signal = { workspace = true }
-tranquil-db = { workspace = true }
+tranquil-db = { workspace = true, features = ["postgres"] }
 tranquil-db-traits = { workspace = true }
 tranquil-store = { workspace = true }
 tranquil-lexicon = { workspace = true, features = ["resolve"] }
@@ -86,6 +86,7 @@ frontend = []
 native-tls-roots = ["tranquil-oauth/native-tls-roots"]
 
 [dev-dependencies]
+tranquil-infra = { workspace = true, features = ["testing"] }
 tempfile = "3"
 ciborium = { workspace = true }
 ctor = { workspace = true }
