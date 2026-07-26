@@ -165,12 +165,11 @@ impl PlcOpOrTombstone {
     }
 }
 
-const PLC_CACHE_TTL_SECS: u64 = 300;
-
 pub struct PlcClient {
     base_url: String,
     client: Client,
     cache: Option<Arc<dyn Cache>>,
+    cache_ttl: Duration,
 }
 
 impl PlcClient {
@@ -193,12 +192,19 @@ impl PlcClient {
             .connect_timeout(Duration::from_secs(connect_timeout_secs))
             .pool_max_idle_per_host(5)
             .pool_idle_timeout(Duration::from_secs(90))
+            .redirect(tranquil_types::redirect_policy(
+                tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
+            ))
+            .dns_resolver(tranquil_types::dns_guard(
+                tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
+            ))
             .build()
-            .unwrap_or_else(|_| Client::new());
+            .expect("failed to build PLC directory HTTP client");
         Self {
             base_url,
             client,
             cache,
+            cache_ttl: Duration::from_secs(cfg.map_or(300, |c| c.plc.did_cache_ttl_secs)),
         }
     }
 
@@ -206,15 +212,7 @@ impl PlcClient {
         urlencoding::encode(did.as_str()).to_string()
     }
 
-    pub async fn get_document(&self, did: &Did) -> Result<Value, PlcError> {
-        let cache_key = crate::cache_keys::plc_doc_key(did);
-        if let Some(ref cache) = self.cache
-            && let Some(cached) = cache.get(&cache_key).await
-            && let Ok(value) = serde_json::from_str(&cached)
-        {
-            return Ok(value);
-        }
-        let url = format!("{}/{}", self.base_url, Self::encode_did(did));
+    async fn fetch_json<T: serde::de::DeserializeOwned>(&self, url: String) -> Result<T, PlcError> {
         let response = self.client.get(&url).send().await?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(PlcError::NotFound);
@@ -227,101 +225,52 @@ impl PlcClient {
                 status, body
             )));
         }
-        let value: Value = response
+        response
             .json()
             .await
-            .map_err(|e| PlcError::InvalidResponse(e.to_string()))?;
-        if let Some(ref cache) = self.cache
-            && let Ok(json_str) = serde_json::to_string(&value)
-        {
-            let _ = cache
-                .set(
-                    &cache_key,
-                    &json_str,
-                    Duration::from_secs(PLC_CACHE_TTL_SECS),
-                )
-                .await;
+            .map_err(|e| PlcError::InvalidResponse(e.to_string()))
+    }
+
+    async fn cached_fetch(&self, cache_key: &str, url: String) -> Result<Value, PlcError> {
+        match &self.cache {
+            Some(cache) => {
+                crate::cache::cached_json(cache.as_ref(), cache_key, self.cache_ttl, || {
+                    self.fetch_json(url)
+                })
+                .await
+            }
+            None => self.fetch_json(url).await,
         }
-        Ok(value)
+    }
+
+    pub async fn get_document(&self, did: &Did) -> Result<Value, PlcError> {
+        let url = format!("{}/{}", self.base_url, Self::encode_did(did));
+        self.cached_fetch(&crate::cache_keys::plc_doc_key(did), url)
+            .await
     }
 
     pub async fn get_document_data(&self, did: &Did) -> Result<Value, PlcError> {
-        let cache_key = crate::cache_keys::plc_data_key(did);
-        if let Some(ref cache) = self.cache
-            && let Some(cached) = cache.get(&cache_key).await
-            && let Ok(value) = serde_json::from_str(&cached)
-        {
-            return Ok(value);
-        }
         let url = format!("{}/{}/data", self.base_url, Self::encode_did(did));
-        let response = self.client.get(&url).send().await?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(PlcError::NotFound);
-        }
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(PlcError::InvalidResponse(format!(
-                "HTTP {}: {}",
-                status, body
-            )));
-        }
-        let value: Value = response
-            .json()
+        self.cached_fetch(&crate::cache_keys::plc_data_key(did), url)
             .await
-            .map_err(|e| PlcError::InvalidResponse(e.to_string()))?;
-        if let Some(ref cache) = self.cache
-            && let Ok(json_str) = serde_json::to_string(&value)
-        {
-            let _ = cache
-                .set(
-                    &cache_key,
-                    &json_str,
-                    Duration::from_secs(PLC_CACHE_TTL_SECS),
-                )
-                .await;
-        }
-        Ok(value)
     }
 
     pub async fn get_last_op(&self, did: &Did) -> Result<PlcOpOrTombstone, PlcError> {
-        let url = format!("{}/{}/log/last", self.base_url, Self::encode_did(did));
-        let response = self.client.get(&url).send().await?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(PlcError::NotFound);
-        }
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(PlcError::InvalidResponse(format!(
-                "HTTP {}: {}",
-                status, body
-            )));
-        }
-        response
-            .json()
-            .await
-            .map_err(|e| PlcError::InvalidResponse(e.to_string()))
+        self.fetch_json(format!(
+            "{}/{}/log/last",
+            self.base_url,
+            Self::encode_did(did)
+        ))
+        .await
     }
 
     pub async fn get_audit_log(&self, did: &Did) -> Result<Vec<Value>, PlcError> {
-        let url = format!("{}/{}/log/audit", self.base_url, Self::encode_did(did));
-        let response = self.client.get(&url).send().await?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(PlcError::NotFound);
-        }
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(PlcError::InvalidResponse(format!(
-                "HTTP {}: {}",
-                status, body
-            )));
-        }
-        response
-            .json()
-            .await
-            .map_err(|e| PlcError::InvalidResponse(e.to_string()))
+        self.fetch_json(format!(
+            "{}/{}/log/audit",
+            self.base_url,
+            Self::encode_did(did)
+        ))
+        .await
     }
 
     pub async fn send_operation(&self, did: &Did, operation: &Value) -> Result<(), PlcError> {
