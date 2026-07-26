@@ -390,7 +390,7 @@
 # Default value: 5
 #connect_timeout_secs = 5
 
-# Seconds to cache DID documents in memory.
+# Seconds to cache DID documents.
 #
 # Can also be specified via environment variable `DID_CACHE_TTL_SECS`.
 #

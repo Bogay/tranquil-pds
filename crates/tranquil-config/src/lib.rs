@@ -835,7 +835,7 @@ pub struct PlcConfig {
     #[config(env = "PLC_CONNECT_TIMEOUT_SECS", default = 5)]
     pub connect_timeout_secs: u64,
 
-    /// Seconds to cache DID documents in memory.
+    /// Seconds to cache DID documents.
     #[config(env = "DID_CACHE_TTL_SECS", default = 300)]
     pub did_cache_ttl_secs: u64,
 }

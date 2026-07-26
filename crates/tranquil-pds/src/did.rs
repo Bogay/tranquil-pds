@@ -1,10 +1,9 @@
+use crate::cache::Cache;
 use crate::types::Did;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use std::time::Duration;
 use tracing::{debug, info, warn};
 
 #[derive(Debug, thiserror::Error)]
@@ -13,6 +12,8 @@ pub enum DidResolutionError {
     UnsupportedDidMethod(String),
     #[error("Invalid did:web format")]
     InvalidDidWeb,
+    #[error("did:web host {0} is outside the allowed host reach")]
+    DidWebHostRejected(String),
     #[error("HTTP request failed: {0}")]
     HttpFailed(String),
     #[error("Invalid DID document: {0}")]
@@ -53,43 +54,50 @@ pub struct DidService {
 pub struct ResolvedService {
     pub url: String,
     pub did: Did,
-    pub service_id: String,
 }
 
-type TimedCache<T> = RwLock<HashMap<Box<str>, (Instant, Arc<T>)>>;
-
 pub struct DidResolver {
-    did_doc_cache: TimedCache<serde_json::Value>,
-    parsed_did_doc_cache: TimedCache<DidDocument>,
-    service_cache: TimedCache<ResolvedService>,
+    cache: Arc<dyn Cache>,
     client: Client,
     cache_ttl: Duration,
     plc_directory_url: String,
 }
 
 impl DidResolver {
-    pub fn new() -> Self {
+    pub fn new(cache: Arc<dyn Cache>) -> Self {
         let cfg = tranquil_config::get();
-        let cache_ttl_secs = cfg.plc.did_cache_ttl_secs;
-
-        let plc_directory_url = cfg.plc.directory_url.clone();
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
             .pool_max_idle_per_host(10)
+            .redirect(tranquil_types::redirect_policy(
+                tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
+            ))
+            .dns_resolver(tranquil_types::dns_guard(
+                tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
+            ))
             .build()
-            .unwrap_or_else(|_| Client::new());
+            .expect("failed to build DID resolver HTTP client");
 
         info!("DID resolver initialized");
 
         Self {
-            did_doc_cache: RwLock::new(HashMap::new()),
-            parsed_did_doc_cache: RwLock::new(HashMap::new()),
-            service_cache: RwLock::new(HashMap::new()),
+            cache,
             client,
-            cache_ttl: Duration::from_secs(cache_ttl_secs),
-            plc_directory_url,
+            cache_ttl: Duration::from_secs(cfg.plc.did_cache_ttl_secs),
+            plc_directory_url: cfg.plc.directory_url.clone(),
+        }
+    }
+
+    fn doc_cache_key(did: &Did) -> Result<String, DidResolutionError> {
+        match (did.is_plc(), did.is_web()) {
+            (true, _) => Ok(crate::cache_keys::plc_doc_key(did)),
+            (_, true) => Ok(crate::cache_keys::did_web_doc_key(did)),
+            _ => {
+                warn!("Unsupported DID method: {}", did);
+                Err(DidResolutionError::UnsupportedDidMethod(did.to_string()))
+            }
         }
     }
 
@@ -97,175 +105,50 @@ impl DidResolver {
         &self,
         did: &Did,
         service_id: &str,
-    ) -> Result<Arc<ResolvedService>, ServiceResolutionError> {
-        {
-            let cache = self.service_cache.read().await;
-            if let Some(cached) = cache.get(&*format!("{did}#{service_id}"))
-                && cached.0.elapsed() < self.cache_ttl
-            {
-                return Ok(cached.1.clone());
-            }
-        }
-
+    ) -> Result<ResolvedService, ServiceResolutionError> {
         let did_doc = self.resolve_did(did).await?;
-        let Some(service) = did_doc
+        let suffix = format!("#{service_id}");
+        did_doc
             .services
             .iter()
-            .find(|s| s.id.ends_with(&format!("#{service_id}")))
-        else {
-            return Err(ServiceResolutionError::ServiceIdNotFound(service_id.into()));
-        };
-
-        let resolved = Arc::new(ResolvedService {
-            url: service.service_endpoint.clone(),
-            did: did.clone(),
-            service_id: service_id.into(),
-        });
-
-        {
-            let mut cache = self.service_cache.write().await;
-            cache.insert(
-                format!("{did}#{service_id}").into(),
-                (Instant::now(), resolved.clone()),
-            );
-        }
-
-        Ok(resolved)
+            .find(|s| s.id.ends_with(&suffix))
+            .map(|service| ResolvedService {
+                url: service.service_endpoint.clone(),
+                did: did.clone(),
+            })
+            .ok_or_else(|| ServiceResolutionError::ServiceIdNotFound(service_id.into()))
     }
 
-    pub async fn resolve_did(&self, did: &Did) -> Result<Arc<DidDocument>, DidResolutionError> {
-        {
-            let cache = self.parsed_did_doc_cache.read().await;
-            if let Some(cached) = cache.get(did.as_str())
-                && cached.0.elapsed() < self.cache_ttl
-            {
-                return Ok(cached.1.clone());
-            }
-        }
-
-        let resolved = Arc::new(self.resolve_did_uncached(did).await?);
-
-        {
-            let mut cache = self.parsed_did_doc_cache.write().await;
-            cache.insert(did.as_str().into(), (Instant::now(), resolved.clone()));
-        }
-
-        Ok(resolved)
+    pub async fn resolve_did(&self, did: &Did) -> Result<DidDocument, DidResolutionError> {
+        self.cached_did_document(did).await
     }
 
-    pub async fn refresh_did(&self, did: &Did) -> Result<Arc<DidDocument>, DidResolutionError> {
-        {
-            let mut cache = self.parsed_did_doc_cache.write().await;
-            cache.remove(did.as_str());
-            let mut cache = self.service_cache.write().await;
-            cache.retain(|k, _| !k.starts_with(did.as_str()));
-        }
+    pub async fn refresh_did(&self, did: &Did) -> Result<DidDocument, DidResolutionError> {
+        let _ = self.cache.delete(&Self::doc_cache_key(did)?).await;
         self.resolve_did(did).await
-    }
-
-    async fn resolve_did_uncached(&self, did: &Did) -> Result<DidDocument, DidResolutionError> {
-        if did.is_web() {
-            self.resolve_did_web(did).await
-        } else if did.is_plc() {
-            self.resolve_did_plc(did).await
-        } else {
-            warn!("Unsupported DID method: {}", did);
-            Err(DidResolutionError::UnsupportedDidMethod(did.to_string()))
-        }
-    }
-
-    async fn resolve_did_web(&self, did: &Did) -> Result<DidDocument, DidResolutionError> {
-        let url = build_did_web_url(did)?;
-
-        debug!("Resolving did:web {} via {}", did, url);
-
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| DidResolutionError::HttpFailed(e.to_string()))?;
-
-        if !resp.status().is_success() {
-            return Err(DidResolutionError::HttpFailed(format!(
-                "HTTP {}",
-                resp.status()
-            )));
-        }
-
-        resp.json::<DidDocument>()
-            .await
-            .map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
-    }
-
-    async fn resolve_did_plc(&self, did: &Did) -> Result<DidDocument, DidResolutionError> {
-        let url = format!(
-            "{}/{}",
-            self.plc_directory_url,
-            urlencoding::encode(did.as_str())
-        );
-
-        debug!("Resolving did:plc {} via {}", did, url);
-
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| DidResolutionError::HttpFailed(e.to_string()))?;
-
-        if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(DidResolutionError::NotFound);
-        }
-
-        if !resp.status().is_success() {
-            return Err(DidResolutionError::HttpFailed(format!(
-                "HTTP {}",
-                resp.status()
-            )));
-        }
-
-        resp.json::<DidDocument>()
-            .await
-            .map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
     }
 
     pub async fn fetch_did_document(
         &self,
         did: &Did,
-    ) -> Result<Arc<serde_json::Value>, DidResolutionError> {
-        {
-            let cache = self.did_doc_cache.read().await;
-            if let Some(cached) = cache.get(did.as_str())
-                && cached.0.elapsed() < self.cache_ttl
-            {
-                return Ok(cached.1.clone());
-            }
-        }
-
-        let resolved = Arc::new(self.fetch_did_document_uncached(did).await?);
-
-        {
-            let mut cache = self.did_doc_cache.write().await;
-            cache.insert(did.as_str().into(), (Instant::now(), resolved.clone()));
-        }
-
-        Ok(resolved)
+    ) -> Result<serde_json::Value, DidResolutionError> {
+        self.cached_did_document(did).await
     }
 
-    // TODO: make cached version
-    async fn fetch_did_document_uncached(
+    async fn cached_did_document<T: serde::de::DeserializeOwned>(
         &self,
         did: &Did,
-    ) -> Result<serde_json::Value, DidResolutionError> {
-        if did.is_web() {
-            self.fetch_did_document_web(did).await
-        } else if did.is_plc() {
-            self.fetch_did_document_plc(did).await
-        } else {
-            warn!("Unsupported DID method: {}", did);
-            Err(DidResolutionError::UnsupportedDidMethod(did.to_string()))
-        }
+    ) -> Result<T, DidResolutionError> {
+        let cache_key = Self::doc_cache_key(did)?;
+        let doc =
+            crate::cache::cached_json(self.cache.as_ref(), &cache_key, self.cache_ttl, || async {
+                match did.is_plc() {
+                    true => self.fetch_did_document_plc(did).await,
+                    false => self.fetch_did_document_web(did).await,
+                }
+            })
+            .await?;
+        serde_json::from_value(doc).map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
     }
 
     async fn fetch_did_document_web(
@@ -273,6 +156,8 @@ impl DidResolver {
         did: &Did,
     ) -> Result<serde_json::Value, DidResolutionError> {
         let url = build_did_web_url(did)?;
+
+        debug!("Resolving did:web {} via {}", did, url);
 
         let resp = self
             .client
@@ -303,6 +188,8 @@ impl DidResolver {
             urlencoding::encode(did.as_str())
         );
 
+        debug!("Resolving did:plc {} via {}", did, url);
+
         let resp = self
             .client
             .get(&url)
@@ -325,21 +212,6 @@ impl DidResolver {
             .await
             .map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
     }
-
-    pub async fn invalidate_cache(&self, did: &Did) {
-        let mut doc_cache = self.parsed_did_doc_cache.write().await;
-        doc_cache.remove(did.as_str());
-    }
-}
-
-impl Default for DidResolver {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub fn create_did_resolver() -> Arc<DidResolver> {
-    Arc::new(DidResolver::new())
 }
 
 fn build_did_web_url(did: &Did) -> Result<String, DidResolutionError> {
@@ -372,18 +244,18 @@ fn build_did_web_url(did: &Did) -> Result<String, DidResolutionError> {
         }
     };
 
-    let scheme =
-        if host.starts_with("localhost") || host.starts_with("127.0.0.1") || host.contains(':') {
-            "http"
-        } else {
-            "https"
-        };
-
-    let url = if path.is_empty() {
-        format!("{}://{}/.well-known/did.json", scheme, host)
+    let https = if path.is_empty() {
+        format!("https://{}/.well-known/did.json", host)
     } else {
-        format!("{}://{}{}/did.json", scheme, host, path)
+        format!("https://{}{}/did.json", host, path)
     };
 
-    Ok(url)
+    let mut url = reqwest::Url::parse(&https).map_err(|_| DidResolutionError::InvalidDidWeb)?;
+    if tranquil_types::url_reach(&url) == Some(tranquil_types::HostReach::Loopback) {
+        let _ = url.set_scheme("http");
+    }
+    match tranquil_types::url_reach_permits(&url, tranquil_types::ReachPolicy::DEBUG_LOOPBACK) {
+        true => Ok(url.to_string()),
+        false => Err(DidResolutionError::DidWebHostRejected(host)),
+    }
 }

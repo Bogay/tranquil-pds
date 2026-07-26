@@ -3,8 +3,8 @@ use axum::{Json, extract::State, http::HeaderMap};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tranquil_pds::oauth::{
-    AuthorizationRequestParameters, ClientAuth, ClientMetadataCache, CodeChallengeMethod,
-    OAuthError, Prompt, RequestData, RequestId, ResponseMode, ResponseType,
+    AuthorizationRequestParameters, ClientAuth, CodeChallengeMethod, OAuthError, Prompt,
+    RequestData, RequestId, ResponseMode, ResponseType,
     scopes::{ParsedScope, parse_scope},
 };
 use tranquil_pds::rate_limit::{OAuthParLimit, OAuthRateLimited};
@@ -80,7 +80,7 @@ pub async fn pushed_authorization_request(
         .ok_or_else(|| OAuthError::InvalidRequest("code_challenge is required".to_string()))?;
     let code_challenge_method =
         parse_code_challenge_method(request.code_challenge_method.as_deref())?;
-    let client_cache = ClientMetadataCache::new(3600);
+    let client_cache = &state.client_metadata_cache;
     let client_metadata = client_cache.get(&request.client_id).await?;
     client_cache.validate_redirect_uri(&client_metadata, &request.redirect_uri)?;
     let client_auth = determine_client_auth(&request)?;

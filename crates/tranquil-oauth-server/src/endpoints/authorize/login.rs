@@ -80,7 +80,7 @@ pub async fn authorize_get(
             "Authorization request has expired. Please start a new request.",
         );
     }
-    let client_cache = ClientMetadataCache::new(3600);
+    let client_cache = &state.client_metadata_cache;
     let client_name = client_cache
         .get(&request_data.parameters.client_id)
         .await

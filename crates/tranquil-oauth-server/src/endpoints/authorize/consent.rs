@@ -120,7 +120,7 @@ pub async fn consent_get(
     };
 
     let did = flow_with_user.did().clone();
-    let client_cache = ClientMetadataCache::new(3600);
+    let client_cache = &state.client_metadata_cache;
     let client_metadata = client_cache
         .get(&request_data.parameters.client_id)
         .await

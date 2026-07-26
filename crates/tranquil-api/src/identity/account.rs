@@ -147,12 +147,7 @@ async fn try_reactivate_migration(
                     Json(CreateAccountOutput {
                         handle: handle.clone(),
                         did: did.clone(),
-                        did_doc: state
-                            .did_resolver
-                            .fetch_did_document(did)
-                            .await
-                            .ok()
-                            .map(|f| (*f).clone()),
+                        did_doc: state.did_resolver.fetch_did_document(did).await.ok(),
                         access_jwt: access_meta.token,
                         refresh_jwt: refresh_meta.token,
                         verification_required,
@@ -568,7 +563,7 @@ pub async fn create_account(
         Json(CreateAccountOutput {
             handle: handle.clone(),
             did,
-            did_doc: did_doc.map(|f| (*f).clone()),
+            did_doc,
             access_jwt: session.access_jwt,
             refresh_jwt: session.refresh_jwt,
             verification_required: !is_migration,

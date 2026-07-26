@@ -1,12 +1,19 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::time::Duration;
 
 use crate::OAuthError;
 use crate::types::ClientAuth;
-use tranquil_types::ClientId;
+use tranquil_infra::cache_keys::{
+    oauth_client_jwks_cooldown_key, oauth_client_jwks_key, oauth_client_meta_key,
+};
+use tranquil_infra::{Cache, cached_json, write_json};
+use tranquil_types::{
+    ClientId, JwksUri, ReachPolicy, dns_guard, redirect_policy, url_reach_permits,
+};
+
+const JWKS_REFRESH_COOLDOWN: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientMetadata {
@@ -30,8 +37,12 @@ pub struct ClientMetadata {
     pub dpop_bound_access_tokens: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jwks: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub jwks_uri: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "tranquil_types::http_url::deserialize_optional"
+    )]
+    pub jwks_uri: Option<JwksUri>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application_type: Option<String>,
 }
@@ -58,33 +69,23 @@ impl Default for ClientMetadata {
 
 #[derive(Clone)]
 pub struct ClientMetadataCache {
-    cache: Arc<RwLock<HashMap<String, CachedMetadata>>>,
-    jwks_cache: Arc<RwLock<HashMap<String, CachedJwks>>>,
+    cache: Arc<dyn Cache>,
     http_client: Client,
-    cache_ttl_secs: u64,
-}
-
-struct CachedMetadata {
-    metadata: ClientMetadata,
-    cached_at: std::time::Instant,
-}
-
-struct CachedJwks {
-    jwks: serde_json::Value,
-    cached_at: std::time::Instant,
+    cache_ttl: Duration,
 }
 
 impl ClientMetadataCache {
-    pub fn new(cache_ttl_secs: u64) -> Self {
+    pub fn new(cache: Arc<dyn Cache>, cache_ttl: Duration) -> Self {
         Self {
-            cache: Arc::new(RwLock::new(HashMap::new())),
-            jwks_cache: Arc::new(RwLock::new(HashMap::new())),
+            cache,
             http_client: {
                 let builder = Client::builder()
                     .timeout(std::time::Duration::from_secs(30))
                     .connect_timeout(std::time::Duration::from_secs(10))
                     .pool_max_idle_per_host(10)
                     .pool_idle_timeout(std::time::Duration::from_secs(90))
+                    .redirect(redirect_policy(ReachPolicy::DEBUG_LOOPBACK))
+                    .dns_resolver(dns_guard(ReachPolicy::DEBUG_LOOPBACK))
                     .user_agent(concat!(
                         "Tranquil-PDS/",
                         env!("CARGO_PKG_VERSION"),
@@ -92,9 +93,11 @@ impl ClientMetadataCache {
                     ));
                 #[cfg(feature = "native-tls-roots")]
                 let builder = builder.danger_accept_invalid_certs(true);
-                builder.build().unwrap_or_else(|_| Client::new())
+                builder
+                    .build()
+                    .expect("failed to build client metadata HTTP client")
             },
-            cache_ttl_secs,
+            cache_ttl,
         }
     }
 
@@ -150,26 +153,13 @@ impl ClientMetadataCache {
         if Self::is_loopback_client(client_id) {
             return Self::build_loopback_metadata(client_id);
         }
-        {
-            let cache = self.cache.read().await;
-            if let Some(cached) = cache.get(client_id.as_str())
-                && cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs
-            {
-                return Ok(cached.metadata.clone());
-            }
-        }
-        let metadata = self.fetch_metadata(client_id).await?;
-        {
-            let mut cache = self.cache.write().await;
-            cache.insert(
-                client_id.to_string(),
-                CachedMetadata {
-                    metadata: metadata.clone(),
-                    cached_at: std::time::Instant::now(),
-                },
-            );
-        }
-        Ok(metadata)
+        cached_json(
+            self.cache.as_ref(),
+            &oauth_client_meta_key(client_id),
+            self.cache_ttl,
+            || self.fetch_metadata(client_id),
+        )
+        .await
     }
 
     pub async fn get_jwks(
@@ -181,43 +171,57 @@ impl ClientMetadataCache {
         }
         let jwks_uri = metadata.jwks_uri.as_ref().ok_or_else(|| {
             OAuthError::InvalidClient(
-                "Client using private_key_jwt must have jwks or jwks_uri".to_string(),
+                "Client using private_key_jwt must have jwks or a usable jwks_uri".to_string(),
             )
         })?;
-        {
-            let cache = self.jwks_cache.read().await;
-            if let Some(cached) = cache.get(jwks_uri)
-                && cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs
-            {
-                return Ok(cached.jwks.clone());
+        cached_json(
+            self.cache.as_ref(),
+            &oauth_client_jwks_key(jwks_uri),
+            self.cache_ttl,
+            || self.fetch_jwks(jwks_uri),
+        )
+        .await
+    }
+
+    async fn refresh_jwks(
+        &self,
+        metadata: &ClientMetadata,
+    ) -> Result<Option<serde_json::Value>, OAuthError> {
+        match (&metadata.jwks, &metadata.jwks_uri) {
+            (None, Some(jwks_uri)) => {
+                let cooldown_key = oauth_client_jwks_cooldown_key(jwks_uri);
+                if self.cache.get(&cooldown_key).await.is_some() {
+                    return Ok(None);
+                }
+                let _ = self
+                    .cache
+                    .set(&cooldown_key, "1", JWKS_REFRESH_COOLDOWN)
+                    .await;
+                self.fetch_and_store_jwks(jwks_uri).await.map(Some)
             }
+            _ => Ok(None),
         }
+    }
+
+    async fn fetch_and_store_jwks(
+        &self,
+        jwks_uri: &JwksUri,
+    ) -> Result<serde_json::Value, OAuthError> {
         let jwks = self.fetch_jwks(jwks_uri).await?;
-        {
-            let mut cache = self.jwks_cache.write().await;
-            cache.insert(
-                jwks_uri.clone(),
-                CachedJwks {
-                    jwks: jwks.clone(),
-                    cached_at: std::time::Instant::now(),
-                },
-            );
-        }
+        write_json(
+            self.cache.as_ref(),
+            &oauth_client_jwks_key(jwks_uri),
+            &jwks,
+            self.cache_ttl,
+        )
+        .await;
         Ok(jwks)
     }
 
-    async fn fetch_jwks(&self, jwks_uri: &str) -> Result<serde_json::Value, OAuthError> {
-        if !jwks_uri.starts_with("https://")
-            && (!jwks_uri.starts_with("http://")
-                || (!jwks_uri.contains("localhost") && !jwks_uri.contains("127.0.0.1")))
-        {
-            return Err(OAuthError::InvalidClient(
-                "jwks_uri must use https (except for localhost)".to_string(),
-            ));
-        }
+    async fn fetch_jwks(&self, jwks_uri: &JwksUri) -> Result<serde_json::Value, OAuthError> {
         let response = self
             .http_client
-            .get(jwks_uri)
+            .get(jwks_uri.as_str())
             .header("Accept", "application/json")
             .send()
             .await
@@ -243,22 +247,16 @@ impl ClientMetadataCache {
     }
 
     async fn fetch_metadata(&self, client_id: &ClientId) -> Result<ClientMetadata, OAuthError> {
-        if !client_id.starts_with("http://") && !client_id.starts_with("https://") {
+        let url = reqwest::Url::parse(client_id)
+            .map_err(|_| OAuthError::InvalidClient("client_id must be a URL".to_string()))?;
+        if !url_reach_permits(&url, ReachPolicy::DEBUG_LOOPBACK) {
             return Err(OAuthError::InvalidClient(
-                "client_id must be a URL".to_string(),
-            ));
-        }
-        if client_id.starts_with("http://")
-            && !client_id.contains("localhost")
-            && !client_id.contains("127.0.0.1")
-        {
-            return Err(OAuthError::InvalidClient(
-                "Non-localhost client_id must use https".to_string(),
+                "client_id must be an https URL inside the allowed host reach".to_string(),
             ));
         }
         let response = self
             .http_client
-            .get(client_id.as_str())
+            .get(url)
             .header("Accept", "application/json")
             .send()
             .await
@@ -514,7 +512,29 @@ async fn verify_private_key_jwt_async(
             "client_assertion iat is in the future".to_string(),
         ));
     }
+    let signing_input = format!("{}.{}", parts[0], parts[1]);
+    let signature_bytes = URL_SAFE_NO_PAD
+        .decode(parts[2])
+        .map_err(|_| OAuthError::InvalidClient("Invalid signature encoding".to_string()))?;
     let jwks = cache.get_jwks(metadata).await?;
+    match verify_assertion_signature(&jwks, kid, alg, &signing_input, &signature_bytes) {
+        Ok(()) => Ok(()),
+        Err(cached_failure) => match cache.refresh_jwks(metadata).await {
+            Ok(Some(fresh)) => {
+                verify_assertion_signature(&fresh, kid, alg, &signing_input, &signature_bytes)
+            }
+            Ok(None) | Err(_) => Err(cached_failure),
+        },
+    }
+}
+
+fn verify_assertion_signature(
+    jwks: &serde_json::Value,
+    kid: Option<&str>,
+    alg: &str,
+    signing_input: &str,
+    signature: &[u8],
+) -> Result<(), OAuthError> {
     let keys = jwks
         .get("keys")
         .and_then(|k| k.as_array())
@@ -531,10 +551,6 @@ async fn verify_private_key_jwt_async(
             "No matching key found in client JWKS".to_string(),
         ));
     }
-    let signing_input = format!("{}.{}", parts[0], parts[1]);
-    let signature_bytes = URL_SAFE_NO_PAD
-        .decode(parts[2])
-        .map_err(|_| OAuthError::InvalidClient("Invalid signature encoding".to_string()))?;
     matching_keys
         .into_iter()
         .filter(|key| {
@@ -544,12 +560,12 @@ async fn verify_private_key_jwt_async(
         .find_map(|key| {
             let kty = key.get("kty").and_then(|k| k.as_str()).unwrap_or("");
             match (alg, kty) {
-                ("ES256", "EC") => verify_es256(key, &signing_input, &signature_bytes).ok(),
-                ("ES384", "EC") => verify_es384(key, &signing_input, &signature_bytes).ok(),
+                ("ES256", "EC") => verify_es256(key, signing_input, signature).ok(),
+                ("ES384", "EC") => verify_es384(key, signing_input, signature).ok(),
                 ("RS256" | "RS384" | "RS512", "RSA") => {
-                    verify_rsa(alg, key, &signing_input, &signature_bytes).ok()
+                    verify_rsa(alg, key, signing_input, signature).ok()
                 }
-                ("EdDSA", "OKP") => verify_eddsa(key, &signing_input, &signature_bytes).ok(),
+                ("EdDSA", "OKP") => verify_eddsa(key, signing_input, signature).ok(),
                 _ => None,
             }
         })

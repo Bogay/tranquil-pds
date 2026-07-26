@@ -8,8 +8,7 @@ use chrono::{Duration, Utc};
 use tranquil_db_traits::RefreshTokenLookup;
 use tranquil_pds::config::AuthConfig;
 use tranquil_pds::oauth::{
-    AuthFlow, ClientAuth, ClientMetadataCache, DPoPVerifier, OAuthError, RefreshToken, TokenData,
-    TokenId,
+    AuthFlow, ClientAuth, DPoPVerifier, OAuthError, RefreshToken, TokenData, TokenId,
     db::{enforce_token_limit_for_user, lookup_refresh_token},
     verify_client_auth,
 };
@@ -63,7 +62,7 @@ pub async fn handle_authorization_code_grant(
         return Err(OAuthError::InvalidGrant("client_id mismatch".to_string()));
     }
     let did = authorized.did.clone();
-    let client_metadata_cache = ClientMetadataCache::new(3600);
+    let client_metadata_cache = &state.client_metadata_cache;
     let client_metadata = client_metadata_cache.get(&authorized.client_id).await?;
     let client_auth = match &request.client_auth {
         RequestClientAuth::PrivateKeyJwt {
@@ -85,7 +84,7 @@ pub async fn handle_authorization_code_grant(
         },
         RequestClientAuth::None { .. } => ClientAuth::None,
     };
-    verify_client_auth(&client_metadata_cache, &client_metadata, &client_auth).await?;
+    verify_client_auth(client_metadata_cache, &client_metadata, &client_auth).await?;
     verify_pkce(&authorized.parameters.code_challenge, &code_verifier)?;
     if let Some(req_redirect_uri) = &redirect_uri
         && req_redirect_uri != &authorized.parameters.redirect_uri

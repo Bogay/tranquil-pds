@@ -4,15 +4,23 @@ use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, jwk:
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
-use tokio::sync::{OnceCell, RwLock};
+use tokio::sync::RwLock;
 use tranquil_db_traits::SsoProviderType;
+use tranquil_types::{SsoIssuer, SsoJwksUri};
 
 use super::config::{AppleProviderConfig, ProviderConfig, SsoConfig};
+use crate::cache::{Cache, cached_json};
+use crate::cache_keys::{oidc_discovery_key, sso_jwks_key};
 
 const SSO_HTTP_TIMEOUT: Duration = Duration::from_secs(15);
+const SSO_DISCOVERY_TTL: Duration = Duration::from_secs(3600);
+static APPLE_JWKS_URI: LazyLock<SsoJwksUri> = LazyLock::new(|| {
+    SsoJwksUri::new("https://appleid.apple.com/auth/keys")
+        .expect("Apple JWKS URI is a valid https URL")
+});
 
 struct PkceChallenge {
     code_verifier: String,
@@ -28,6 +36,12 @@ fn create_http_client() -> Client {
     Client::builder()
         .timeout(SSO_HTTP_TIMEOUT)
         .connect_timeout(Duration::from_secs(5))
+        .redirect(tranquil_types::redirect_policy(
+            tranquil_types::ReachPolicy::AllowPrivate,
+        ))
+        .dns_resolver(tranquil_types::dns_guard(
+            tranquil_types::ReachPolicy::AllowPrivate,
+        ))
         .build()
         .expect("Failed to create HTTP client")
 }
@@ -367,16 +381,21 @@ impl SsoProvider for DiscordProvider {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OidcDiscoveryConfig {
-    pub issuer: String,
+    pub issuer: SsoIssuer,
     pub authorization_endpoint: String,
     pub token_endpoint: String,
     pub userinfo_endpoint: Option<String>,
-    pub jwks_uri: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "tranquil_types::http_url::deserialize_optional"
+    )]
+    pub jwks_uri: Option<SsoJwksUri>,
 }
 
-struct OidcDiscoveryCache {
+#[derive(Serialize, Deserialize)]
+struct OidcDiscovery {
     config: OidcDiscoveryConfig,
     jwks: Option<JwkSet>,
 }
@@ -385,10 +404,10 @@ pub struct OidcProvider {
     provider_type: SsoProviderType,
     client_id: String,
     client_secret: String,
-    issuer: String,
+    issuer: SsoIssuer,
     display_name: String,
     http_client: Client,
-    discovery_cache: OnceCell<OidcDiscoveryCache>,
+    cache: Arc<dyn Cache>,
 }
 
 impl OidcProvider {
@@ -397,11 +416,25 @@ impl OidcProvider {
         config: &ProviderConfig,
         default_issuer: Option<&str>,
         default_name: &str,
+        cache: Arc<dyn Cache>,
     ) -> Option<Self> {
-        let issuer = config
+        let issuer = match config
             .issuer
             .clone()
-            .or_else(|| default_issuer.map(String::from))?;
+            .or_else(|| default_issuer.map(String::from))
+            .map(SsoIssuer::new)
+        {
+            Some(Ok(issuer)) => issuer,
+            Some(Err(e)) => {
+                tracing::error!(
+                    provider = %provider_type.as_str(),
+                    error = %e,
+                    "SSO provider disabled because its issuer isn't a usable http or https URL"
+                );
+                return None;
+            }
+            None => return None,
+        };
 
         Some(Self {
             provider_type,
@@ -413,74 +446,80 @@ impl OidcProvider {
                 .clone()
                 .unwrap_or_else(|| default_name.to_string()),
             http_client: create_http_client(),
-            discovery_cache: OnceCell::new(),
+            cache,
         })
     }
 
-    async fn get_discovery(&self) -> Result<&OidcDiscoveryCache, SsoError> {
-        self.discovery_cache
-            .get_or_try_init(|| async {
-                let discovery_url = format!(
-                    "{}/.well-known/openid-configuration",
-                    self.issuer.trim_end_matches('/')
-                );
+    async fn get_discovery(&self) -> Result<OidcDiscovery, SsoError> {
+        cached_json(
+            self.cache.as_ref(),
+            &oidc_discovery_key(&self.issuer),
+            SSO_DISCOVERY_TTL,
+            || self.fetch_discovery(),
+        )
+        .await
+    }
 
-                tracing::debug!(
-                    provider = %self.provider_type.as_str(),
-                    url = %discovery_url,
-                    "Fetching OIDC discovery document"
-                );
+    async fn fetch_discovery(&self) -> Result<OidcDiscovery, SsoError> {
+        let discovery_url = self.issuer.endpoint(".well-known/openid-configuration");
 
-                let resp = self
-                    .http_client
-                    .get(&discovery_url)
-                    .send()
-                    .await
-                    .map_err(|e| SsoError::Discovery(e.to_string()))?;
+        tracing::debug!(
+            provider = %self.provider_type.as_str(),
+            url = %discovery_url,
+            "Fetching OIDC discovery document"
+        );
 
-                if !resp.status().is_success() {
-                    return Err(SsoError::Discovery(format!(
-                        "Discovery endpoint returned {}",
-                        resp.status()
-                    )));
-                }
-
-                let config: OidcDiscoveryConfig = resp
-                    .json()
-                    .await
-                    .map_err(|e| SsoError::Discovery(e.to_string()))?;
-
-                let jwks = match &config.jwks_uri {
-                    Some(jwks_uri) => {
-                        tracing::debug!(
-                            provider = %self.provider_type.as_str(),
-                            url = %jwks_uri,
-                            "Fetching JWKS"
-                        );
-                        let jwks_resp =
-                            self.http_client.get(jwks_uri).send().await.map_err(|e| {
-                                SsoError::Discovery(format!("JWKS fetch failed: {}", e))
-                            })?;
-
-                        if jwks_resp.status().is_success() {
-                            Some(jwks_resp.json::<JwkSet>().await.map_err(|e| {
-                                SsoError::Discovery(format!("JWKS parse failed: {}", e))
-                            })?)
-                        } else {
-                            tracing::warn!(
-                                provider = %self.provider_type.as_str(),
-                                status = %jwks_resp.status(),
-                                "JWKS fetch returned non-success status"
-                            );
-                            None
-                        }
-                    }
-                    None => None,
-                };
-
-                Ok(OidcDiscoveryCache { config, jwks })
-            })
+        let resp = self
+            .http_client
+            .get(discovery_url)
+            .send()
             .await
+            .map_err(|e| SsoError::Discovery(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            return Err(SsoError::Discovery(format!(
+                "Discovery endpoint returned {}",
+                resp.status()
+            )));
+        }
+
+        let config: OidcDiscoveryConfig = resp
+            .json()
+            .await
+            .map_err(|e| SsoError::Discovery(e.to_string()))?;
+
+        let jwks =
+            match &config.jwks_uri {
+                Some(jwks_uri) => {
+                    tracing::debug!(
+                        provider = %self.provider_type.as_str(),
+                        url = %jwks_uri,
+                        "Fetching JWKS"
+                    );
+                    let jwks_resp = self
+                        .http_client
+                        .get(jwks_uri.as_str())
+                        .send()
+                        .await
+                        .map_err(|e| SsoError::Discovery(format!("JWKS fetch failed: {}", e)))?;
+
+                    if jwks_resp.status().is_success() {
+                        Some(jwks_resp.json::<JwkSet>().await.map_err(|e| {
+                            SsoError::Discovery(format!("JWKS parse failed: {}", e))
+                        })?)
+                    } else {
+                        tracing::warn!(
+                            provider = %self.provider_type.as_str(),
+                            status = %jwks_resp.status(),
+                            "JWKS fetch returned non-success status"
+                        );
+                        None
+                    }
+                }
+                None => None,
+            };
+
+        Ok(OidcDiscovery { config, jwks })
     }
 
     fn generate_pkce() -> PkceChallenge {
@@ -602,9 +641,7 @@ impl SsoProvider for OidcProvider {
 
         let auth_endpoint = match self.provider_type {
             SsoProviderType::Google => "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
-            SsoProviderType::Gitlab => {
-                format!("{}/oauth/authorize", self.issuer.trim_end_matches('/'))
-            }
+            SsoProviderType::Gitlab => self.issuer.endpoint("oauth/authorize").to_string(),
             _ => {
                 let discovery = self.get_discovery().await?;
                 discovery.config.authorization_endpoint.clone()
@@ -638,7 +675,7 @@ impl SsoProvider for OidcProvider {
     ) -> Result<SsoTokenResponse, SsoError> {
         let token_endpoint = match self.provider_type {
             SsoProviderType::Google => "https://oauth2.googleapis.com/token".to_string(),
-            SsoProviderType::Gitlab => format!("{}/oauth/token", self.issuer.trim_end_matches('/')),
+            SsoProviderType::Gitlab => self.issuer.endpoint("oauth/token").to_string(),
             _ => {
                 let discovery = self.get_discovery().await?;
                 discovery.config.token_endpoint.clone()
@@ -721,9 +758,7 @@ impl SsoProvider for OidcProvider {
             SsoProviderType::Google => {
                 "https://openidconnect.googleapis.com/v1/userinfo".to_string()
             }
-            SsoProviderType::Gitlab => {
-                format!("{}/oauth/userinfo", self.issuer.trim_end_matches('/'))
-            }
+            SsoProviderType::Gitlab => self.issuer.endpoint("oauth/userinfo").to_string(),
             _ => {
                 let discovery = self.get_discovery().await?;
                 discovery
@@ -777,11 +812,11 @@ pub struct AppleProvider {
     private_key_pem: String,
     http_client: Client,
     client_secret_cache: RwLock<Option<CachedClientSecret>>,
-    jwks_cache: OnceCell<JwkSet>,
+    cache: Arc<dyn Cache>,
 }
 
 impl AppleProvider {
-    pub fn new(config: &AppleProviderConfig) -> Result<Self, SsoError> {
+    pub fn new(config: &AppleProviderConfig, cache: Arc<dyn Cache>) -> Result<Self, SsoError> {
         let key_pem = config.private_key_pem.replace("\\n", "\n");
 
         jsonwebtoken::EncodingKey::from_ec_pem(key_pem.as_bytes())
@@ -794,7 +829,7 @@ impl AppleProvider {
             private_key_pem: key_pem,
             http_client: create_http_client(),
             client_secret_cache: RwLock::new(None),
-            jwks_cache: OnceCell::new(),
+            cache,
         })
     }
 
@@ -868,29 +903,35 @@ impl AppleProvider {
         Ok(generated.secret)
     }
 
-    async fn get_jwks(&self) -> Result<&JwkSet, SsoError> {
-        self.jwks_cache
-            .get_or_try_init(|| async {
-                tracing::debug!("Fetching Apple JWKS");
-                let resp = self
-                    .http_client
-                    .get("https://appleid.apple.com/auth/keys")
-                    .send()
-                    .await
-                    .map_err(|e| SsoError::Discovery(format!("Apple JWKS fetch failed: {}", e)))?;
+    async fn get_jwks(&self) -> Result<JwkSet, SsoError> {
+        cached_json(
+            self.cache.as_ref(),
+            &sso_jwks_key(&APPLE_JWKS_URI),
+            SSO_DISCOVERY_TTL,
+            || self.fetch_jwks(),
+        )
+        .await
+    }
 
-                if !resp.status().is_success() {
-                    return Err(SsoError::Discovery(format!(
-                        "Apple JWKS returned {}",
-                        resp.status()
-                    )));
-                }
-
-                resp.json::<JwkSet>()
-                    .await
-                    .map_err(|e| SsoError::Discovery(format!("Apple JWKS parse failed: {}", e)))
-            })
+    async fn fetch_jwks(&self) -> Result<JwkSet, SsoError> {
+        tracing::debug!("Fetching Apple JWKS");
+        let resp = self
+            .http_client
+            .get(APPLE_JWKS_URI.as_str())
+            .send()
             .await
+            .map_err(|e| SsoError::Discovery(format!("Apple JWKS fetch failed: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(SsoError::Discovery(format!(
+                "Apple JWKS returned {}",
+                resp.status()
+            )));
+        }
+
+        resp.json()
+            .await
+            .map_err(|e| SsoError::Discovery(format!("Apple JWKS parse failed: {}", e)))
     }
 
     fn validate_id_token(
@@ -1043,7 +1084,7 @@ impl SsoProvider for AppleProvider {
         })?;
 
         let jwks = self.get_jwks().await?;
-        let claims = self.validate_id_token(id_token, jwks, expected_nonce)?;
+        let claims = self.validate_id_token(id_token, &jwks, expected_nonce)?;
 
         tracing::debug!(
             sub = %claims.sub,
@@ -1063,10 +1104,11 @@ impl SsoProvider for AppleProvider {
 #[derive(Clone)]
 pub struct SsoManager {
     providers: HashMap<SsoProviderType, Arc<dyn SsoProvider>>,
+    config: &'static SsoConfig,
 }
 
 impl SsoManager {
-    pub fn from_config(config: &SsoConfig) -> Self {
+    pub fn from_config(config: &'static SsoConfig, cache: Arc<dyn Cache>) -> Self {
         let mut providers: HashMap<SsoProviderType, Arc<dyn SsoProvider>> = HashMap::new();
 
         if let Some(ref cfg) = config.github {
@@ -1086,13 +1128,15 @@ impl SsoManager {
                 cfg,
                 Some("https://accounts.google.com"),
                 "Google",
+                cache.clone(),
             )
         {
             providers.insert(SsoProviderType::Google, Arc::new(provider));
         }
 
         if let Some(ref cfg) = config.gitlab
-            && let Some(provider) = OidcProvider::new(SsoProviderType::Gitlab, cfg, None, "GitLab")
+            && let Some(provider) =
+                OidcProvider::new(SsoProviderType::Gitlab, cfg, None, "GitLab", cache.clone())
         {
             providers.insert(SsoProviderType::Gitlab, Arc::new(provider));
         }
@@ -1103,13 +1147,14 @@ impl SsoManager {
                 cfg,
                 None,
                 cfg.display_name.as_deref().unwrap_or("SSO"),
+                cache.clone(),
             )
         {
             providers.insert(SsoProviderType::Oidc, Arc::new(provider));
         }
 
         if let Some(ref cfg) = config.apple {
-            match AppleProvider::new(cfg) {
+            match AppleProvider::new(cfg, cache.clone()) {
                 Ok(provider) => {
                     providers.insert(SsoProviderType::Apple, Arc::new(provider));
                 }
@@ -1119,7 +1164,11 @@ impl SsoManager {
             }
         }
 
-        Self { providers }
+        Self { providers, config }
+    }
+
+    pub fn config(&self) -> &'static SsoConfig {
+        self.config
     }
 
     pub fn get_provider(&self, provider_type: SsoProviderType) -> Option<Arc<dyn SsoProvider>> {
@@ -1135,11 +1184,5 @@ impl SsoManager {
 
     pub fn is_any_enabled(&self) -> bool {
         !self.providers.is_empty()
-    }
-}
-
-impl Default for SsoManager {
-    fn default() -> Self {
-        Self::from_config(SsoConfig::get())
     }
 }

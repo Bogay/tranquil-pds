@@ -15,10 +15,12 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tranquil_db::PostgresRepositories;
 use tranquil_db_traits::SequencedEvent;
+use tranquil_oauth::ClientMetadataCache;
 
 static RATE_LIMITING_DISABLED: AtomicBool = AtomicBool::new(false);
 
@@ -49,6 +51,7 @@ pub struct AppState {
     pub sso_manager: SsoManager,
     pub webauthn_config: Arc<WebAuthnConfig>,
     pub cross_pds_oauth: Arc<CrossPdsOAuthClient>,
+    pub client_metadata_cache: ClientMetadataCache,
     pub shutdown: CancellationToken,
     pub bootstrap_invite_code: Option<crate::types::InviteCode>,
     pub signal_sender: Option<Arc<tranquil_signal::SignalSlot>>,
@@ -210,6 +213,27 @@ impl RateLimitKind {
     }
 }
 
+const CLIENT_METADATA_TTL: Duration = Duration::from_secs(3600);
+
+struct CacheBound {
+    did_resolver: Arc<DidResolver>,
+    cross_pds_oauth: Arc<CrossPdsOAuthClient>,
+    client_metadata_cache: ClientMetadataCache,
+    sso_manager: SsoManager,
+}
+
+impl CacheBound {
+    fn new(cache: &Arc<dyn Cache>, sso_config: &'static SsoConfig) -> Self {
+        tranquil_lexicon::LexiconRegistry::global().set_shared_cache(cache.clone());
+        Self {
+            did_resolver: Arc::new(DidResolver::new(cache.clone())),
+            cross_pds_oauth: Arc::new(CrossPdsOAuthClient::new(cache.clone())),
+            client_metadata_cache: ClientMetadataCache::new(cache.clone(), CLIENT_METADATA_TTL),
+            sso_manager: SsoManager::from_config(sso_config, cache.clone()),
+        }
+    }
+}
+
 impl AppState {
     pub fn plc_client(&self) -> PlcClient {
         PlcClient::with_cache(None, Some(self.cache.clone()))
@@ -366,10 +390,7 @@ impl AppState {
         let (cache, distributed_rate_limiter) = create_cache(shutdown.clone())
             .await
             .expect("Failed to initialize cache and distributed rate limiter at startup");
-        let did_resolver = Arc::new(DidResolver::new());
-        let cross_pds_oauth = Arc::new(CrossPdsOAuthClient::new(cache.clone()));
-        let sso_config = SsoConfig::init();
-        let sso_manager = SsoManager::from_config(sso_config);
+        let bound = CacheBound::new(&cache, SsoConfig::init());
         let webauthn_config = Arc::new(
             WebAuthnConfig::new(&cfg.server.hostname)
                 .expect("Failed to create WebAuthn config at startup"),
@@ -385,9 +406,10 @@ impl AppState {
             circuit_breakers,
             cache,
             distributed_rate_limiter,
-            did_resolver,
-            cross_pds_oauth,
-            sso_manager,
+            did_resolver: bound.did_resolver,
+            cross_pds_oauth: bound.cross_pds_oauth,
+            client_metadata_cache: bound.client_metadata_cache,
+            sso_manager: bound.sso_manager,
             webauthn_config,
             shutdown,
             bootstrap_invite_code: None,
@@ -410,6 +432,11 @@ impl AppState {
         cache: Arc<dyn Cache>,
         distributed_rate_limiter: Arc<dyn DistributedRateLimiter>,
     ) -> Self {
+        let bound = CacheBound::new(&cache, self.sso_manager.config());
+        self.did_resolver = bound.did_resolver;
+        self.cross_pds_oauth = bound.cross_pds_oauth;
+        self.client_metadata_cache = bound.client_metadata_cache;
+        self.sso_manager = bound.sso_manager;
         self.cache = cache;
         self.distributed_rate_limiter = distributed_rate_limiter;
         self
