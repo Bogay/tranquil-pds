@@ -125,6 +125,11 @@ impl LexiconRegistry {
     pub fn is_negative_cached(&self, nsid: &Nsid) -> bool {
         self.dynamic.is_negative_cached(nsid)
     }
+
+    #[cfg(feature = "resolve")]
+    pub fn set_shared_cache(&self, cache: Arc<dyn tranquil_infra::Cache>) {
+        self.dynamic.set_shared_cache(cache);
+    }
 }
 
 pub struct ResolvedRef {

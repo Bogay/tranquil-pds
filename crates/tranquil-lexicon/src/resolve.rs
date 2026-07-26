@@ -4,7 +4,10 @@ use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use reqwest::Client;
 use std::sync::OnceLock;
 use std::time::Duration;
-use tranquil_types::{Did, Nsid};
+use tranquil_types::did_doc::extract_pds_endpoint;
+use tranquil_types::{
+    Did, Nsid, SchemaHostUrl, UrlKind, dns_guard, redirect_policy, url_kind, url_reach_permits,
+};
 
 static RESOLVER_CLIENT: OnceLock<Client> = OnceLock::new();
 
@@ -17,7 +20,8 @@ fn client() -> &'static Client {
             .connect_timeout(Duration::from_secs(5))
             .pool_max_idle_per_host(4)
             .pool_idle_timeout(Duration::from_secs(60))
-            .redirect(reqwest::redirect::Policy::limited(3))
+            .redirect(redirect_policy(url_kind::SchemaHost::REACH_POLICY))
+            .dns_resolver(dns_guard(url_kind::SchemaHost::REACH_POLICY))
             .build()
             .expect("failed to build lexicon resolver HTTP client")
     })
@@ -63,6 +67,8 @@ pub enum ResolveError {
     NoPdsEndpoint { did: Did },
     #[error("schema fetch failed from {url}: {reason}")]
     SchemaFetch { url: String, reason: String },
+    #[error("no schema record for {nsid} at {url}")]
+    SchemaNotFound { nsid: Nsid, url: String },
     #[error("schema deserialization failed: {0}")]
     InvalidSchema(String),
     #[error("schema resolution recently failed for {nsid}, cached for {ttl_secs}s")]
@@ -71,6 +77,23 @@ pub enum ResolveError {
     NetworkDisabled,
     #[error("leader task for {nsid} aborted before completion")]
     LeaderAborted { nsid: Nsid },
+}
+
+impl ResolveError {
+    pub fn is_definitive(&self) -> bool {
+        match self {
+            Self::NoDid { .. }
+            | Self::NoPdsEndpoint { .. }
+            | Self::InvalidSchema(_)
+            | Self::SchemaNotFound { .. } => true,
+            Self::DnsLookup { .. }
+            | Self::DidResolution { .. }
+            | Self::SchemaFetch { .. }
+            | Self::NegativelyCached { .. }
+            | Self::NetworkDisabled
+            | Self::LeaderAborted { .. } => false,
+        }
+    }
 }
 
 pub fn nsid_to_authority(nsid: &Nsid) -> String {
@@ -123,7 +146,7 @@ pub async fn resolve_did_from_dns(authority: &str) -> Result<Did, ResolveError> 
 pub async fn resolve_pds_endpoint(
     did: &Did,
     plc_directory_url: Option<&str>,
-) -> Result<String, ResolveError> {
+) -> Result<SchemaHostUrl, ResolveError> {
     let plc_base = plc_directory_url.unwrap_or(DEFAULT_PLC_DIRECTORY);
 
     let url = match did
@@ -131,7 +154,20 @@ pub async fn resolve_pds_endpoint(
         .and_then(|(_, rest)| rest.split_once(':'))
     {
         Some(("plc", _)) => format!("{}/{}", plc_base.trim_end_matches('/'), did),
-        Some(("web", domain)) => format!("https://{}/.well-known/did.json", domain),
+        Some(("web", domain)) => {
+            let url = format!("https://{}/.well-known/did.json", domain);
+            let permitted = reqwest::Url::parse(&url)
+                .is_ok_and(|u| url_reach_permits(&u, url_kind::SchemaHost::REACH_POLICY));
+            match permitted {
+                true => url,
+                false => {
+                    return Err(ResolveError::DidResolution {
+                        did: did.clone(),
+                        reason: "did:web host is outside the allowed host reach".to_string(),
+                    });
+                }
+            }
+        }
         _ => {
             return Err(ResolveError::DidResolution {
                 did: did.clone(),
@@ -162,39 +198,29 @@ pub async fn resolve_pds_endpoint(
             reason: e.to_string(),
         })?;
 
-    extract_pds_endpoint(&doc).ok_or_else(|| ResolveError::NoPdsEndpoint { did: did.clone() })
+    extract_pds_endpoint(&doc).map_err(|_| ResolveError::NoPdsEndpoint { did: did.clone() })
 }
 
-fn extract_pds_endpoint(doc: &serde_json::Value) -> Option<String> {
-    doc.get("service")
-        .and_then(|s| s.as_array())
-        .and_then(|services| {
-            services.iter().find_map(|svc| {
-                let is_pds = svc
-                    .get("type")
-                    .and_then(|t| t.as_str())
-                    .is_some_and(|t| t == "AtprotoPersonalDataServer");
-                is_pds
-                    .then(|| svc.get("serviceEndpoint").and_then(|ep| ep.as_str()))?
-                    .map(|s| s.to_string())
-            })
-        })
+fn is_record_absent(xrpc_error: &str, xrpc_message: &str) -> bool {
+    xrpc_error == "RecordNotFound"
+        || xrpc_error == "InvalidRequest" && xrpc_message.starts_with("Could not locate record")
 }
 
 pub async fn fetch_schema_from_pds(
-    pds_endpoint: &str,
+    pds_endpoint: &SchemaHostUrl,
     did: &Did,
     nsid: &Nsid,
 ) -> Result<LexiconDoc, ResolveError> {
-    let url = format!(
-        "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection=com.atproto.lexicon.schema&rkey={}",
-        pds_endpoint.trim_end_matches('/'),
-        urlencoding::encode(did.as_str()),
-        urlencoding::encode(nsid.as_str())
-    );
+    let mut request_url = pds_endpoint.endpoint("xrpc/com.atproto.repo.getRecord");
+    request_url
+        .query_pairs_mut()
+        .append_pair("repo", did.as_str())
+        .append_pair("collection", "com.atproto.lexicon.schema")
+        .append_pair("rkey", nsid.as_str());
+    let url = request_url.to_string();
 
     let resp = client()
-        .get(&url)
+        .get(request_url)
         .send()
         .await
         .map_err(|e| ResolveError::SchemaFetch {
@@ -204,10 +230,27 @@ pub async fn fetch_schema_from_pds(
 
     let status = resp.status();
     if !status.is_success() {
-        return Err(ResolveError::SchemaFetch {
-            url,
-            reason: format!("HTTP {}", status),
-        });
+        let body = read_body_limited(resp, MAX_RESPONSE_BYTES)
+            .await
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .unwrap_or(serde_json::Value::Null);
+        let field = |name: &str| {
+            body.get(name)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        return match is_record_absent(&field("error"), &field("message")) {
+            true => Err(ResolveError::SchemaNotFound {
+                nsid: nsid.clone(),
+                url,
+            }),
+            false => Err(ResolveError::SchemaFetch {
+                url,
+                reason: format!("HTTP {}", status),
+            }),
+        };
     }
 
     let body = read_body_limited(resp, MAX_RESPONSE_BYTES)
@@ -293,6 +336,27 @@ mod tests {
     }
 
     #[test]
+    fn is_record_absent_recognizes_only_the_reference_pds_absence_shapes() {
+        assert!(is_record_absent(
+            "RecordNotFound",
+            "Could not locate record: at://did:plc:nel/com.atproto.lexicon.schema/x"
+        ));
+        assert!(is_record_absent("RecordNotFound", ""));
+        assert!(is_record_absent(
+            "InvalidRequest",
+            "Could not locate record"
+        ));
+        assert!(!is_record_absent(
+            "InvalidRequest",
+            "Error: rkey must be a valid record key"
+        ));
+        assert!(!is_record_absent("InvalidRequest", ""));
+        assert!(!is_record_absent("InternalServerError", ""));
+        assert!(!is_record_absent("RateLimitExceeded", ""));
+        assert!(!is_record_absent("", ""));
+    }
+
+    #[test]
     fn test_nsid_to_authority() {
         assert_eq!(
             nsid_to_authority(&nsid("app.bsky.feed.post")),
@@ -314,57 +378,6 @@ mod tests {
             nsid_to_authority(&nsid("org.example.record")),
             "example.org"
         );
-    }
-
-    #[test]
-    fn test_extract_pds_endpoint_valid() {
-        let doc = serde_json::json!({
-            "service": [{
-                "type": "AtprotoPersonalDataServer",
-                "serviceEndpoint": "https://pds.example.com"
-            }]
-        });
-        assert_eq!(
-            extract_pds_endpoint(&doc),
-            Some("https://pds.example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_pds_endpoint_multiple_services() {
-        let doc = serde_json::json!({
-            "service": [
-                {
-                    "type": "AtprotoLabeler",
-                    "serviceEndpoint": "https://labeler.example.com"
-                },
-                {
-                    "type": "AtprotoPersonalDataServer",
-                    "serviceEndpoint": "https://pds.example.com"
-                }
-            ]
-        });
-        assert_eq!(
-            extract_pds_endpoint(&doc),
-            Some("https://pds.example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_pds_endpoint_missing() {
-        let doc = serde_json::json!({
-            "service": [{
-                "type": "AtprotoLabeler",
-                "serviceEndpoint": "https://labeler.example.com"
-            }]
-        });
-        assert_eq!(extract_pds_endpoint(&doc), None);
-    }
-
-    #[test]
-    fn test_extract_pds_endpoint_no_services() {
-        let doc = serde_json::json!({});
-        assert_eq!(extract_pds_endpoint(&doc), None);
     }
 
     #[test]

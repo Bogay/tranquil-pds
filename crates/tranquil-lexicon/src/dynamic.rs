@@ -6,15 +6,24 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
+use tranquil_infra::cache_keys::{lexicon_doc_key, lexicon_negative_key};
+use tranquil_infra::{Cache, read_json, write_json};
 use tranquil_types::Nsid;
 
-const NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 const POSITIVE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const REFRESH_FAILURE_BACKOFF: Duration = Duration::from_secs(60);
 const MAX_DYNAMIC_SCHEMAS: usize = 1024;
 
 struct NegativeEntry {
     expires_at: Instant,
+}
+
+fn negative_ttl_for(error: &ResolveError) -> Duration {
+    match error.is_definitive() {
+        true => NEGATIVE_CACHE_TTL,
+        false => REFRESH_FAILURE_BACKOFF,
+    }
 }
 
 struct PositiveEntry {
@@ -44,6 +53,7 @@ pub struct DynamicRegistry {
     negative_cache: RwLock<HashMap<Nsid, NegativeEntry>>,
     in_flight: RwLock<HashMap<Nsid, Arc<Notify>>>,
     network_disabled: AtomicBool,
+    shared: RwLock<Option<Arc<dyn Cache>>>,
 }
 
 struct InFlightGuard<'a> {
@@ -70,7 +80,16 @@ impl DynamicRegistry {
             negative_cache: RwLock::new(HashMap::new()),
             in_flight: RwLock::new(HashMap::new()),
             network_disabled: AtomicBool::new(false),
+            shared: RwLock::new(None),
         }
+    }
+
+    pub fn set_shared_cache(&self, cache: Arc<dyn Cache>) {
+        *self.shared.write() = Some(cache);
+    }
+
+    fn shared_cache(&self) -> Option<Arc<dyn Cache>> {
+        self.shared.read().clone()
     }
 
     pub fn from_env() -> Self {
@@ -105,13 +124,17 @@ impl DynamicRegistry {
     }
 
     pub fn is_negative_cached(&self, nsid: &Nsid) -> bool {
-        let cache = self.negative_cache.read();
-        cache
-            .get(nsid)
-            .is_some_and(|entry| entry.expires_at > Instant::now())
+        self.negative_remaining(nsid).is_some()
     }
 
-    fn insert_negative(&self, nsid: &Nsid) {
+    fn negative_remaining(&self, nsid: &Nsid) -> Option<Duration> {
+        self.negative_cache
+            .read()
+            .get(nsid)
+            .and_then(|entry| entry.expires_at.checked_duration_since(Instant::now()))
+    }
+
+    fn insert_negative(&self, nsid: &Nsid, ttl: Duration) {
         let mut cache = self.negative_cache.write();
         if cache.len() >= MAX_DYNAMIC_SCHEMAS {
             let now = Instant::now();
@@ -120,7 +143,7 @@ impl DynamicRegistry {
         cache.insert(
             nsid.clone(),
             NegativeEntry {
-                expires_at: Instant::now() + NEGATIVE_CACHE_TTL,
+                expires_at: Instant::now() + ttl,
             },
         );
     }
@@ -157,6 +180,44 @@ impl DynamicRegistry {
         self.negative_cache.write().remove(&arc.id);
 
         arc
+    }
+
+    async fn shared_get(&self, nsid: &Nsid) -> Option<Arc<LexiconDoc>> {
+        let cache = self.shared_cache()?;
+        let doc = read_json::<LexiconDoc>(cache.as_ref(), &lexicon_doc_key(nsid)).await?;
+        Some(self.insert_schema(doc))
+    }
+
+    async fn shared_put(&self, doc: &LexiconDoc) {
+        let Some(cache) = self.shared_cache() else {
+            return;
+        };
+        write_json(
+            cache.as_ref(),
+            &lexicon_doc_key(&doc.id),
+            doc,
+            POSITIVE_CACHE_TTL,
+        )
+        .await;
+        let _ = cache.delete(&lexicon_negative_key(&doc.id)).await;
+    }
+
+    async fn shared_is_negative(&self, nsid: &Nsid) -> bool {
+        match self.shared_cache() {
+            Some(cache) => cache.get(&lexicon_negative_key(nsid)).await.is_some(),
+            None => false,
+        }
+    }
+
+    async fn shared_put_negative(&self, nsid: &Nsid, error: &ResolveError) {
+        if !error.is_definitive() {
+            return;
+        }
+        if let Some(cache) = self.shared_cache() {
+            let _ = cache
+                .set(&lexicon_negative_key(nsid), "1", NEGATIVE_CACHE_TTL)
+                .await;
+        }
     }
 
     fn bump_expiry(&self, nsid: &Nsid, duration: Duration) {
@@ -203,15 +264,23 @@ impl DynamicRegistry {
 
         match self.acquire_leadership(nsid) {
             Some(_guard) => match resolver(nsid.clone()).await {
-                Ok(doc) => Ok(self.insert_schema(doc)),
+                Ok(doc) => {
+                    self.shared_put(&doc).await;
+                    Ok(self.insert_schema(doc))
+                }
                 Err(e) => {
+                    let (doc, source) = match self.shared_get(nsid).await {
+                        Some(doc) => (doc, "shared"),
+                        None => (stale, "local"),
+                    };
                     self.bump_expiry(nsid, REFRESH_FAILURE_BACKOFF);
                     tracing::warn!(
                         nsid = %nsid,
                         error = %e,
-                        "lexicon refresh failed, serving stale cached entry"
+                        source,
+                        "lexicon refresh failed, serving cached entry"
                     );
-                    Ok(stale)
+                    Ok(doc)
                 }
             },
             None => {
@@ -230,34 +299,59 @@ impl DynamicRegistry {
         F: FnOnce(Nsid) -> Fut,
         Fut: std::future::Future<Output = Result<LexiconDoc, ResolveError>>,
     {
-        if self.network_disabled.load(Ordering::Relaxed) {
-            return Err(ResolveError::NetworkDisabled);
+        if let Some(doc) = self.shared_get(nsid).await {
+            return Ok(doc);
         }
-        if self.is_negative_cached(nsid) {
+
+        if let Some(remaining) = self.negative_remaining(nsid) {
             return Err(ResolveError::NegativelyCached {
                 nsid: nsid.clone(),
-                ttl_secs: NEGATIVE_CACHE_TTL.as_secs(),
+                ttl_secs: remaining.as_secs(),
             });
+        }
+
+        if self.shared_is_negative(nsid).await {
+            // Cache reports 0 remaining TTL for shared negative hit,
+            // so we mirror for the backoff rather than a full `NEGATIVE_CACHE_TTL`.
+            self.insert_negative(nsid, REFRESH_FAILURE_BACKOFF);
+            return Err(ResolveError::NegativelyCached {
+                nsid: nsid.clone(),
+                ttl_secs: REFRESH_FAILURE_BACKOFF.as_secs(),
+            });
+        }
+
+        if self.network_disabled.load(Ordering::Relaxed) {
+            return Err(ResolveError::NetworkDisabled);
         }
 
         match self.acquire_leadership(nsid) {
             Some(_guard) => match resolver(nsid.clone()).await {
-                Ok(doc) => Ok(self.insert_schema(doc)),
+                Ok(doc) => {
+                    self.shared_put(&doc).await;
+                    Ok(self.insert_schema(doc))
+                }
                 Err(e) => {
-                    self.insert_negative(nsid);
-                    tracing::debug!(nsid = %nsid, error = %e, "caching negative resolution result");
+                    let ttl = negative_ttl_for(&e);
+                    self.insert_negative(nsid, ttl);
+                    self.shared_put_negative(nsid, &e).await;
+                    tracing::debug!(
+                        nsid = %nsid,
+                        error = %e,
+                        ttl_secs = ttl.as_secs(),
+                        "caching negative resolution result"
+                    );
                     Err(e)
                 }
             },
             None => {
                 self.wait_for_leader(nsid).await;
-                match self.get_cached(nsid) {
-                    Some(doc) => Ok(doc),
-                    None if self.is_negative_cached(nsid) => Err(ResolveError::NegativelyCached {
+                match (self.get_cached(nsid), self.negative_remaining(nsid)) {
+                    (Some(doc), _) => Ok(doc),
+                    (None, Some(remaining)) => Err(ResolveError::NegativelyCached {
                         nsid: nsid.clone(),
-                        ttl_secs: NEGATIVE_CACHE_TTL.as_secs(),
+                        ttl_secs: remaining.as_secs(),
                     }),
-                    None => Err(ResolveError::LeaderAborted { nsid: nsid.clone() }),
+                    (None, None) => Err(ResolveError::LeaderAborted { nsid: nsid.clone() }),
                 }
             }
         }
@@ -316,6 +410,7 @@ impl Default for DynamicRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tranquil_infra::MemoryCache;
 
     fn nsid(s: &str) -> Nsid {
         s.parse().unwrap()
@@ -324,19 +419,19 @@ mod tests {
     #[test]
     fn test_negative_cache() {
         let registry = DynamicRegistry::new();
-        assert!(!registry.is_negative_cached(&nsid("com.example.test")));
+        assert!(!registry.is_negative_cached(&nsid("pet.nel.negative")));
 
-        registry.insert_negative(&nsid("com.example.test"));
-        assert!(registry.is_negative_cached(&nsid("com.example.test")));
+        registry.insert_negative(&nsid("pet.nel.negative"), NEGATIVE_CACHE_TTL);
+        assert!(registry.is_negative_cached(&nsid("pet.nel.negative")));
     }
 
     #[tokio::test]
     async fn test_negative_cache_returns_appropriate_error_variant() {
         let registry = DynamicRegistry::new();
-        registry.insert_negative(&nsid("com.example.cached"));
+        registry.insert_negative(&nsid("pet.nel.cached"), NEGATIVE_CACHE_TTL);
 
         let err = registry
-            .resolve_and_cache(&nsid("com.example.cached"))
+            .resolve_and_cache(&nsid("pet.nel.cached"))
             .await
             .unwrap_err();
 
@@ -383,17 +478,17 @@ mod tests {
     fn test_negative_cache_cleared_on_insert() {
         let registry = DynamicRegistry::new();
 
-        registry.insert_negative(&nsid("com.example.test"));
-        assert!(registry.is_negative_cached(&nsid("com.example.test")));
+        registry.insert_negative(&nsid("pet.nel.cleared"), NEGATIVE_CACHE_TTL);
+        assert!(registry.is_negative_cached(&nsid("pet.nel.cleared")));
 
         let doc = LexiconDoc {
             lexicon: 1,
-            id: nsid("com.example.test"),
+            id: nsid("pet.nel.cleared"),
             defs: HashMap::new(),
         };
         registry.insert_schema(doc);
 
-        assert!(!registry.is_negative_cached(&nsid("com.example.test")));
+        assert!(!registry.is_negative_cached(&nsid("pet.nel.cleared")));
     }
 
     #[test]
@@ -690,6 +785,97 @@ mod tests {
         assert!(
             weak.upgrade().is_none(),
             "evicted Arc should be freed when no external references remain"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_shared_positive_hit_skips_resolver() {
+        let registry = DynamicRegistry::new();
+        let cache = Arc::new(MemoryCache::new());
+        registry.set_shared_cache(cache.clone());
+        let doc = LexiconDoc {
+            lexicon: 1,
+            id: nsid("pet.nel.sharedDoc"),
+            defs: HashMap::new(),
+        };
+        cache
+            .set(
+                &lexicon_doc_key(&nsid("pet.nel.sharedDoc")),
+                &serde_json::to_string(&doc).unwrap(),
+                POSITIVE_CACHE_TTL,
+            )
+            .await
+            .unwrap();
+
+        let resolved = registry
+            .resolve_and_cache_with(&nsid("pet.nel.sharedDoc"), |_| async move {
+                panic!("resolver mustn't run on a shared positive hit")
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(resolved.id, "pet.nel.sharedDoc");
+        assert!(registry.get_cached(&nsid("pet.nel.sharedDoc")).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_definitive_failure_writes_shared_negative_and_peers_mirror_it() {
+        let cache = Arc::new(MemoryCache::new());
+        let registry = DynamicRegistry::new();
+        registry.set_shared_cache(cache.clone());
+
+        let _ = registry
+            .resolve_and_cache_with(&nsid("pet.nel.gone"), |n| async move {
+                Err::<LexiconDoc, _>(ResolveError::SchemaNotFound {
+                    nsid: n,
+                    url: "https://oyster.cafe".to_string(),
+                })
+            })
+            .await;
+        assert!(
+            cache
+                .get(&lexicon_negative_key(&nsid("pet.nel.gone")))
+                .await
+                .is_some(),
+            "definitive failure must write the shared negative key"
+        );
+
+        let _ = registry
+            .resolve_and_cache_with(&nsid("pet.nel.transient"), |n| async move {
+                Err::<LexiconDoc, _>(ResolveError::DnsLookup {
+                    domain: n.into_inner(),
+                    reason: "simulated".to_string(),
+                })
+            })
+            .await;
+        assert!(
+            cache
+                .get(&lexicon_negative_key(&nsid("pet.nel.transient")))
+                .await
+                .is_none(),
+            "transient failure must stay out of the shared negative key"
+        );
+
+        let peer = DynamicRegistry::new();
+        peer.set_shared_cache(cache);
+        let err = peer
+            .resolve_and_cache_with(&nsid("pet.nel.gone"), |_| async move {
+                panic!("resolver mustn't run on a shared negative hit")
+            })
+            .await
+            .unwrap_err();
+        match err {
+            ResolveError::NegativelyCached { ttl_secs, .. } => assert!(
+                ttl_secs <= REFRESH_FAILURE_BACKOFF.as_secs(),
+                "local mirror must use the backoff TTL, got {}s",
+                ttl_secs
+            ),
+            other => panic!("expected NegativelyCached, got: {}", other),
+        }
+        assert!(
+            peer.negative_remaining(&nsid("pet.nel.gone"))
+                .expect("local mirror exists")
+                <= REFRESH_FAILURE_BACKOFF
         );
     }
 }

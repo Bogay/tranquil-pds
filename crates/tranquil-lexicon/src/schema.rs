@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tranquil_types::Nsid;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LexiconDoc {
     pub lexicon: u32,
     pub id: Nsid,
@@ -10,7 +10,7 @@ pub struct LexiconDoc {
     pub defs: HashMap<String, LexDef>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum LexDef {
     #[serde(rename = "record")]
@@ -35,14 +35,14 @@ pub enum LexDef {
     PermissionSet {},
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LexRecord {
     #[serde(default)]
     pub key: Option<String>,
     pub record: LexObject,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LexObject {
     #[serde(default)]
     pub required: Vec<String>,
@@ -52,7 +52,7 @@ pub struct LexObject {
     pub properties: HashMap<String, LexProperty>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum LexProperty {
     #[serde(rename = "string")]
@@ -79,7 +79,7 @@ pub enum LexProperty {
     Object(LexObject),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LexString {
     #[serde(default)]
@@ -102,7 +102,7 @@ pub struct LexString {
     pub default: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LexInteger {
     #[serde(default)]
     pub minimum: Option<i64>,
@@ -116,7 +116,7 @@ pub struct LexInteger {
     pub const_value: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LexBytes {
     #[serde(default)]
@@ -125,7 +125,7 @@ pub struct LexBytes {
     pub min_length: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LexBlob {
     #[serde(default)]
@@ -134,7 +134,7 @@ pub struct LexBlob {
     pub max_size: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LexArray {
     pub items: Box<LexProperty>,
@@ -144,7 +144,7 @@ pub struct LexArray {
     pub max_length: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LexUnion {
     #[serde(default)]
     pub refs: Vec<String>,
@@ -152,14 +152,14 @@ pub struct LexUnion {
     pub closed: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LexRef {
     #[serde(rename = "ref")]
     pub reference: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StringFormat {
     #[serde(rename = "did")]
     Did,
@@ -204,6 +204,6 @@ pub fn parse_ref(reference: &str) -> ParsedRef<'_> {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LexStringDef {}

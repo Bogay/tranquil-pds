@@ -74,7 +74,7 @@ async fn test_resolve_pds_endpoint_from_plc() {
     let endpoint = resolve_pds_endpoint(&did.parse().unwrap(), Some(&plc_server.uri()))
         .await
         .unwrap();
-    assert_eq!(endpoint, "https://pds.example.com");
+    assert_eq!(endpoint.as_str(), "https://pds.example.com");
 }
 
 #[tokio::test]
@@ -130,14 +130,17 @@ async fn test_resolve_pds_endpoint_multiple_services_picks_pds() {
             "id": did,
             "service": [
                 {
+                    "id": "#atproto_labeler",
                     "type": "AtprotoLabeler",
                     "serviceEndpoint": "https://labeler.example.com"
                 },
                 {
+                    "id": "#bsky_notif",
                     "type": "BskyNotificationService",
                     "serviceEndpoint": "https://notify.example.com"
                 },
                 {
+                    "id": "#atproto_pds",
                     "type": "AtprotoPersonalDataServer",
                     "serviceEndpoint": "https://pds.example.com"
                 }
@@ -149,7 +152,7 @@ async fn test_resolve_pds_endpoint_multiple_services_picks_pds() {
     let endpoint = resolve_pds_endpoint(&did.parse().unwrap(), Some(&plc_server.uri()))
         .await
         .unwrap();
-    assert_eq!(endpoint, "https://pds.example.com");
+    assert_eq!(endpoint.as_str(), "https://pds.example.com");
 }
 
 #[tokio::test]
@@ -168,7 +171,7 @@ async fn test_fetch_schema_from_pds_success() {
         .await;
 
     let doc = fetch_schema_from_pds(
-        &pds_server.uri(),
+        &pds_server.uri().parse().unwrap(),
         &did.parse().unwrap(),
         &nsid.parse().unwrap(),
     )
@@ -195,7 +198,7 @@ async fn test_fetch_schema_missing_value_field() {
         .await;
 
     let result = fetch_schema_from_pds(
-        &pds_server.uri(),
+        &pds_server.uri().parse().unwrap(),
         &did.parse().unwrap(),
         &nsid.parse().unwrap(),
     )
@@ -222,7 +225,7 @@ async fn test_fetch_schema_invalid_lexicon_json() {
         .await;
 
     let result = fetch_schema_from_pds(
-        &pds_server.uri(),
+        &pds_server.uri().parse().unwrap(),
         &did.parse().unwrap(),
         &nsid.parse().unwrap(),
     )
@@ -352,7 +355,7 @@ async fn test_pds_trailing_slash_handled() {
 
     let pds_url_with_slash = format!("{}/", pds_server.uri());
     let doc = fetch_schema_from_pds(
-        &pds_url_with_slash,
+        &pds_url_with_slash.parse().unwrap(),
         &did.parse().unwrap(),
         &nsid.parse().unwrap(),
     )
@@ -377,7 +380,7 @@ async fn test_fetch_schema_error_status_gives_meaningful_error() {
         .await;
 
     let result = fetch_schema_from_pds(
-        &pds_server.uri(),
+        &pds_server.uri().parse().unwrap(),
         &did.parse().unwrap(),
         &nsid.parse().unwrap(),
     )
