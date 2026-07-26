@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::cache::Cache;
+use crate::cache_keys::{legacy_2fa_challenge_key, legacy_2fa_cooldown_key};
 use crate::types::Did;
 use crate::util::{generate_token_code, normalize_token_code};
 
@@ -58,8 +59,8 @@ pub async fn create_challenge(
 }
 
 pub async fn clear_challenge(cache: &dyn Cache, did: &Did) {
-    let _ = cache.delete(&challenge_key(did)).await;
-    let _ = cache.delete(&cooldown_key(did)).await;
+    let _ = cache.delete(&legacy_2fa_challenge_key(did)).await;
+    let _ = cache.delete(&legacy_2fa_cooldown_key(did)).await;
 }
 
 async fn validate_challenge_internal(
@@ -71,7 +72,7 @@ async fn validate_challenge_internal(
         return Err(ValidationError::CacheUnavailable);
     }
 
-    let challenge_k = challenge_key(did);
+    let challenge_k = legacy_2fa_challenge_key(did);
 
     let json = cache
         .get(&challenge_k)
@@ -114,17 +115,9 @@ async fn validate_challenge_internal(
     }
 
     let _ = cache.delete(&challenge_k).await;
-    let _ = cache.delete(&cooldown_key(did)).await;
+    let _ = cache.delete(&legacy_2fa_cooldown_key(did)).await;
 
     Ok(())
-}
-
-fn challenge_key(did: &Did) -> String {
-    format!("legacy_2fa:{}", did)
-}
-
-fn cooldown_key(did: &Did) -> String {
-    format!("legacy_2fa_cooldown:{}", did)
 }
 
 fn current_timestamp() -> u64 {
@@ -226,7 +219,7 @@ async fn create_challenge_code(
         return Err(ChallengeError::CacheUnavailable);
     }
 
-    let cooldown = cooldown_key(did);
+    let cooldown = legacy_2fa_cooldown_key(did);
     if cache.get(&cooldown).await.is_some() {
         return Err(ChallengeError::RateLimited);
     }
@@ -244,7 +237,7 @@ async fn create_challenge_code(
 
     cache
         .set(
-            &challenge_key(did),
+            &legacy_2fa_challenge_key(did),
             &json,
             Duration::from_secs(CHALLENGE_TTL_SECS),
         )
@@ -280,67 +273,11 @@ impl From<ValidationError> for Legacy2faFlowError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::CacheError;
-    use async_trait::async_trait;
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    struct MockCache {
-        data: Mutex<HashMap<String, (String, u64)>>,
-    }
-
-    impl MockCache {
-        fn new() -> Self {
-            Self {
-                data: Mutex::new(HashMap::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl Cache for MockCache {
-        async fn get(&self, key: &str) -> Option<String> {
-            let data = self.data.lock().unwrap();
-            let now = current_timestamp();
-            data.get(key)
-                .filter(|(_, exp)| *exp > now)
-                .map(|(v, _)| v.clone())
-        }
-
-        async fn set(&self, key: &str, value: &str, ttl: Duration) -> Result<(), CacheError> {
-            let mut data = self.data.lock().unwrap();
-            let expires = current_timestamp() + ttl.as_secs();
-            data.insert(key.to_string(), (value.to_string(), expires));
-            Ok(())
-        }
-
-        async fn delete(&self, key: &str) -> Result<(), CacheError> {
-            let mut data = self.data.lock().unwrap();
-            data.remove(key);
-            Ok(())
-        }
-
-        async fn get_bytes(&self, _key: &str) -> Option<Vec<u8>> {
-            None
-        }
-
-        async fn set_bytes(
-            &self,
-            _key: &str,
-            _value: &[u8],
-            _ttl: Duration,
-        ) -> Result<(), CacheError> {
-            Ok(())
-        }
-
-        fn is_available(&self) -> bool {
-            true
-        }
-    }
+    use tranquil_infra::MemoryCache;
 
     #[tokio::test]
     async fn test_create_and_validate_challenge() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test123".to_string()).unwrap();
 
         let code = create_challenge(&cache, &did).await.unwrap();
@@ -352,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_challenge_code_format() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test123".to_string()).unwrap();
 
         let code = create_challenge(&cache, &did).await.unwrap();
@@ -364,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_case_insensitive_validation() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test123".to_string()).unwrap();
 
         let code = create_challenge(&cache, &did).await.unwrap();
@@ -375,7 +312,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hyphen_insensitive_validation() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test123".to_string()).unwrap();
 
         let code = create_challenge(&cache, &did).await.unwrap();
@@ -386,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_code_rejected() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test123".to_string()).unwrap();
 
         let _code = create_challenge(&cache, &did).await.unwrap();
@@ -396,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_challenge_consumed_on_success() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test123".to_string()).unwrap();
 
         let code = create_challenge(&cache, &did).await.unwrap();
@@ -410,7 +347,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_max_attempts_exceeded() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test123".to_string()).unwrap();
 
         let _code = create_challenge(&cache, &did).await.unwrap();
@@ -425,7 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limiting() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test123".to_string()).unwrap();
 
         let _first = create_challenge(&cache, &did).await.unwrap();
@@ -453,7 +390,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_flow_not_required() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,
@@ -470,7 +407,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_flow_not_required_because_app_password() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: true,
@@ -487,7 +424,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_flow_blocked() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,
@@ -504,7 +441,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_flow_challenge_sent_totp() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,
@@ -521,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_flow_challenge_sent_email_2fa_enabled() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test2".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,
@@ -538,7 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_flow_verified() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,
@@ -557,7 +494,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_attempts_persist_across_failures() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:test123".to_string()).unwrap();
 
         let code = create_challenge(&cache, &did).await.unwrap();
@@ -590,7 +527,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_totp_shaped_token_accepted_via_verifier() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:totp1".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,
@@ -607,7 +544,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_totp_shaped_token_rejected_does_not_touch_email_challenge() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:totp2".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,
@@ -641,7 +578,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_email_shaped_token_routes_to_email_path_when_totp_present() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:totp3".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,
@@ -662,7 +599,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backup_code_shaped_token_routes_to_verifier() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:totp4".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,
@@ -681,7 +618,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_totp_shaped_token_ignored_when_no_totp() {
-        let cache = MockCache::new();
+        let cache = MemoryCache::new();
         let did = Did::new("did:plc:totp5".to_string()).unwrap();
         let ctx = Legacy2faContext {
             is_app_password: false,

@@ -33,36 +33,12 @@ pub async fn resolve_effective_scopes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use std::sync::Mutex;
     use std::time::Duration;
-    use tranquil_pds::cache::{Cache, CacheError};
+    use tranquil_infra::MemoryCache;
+    use tranquil_pds::cache::Cache;
 
-    #[derive(Default)]
-    struct MapCache(Mutex<HashMap<String, String>>);
-    #[async_trait::async_trait]
-    impl Cache for MapCache {
-        async fn get(&self, k: &str) -> Option<String> {
-            self.0.lock().unwrap().get(k).cloned()
-        }
-        async fn set(&self, k: &str, v: &str, _t: Duration) -> Result<(), CacheError> {
-            self.0.lock().unwrap().insert(k.into(), v.into());
-            Ok(())
-        }
-        async fn delete(&self, k: &str) -> Result<(), CacheError> {
-            self.0.lock().unwrap().remove(k);
-            Ok(())
-        }
-        async fn get_bytes(&self, _k: &str) -> Option<Vec<u8>> {
-            None
-        }
-        async fn set_bytes(&self, _k: &str, _v: &[u8], _t: Duration) -> Result<(), CacheError> {
-            Ok(())
-        }
-    }
-
-    fn cache_with(nsid: &str, scopes: &str) -> MapCache {
-        let c = MapCache::default();
+    async fn cache_with(nsid: &str, scopes: &str) -> MemoryCache {
+        let c = MemoryCache::new();
         let key = tranquil_pds::cache_keys::permission_set_key(
             &tranquil_types::Nsid::new(nsid).unwrap(),
             None,
@@ -74,7 +50,7 @@ mod tests {
             "refreshed_at": chrono::Utc::now().timestamp(),
         })
         .to_string();
-        c.0.lock().unwrap().insert(key, json);
+        let _ = c.set(&key, &json, Duration::from_secs(3600)).await;
         c
     }
 
@@ -83,7 +59,8 @@ mod tests {
         let c = cache_with(
             "io.atcr.authFullApp",
             "repo:io.atcr.manifest?action=create identity:*",
-        );
+        )
+        .await;
         let eff = resolve_effective_scopes(
             &c,
             "atproto include:io.atcr.authFullApp",
@@ -104,7 +81,8 @@ mod tests {
         let c = cache_with(
             "io.atcr.authFullApp",
             "repo:io.atcr.manifest?action=create identity:*",
-        );
+        )
+        .await;
         let granted = DbScope::new("atproto repo:* blob:*/* account:*?action=manage").unwrap();
         let eff = resolve_effective_scopes(
             &c,

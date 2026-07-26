@@ -137,39 +137,12 @@ fn map_err(e: &ScopeExpansionError) -> ResolveFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::{Cache, CacheError};
-    use std::collections::HashMap;
-    use std::sync::Mutex;
     use std::time::Duration;
+    use tranquil_infra::MemoryCache;
 
-    #[derive(Default)]
-    struct MapCache(Mutex<HashMap<String, String>>);
+    const SEED_TTL: Duration = Duration::from_secs(3600);
 
-    #[async_trait::async_trait]
-    impl Cache for MapCache {
-        async fn get(&self, key: &str) -> Option<String> {
-            self.0.lock().unwrap().get(key).cloned()
-        }
-        async fn set(&self, key: &str, value: &str, _ttl: Duration) -> Result<(), CacheError> {
-            self.0
-                .lock()
-                .unwrap()
-                .insert(key.to_string(), value.to_string());
-            Ok(())
-        }
-        async fn delete(&self, key: &str) -> Result<(), CacheError> {
-            self.0.lock().unwrap().remove(key);
-            Ok(())
-        }
-        async fn get_bytes(&self, _key: &str) -> Option<Vec<u8>> {
-            None
-        }
-        async fn set_bytes(&self, _k: &str, _v: &[u8], _t: Duration) -> Result<(), CacheError> {
-            Ok(())
-        }
-    }
-
-    fn seed_at(cache: &MapCache, nsid: &str, scope: &str, refreshed_at: i64) {
+    async fn seed_at(cache: &MemoryCache, nsid: &str, scope: &str, refreshed_at: i64) {
         let key =
             crate::cache_keys::permission_set_key(&tranquil_types::Nsid::new(nsid).unwrap(), None);
         let val = serde_json::to_string(&CachedPermissionSet {
@@ -179,21 +152,22 @@ mod tests {
             refreshed_at,
         })
         .unwrap();
-        cache.0.lock().unwrap().insert(key, val);
+        let _ = cache.set(&key, &val, SEED_TTL).await;
     }
 
-    fn seed(cache: &MapCache, nsid: &str, scope: &str) {
-        seed_at(cache, nsid, scope, now_secs());
+    async fn seed(cache: &MemoryCache, nsid: &str, scope: &str) {
+        seed_at(cache, nsid, scope, now_secs()).await;
     }
 
     #[tokio::test]
     async fn cache_hit_expands_without_network() {
-        let cache = MapCache::default();
+        let cache = MemoryCache::new();
         seed(
             &cache,
             "io.atcr.authFullApp",
             "repo:io.atcr.manifest?action=create identity:*",
-        );
+        )
+        .await;
         let out = expand_scopes(&cache, "atproto include:io.atcr.authFullApp").await;
         assert!(out.failures.is_empty());
         assert_eq!(out.passthrough, vec!["atproto".to_string()]);
@@ -208,13 +182,14 @@ mod tests {
 
     #[tokio::test]
     async fn stale_entry_is_served_when_refresh_fails() {
-        let cache = MapCache::default();
+        let cache = MemoryCache::new();
         seed_at(
             &cache,
             "nonexistent.fake.permissionSet",
             "repo:nonexistent.fake.record?action=create",
             now_secs() - STALE_AFTER_SECS - 1,
-        );
+        )
+        .await;
         let out = expand_scopes(&cache, "include:nonexistent.fake.permissionSet").await;
         assert!(
             out.failures.is_empty(),
@@ -230,7 +205,7 @@ mod tests {
 
     #[tokio::test]
     async fn entry_without_refreshed_at_is_treated_as_stale_but_usable() {
-        let cache = MapCache::default();
+        let cache = MemoryCache::new();
         let key = crate::cache_keys::permission_set_key(
             &tranquil_types::Nsid::new("nonexistent.fake.permissionSet").unwrap(),
             None,
@@ -238,7 +213,7 @@ mod tests {
         // Shape written before `refreshed_at` existed.
         let legacy =
             r#"{"scope":"repo:nonexistent.fake.record?action=create","title":null,"detail":null}"#;
-        cache.0.lock().unwrap().insert(key, legacy.to_string());
+        let _ = cache.set(&key, legacy, SEED_TTL).await;
         let out = expand_scopes(&cache, "include:nonexistent.fake.permissionSet").await;
         assert!(out.failures.is_empty());
         assert_eq!(out.sets.len(), 1);
@@ -246,7 +221,7 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_scopes_untouched() {
-        let cache = MapCache::default();
+        let cache = MemoryCache::new();
         let out = expand_scopes(&cache, "atproto repo:app.bsky.feed.post?action=create").await;
         assert!(out.failures.is_empty());
         assert!(out.sets.is_empty());
@@ -255,7 +230,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_miss_unresolvable_is_a_failure() {
-        let cache = MapCache::default();
+        let cache = MemoryCache::new();
         let out = expand_scopes(&cache, "include:nonexistent.fake.permissionSet").await;
         assert_eq!(out.sets.len(), 0);
         assert_eq!(out.failures.len(), 1);

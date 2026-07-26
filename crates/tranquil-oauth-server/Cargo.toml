@@ -37,6 +37,7 @@ webauthn-rs = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
+tranquil-infra = { workspace = true, features = ["testing"] }
 
 [features]
 bsky = []
