@@ -89,6 +89,10 @@ pub const HEADER_ATPROTO_CONTENT_LABELERS: HeaderName =
     HeaderName::from_static("atproto-content-labelers");
 #[cfg(feature = "bsky-support")]
 pub const HEADER_X_BSKY_TOPICS: HeaderName = HeaderName::from_static("x-bsky-topics");
+#[cfg(feature = "bsky-support")]
+pub const CORS_BSKY_ALLOW_HEADERS: [HeaderName; 1] = [HEADER_X_BSKY_TOPICS];
+#[cfg(not(feature = "bsky-support"))]
+pub const CORS_BSKY_ALLOW_HEADERS: [HeaderName; 0] = [];
 
 pub fn get_header_str(
     headers: &HeaderMap,
@@ -250,11 +254,7 @@ pub fn build_full_url(path: &str) -> String {
         && (path.starts_with("/com.atproto.")
             // BSKY: Bluesky requires that the PDS implement some app.bsky.* endpoints so we need to deal with those here too.
             // TODO: surely we can figure out a way to do this more generically?
-            || (if cfg!(feature = "bsky-support") {
-                path.starts_with("/app.bsky.")
-            } else {
-                true
-            })
+            || (cfg!(feature = "bsky-support") && path.starts_with("/app.bsky."))
             || path.starts_with("/_"))
     {
         format!("/xrpc{path}")
@@ -798,7 +798,10 @@ mod tests {
         );
         assert_eq!(
             build_full_url("/app.bsky.feed.getTimeline"),
-            "https://example.com/xrpc/app.bsky.feed.getTimeline"
+            match cfg!(feature = "bsky-support") {
+                true => "https://example.com/xrpc/app.bsky.feed.getTimeline",
+                false => "https://example.com/app.bsky.feed.getTimeline",
+            }
         );
         assert_eq!(
             build_full_url("/_health"),

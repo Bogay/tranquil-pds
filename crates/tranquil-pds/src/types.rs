@@ -1,5 +1,6 @@
 pub use tranquil_types::*;
 
+#[cfg(feature = "bsky")]
 use std::sync::LazyLock;
 
 #[cfg(feature = "bsky")]

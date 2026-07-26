@@ -164,6 +164,13 @@ pub async fn resolve_signing_key(
     }
 }
 
+#[cfg_attr(
+    not(feature = "bsky"),
+    expect(
+        unused_variables,
+        reason = "only the bsky block writes display_name into the default profile record"
+    )
+)]
 pub async fn sequence_new_account(
     state: &AppState,
     did: &Did,

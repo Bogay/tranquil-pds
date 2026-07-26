@@ -335,27 +335,29 @@ async fn proxy_handler(
                 };
 
                 // BSKY: getFeed must be audienced to the feed generator, not the AppView.
-                let (token_aud, token_lxm) =
-                    if cfg!(feature = "bsky-support") && method == "app.bsky.feed.getFeed" {
-                        match resolve_feed_generator_did(&resolved.url, query.as_deref()).await {
-                            Some(feed_did) => (
-                                feed_did,
-                                "app.bsky.feed.getFeedSkeleton"
-                                    .parse::<Nsid>()
-                                    .expect("getFeedSkeleton is a valid NSID"),
-                            ),
-                            None => {
-                                warn!(
-                                    "getFeed proxy: could not resolve feed generator DID; refusing \
-                                 to mint an AppView-audienced token"
-                                );
-                                return ApiError::InvalidRequest("Could not resolve feed".into())
-                                    .into_response();
-                            }
+                #[cfg(feature = "bsky-support")]
+                let (token_aud, token_lxm) = if method == "app.bsky.feed.getFeed" {
+                    match resolve_feed_generator_did(&resolved.url, query.as_deref()).await {
+                        Some(feed_did) => (
+                            feed_did,
+                            "app.bsky.feed.getFeedSkeleton"
+                                .parse::<Nsid>()
+                                .expect("getFeedSkeleton is a valid NSID"),
+                        ),
+                        None => {
+                            warn!(
+                                "getFeed proxy refuses to mint an AppView-audienced token \
+                                 because feed generator DID resolution failed"
+                            );
+                            return ApiError::InvalidRequest("Couldn't resolve feed".into())
+                                .into_response();
                         }
-                    } else {
-                        (resolved.did.clone(), method_nsid.clone())
-                    };
+                    }
+                } else {
+                    (resolved.did.clone(), method_nsid.clone())
+                };
+                #[cfg(not(feature = "bsky-support"))]
+                let (token_aud, token_lxm) = (resolved.did.clone(), method_nsid.clone());
 
                 match crate::auth::create_service_token(
                     &auth_user.did,

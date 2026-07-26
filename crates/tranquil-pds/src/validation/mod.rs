@@ -132,6 +132,10 @@ fn validate_preamble<'a>(
     Ok((record_type, obj))
 }
 
+#[cfg_attr(
+    not(feature = "bsky"),
+    expect(unused_variables, reason = "only bsky record checks read obj and rkey")
+)]
 fn check_banned_content(
     record_type: &str,
     obj: &serde_json::Map<String, Value>,
@@ -211,6 +215,7 @@ fn check_post_banned_content(obj: &serde_json::Map<String, Value>) -> Result<(),
     Ok(())
 }
 
+#[cfg(feature = "bsky")]
 fn check_string_field(
     obj: &serde_json::Map<String, Value>,
     field: &str,
