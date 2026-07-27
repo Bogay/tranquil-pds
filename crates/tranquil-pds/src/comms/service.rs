@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,8 +8,8 @@ use chrono::Utc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use tranquil_comms::{
-    CommsChannel, CommsMessageType, CommsSender, NotificationStrings, SendError, format_message,
-    get_strings,
+    CommsChannel, CommsMessageType, CommsSender, RenderedTemplate, SendError, TemplateId,
+    render_template,
 };
 use tranquil_db_traits::{
     DbError, InfraRepository, QueuedComms, Recipient, UserCommsPrefs, UserRepository,
@@ -271,31 +272,125 @@ fn email_recipient(prefs: &UserCommsPrefs) -> Option<Recipient> {
         .map(Recipient::Email)
 }
 
+#[derive(Debug)]
+pub enum NotificationError {
+    InvalidRequest(String),
+    RequiresBot,
+    DbError(DbError),
+    PreferredLocaleNotFound(DbError),
+    TemplateRenderingError(String),
+}
+
+impl fmt::Display for NotificationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRequest(e) => write!(f, "Invalid request: {}", e),
+            Self::RequiresBot => write!(f, "Requires bot"),
+            Self::DbError(e) => write!(f, "DB error: {}", e),
+            Self::PreferredLocaleNotFound(e) => write!(f, "Preferred locale not found: {}", e),
+            Self::TemplateRenderingError(e) => write!(f, "Template rendering error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for NotificationError {}
+
 pub mod repo {
     use super::*;
 
     pub enum Notice<'a> {
-        Welcome,
-        PasswordReset { code: &'a str },
-        TwoFactorCode { code: &'a str },
-        AccountDeletion { code: &'a str },
-        PlcOperation { token: &'a str },
-        PasskeyRecovery { url: &'a str },
-        ShortTokenEmail { token: &'a str },
-        LegacyLoginAlert { channel: CommsChannel, ip: &'a str },
+        Welcome {
+            hostname: &'a str,
+            handle: &'a str,
+        },
+        PasswordReset {
+            hostname: &'a str,
+            handle: &'a str,
+            code: &'a str,
+        },
+        TwoFactorCode {
+            hostname: &'a str,
+            handle: &'a str,
+            code: &'a str,
+        },
+        AccountDeletion {
+            hostname: &'a str,
+            handle: &'a str,
+            code: &'a str,
+        },
+        PlcOperation {
+            hostname: &'a str,
+            handle: &'a str,
+            token: &'a str,
+        },
+        PasskeyRecovery {
+            hostname: &'a str,
+            handle: &'a str,
+            url: &'a str,
+        },
+        ShortTokenEmail {
+            hostname: &'a str,
+            handle: &'a str,
+            code: &'a str,
+            verify_page: &'a str,
+            verify_link: &'a str,
+        },
+        LegacyLoginAlert {
+            hostname: &'a str,
+            handle: &'a str,
+            timestamp: &'a str,
+            ip: &'a str,
+            channel: CommsChannel, // Used for logging purposes
+        },
+        EmailUpdate {
+            hostname: &'a str,
+            handle: &'a str,
+            code: &'a str,
+            verify_page: &'a str,
+            verify_link: &'a str,
+        },
+        MigrationVerification {
+            hostname: &'a str,
+            handle: &'a str,
+            code: &'a str,
+            verify_page: &'a str,
+            verify_link: &'a str,
+        },
+        SignupVerification {
+            hostname: &'a str,
+            handle: &'a str,
+            code: &'a str,
+            verify_page: &'a str,
+            verify_link: &'a str,
+        },
+        ChannelVerification {
+            hostname: &'a str,
+            code: &'a str,
+            verify_link: &'a str,
+        },
+        ChannelVerified {
+            hostname: &'a str,
+            handle: &'a str,
+            channel: CommsChannel,
+        },
     }
 
     impl Notice<'_> {
         fn comms_type(&self) -> CommsMessageType {
             match self {
-                Self::Welcome => CommsMessageType::Welcome,
+                Self::Welcome { .. } => CommsMessageType::Welcome,
                 Self::PasswordReset { .. } => CommsMessageType::PasswordReset,
                 Self::TwoFactorCode { .. } => CommsMessageType::TwoFactorCode,
                 Self::AccountDeletion { .. } => CommsMessageType::AccountDeletion,
                 Self::PlcOperation { .. } => CommsMessageType::PlcOperation,
                 Self::PasskeyRecovery { .. } => CommsMessageType::PasskeyRecovery,
-                Self::ShortTokenEmail { .. } => CommsMessageType::EmailUpdate,
+                Self::ShortTokenEmail { .. } => CommsMessageType::EmailUpdate, // Unfortunate naming inconsistency, EmailUpdate is the correct name for this.
                 Self::LegacyLoginAlert { .. } => CommsMessageType::LegacyLoginAlert,
+                Self::EmailUpdate { .. } => CommsMessageType::EmailUpdate,
+                Self::MigrationVerification { .. } => CommsMessageType::MigrationVerification,
+                Self::SignupVerification { .. } => CommsMessageType::EmailVerification,
+                Self::ChannelVerification { .. } => CommsMessageType::ChannelVerification,
+                Self::ChannelVerified { .. } => CommsMessageType::ChannelVerified,
             }
         }
 
@@ -308,68 +403,174 @@ pub mod repo {
             }
         }
 
-        fn subject(&self, strings: &NotificationStrings) -> &'static str {
-            match self {
-                Self::Welcome => strings.welcome_subject,
-                Self::PasswordReset { .. } => strings.password_reset_subject,
-                Self::TwoFactorCode { .. } => strings.two_factor_code_subject,
-                Self::AccountDeletion { .. } => strings.account_deletion_subject,
-                Self::PlcOperation { .. } => strings.plc_operation_subject,
-                Self::PasskeyRecovery { .. } => strings.passkey_recovery_subject,
-                Self::ShortTokenEmail { .. } => strings.email_update_subject,
-                Self::LegacyLoginAlert { .. } => strings.legacy_login_subject,
-            }
-        }
-
-        fn body(&self, strings: &NotificationStrings, handle: &str, hostname: &str) -> String {
-            match self {
-                Self::Welcome => format_message(
-                    strings.welcome_body,
+        fn rendered(&self, locale: &str) -> Result<RenderedTemplate, NotificationError> {
+            let result = match self {
+                Self::Welcome { hostname, handle } => render_template(
+                    TemplateId::Welcome,
+                    locale,
                     &[("hostname", hostname), ("handle", handle)],
                 ),
-                Self::PasswordReset { code } => format_message(
-                    strings.password_reset_body,
-                    &[("handle", handle), ("code", code)],
+                Self::PasswordReset {
+                    hostname,
+                    handle,
+                    code,
+                } => render_template(
+                    TemplateId::PasswordReset,
+                    locale,
+                    &[("hostname", hostname), ("handle", handle), ("code", code)],
                 ),
-                Self::TwoFactorCode { code } => format_message(
-                    strings.two_factor_code_body,
-                    &[("handle", handle), ("code", code)],
+                Self::TwoFactorCode {
+                    hostname,
+                    handle,
+                    code,
+                } => render_template(
+                    TemplateId::TwoFactorCode,
+                    locale,
+                    &[("hostname", hostname), ("handle", handle), ("code", code)],
                 ),
-                Self::AccountDeletion { code } => format_message(
-                    strings.account_deletion_body,
-                    &[("handle", handle), ("code", code)],
+                Self::AccountDeletion {
+                    hostname,
+                    handle,
+                    code,
+                } => render_template(
+                    TemplateId::AccountDeletion,
+                    locale,
+                    &[("hostname", hostname), ("handle", handle), ("code", code)],
                 ),
-                Self::PlcOperation { token } => format_message(
-                    strings.plc_operation_body,
-                    &[("handle", handle), ("token", token)],
+                Self::PlcOperation {
+                    hostname,
+                    handle,
+                    token,
+                } => render_template(
+                    TemplateId::PlcOperation,
+                    locale,
+                    &[("hostname", hostname), ("handle", handle), ("token", token)],
                 ),
-                Self::PasskeyRecovery { url } => format_message(
-                    strings.passkey_recovery_body,
-                    &[("handle", handle), ("url", url)],
+                Self::PasskeyRecovery {
+                    hostname,
+                    handle,
+                    url,
+                } => render_template(
+                    TemplateId::PasskeyRecovery,
+                    locale,
+                    &[("hostname", hostname), ("handle", handle), ("url", url)],
                 ),
-                Self::ShortTokenEmail { token } => {
-                    let verify_page = format!("https://{hostname}/app/settings");
-                    format_message(
-                        strings.short_token_body,
-                        &[
-                            ("handle", handle),
-                            ("code", token),
-                            ("verify_page", &verify_page),
-                        ],
-                    )
-                }
-                Self::LegacyLoginAlert { ip, .. } => {
-                    let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
-                    format_message(
-                        strings.legacy_login_body,
-                        &[
-                            ("handle", handle),
-                            ("timestamp", &timestamp),
-                            ("ip", ip),
-                            ("hostname", hostname),
-                        ],
-                    )
-                }
+                Self::ShortTokenEmail {
+                    hostname,
+                    handle,
+                    code,
+                    verify_page,
+                    verify_link,
+                } => render_template(
+                    TemplateId::EmailUpdate,
+                    locale,
+                    &[
+                        ("hostname", hostname),
+                        ("handle", handle),
+                        ("code", code),
+                        ("verify_page", verify_page),
+                        ("verify_link", verify_link),
+                    ],
+                ),
+                Self::LegacyLoginAlert {
+                    #[allow(unused)]
+                    channel,
+                    hostname,
+                    handle,
+                    timestamp,
+                    ip,
+                } => render_template(
+                    TemplateId::LegacyLogin,
+                    locale,
+                    &[
+                        ("handle", handle),
+                        ("timestamp", timestamp),
+                        ("ip", ip),
+                        ("hostname", hostname),
+                    ],
+                ),
+                Self::EmailUpdate {
+                    hostname,
+                    handle,
+                    code,
+                    verify_page,
+                    verify_link,
+                } => render_template(
+                    TemplateId::EmailUpdate,
+                    locale,
+                    &[
+                        ("hostname", hostname),
+                        ("handle", handle),
+                        ("code", code),
+                        ("verify_page", verify_page),
+                        ("verify_link", verify_link),
+                    ],
+                ),
+                Self::MigrationVerification {
+                    hostname,
+                    handle,
+                    code,
+                    verify_page,
+                    verify_link,
+                } => render_template(
+                    TemplateId::MigrationVerification,
+                    locale,
+                    &[
+                        ("hostname", hostname),
+                        ("handle", handle),
+                        ("code", code),
+                        ("verify_page", verify_page),
+                        ("verify_link", verify_link),
+                    ],
+                ),
+                Self::SignupVerification {
+                    hostname,
+                    handle,
+                    code,
+                    verify_page,
+                    verify_link,
+                } => render_template(
+                    TemplateId::SignupVerification,
+                    locale,
+                    &[
+                        ("hostname", hostname),
+                        ("handle", handle),
+                        ("code", code),
+                        ("verify_page", verify_page),
+                        ("verify_link", verify_link),
+                    ],
+                ),
+                Self::ChannelVerification {
+                    hostname,
+                    code,
+                    verify_link,
+                } => render_template(
+                    TemplateId::ChannelVerification,
+                    locale,
+                    &[
+                        ("hostname", hostname),
+                        ("code", code),
+                        ("verify_link", verify_link),
+                    ],
+                ),
+                Self::ChannelVerified {
+                    hostname,
+                    handle,
+                    channel,
+                } => render_template(
+                    TemplateId::ChannelVerified,
+                    locale,
+                    &[
+                        ("hostname", hostname),
+                        ("handle", handle),
+                        ("channel", channel.display_name()),
+                    ],
+                ),
+            };
+
+            match result {
+                Ok(template) => Ok(template),
+                Err(e) => Err(NotificationError::TemplateRenderingError(e.to_string())),
             }
         }
     }
@@ -379,12 +580,9 @@ pub mod repo {
         infra_repo: &dyn InfraRepository,
         user_id: Uuid,
         notice: Notice<'_>,
-        hostname: &str,
-    ) -> Result<Option<Uuid>, DbError> {
-        let prefs = user_repo
-            .get_comms_prefs(user_id)
-            .await?
-            .ok_or(DbError::NotFound)?;
+    ) -> Result<Option<Uuid>, NotificationError> {
+        // TODO extract this to a function
+        let prefs = get_comms_prefs(user_repo, user_id).await?;
         let channel = notice.channel().unwrap_or(prefs.preferred_channel);
         let Some(recipient) = recipient_for(&prefs, channel) else {
             warn!(
@@ -394,24 +592,38 @@ pub mod repo {
             );
             return Ok(None);
         };
-        let strings = get_strings(locale_of(&prefs));
-        let subject = format_message(notice.subject(strings), &[("hostname", hostname)]);
-        let body = notice.body(strings, prefs.handle.as_str(), hostname);
+        let locale: &str = locale_of(&prefs);
+        let rendered = notice.rendered(locale)?;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
                 &recipient,
                 notice.comms_type(),
-                Some(&subject),
-                &body,
-                None,
+                Some(&rendered.subject),
+                &rendered.body,
+                rendered.metadata(),
             )
             .await
+            .map_err(NotificationError::DbError)
             .map(Some)
     }
 
     fn locale_of(prefs: &UserCommsPrefs) -> &str {
         prefs.preferred_locale.as_deref().unwrap_or("en")
+    }
+
+    pub async fn get_comms_prefs(
+        user_repo: &dyn UserRepository,
+        user_id: Uuid,
+    ) -> Result<UserCommsPrefs, NotificationError> {
+        let user = user_repo.get_comms_prefs(user_id).await;
+        match user {
+            Ok(Some(prefs)) => Ok(prefs),
+            Ok(None) => Err(NotificationError::PreferredLocaleNotFound(
+                DbError::NotFound,
+            )),
+            Err(e) => Err(NotificationError::PreferredLocaleNotFound(e)),
+        }
     }
 
     pub async fn enqueue_email_update(
@@ -421,35 +633,34 @@ pub mod repo {
         handle: &crate::types::Handle,
         code: &str,
         hostname: &str,
-    ) -> Result<Uuid, DbError> {
-        let strings = get_strings("en");
-        let encoded_email = urlencoding::encode(new_email.as_str());
-        let encoded_token = urlencoding::encode(code);
-        let verify_page = format!("https://{}/app/verify", hostname);
+    ) -> Result<Uuid, NotificationError> {
+        // TODO support user locale for email update
+        let locale: &str = "en";
+        let verify_page = format!("https://{hostname}/app/verify?type=email-update");
         let verify_link = format!(
-            "https://{}/app/verify?token={}&identifier={}",
-            hostname, encoded_token, encoded_email
+            "https://{}/app/verify?type=email-update&token={}",
+            hostname,
+            urlencoding::encode(code)
         );
-        let body = format_message(
-            strings.email_update_body,
-            &[
-                ("handle", handle.as_str()),
-                ("code", code),
-                ("verify_page", &verify_page),
-                ("verify_link", &verify_link),
-            ],
-        );
-        let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
+        let notice = Notice::EmailUpdate {
+            hostname,
+            handle: handle.as_str(),
+            code,
+            verify_page: &verify_page,
+            verify_link: &verify_link,
+        };
+        let rendered = notice.rendered(locale)?;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
                 &Recipient::Email(new_email.clone()),
-                CommsMessageType::EmailUpdate,
-                Some(&subject),
-                &body,
-                None,
+                notice.comms_type(),
+                Some(&rendered.subject),
+                &rendered.body,
+                rendered.metadata(),
             )
             .await
+            .map_err(NotificationError::DbError)
     }
 
     pub async fn enqueue_migration_verification(
@@ -459,42 +670,35 @@ pub mod repo {
         target: &VerificationTarget,
         token: &str,
         hostname: &str,
-    ) -> Result<Uuid, DbError> {
-        let prefs = user_repo
-            .get_comms_prefs(user_id)
-            .await?
-            .ok_or(DbError::NotFound)?;
-        let strings = get_strings(locale_of(&prefs));
-        let encoded_id = urlencoding::encode(&target.id);
-        let encoded_token = urlencoding::encode(token);
-        let verify_page = format!("https://{}/app/verify", hostname);
+    ) -> Result<Uuid, NotificationError> {
+        let prefs = get_comms_prefs(user_repo, user_id).await?;
+        let locale: &str = locale_of(&prefs);
+        let verify_page = format!("https://{hostname}/app/verify");
         let verify_link = format!(
             "https://{}/app/verify?token={}&identifier={}",
-            hostname, encoded_token, encoded_id
+            hostname,
+            urlencoding::encode(token),
+            urlencoding::encode(&target.id)
         );
-        let body = format_message(
-            strings.migration_verification_body,
-            &[
-                ("code", token),
-                ("hostname", hostname),
-                ("verify_page", &verify_page),
-                ("verify_link", &verify_link),
-            ],
-        );
-        let subject = format_message(
-            strings.migration_verification_subject,
-            &[("hostname", hostname)],
-        );
+        let notice = Notice::MigrationVerification {
+            hostname,
+            handle: target.recipient.as_str(),
+            code: token,
+            verify_page: &verify_page,
+            verify_link: &verify_link,
+        };
+        let rendered = notice.rendered(locale)?;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
                 &target.recipient,
-                CommsMessageType::MigrationVerification,
-                Some(&subject),
-                &body,
-                None,
+                notice.comms_type(),
+                Some(&rendered.subject),
+                &rendered.body,
+                rendered.metadata(),
             )
             .await
+            .map_err(NotificationError::DbError)
     }
 
     pub async fn enqueue_signup_verification(
@@ -504,46 +708,81 @@ pub mod repo {
         target: &VerificationTarget,
         code: &str,
         hostname: &str,
-    ) -> Result<Uuid, DbError> {
-        let prefs = match user_repo.get_comms_prefs(user_id).await {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!(user_id = %user_id, error = %e, "failed to fetch comms preferences, using defaults");
-                None
-            }
-        };
-        let locale = prefs.as_ref().map(locale_of).unwrap_or("en");
-        let strings = get_strings(locale);
-        let encoded_token = urlencoding::encode(code);
-        let encoded_id = urlencoding::encode(&target.id);
-        let verify_page = format!("https://{}/app/verify", hostname);
+    ) -> Result<Uuid, NotificationError> {
+        let prefs = get_comms_prefs(user_repo, user_id).await?;
+        let locale = locale_of(&prefs);
+        let verify_page = format!("https://{hostname}/app/verify");
         let verify_link = format!(
             "https://{}/app/verify?token={}&identifier={}",
-            hostname, encoded_token, encoded_id
+            hostname,
+            urlencoding::encode(code),
+            urlencoding::encode(&target.id)
         );
-        let body = format_message(
-            strings.signup_verification_body,
-            &[
-                ("code", code),
-                ("hostname", hostname),
-                ("verify_page", &verify_page),
-                ("verify_link", &verify_link),
-            ],
-        );
-        let subject = format_message(
-            strings.signup_verification_subject,
-            &[("hostname", hostname)],
-        );
+        let notice = Notice::SignupVerification {
+            hostname,
+            handle: target.recipient.as_str(),
+            code,
+            verify_page: &verify_page,
+            verify_link: &verify_link,
+        };
+        let rendered = notice.rendered(locale)?;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
                 &target.recipient,
-                CommsMessageType::EmailVerification,
-                Some(&subject),
-                &body,
-                None,
+                notice.comms_type(),
+                Some(&rendered.subject),
+                &rendered.body,
+                rendered.metadata(),
             )
             .await
+            .map_err(NotificationError::DbError)
+    }
+
+    pub async fn enqueue_channel_verification(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        target: &VerificationTarget,
+        code: &str,
+        hostname: &str,
+        channel: CommsChannel,
+    ) -> Result<Uuid, NotificationError> {
+        if channel.verifies_via_bot() {
+            warn!(
+                user_id = %user_id,
+                channel = ?channel,
+                "This channel verifies through a bot. Please message the bot first so that it's able to reply with useful info for channel {}",
+                channel.display_name(),
+            );
+            return Err(NotificationError::RequiresBot);
+        }
+        let prefs = get_comms_prefs(user_repo, user_id).await?;
+        let locale: &str = locale_of(&prefs);
+        // TODO clean up identifier encoding within the rendering
+        let encoded_token = urlencoding::encode(code);
+        let encoded_id = urlencoding::encode(&target.id);
+        let verify_link = format!(
+            "https://{}/app/verify?token={}&identifier={}",
+            hostname, encoded_token, encoded_id
+        );
+        let notice = Notice::ChannelVerification {
+            hostname,
+            code,
+            verify_link: &verify_link,
+        };
+        let rendered = notice.rendered(locale)?;
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                &target.recipient,
+                notice.comms_type(),
+                Some(&rendered.subject),
+                &rendered.body,
+                rendered.metadata(),
+            )
+            .await
+            .map_err(NotificationError::DbError)
     }
 
     pub async fn enqueue_channel_verified(
@@ -552,31 +791,27 @@ pub mod repo {
         user_id: Uuid,
         recipient: &Recipient,
         hostname: &str,
-    ) -> Result<Uuid, DbError> {
-        let prefs = user_repo
-            .get_comms_prefs(user_id)
-            .await?
-            .ok_or(DbError::NotFound)?;
-        let strings = get_strings(locale_of(&prefs));
-        let body = format_message(
-            strings.channel_verified_body,
-            &[
-                ("handle", &prefs.handle),
-                ("channel", recipient.channel().display_name()),
-                ("hostname", hostname),
-            ],
-        );
-        let subject = format_message(strings.channel_verified_subject, &[("hostname", hostname)]);
+        channel: CommsChannel,
+    ) -> Result<Uuid, NotificationError> {
+        let prefs = get_comms_prefs(user_repo, user_id).await?;
+        let locale: &str = locale_of(&prefs);
+        let notice = Notice::ChannelVerified {
+            hostname,
+            handle: prefs.handle.as_str(),
+            channel,
+        };
+        let rendered = notice.rendered(locale)?;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
                 recipient,
-                CommsMessageType::ChannelVerified,
-                Some(&subject),
-                &body,
-                None,
+                notice.comms_type(),
+                Some(&rendered.subject),
+                &rendered.body,
+                rendered.metadata(),
             )
             .await
+            .map_err(NotificationError::DbError)
     }
 
     pub async fn try_channel_verified_notice(
@@ -585,11 +820,127 @@ pub mod repo {
         user_id: Uuid,
         recipient: &Recipient,
         hostname: &str,
+        channel: CommsChannel,
     ) {
         if let Err(e) =
-            enqueue_channel_verified(user_repo, infra_repo, user_id, recipient, hostname).await
+            enqueue_channel_verified(user_repo, infra_repo, user_id, recipient, hostname, channel)
+                .await
         {
             warn!(error = %e, "Failed to enqueue channel verified notification");
+        }
+    }
+
+    #[cfg(test)]
+    mod notice_render_tests {
+        use super::Notice;
+
+        fn builtins() {
+            let _ = tranquil_comms::init_templates(&tranquil_config::CommsConfig {
+                templates_dir: None,
+                template_locales: Vec::new(),
+                fallback_to_builtin: true,
+            });
+        }
+
+        fn assert_page_and_link(body: &str, page: &str, link: &str) {
+            assert!(body.contains(page), "{body}");
+            assert!(body.contains(link), "{body}");
+            assert!(!body.contains("{{"), "{body}");
+        }
+
+        #[test]
+        fn email_update_substitutes_verify_page_and_link() {
+            builtins();
+            let page = "https://example.com/app/verify?type=email-update";
+            let link = "https://example.com/app/verify?type=email-update&token=abc";
+            let notice = Notice::EmailUpdate {
+                hostname: "example.com",
+                handle: "alice",
+                code: "abc",
+                verify_page: page,
+                verify_link: link,
+            };
+            assert_page_and_link(&notice.rendered("en").unwrap().body, page, link);
+            assert!(
+                notice
+                    .rendered("en")
+                    .unwrap()
+                    .subject
+                    .contains("example.com")
+            );
+        }
+
+        #[test]
+        fn short_token_email_substitutes_verify_page_and_link() {
+            builtins();
+            let page = "https://example.com/app/verify?type=email-update";
+            let link = "https://example.com/app/verify?type=email-update&token=abc";
+            let notice = Notice::ShortTokenEmail {
+                hostname: "example.com",
+                handle: "alice",
+                code: "abc",
+                verify_page: page,
+                verify_link: link,
+            };
+            assert_page_and_link(&notice.rendered("en").unwrap().body, page, link);
+            assert!(notice.rendered("en").unwrap().body.contains("abc"));
+        }
+
+        #[test]
+        fn migration_verification_substitutes_verify_page_and_link() {
+            builtins();
+            let page = "https://example.com/app/verify";
+            let link = "https://example.com/app/verify?token=abc&identifier=user%40example.com";
+            let notice = Notice::MigrationVerification {
+                hostname: "example.com",
+                handle: "alice",
+                code: "abc",
+                verify_page: page,
+                verify_link: link,
+            };
+            let body = notice.rendered("en").unwrap().body;
+            assert_page_and_link(&body, page, link);
+            assert!(body.contains("example.com"));
+            assert!(body.contains("abc"));
+        }
+
+        #[test]
+        fn signup_verification_substitutes_verify_page_and_link() {
+            builtins();
+            let page = "https://example.com/app/verify";
+            let link = "https://example.com/app/verify?token=abc&identifier=user%40example.com";
+            let notice = Notice::SignupVerification {
+                hostname: "example.com",
+                handle: "alice",
+                code: "abc",
+                verify_page: page,
+                verify_link: link,
+            };
+            let body = notice.rendered("en").unwrap().body;
+            assert_page_and_link(&body, page, link);
+            assert!(body.contains("example.com"));
+            assert!(
+                notice
+                    .rendered("en")
+                    .unwrap()
+                    .subject
+                    .contains("example.com")
+            );
+        }
+
+        #[test]
+        fn channel_verification_substitutes_verify_link() {
+            builtins();
+            let link = "https://example.com/app/verify?token=abc&identifier=user%40example.com";
+            let notice = Notice::ChannelVerification {
+                hostname: "example.com",
+                code: "abc",
+                verify_link: link,
+            };
+            let body = notice.rendered("en").unwrap().body;
+            assert!(body.contains(link), "{body}");
+            assert!(body.contains("abc"), "{body}");
+            assert!(!body.contains("{{"), "{body}");
         }
     }
 }

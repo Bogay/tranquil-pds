@@ -1354,8 +1354,10 @@ pub async fn complete_registration(
                 state.repos.user.as_ref(),
                 state.repos.infra.as_ref(),
                 user_id.unwrap_or(uuid::Uuid::nil()),
-                tranquil_pds::comms::Notice::Welcome,
-                hostname,
+                tranquil_pds::comms::Notice::Welcome {
+                    hostname,
+                    handle: handle.as_str(),
+                },
             )
             .await
             {

@@ -585,6 +585,32 @@
 # Can also be specified via environment variable `MAIL_DKIM_KEY_PATH`.
 #private_key_path =
 
+[comms]
+# Directory of per-locale notification templates. When unset, built-in
+# plain-text strings are used. When set, every locale in `template_locales`
+# must have a complete template set (validated at startup).
+# Layout: `{templates_dir}/{locale}/{id}.{subject.txt,body.txt,body.html}`.
+#
+# Can also be specified via environment variable `COMMS_TEMPLATES_DIR`.
+#templates_dir =
+
+# Locales that must have a complete on-disk template set when
+# `templates_dir` is set. Comma-separated via `COMMS_TEMPLATE_LOCALES`.
+#
+# Can also be specified via environment variable `COMMS_TEMPLATE_LOCALES`.
+#
+# Default value: []
+#template_locales = []
+
+# When `templates_dir` is set and the user's preferred locale is not in
+# `template_locales`, fall back to built-in `STRINGS_*` (plain text only).
+# When false, enqueue fails for unsupported locales.
+#
+# Can also be specified via environment variable `COMMS_TEMPLATE_FALLBACK_TO_BUILTIN`.
+#
+# Default value: true
+#fallback_to_builtin = true
+
 [discord]
 # Discord bot token. When unset, Discord integration is disabled.
 #

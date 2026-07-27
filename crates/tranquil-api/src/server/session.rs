@@ -7,6 +7,7 @@ use axum::{
 use bcrypt::verify;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::str::FromStr;
 use tracing::{error, info, warn};
 use tranquil_db_traits::{ChannelVerificationStatus, SessionId, TokenFamilyId};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
@@ -21,7 +22,7 @@ use tranquil_pds::rate_limit::{
 };
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{AccountState, AtIdentifier, Did, Handle, PlainPassword};
-use tranquil_types::TokenId;
+use tranquil_types::{Locale, TokenId};
 
 pub fn verification_blocks_login(channel_verification: &ChannelVerificationStatus) -> bool {
     !tranquil_config::get()
@@ -225,9 +226,10 @@ pub async fn create_session(
                 state.repos.infra.as_ref(),
                 row.id,
                 tranquil_pds::comms::Notice::TwoFactorCode {
+                    hostname,
+                    handle: row.handle.as_ref(),
                     code: code.as_str(),
                 },
-                hostname,
             )
             .await
             {
@@ -355,9 +357,13 @@ pub async fn create_session(
                 row.id,
                 tranquil_pds::comms::Notice::LegacyLoginAlert {
                     channel: row.preferred_comms_channel,
+                    hostname,
+                    handle: row.handle.as_ref(),
+                    timestamp: &chrono::Utc::now()
+                        .format("%Y-%m-%d %H:%M:%S UTC")
+                        .to_string(),
                     ip: client_ip,
                 },
-                hostname,
             )
             .await
             {
@@ -957,8 +963,10 @@ pub async fn confirm_signup(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         row.id,
-        tranquil_pds::comms::Notice::Welcome,
-        hostname,
+        tranquil_pds::comms::Notice::Welcome {
+            hostname,
+            handle: row.handle.as_ref(),
+        },
     )
     .await
     {
@@ -1324,8 +1332,6 @@ pub async fn update_legacy_login_preference(
     }))
 }
 
-use tranquil_pds::comms::VALID_LOCALES;
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateLocaleInput {
@@ -1337,10 +1343,14 @@ pub async fn update_locale(
     auth: Auth<Active>,
     Json(input): Json<UpdateLocaleInput>,
 ) -> Result<Json<PreferredLocaleOutput>, ApiError> {
-    if !VALID_LOCALES.contains(&input.preferred_locale.as_str()) {
+    if Locale::from_str(&input.preferred_locale).is_err() {
         return Err(ApiError::InvalidRequest(format!(
             "Invalid locale. Valid options: {}",
-            VALID_LOCALES.join(", ")
+            Locale::ALL
+                .iter()
+                .map(|l| l.as_str())
+                .collect::<Vec<&str>>()
+                .join(", ")
         )));
     }
 

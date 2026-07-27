@@ -569,14 +569,16 @@ pub async fn request_account_delete(
 ) -> Result<Json<EmptyResponse>, ApiError> {
     let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
-    let user_id = state
+    let user = state
         .repos
         .user
-        .get_id_by_did(session_mfa.did())
+        .get_by_did(session_mfa.did())
         .await
         .ok()
         .flatten()
         .ok_or(ApiError::InternalError(None))?;
+    let user_id = user.id;
+    let handle = user.handle;
     let confirmation_token = Uuid::new_v4().to_string();
     let expires_at = Utc::now() + Duration::minutes(15);
     state
@@ -591,9 +593,10 @@ pub async fn request_account_delete(
         state.repos.infra.as_ref(),
         user_id,
         tranquil_pds::comms::Notice::AccountDeletion {
+            hostname,
+            handle: handle.as_ref(),
             code: &confirmation_token,
         },
-        hostname,
     )
     .await
     {

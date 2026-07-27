@@ -63,6 +63,10 @@ async fn main() -> ExitCode {
                     eprint!("{e}");
                     return ExitCode::FAILURE;
                 }
+                if let Err(e) = tranquil_pds::comms::validate_templates(&config.comms) {
+                    eprintln!("Notification templates invalid: {e}");
+                    return ExitCode::FAILURE;
+                }
                 if let Some(key) = config.secrets.plc_rotation_key.as_deref()
                     && let Err(reason) = tranquil_pds::plc::validate_rotation_did_key(key)
                 {
@@ -218,6 +222,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut deferred_discord_endpoint: Option<(DiscordSender, String, String)> = None;
 
     let cfg = tranquil_config::get();
+
+    if let Err(e) = tranquil_pds::comms::init_templates(&cfg.comms) {
+        error!(error = %e, "Notification template configuration invalid");
+        return Err(e.into());
+    }
 
     match EmailSender::from_config(cfg) {
         Ok(Some(email_sender)) => {

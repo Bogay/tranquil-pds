@@ -1,8 +1,9 @@
 use confique::Config;
 use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::OnceLock;
-use tranquil_types::Domain;
+use tranquil_types::{Domain, Locale};
 
 static CONFIG: OnceLock<TranquilConfig> = OnceLock::new();
 
@@ -137,6 +138,9 @@ pub struct TranquilConfig {
     pub email: EmailConfig,
 
     #[config(nested)]
+    pub comms: CommsConfig,
+
+    #[config(nested)]
     pub discord: DiscordConfig,
 
     #[config(nested)]
@@ -242,6 +246,9 @@ impl TranquilConfig {
                     .to_string(),
             );
         }
+
+        // -- comms ------------------------------------------------------------
+        self.comms.validate(&mut errors);
 
         // -- blob storage -----------------------------------------------------
         match self.storage.backend.as_str() {
@@ -1062,6 +1069,48 @@ impl EmailConfig {
     }
 }
 
+/// Channel-neutral notification templates shared by every comms channel
+/// (email, Telegram, Discord, Signal).
+#[derive(Debug, Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+pub struct CommsConfig {
+    /// Directory of per-locale notification templates. When unset, built-in
+    /// plain-text strings are used. When set, every locale in `template_locales`
+    /// must have a complete template set (validated at startup).
+    /// Layout: `{templates_dir}/{locale}/{id}.{subject.txt,body.txt,body.html}`.
+    #[config(env = "COMMS_TEMPLATES_DIR")]
+    pub templates_dir: Option<String>,
+
+    /// Locales that must have a complete on-disk template set when
+    /// `templates_dir` is set. Comma-separated via `COMMS_TEMPLATE_LOCALES`.
+    #[config(env = "COMMS_TEMPLATE_LOCALES", parse_env = split_comma_list, default = [])]
+    pub template_locales: Vec<String>,
+
+    /// When `templates_dir` is set and the user's preferred locale is not in
+    /// `template_locales`, fall back to built-in `STRINGS_*` (plain text only).
+    /// When false, enqueue fails for unsupported locales.
+    #[config(env = "COMMS_TEMPLATE_FALLBACK_TO_BUILTIN", default = true)]
+    pub fallback_to_builtin: bool,
+}
+
+impl CommsConfig {
+    pub fn validate(&self, errors: &mut Vec<String>) {
+        if self.templates_dir.is_some() && self.template_locales.is_empty() {
+            errors.push(
+                "comms.template_locales must be set when comms.templates_dir is set".to_string(),
+            );
+        }
+
+        for locale in self.template_locales.iter() {
+            if Locale::from_str(locale).is_err() {
+                errors.push(format!(
+                    "comms.template_locales entry {locale:?} is not a valid locale"
+                ));
+            }
+        }
+    }
+}
+
 fn looks_like_email_address(s: &str) -> bool {
     let trimmed = s.trim();
     if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) {
@@ -1756,7 +1805,10 @@ port = 587
         result.expect("known keys must load successfully");
     }
 
+    use serial_test::serial;
+
     #[test]
+    #[serial]
     fn serial_validate_rejects_legacy_sendmail_path() {
         seed_required_env();
         unsafe { std::env::set_var("SENDMAIL_PATH", "/usr/sbin/sendmail") };
@@ -1777,6 +1829,7 @@ port = 587
     }
 
     #[test]
+    #[serial]
     fn serial_validate_passes_when_no_legacy_env_set() {
         seed_required_env();
         unsafe { std::env::remove_var("SENDMAIL_PATH") };
@@ -2021,5 +2074,32 @@ port = 587
                 private_key_path: o.dkim_key_path.map(str::to_string),
             },
         }
+    }
+
+    #[test]
+    fn comms_validate_accepts_valid_locales() {
+        let mut errors = Vec::new();
+        CommsConfig {
+            template_locales: vec!["en".to_string(), "fr".to_string()],
+            templates_dir: None,
+            fallback_to_builtin: true,
+        }
+        .validate(&mut errors);
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+    }
+
+    #[test]
+    fn comms_validate_rejects_invalid_locales() {
+        let mut errors = Vec::new();
+        CommsConfig {
+            template_locales: vec!["en/US".to_string(), "fr".to_string()],
+            templates_dir: None,
+            fallback_to_builtin: true,
+        }
+        .validate(&mut errors);
+        assert!(
+            errors.iter().any(|e| e.contains("is not a valid locale")),
+            "expected invalid locale error, got {errors:?}"
+        );
     }
 }

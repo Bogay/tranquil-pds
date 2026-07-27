@@ -1,0 +1,7 @@
+Hello @{{handle}},
+
+Your account deletion confirmation code is: {{code}}
+
+This code will expire in 10 minutes.
+
+If you did not request this, please secure your account immediately.

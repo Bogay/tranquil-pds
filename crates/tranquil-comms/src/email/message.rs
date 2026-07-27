@@ -2,10 +2,12 @@ use lettre::Message;
 use lettre::message::Mailbox;
 use lettre::message::header::{ContentType, MIME_VERSION_1_0};
 use lettre::message::header::{Header, HeaderName, HeaderValue};
+use lettre::message::{MultiPart, SinglePart};
 use uuid::Uuid;
 
 use super::types::EmailDomain;
 use crate::sender::SendError;
+use crate::templates::html_body_from_metadata;
 use crate::{CommsMessageType, QueuedComms};
 
 pub(super) fn build(
@@ -37,9 +39,18 @@ pub(super) fn build(
         None => builder,
     };
 
-    builder
-        .body(qc.body.clone())
-        .map_err(|e| SendError::MessageBuild(e.to_string()))
+    match html_body_from_metadata(&qc.metadata) {
+        Some(html) => builder
+            .multipart(
+                MultiPart::alternative()
+                    .singlepart(SinglePart::plain(qc.body.clone()))
+                    .singlepart(SinglePart::html(html.to_string())),
+            )
+            .map_err(|e| SendError::MessageBuild(e.to_string())),
+        None => builder
+            .body(qc.body.clone())
+            .map_err(|e| SendError::MessageBuild(e.to_string())),
+    }
 }
 
 pub(super) fn recipient_domain(message: &Message) -> Result<EmailDomain, SendError> {
@@ -104,6 +115,7 @@ mod tests {
     use super::*;
     use crate::{CommsChannel, CommsStatus};
     use chrono::Utc;
+    use serde_json::json;
     use uuid::Uuid;
 
     fn from_mailbox() -> Mailbox {
@@ -114,7 +126,12 @@ mod tests {
         tranquil_types::EmailAddress::new(recipient).unwrap()
     }
 
-    fn fixture(recipient: &str, subject: Option<&str>, body: &str) -> QueuedComms {
+    fn fixture(
+        recipient: &str,
+        subject: Option<&str>,
+        body: &str,
+        metadata: Option<serde_json::Value>,
+    ) -> QueuedComms {
         QueuedComms {
             id: Uuid::new_v4(),
             user_id: None,
@@ -124,7 +141,7 @@ mod tests {
             recipient: recipient.to_string(),
             subject: subject.map(String::from),
             body: body.to_string(),
-            metadata: None,
+            metadata,
             attempts: 0,
             max_attempts: 3,
             last_error: None,
@@ -139,7 +156,7 @@ mod tests {
     fn build_basic_message() {
         let msg = build(
             &from_mailbox(),
-            &fixture("user@nel.pet", Some("Welcome"), "Hello world."),
+            &fixture("user@nel.pet", Some("Welcome"), "Hello world.", None),
             &to("user@nel.pet"),
             false,
         )
@@ -155,10 +172,33 @@ mod tests {
     }
 
     #[test]
+    fn build_multipart_when_html_metadata_present() {
+        let msg = build(
+            &from_mailbox(),
+            &fixture(
+                "user@nel.pet",
+                Some("Welcome"),
+                "Hello plain.",
+                Some(json!({"html_body": "<p>Hello <b>html</b>.</p>"})),
+            ),
+            &to("user@jola.dev"),
+            false,
+        )
+        .unwrap();
+        let raw = String::from_utf8(msg.formatted()).unwrap();
+        let lower = raw.to_lowercase();
+        assert!(lower.contains("multipart/alternative"), "{raw}");
+        assert!(lower.contains("text/plain"), "{raw}");
+        assert!(lower.contains("text/html"), "{raw}");
+        assert!(raw.contains("Hello plain."));
+        assert!(raw.contains("<p>Hello <b>html</b>.</p>"));
+    }
+
+    #[test]
     fn utf8_subject_is_encoded() {
         let msg = build(
             &from_mailbox(),
-            &fixture("user@nel.pet", Some("héllo wörld"), "Body"),
+            &fixture("user@nel.pet", Some("héllo wörld"), "Body", None),
             &to("user@jola.dev"),
             false,
         )
@@ -178,7 +218,12 @@ mod tests {
     fn subject_crlf_does_not_inject_headers() {
         let msg = build(
             &from_mailbox(),
-            &fixture("user@nel.pet", Some("hi\r\nBcc: evil@nel.pet"), "body"),
+            &fixture(
+                "user@nel.pet",
+                Some("hi\r\nBcc: evil@nel.pet"),
+                "body",
+                None,
+            ),
             &to("user@jola.dev"),
             false,
         )
@@ -198,7 +243,7 @@ mod tests {
     fn message_id_uses_from_domain() {
         let msg = build(
             &from_mailbox(),
-            &fixture("user@nel.pet", Some("s"), "b"),
+            &fixture("user@nel.pet", Some("s"), "b", None),
             &to("user@jola.dev"),
             false,
         )
@@ -218,7 +263,7 @@ mod tests {
     fn missing_subject_uses_default() {
         let msg = build(
             &from_mailbox(),
-            &fixture("user@nel.pet", None, "Body"),
+            &fixture("user@nel.pet", None, "Body", None),
             &to("user@nel.pet"),
             false,
         )
@@ -231,7 +276,7 @@ mod tests {
     fn recipient_domain_extracted() {
         let msg = build(
             &from_mailbox(),
-            &fixture("user@Nel.PET", Some("s"), "b"),
+            &fixture("user@Nel.PET", Some("s"), "b", None),
             &to("user@nel.pet"),
             false,
         )
@@ -244,7 +289,7 @@ mod tests {
     fn atmos_category_header_present_when_enabled_and_mapped() {
         let qc = QueuedComms {
             comms_type: CommsMessageType::PasswordReset,
-            ..fixture("user@nel.pet", Some("s"), "b")
+            ..fixture("user@nel.pet", Some("s"), "b", None)
         };
         let msg = build(&from_mailbox(), &qc, &to("user@jola.dev"), true).unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();
@@ -255,7 +300,7 @@ mod tests {
     fn atmos_category_header_absent_when_disabled() {
         let qc = QueuedComms {
             comms_type: CommsMessageType::PasswordReset,
-            ..fixture("user@nel.pet", Some("s"), "b")
+            ..fixture("user@nel.pet", Some("s"), "b", None)
         };
         let msg = build(&from_mailbox(), &qc, &to("user@nel.pet"), false).unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();
@@ -266,7 +311,7 @@ mod tests {
     fn atmos_category_header_absent_when_unmapped() {
         let qc = QueuedComms {
             comms_type: CommsMessageType::AdminEmail,
-            ..fixture("user@nel.pet", Some("s"), "b")
+            ..fixture("user@nel.pet", Some("s"), "b", None)
         };
         let msg = build(&from_mailbox(), &qc, &to("user@nel.pet"), true).unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();

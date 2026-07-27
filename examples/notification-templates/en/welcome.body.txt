@@ -1,0 +1,12 @@
+Welcome to {{hostname}}{{#if handle}}, @{{handle}}{{/if}}!
+
+Thanks for joining us.
+
+{{#if handle}}
+Your handle is @{{handle}}.
+{{else}}
+Set your handle to personalize your account.
+{{/if}}
+
+Stay in touch,
+{{hostname}}

@@ -1,0 +1,9 @@
+Hello @{{handle}},
+
+You requested to sign a PLC operation for your account.
+
+Your verification token is: {{token}}
+
+This token will expire in 10 minutes.
+
+If you did not request this, you can safely ignore this message.

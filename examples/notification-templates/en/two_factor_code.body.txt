@@ -1,0 +1,7 @@
+Hello @{{handle}},
+
+Your sign-in verification code is: {{code}}
+
+This code will expire in 10 minutes.
+
+If you did not request this, please secure your account immediately.

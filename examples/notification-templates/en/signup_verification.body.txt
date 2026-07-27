@@ -1,0 +1,14 @@
+Welcome! Your verification code is:
+{{code}}
+
+{{#if verify_page}}
+Copy the code above and enter it at:
+{{verify_page}}
+{{else if verify_link}}
+Or verify directly:
+{{{verify_link}}}
+{{/if}}
+
+This code will expire in 30 minutes.
+
+If you did not create an account on {{hostname}}, please ignore this message.

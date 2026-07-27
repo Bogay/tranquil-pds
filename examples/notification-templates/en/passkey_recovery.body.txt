@@ -1,0 +1,10 @@
+Hello @{{handle}},
+
+You requested to recover your passkey-only account.
+
+Click the link below to set a temporary password and regain access:
+{{url}}
+
+This link will expire in 1 hour.
+
+If you did not request this, please ignore this message. Your account remains secure.

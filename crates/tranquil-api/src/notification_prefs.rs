@@ -5,6 +5,7 @@ use tracing::info;
 use tranquil_db_traits::{CommsChannel, CommsMessageType, CommsStatus};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Active, Auth};
+use tranquil_pds::comms::{NotificationError, VerificationTarget};
 use tranquil_pds::state::AppState;
 use tranquil_types::{Did, Handle};
 
@@ -151,77 +152,26 @@ pub async fn request_channel_verification(
     id: &str,
     handle: Option<&Handle>,
 ) -> Result<String, ApiError> {
-    if channel.verifies_via_bot() {
-        return Err(ApiError::InvalidRequest(
-            "This channel verifies through a bot. Please message the bot first so that it's able to reply with useful info".into(),
-        ));
-    }
     let token =
         tranquil_pds::auth::verification_token::generate_channel_update_token(did, channel, id);
     let formatted_token = tranquil_pds::auth::verification_token::format_token_for_display(&token);
 
-    match channel {
-        CommsChannel::Email => {
-            let hostname = &tranquil_config::get().server.hostname;
-            let handle = handle.ok_or_else(|| {
-                ApiError::InternalError(Some("Email verification requires a handle".into()))
-            })?;
-            let new_email = tranquil_types::EmailAddress::new(id)?;
-            tranquil_pds::comms::comms_repo::enqueue_email_update(
-                state.repos.infra.as_ref(),
-                user_id,
-                &new_email,
-                handle,
-                &formatted_token,
-                hostname,
-            )
-            .await
-            .log_db_err("enqueue email verification")?;
-        }
-        _ => {
-            let hostname = &tranquil_config::get().server.hostname;
-            let encoded_token = urlencoding::encode(&formatted_token);
-            let encoded_id = urlencoding::encode(id);
-            let verify_link = format!(
-                "https://{}/app/verify?token={}&identifier={}",
-                hostname, encoded_token, encoded_id
-            );
-            let prefs = state
-                .repos
-                .user
-                .get_comms_prefs(user_id)
-                .await
-                .ok()
-                .flatten();
-            let locale = prefs
-                .as_ref()
-                .and_then(|p| p.preferred_locale.as_deref())
-                .unwrap_or("en");
-            let strings = tranquil_pds::comms::get_strings(locale);
-            let body = tranquil_pds::comms::format_message(
-                strings.channel_verification_body,
-                &[("code", &formatted_token), ("verify_link", &verify_link)],
-            );
-            let subject = tranquil_pds::comms::format_message(
-                strings.channel_verification_subject,
-                &[("hostname", hostname)],
-            );
-            let recipient = tranquil_db_traits::Recipient::new(channel, id)?;
-            state
-                .repos
-                .infra
-                .enqueue_comms(
-                    Some(user_id),
-                    &recipient,
-                    tranquil_db_traits::CommsMessageType::ChannelVerification,
-                    Some(&subject),
-                    &body,
-                    Some(json!({"code": formatted_token})),
-                )
-                .await
-                .log_db_err("enqueue channel verification")?;
-        }
-    }
+    let fallback_handle = handle.map(|h| h.as_str()).unwrap_or_else(|| did.as_str());
+
+    tranquil_pds::comms::comms_repo::enqueue_channel_verification(
+        state.repos.user.as_ref(),
+        state.repos.infra.as_ref(),
+        user_id,
+        &VerificationTarget::resolve(channel, id, Some(fallback_handle))?,
+        &formatted_token,
+        &tranquil_config::get().server.hostname,
+        channel,
+    )
+    .await
+    .map_err(|e| match e {
+        NotificationError::RequiresBot => ApiError::VerificationChannelRequiresBot,
+        _ => ApiError::InternalError(Some(e.to_string())),
+    })?;
 
     Ok(token)
 }
@@ -297,7 +247,14 @@ async fn process_messaging_channel_update(
     };
 
     if matches!(channel, CommsChannel::Signal) {
-        request_channel_verification(state, user_id, did, channel, &clean, None).await?;
+        let handle = state
+            .repos
+            .user
+            .get_handle_by_did(did)
+            .await
+            .log_db_err("get handle by did")?
+            .ok_or(ApiError::AccountNotFound)?;
+        request_channel_verification(state, user_id, did, channel, &clean, Some(&handle)).await?;
     }
 
     verification_required.push(channel);

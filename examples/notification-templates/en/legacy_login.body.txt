@@ -1,0 +1,20 @@
+Hello @{{handle}},
+
+A login to your account was detected using a legacy app (like Bluesky) that doesn't support TOTP verification.
+
+{{#if timestamp}}
+Time: {{timestamp}}
+{{/if}}
+{{#if ip}}
+IP Address: {{ip}}
+{{/if}}
+
+Your TOTP protection was bypassed for this login. The session has limited permissions for sensitive operations.
+
+If this wasn't you, please:
+1. Change your password immediately
+2. Review your active sessions
+3. Consider disabling legacy app logins in your security settings
+
+Stay safe,
+{{hostname}}

@@ -711,8 +711,11 @@ pub async fn request_passkey_recovery(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         user.id,
-        tranquil_pds::comms::Notice::PasskeyRecovery { url: &recovery_url },
-        hostname,
+        tranquil_pds::comms::Notice::PasskeyRecovery {
+            hostname,
+            handle: user.handle.as_ref(),
+            url: &recovery_url,
+        },
     )
     .await;
 

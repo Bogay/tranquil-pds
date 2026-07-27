@@ -89,6 +89,7 @@ pub enum ApiError {
     MissingTelegramUsername,
     MissingSignalNumber,
     InvalidVerificationChannel,
+    VerificationChannelRequiresBot,
     SelfHostedDidWebDisabled,
     AccountAlreadyExists,
     HandleNotFound,
@@ -232,6 +233,7 @@ impl ApiError {
             | Self::MissingTelegramUsername
             | Self::MissingSignalNumber
             | Self::InvalidVerificationChannel
+            | Self::VerificationChannelRequiresBot
             | Self::SelfHostedDidWebDisabled
             | Self::AccountAlreadyExists
             | Self::TokenRequired
@@ -335,6 +337,7 @@ impl ApiError {
             Self::MissingTelegramUsername => Cow::Borrowed("MissingTelegramUsername"),
             Self::MissingSignalNumber => Cow::Borrowed("MissingSignalNumber"),
             Self::InvalidVerificationChannel => Cow::Borrowed("InvalidVerificationChannel"),
+            Self::VerificationChannelRequiresBot => Cow::Borrowed("VerificationChannelRequiresBot"),
             Self::SelfHostedDidWebDisabled => Cow::Borrowed("SelfHostedDidWebDisabled"),
             Self::AccountAlreadyExists => Cow::Borrowed("AccountAlreadyExists"),
             Self::HandleNotFound => Cow::Borrowed("HandleNotFound"),
@@ -482,6 +485,7 @@ impl ApiError {
                 "Signal username is required when using Signal verification".into()
             }
             Self::InvalidVerificationChannel => "Invalid verification channel".into(),
+            Self::VerificationChannelRequiresBot => "This verification channel requires a bot".into(),
             Self::SelfHostedDidWebDisabled => {
                 "Self-hosted did:web accounts are disabled on this server".into()
             }

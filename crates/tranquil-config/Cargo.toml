@@ -8,3 +8,6 @@ license.workspace = true
 serde = { workspace = true }
 tranquil-types = { workspace = true }
 confique = { workspace = true }
+
+[dev-dependencies]
+serial_test = "4.0.1"

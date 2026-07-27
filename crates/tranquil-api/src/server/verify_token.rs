@@ -211,6 +211,7 @@ async fn notify_channel_verified(state: &AppState, user_id: uuid::Uuid, channel:
         user_id,
         &recipient,
         &tranquil_config::get().server.hostname,
+        channel,
     )
     .await;
 }

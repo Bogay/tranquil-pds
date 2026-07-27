@@ -95,9 +95,10 @@ pub async fn request_password_reset(
         state.repos.infra.as_ref(),
         user_id,
         tranquil_pds::comms::Notice::PasswordReset {
+            hostname,
+            handle: normalized_handle.as_str(),
             code: &display_code,
         },
-        hostname,
     )
     .await
     {

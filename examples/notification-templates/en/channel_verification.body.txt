@@ -1,0 +1,5 @@
+Your verification code is:
+{{code}}
+
+Or verify directly:
+{{{verify_link}}}

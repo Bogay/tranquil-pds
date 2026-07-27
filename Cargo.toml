@@ -85,6 +85,7 @@ hex = "0.4"
 hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
 hkdf = "0.12"
 hmac = "0.12"
+handlebars = "6.4"
 http = "1.4"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server", "server-auto", "server-graceful", "service", "tokio"] }

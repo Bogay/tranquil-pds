@@ -1,0 +1,16 @@
+Welcome to {{hostname}}!
+
+Your account has been migrated successfully. To complete the setup, please verify your email address.
+
+Your verification code is:
+{{code}}
+
+Copy the code above and enter it at:
+{{verify_page}}
+
+This code will expire in 48 hours.
+
+Or if you like to live dangerously:
+{{{verify_link}}}
+
+If you did not migrate your account, please ignore this email.
