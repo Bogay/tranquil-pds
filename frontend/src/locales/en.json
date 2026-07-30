@@ -282,7 +282,7 @@
   "appPasswords": {
     "create": "Create",
     "name": "Name",
-    "namePlaceholder": "App name (eg. Witchsky)",
+    "namePlaceholder": "App name (e.g. Witchsky)",
     "created": "App Password Created",
     "createdMessage": "Copy this password now. You won't be able to see it again.",
     "noPasswords": "No app passwords yet",
