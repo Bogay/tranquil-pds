@@ -339,7 +339,9 @@ fn build_expanded_scopes(
     default_aud: Option<&str>,
     namespace_authority: &str,
 ) -> String {
-    let mut scopes: Vec<String> = Vec::new();
+    // Key is `repo`, value is array of actions
+    let mut ungrouped_repo_scopes: HashMap<String, Vec<String>> = HashMap::new();
+    let mut rpc_scopes: Vec<String> = Vec::new();
 
     permissions
         .iter()
@@ -357,7 +359,14 @@ fn build_expanded_scopes(
                         .filter(|coll| is_under_authority(coll, namespace_authority))
                         .for_each(|coll| {
                             actions.iter().for_each(|action| {
-                                scopes.push(format!("repo:{}?action={}", coll, action));
+                                let existing = ungrouped_repo_scopes.get_mut(coll);
+
+                                if existing.is_none() {
+                                    ungrouped_repo_scopes
+                                        .insert(coll.to_string(), vec![action.to_string()]);
+                                } else {
+                                    existing.unwrap().push(action.to_string());
+                                }
                             });
                         });
                 }
@@ -373,14 +382,23 @@ fn build_expanded_scopes(
                                 Some(aud) => format!("rpc:{}?aud={}", lxm, aud),
                                 None => format!("rpc:{}", lxm),
                             };
-                            scopes.push(scope);
+
+                            rpc_scopes.push(scope);
                         });
                 }
             }
             _ => {}
         });
 
-    scopes.join(" ")
+    let grouped_repo_scopes: Vec<String> = ungrouped_repo_scopes
+        .iter()
+        .map(|(repo, actions)| format!("repo:{}?action={}", repo, actions.join("&action=")))
+        .collect();
+
+    let combined_repo_scopes = grouped_repo_scopes.join(" ");
+    let combined_rpc_scopes = rpc_scopes.join(" ");
+
+    format!("{} {}", combined_repo_scopes, combined_rpc_scopes)
 }
 
 #[cfg(test)]
