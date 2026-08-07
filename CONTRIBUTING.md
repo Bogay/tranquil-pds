@@ -64,7 +64,7 @@ In order of importance the following rules describe what "correct" means for Tra
     and not something said application relies on for proper functioning.
 
 There is bound to be edge cases that these rules don't fully cover.
-Here common sense, community sentiment, furthering the goals of atproto itself, and ultimately maintainer opinion take precedence over support for any individual applicaion.
+Here common sense, community sentiment, furthering the goals of atproto itself, and ultimately maintainer opinion take precedence over support for any individual application.
 Even Bluesky.
 
 The rules above are meant to capture Tranquils goals of being correct while being community oriented and avoiding as much "Bluesky-defaultism" as possible.

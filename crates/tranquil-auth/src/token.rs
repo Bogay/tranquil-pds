@@ -1,3 +1,5 @@
+use crate::compress::encode_scope;
+
 use super::types::{
     ActClaim, Claims, Header, SigningAlgorithm, TokenScope, TokenType, TokenWithMetadata,
 };
@@ -205,7 +207,7 @@ fn create_signed_token_pinned(
         aud: format!("did:web:{}", aud_hostname),
         exp: expiration,
         iat: Utc::now().timestamp(),
-        scope: Some(scope.to_string()),
+        scope: Some(encode_scope(scope)),
         lxm: None,
         jti: jti.clone(),
         act,
@@ -328,7 +330,7 @@ fn create_hs256_token_with_metadata(
         ),
         exp: expiration,
         iat: Utc::now().timestamp(),
-        scope: Some(scope.to_string()),
+        scope: Some(encode_scope(scope)),
         lxm: None,
         jti: jti.clone(),
         act: None,

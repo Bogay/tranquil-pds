@@ -1,3 +1,5 @@
+use crate::compress::decode_scope;
+
 use super::types::{
     Claims, Header, SigningAlgorithm, TokenData, TokenDecodeError, TokenScope, TokenType,
     TokenVerifyError, UnsafeClaims,
@@ -164,8 +166,14 @@ pub fn verify_token_es256k(
         .decode(claims_b64)
         .map_err(|_| TokenVerifyError::Invalid("Base64 decode of claims failed"))?;
 
-    let claims: Claims = serde_json::from_slice(&claims_bytes)
+    let mut claims: Claims = serde_json::from_slice(&claims_bytes)
         .map_err(|_| TokenVerifyError::Invalid("JSON decode of claims failed"))?;
+
+    if let Some(scope) = &claims.scope {
+        claims.scope = Some(
+            decode_scope(scope).map_err(|_| TokenVerifyError::Invalid("Invalid token scope"))?,
+        );
+    }
 
     let now = Utc::now().timestamp();
     if claims.exp < now {
@@ -244,8 +252,12 @@ fn verify_token_hs256_internal(
         .decode(claims_b64)
         .context("Base64 decode of claims failed")?;
 
-    let claims: Claims =
+    let mut claims: Claims =
         serde_json::from_slice(&claims_bytes).context("JSON decode of claims failed")?;
+
+    if let Some(scope) = &claims.scope {
+        claims.scope = Some(decode_scope(scope).context("Invalid scope claim encoding")?);
+    }
 
     let now = Utc::now().timestamp();
     if claims.exp < now {

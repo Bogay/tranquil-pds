@@ -399,6 +399,8 @@ fn build_expanded_scopes(
     let combined_rpc_scopes = rpc_scopes.join(" ");
 
     format!("{} {}", combined_repo_scopes, combined_rpc_scopes)
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -477,9 +479,8 @@ mod tests {
         }];
 
         let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
-        assert!(expanded.contains("repo:io.atcr.manifest?action=create"));
-        assert!(expanded.contains("repo:io.atcr.manifest?action=delete"));
-        assert!(expanded.contains("repo:io.atcr.sailor.star?action=create"));
+        assert!(expanded.contains("repo:io.atcr.manifest?action=create&action=delete"));
+        assert!(expanded.contains("repo:io.atcr.sailor.star?action=create&action=delete"));
         assert!(!expanded.contains("app.bsky.feed.post"));
     }
 
@@ -494,9 +495,10 @@ mod tests {
         }];
 
         let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
-        assert!(expanded.contains("repo:io.atcr.manifest?action=create"));
-        assert!(expanded.contains("repo:io.atcr.manifest?action=update"));
-        assert!(expanded.contains("repo:io.atcr.manifest?action=delete"));
+        assert!(expanded.contains("repo:io.atcr.manifest?action="));
+        assert!(expanded.contains("action=create"));
+        assert!(expanded.contains("action=update"));
+        assert!(expanded.contains("action=delete"));
     }
 
     #[test]
