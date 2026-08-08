@@ -2,7 +2,7 @@ use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use tracing::debug;
 use tranquil_types::{Did, Nsid};
 
@@ -334,13 +334,20 @@ fn is_under_authority(target_nsid: &str, authority: &str) -> bool {
 
 const DEFAULT_ACTIONS: &[&str] = &["create", "update", "delete"];
 
+fn action_rank(action: &str) -> usize {
+    DEFAULT_ACTIONS
+        .iter()
+        .position(|known| *known == action)
+        .unwrap_or(DEFAULT_ACTIONS.len())
+}
+
 fn build_expanded_scopes(
     permissions: &[PermissionEntry],
     default_aud: Option<&str>,
     namespace_authority: &str,
 ) -> String {
     // Key is `repo`, value is array of actions
-    let mut ungrouped_repo_scopes: HashMap<String, Vec<String>> = HashMap::new();
+    let mut ungrouped_repo_scopes: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut rpc_scopes: Vec<String> = Vec::new();
 
     permissions
@@ -354,21 +361,21 @@ fn build_expanded_scopes(
                         .map(|a| a.iter().map(String::as_str).collect())
                         .unwrap_or_else(|| DEFAULT_ACTIONS.to_vec());
 
-                    collections
-                        .iter()
-                        .filter(|coll| is_under_authority(coll, namespace_authority))
-                        .for_each(|coll| {
-                            actions.iter().for_each(|action| {
-                                let existing = ungrouped_repo_scopes.get_mut(coll);
+                    if !actions.is_empty() {
+                        collections
+                            .iter()
+                            .filter(|coll| is_under_authority(coll, namespace_authority))
+                            .for_each(|coll| {
+                                let existing =
+                                    ungrouped_repo_scopes.entry(coll.to_string()).or_default();
 
-                                if existing.is_none() {
-                                    ungrouped_repo_scopes
-                                        .insert(coll.to_string(), vec![action.to_string()]);
-                                } else {
-                                    existing.unwrap().push(action.to_string());
-                                }
+                                actions.iter().for_each(|action| {
+                                    if !existing.iter().any(|seen| seen == action) {
+                                        existing.push(action.to_string());
+                                    }
+                                });
                             });
-                        });
+                    }
                 }
             }
             "rpc" => {
@@ -383,7 +390,9 @@ fn build_expanded_scopes(
                                 None => format!("rpc:{}", lxm),
                             };
 
-                            rpc_scopes.push(scope);
+                            if !rpc_scopes.contains(&scope) {
+                                rpc_scopes.push(scope);
+                            }
                         });
                 }
             }
@@ -392,7 +401,12 @@ fn build_expanded_scopes(
 
     let grouped_repo_scopes: Vec<String> = ungrouped_repo_scopes
         .iter()
-        .map(|(repo, actions)| format!("repo:{}?action={}", repo, actions.join("&action=")))
+        .map(|(repo, actions)| {
+            let mut actions = actions.clone();
+            actions.sort_by(|a, b| action_rank(a).cmp(&action_rank(b)).then_with(|| a.cmp(b)));
+
+            format!("repo:{}?action={}", repo, actions.join("&action="))
+        })
         .collect();
 
     let combined_repo_scopes = grouped_repo_scopes.join(" ");
@@ -479,9 +493,11 @@ mod tests {
         }];
 
         let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
-        assert!(expanded.contains("repo:io.atcr.manifest?action=create&action=delete"));
-        assert!(expanded.contains("repo:io.atcr.sailor.star?action=create&action=delete"));
-        assert!(!expanded.contains("app.bsky.feed.post"));
+        assert_eq!(
+            expanded,
+            "repo:io.atcr.manifest?action=create&action=delete \
+             repo:io.atcr.sailor.star?action=create&action=delete"
+        );
     }
 
     #[test]
@@ -495,10 +511,121 @@ mod tests {
         }];
 
         let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
-        assert!(expanded.contains("repo:io.atcr.manifest?action="));
-        assert!(expanded.contains("action=create"));
-        assert!(expanded.contains("action=update"));
-        assert!(expanded.contains("action=delete"));
+        assert_eq!(
+            expanded,
+            "repo:io.atcr.manifest?action=create&action=update&action=delete"
+        );
+    }
+
+    #[test]
+    fn test_build_expanded_scopes_repo_omitted_action_grants_all() {
+        let permissions = vec![PermissionEntry {
+            resource: "repo".to_string(),
+            action: None,
+            collection: Some(vec!["io.atcr.manifest".to_string()]),
+            lxm: None,
+            aud: None,
+        }];
+
+        let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
+        assert_eq!(
+            expanded, "repo:io.atcr.manifest?action=create&action=update&action=delete",
+            "an omitted action list means all actions"
+        );
+    }
+
+    #[test]
+    fn test_build_expanded_scopes_repo_empty_action_list_skips_entry() {
+        let permissions = vec![PermissionEntry {
+            resource: "repo".to_string(),
+            action: Some(vec![]),
+            collection: Some(vec!["io.atcr.manifest".to_string()]),
+            lxm: None,
+            aud: None,
+        }];
+
+        let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
+        assert!(
+            expanded.is_empty(),
+            "an explicitly empty action list is invalid, so the entry is skipped rather \
+             than expanded to all actions or emitted as a bare `?action=`, got: {expanded}"
+        );
+    }
+
+    #[test]
+    fn test_build_expanded_scopes_is_deterministic() {
+        let permissions = vec![
+            PermissionEntry {
+                resource: "repo".to_string(),
+                action: Some(vec!["create".to_string()]),
+                collection: Some(vec![
+                    "io.atcr.sailor.star".to_string(),
+                    "io.atcr.manifest".to_string(),
+                    "io.atcr.blob".to_string(),
+                ]),
+                lxm: None,
+                aud: None,
+            },
+            PermissionEntry {
+                resource: "rpc".to_string(),
+                action: None,
+                collection: None,
+                lxm: Some(vec![
+                    "io.atcr.getManifest".to_string(),
+                    "io.atcr.listTags".to_string(),
+                ]),
+                aud: Some("*".to_string()),
+            },
+        ];
+
+        let first = build_expanded_scopes(&permissions, None, "io.atcr");
+        assert_eq!(
+            first,
+            "repo:io.atcr.blob?action=create repo:io.atcr.manifest?action=create \
+             repo:io.atcr.sailor.star?action=create \
+             rpc:io.atcr.getManifest?aud=* rpc:io.atcr.listTags?aud=*"
+        );
+
+        for _ in 0..16 {
+            assert_eq!(build_expanded_scopes(&permissions, None, "io.atcr"), first);
+        }
+    }
+
+    #[test]
+    fn test_build_expanded_scopes_dedupes_and_canonicalizes_actions() {
+        let permissions = vec![
+            PermissionEntry {
+                resource: "repo".to_string(),
+                action: Some(vec!["delete".to_string(), "create".to_string()]),
+                collection: Some(vec!["io.atcr.manifest".to_string()]),
+                lxm: None,
+                aud: None,
+            },
+            PermissionEntry {
+                resource: "repo".to_string(),
+                action: Some(vec!["create".to_string(), "update".to_string()]),
+                collection: Some(vec!["io.atcr.manifest".to_string()]),
+                lxm: None,
+                aud: None,
+            },
+            PermissionEntry {
+                resource: "rpc".to_string(),
+                action: None,
+                collection: None,
+                lxm: Some(vec![
+                    "io.atcr.getManifest".to_string(),
+                    "io.atcr.getManifest".to_string(),
+                ]),
+                aud: Some("*".to_string()),
+            },
+        ];
+
+        let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
+        assert_eq!(
+            expanded,
+            "repo:io.atcr.manifest?action=create&action=update&action=delete \
+             rpc:io.atcr.getManifest?aud=*"
+        );
     }
 
     #[test]

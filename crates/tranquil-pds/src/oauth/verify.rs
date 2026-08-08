@@ -164,7 +164,9 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
     let scope = payload
         .get("scope")
         .and_then(|s| s.as_str())
-        .map(|s| s.to_string());
+        .map(crate::auth::decode_scope)
+        .transpose()
+        .map_err(|_| OAuthError::InvalidToken("Invalid scope claim encoding".to_string()))?;
     let controller_did = payload
         .get("act")
         .and_then(|a| a.get("sub"))

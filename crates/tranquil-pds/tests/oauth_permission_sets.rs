@@ -506,6 +506,129 @@ async fn test_enforcement_uses_expanded_jwt_scope() {
 }
 
 #[tokio::test]
+async fn test_long_expanded_scope_is_compressed_in_jwt() {
+    const BIG_SET_NSID: &str = "io.atcr.authBigApp";
+    let collections = [
+        "io.atcr.manifest",
+        "io.atcr.sailor.star",
+        "io.atcr.tag",
+        "io.atcr.blueprint",
+        "io.atcr.artifact",
+        "io.atcr.channel.read",
+    ];
+    let granular_scope = collections
+        .iter()
+        .map(|coll| format!("repo:{}?action=create&action=delete", coll))
+        .collect::<Vec<_>>()
+        .join(" ");
+    seed_permission_set(BIG_SET_NSID, &granular_scope).await;
+
+    let scope = format!("atproto include:{}", BIG_SET_NSID);
+    let (session, _consent_body, _mock) = create_delegated_session_with_scope(
+        "psc",
+        "https://example.com/permset-compress-callback",
+        &scope,
+    )
+    .await;
+
+    let payload = decode_jwt_payload(&session.access_token);
+    let jwt_scope = payload["scope"]
+        .as_str()
+        .expect("access token JWT should have a scope claim");
+    assert!(
+        jwt_scope.starts_with("$br$"),
+        "an expanded scope this long should be compressed in the JWT claim, got: {}",
+        jwt_scope
+    );
+
+    let decoded = tranquil_pds::auth::decode_scope(jwt_scope).expect("scope claim should decode");
+    for coll in collections {
+        assert!(
+            decoded.contains(&format!("repo:{}?action=create", coll)),
+            "decoded scope should carry {}, got: {}",
+            coll,
+            decoded
+        );
+    }
+    assert!(
+        !decoded.contains("include:"),
+        "decoded scope should not contain the raw include: token, got: {}",
+        decoded
+    );
+
+    let url = base_url().await;
+    let http_client = client();
+
+    let introspect_res = http_client
+        .post(format!("{}/oauth/introspect", url))
+        .form(&[("token", session.access_token.as_str())])
+        .send()
+        .await
+        .expect("introspect request failed");
+    assert_eq!(introspect_res.status(), StatusCode::OK);
+    let introspect_body: Value = introspect_res.json().await.unwrap();
+    let introspect_scope = introspect_body["scope"]
+        .as_str()
+        .expect("introspect response should have a scope string");
+    assert_eq!(
+        introspect_scope, decoded,
+        "introspect should report the decoded scope"
+    );
+
+    let collection = collections[0];
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.repo.createRecord", url))
+        .bearer_auth(&session.access_token)
+        .json(&json!({
+            "repo": session.delegated_did,
+            "collection": collection,
+            "validate": false,
+            "record": {
+                "$type": collection,
+                "note": "compressed scope enforcement test",
+                "createdAt": Utc::now().to_rfc3339()
+            }
+        }))
+        .send()
+        .await
+        .expect("createRecord request failed");
+    assert_ne!(
+        create_res.status(),
+        StatusCode::FORBIDDEN,
+        "a compressed scope claim must still authorize the collections it covers. Got body: {:?}",
+        create_res.text().await
+    );
+
+    let refresh_res = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", session.refresh_token.as_str()),
+            ("client_id", session.client_id.as_str()),
+        ])
+        .send()
+        .await
+        .expect("Refresh request failed");
+    assert_eq!(refresh_res.status(), StatusCode::OK);
+    let refresh_body: Value = refresh_res.json().await.unwrap();
+    let refreshed_token = refresh_body["access_token"].as_str().unwrap();
+    let refreshed_claim = decode_jwt_payload(refreshed_token)["scope"]
+        .as_str()
+        .expect("refreshed JWT should have a scope claim")
+        .to_string();
+    assert!(
+        refreshed_claim.starts_with("$br$"),
+        "refreshed claim should also be compressed, got: {}",
+        refreshed_claim
+    );
+    assert_eq!(
+        tranquil_pds::auth::decode_scope(&refreshed_claim).expect("refreshed scope should decode"),
+        decoded,
+        "refresh must yield a byte-identical decoded scope"
+    );
+}
+
+#[tokio::test]
 async fn test_consent_post_errors_when_set_unresolvable() {
     const UNRESOLVABLE_NSID: &str = "io.atcr.authUnresolvableSet";
     seed_permission_set(UNRESOLVABLE_NSID, PERMISSION_SET_GRANULAR_SCOPE).await;

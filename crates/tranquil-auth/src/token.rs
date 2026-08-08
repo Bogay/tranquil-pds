@@ -3,7 +3,7 @@ use crate::compress::encode_scope;
 use super::types::{
     ActClaim, Claims, Header, SigningAlgorithm, TokenScope, TokenType, TokenWithMetadata,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Duration, Utc};
@@ -207,7 +207,7 @@ fn create_signed_token_pinned(
         aud: format!("did:web:{}", aud_hostname),
         exp: expiration,
         iat: Utc::now().timestamp(),
-        scope: Some(encode_scope(scope)),
+        scope: Some(encode_scope(scope).context("Scope too large to encode")?),
         lxm: None,
         jti: jti.clone(),
         act,
@@ -330,7 +330,7 @@ fn create_hs256_token_with_metadata(
         ),
         exp: expiration,
         iat: Utc::now().timestamp(),
-        scope: Some(encode_scope(scope)),
+        scope: Some(encode_scope(scope).context("Scope too large to encode")?),
         lxm: None,
         jti: jti.clone(),
         act: None,

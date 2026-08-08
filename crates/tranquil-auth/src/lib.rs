@@ -13,7 +13,7 @@ pub use token::{
     create_service_token_hs256,
 };
 
-pub use compress::{ScopeDecodeError, decode_scope, encode_scope};
+pub use compress::{ScopeDecodeError, ScopeEncodeError, decode_scope, encode_scope};
 
 pub use totp::{
     TotpError, decrypt_totp_secret, encrypt_totp_secret, generate_backup_codes,

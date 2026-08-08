@@ -43,7 +43,8 @@ pub fn create_access_token_with_delegation(
     let issuer = format!("https://{}", pds_hostname);
     let now = Utc::now().timestamp();
     let exp = now + ACCESS_TOKEN_EXPIRY_SECONDS;
-    let actual_scope = scope.unwrap_or("atproto");
+    let actual_scope = tranquil_pds::auth::encode_scope(scope.unwrap_or("atproto"))
+        .map_err(|_| OAuthError::InvalidScope("Scope too large".to_string()))?;
     let mut payload = json!({
         "iss": issuer,
         "sub": sub.as_str(),
