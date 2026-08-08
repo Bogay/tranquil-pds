@@ -159,7 +159,7 @@ pub async fn reauth_passkey_start(
         return Err(ApiError::NoPasskeys);
     }
 
-    let passkeys: Vec<webauthn_rs::prelude::SecurityKey> = stored_passkeys
+    let passkeys: Vec<webauthn_rs::prelude::Passkey> = stored_passkeys
         .iter()
         .filter_map(|sp| serde_json::from_slice(&sp.public_key).ok())
         .collect();
@@ -216,7 +216,7 @@ pub async fn reauth_passkey_finish(
         .log_db_err("loading authentication state")?
         .ok_or(ApiError::NoChallengeInProgress)?;
 
-    let auth_state: webauthn_rs::prelude::SecurityKeyAuthentication =
+    let auth_state: webauthn_rs::prelude::PasskeyAuthentication =
         serde_json::from_str(&auth_state_json).map_err(|e| {
             error!("Failed to deserialize authentication state: {:?}", e);
             ApiError::InternalError(None)

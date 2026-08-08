@@ -492,7 +492,7 @@ pub async fn complete_passkey_setup(
             }
         };
 
-    let security_key = match webauthn.finish_registration(&credential, &reg_state) {
+    let passkey = match webauthn.finish_registration(&credential, &reg_state) {
         Ok(sk) => sk,
         Err(e) => {
             warn!("Passkey registration failed: {:?}", e);
@@ -500,11 +500,11 @@ pub async fn complete_passkey_setup(
         }
     };
 
-    let credential_id = security_key.cred_id().to_vec();
-    let public_key = match serde_json::to_vec(&security_key) {
+    let credential_id = passkey.cred_id().to_vec();
+    let public_key = match serde_json::to_vec(&passkey) {
         Ok(pk) => pk,
         Err(e) => {
-            error!("Error serializing security key: {:?}", e);
+            error!("Error serializing passkey: {:?}", e);
             return Err(ApiError::InternalError(None));
         }
     };
