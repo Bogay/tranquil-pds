@@ -104,10 +104,11 @@ pub async fn finish_passkey_registration(
         .log_db_err("loading registration state")?
         .ok_or(ApiError::NoRegistrationInProgress)?;
 
-    let reg_state: PasskeyRegistration = serde_json::from_str(&reg_state_json).map_err(|e| {
-        error!("Failed to deserialize registration state: {:?}", e);
-        ApiError::InternalError(None)
-    })?;
+    let reg_state: SecurityKeyRegistration =
+        serde_json::from_str(&reg_state_json).map_err(|e| {
+            error!("Failed to deserialize registration state: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
     let credential: RegisterPublicKeyCredential = serde_json::from_value(input.credential)
         .map_err(|e| {

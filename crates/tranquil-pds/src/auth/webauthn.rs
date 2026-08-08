@@ -43,11 +43,11 @@ impl WebAuthnConfig {
         username: &str,
         display_name: &str,
         exclude_credentials: Vec<CredentialID>,
-    ) -> Result<(CreationChallengeResponse, PasskeyRegistration), WebauthnError> {
+    ) -> Result<(CreationChallengeResponse, SecurityKeyRegistration), WebauthnError> {
         let user_unique_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, user_id.as_bytes());
 
         self.webauthn
-            .start_passkey_registration(
+            .start_securitykey_registration(
                 user_unique_id,
                 username,
                 display_name,
@@ -56,6 +56,8 @@ impl WebAuthnConfig {
                 } else {
                     Some(exclude_credentials)
                 },
+                None,
+                None,
             )
             .map(|(mut ccr, state)| {
                 let sel = ccr
@@ -64,6 +66,7 @@ impl WebAuthnConfig {
                     .get_or_insert_with(AuthenticatorSelectionCriteria::default);
                 sel.resident_key = Some(ResidentKeyRequirement::Required);
                 sel.require_resident_key = true;
+                ccr.public_key.hints = None;
                 (ccr, state)
             })
             .map_err(|e| WebauthnError::RegistrationFailed(e.to_string()))
@@ -72,29 +75,33 @@ impl WebAuthnConfig {
     pub fn finish_registration(
         &self,
         reg: &RegisterPublicKeyCredential,
-        state: &PasskeyRegistration,
-    ) -> Result<Passkey, WebauthnError> {
+        state: &SecurityKeyRegistration,
+    ) -> Result<SecurityKey, WebauthnError> {
         self.webauthn
-            .finish_passkey_registration(reg, state)
+            .finish_securitykey_registration(reg, state)
             .map_err(|e| WebauthnError::RegistrationFailed(e.to_string()))
     }
 
     pub fn start_authentication(
         &self,
-        credentials: Vec<Passkey>,
-    ) -> Result<(RequestChallengeResponse, PasskeyAuthentication), WebauthnError> {
+        credentials: Vec<SecurityKey>,
+    ) -> Result<(RequestChallengeResponse, SecurityKeyAuthentication), WebauthnError> {
         self.webauthn
-            .start_passkey_authentication(&credentials)
+            .start_securitykey_authentication(&credentials)
+            .map(|(mut rcr, state)| {
+                rcr.public_key.hints = None;
+                (rcr, state)
+            })
             .map_err(|e| WebauthnError::AuthenticationFailed(e.to_string()))
     }
 
     pub fn finish_authentication(
         &self,
         auth: &PublicKeyCredential,
-        state: &PasskeyAuthentication,
+        state: &SecurityKeyAuthentication,
     ) -> Result<AuthenticationResult, WebauthnError> {
         self.webauthn
-            .finish_passkey_authentication(auth, state)
+            .finish_securitykey_authentication(auth, state)
             .map_err(|e| WebauthnError::AuthenticationFailed(e.to_string()))
     }
 

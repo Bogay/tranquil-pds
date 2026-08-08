@@ -327,7 +327,7 @@ async fn passkey_start_named(
             .into_response();
     }
 
-    let passkeys: Vec<webauthn_rs::prelude::Passkey> = stored_passkeys
+    let passkeys: Vec<webauthn_rs::prelude::SecurityKey> = stored_passkeys
         .iter()
         .filter_map(|sp| serde_json::from_slice(&sp.public_key).ok())
         .collect();
@@ -714,7 +714,7 @@ async fn passkey_finish_named(
             ).into_response()
         })?;
 
-    let auth_state: webauthn_rs::prelude::PasskeyAuthentication =
+    let auth_state: webauthn_rs::prelude::SecurityKeyAuthentication =
         serde_json::from_str(&auth_state_json).map_err(|e| {
             tracing::error!(error = %e, "Failed to deserialize authentication state");
             (
@@ -972,7 +972,7 @@ pub async fn authorize_passkey_start(
             .into_response();
     }
 
-    let passkeys: Vec<webauthn_rs::prelude::Passkey> = stored_passkeys
+    let passkeys: Vec<webauthn_rs::prelude::SecurityKey> = stored_passkeys
         .iter()
         .filter_map(|sp| serde_json::from_slice(&sp.public_key).ok())
         .collect();
@@ -1146,7 +1146,7 @@ pub async fn authorize_passkey_finish(
         }
     };
 
-    let auth_state: webauthn_rs::prelude::PasskeyAuthentication = match serde_json::from_str(
+    let auth_state: webauthn_rs::prelude::SecurityKeyAuthentication = match serde_json::from_str(
         &auth_state_json,
     ) {
         Ok(s) => s,
