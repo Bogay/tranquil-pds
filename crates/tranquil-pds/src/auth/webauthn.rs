@@ -28,7 +28,8 @@ impl WebAuthnConfig {
 
         let builder = WebauthnBuilder::new(&rp_id, &rp_origin)
             .map_err(|e| WebauthnError::BuilderFailed(e.to_string()))?
-            .rp_name("Tranquil PDS");
+            .rp_name("Tranquil PDS")
+            .danger_set_user_presence_only_security_keys(true);
 
         let webauthn = builder
             .build()
