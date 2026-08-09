@@ -1,9 +1,10 @@
+use crate::parser::RepoAction;
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use tracing::debug;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use tracing::{debug, warn};
 use tranquil_types::{Did, Nsid};
 
 #[derive(Debug, thiserror::Error)]
@@ -332,13 +333,23 @@ fn is_under_authority(target_nsid: &str, authority: &str) -> bool {
             .is_some_and(|c| c == '.')
 }
 
-const DEFAULT_ACTIONS: &[&str] = &["create", "update", "delete"];
-
-fn action_rank(action: &str) -> usize {
-    DEFAULT_ACTIONS
-        .iter()
-        .position(|known| *known == action)
-        .unwrap_or(DEFAULT_ACTIONS.len())
+fn parse_permission_actions(actions: Option<&Vec<String>>) -> Option<BTreeSet<RepoAction>> {
+    match actions {
+        None => Some(RepoAction::ALL.into_iter().collect()),
+        Some(values) => values
+            .iter()
+            .map(|value| {
+                let parsed = RepoAction::parse_str(value);
+                if parsed.is_none() {
+                    warn!(
+                        action = %value,
+                        "skipping permission entry with unrecognized repo action"
+                    );
+                }
+                parsed
+            })
+            .collect(),
+    }
 }
 
 fn build_expanded_scopes(
@@ -346,36 +357,26 @@ fn build_expanded_scopes(
     default_aud: Option<&str>,
     namespace_authority: &str,
 ) -> String {
-    // Key is `repo`, value is array of actions
-    let mut ungrouped_repo_scopes: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut ungrouped_repo_scopes: BTreeMap<String, BTreeSet<RepoAction>> = BTreeMap::new();
     let mut rpc_scopes: Vec<String> = Vec::new();
 
     permissions
         .iter()
         .for_each(|perm| match perm.resource.as_str() {
             "repo" => {
-                if let Some(collections) = &perm.collection {
-                    let actions: Vec<&str> = perm
-                        .action
-                        .as_ref()
-                        .map(|a| a.iter().map(String::as_str).collect())
-                        .unwrap_or_else(|| DEFAULT_ACTIONS.to_vec());
-
-                    if !actions.is_empty() {
-                        collections
-                            .iter()
-                            .filter(|coll| is_under_authority(coll, namespace_authority))
-                            .for_each(|coll| {
-                                let existing =
-                                    ungrouped_repo_scopes.entry(coll.to_string()).or_default();
-
-                                actions.iter().for_each(|action| {
-                                    if !existing.iter().any(|seen| seen == action) {
-                                        existing.push(action.to_string());
-                                    }
-                                });
-                            });
-                    }
+                if let Some(collections) = &perm.collection
+                    && let Some(actions) = parse_permission_actions(perm.action.as_ref())
+                    && !actions.is_empty()
+                {
+                    collections
+                        .iter()
+                        .filter(|coll| is_under_authority(coll, namespace_authority))
+                        .for_each(|coll| {
+                            ungrouped_repo_scopes
+                                .entry(coll.to_string())
+                                .or_default()
+                                .extend(actions.iter().copied());
+                        });
                 }
             }
             "rpc" => {
@@ -402,10 +403,9 @@ fn build_expanded_scopes(
     let grouped_repo_scopes: Vec<String> = ungrouped_repo_scopes
         .iter()
         .map(|(repo, actions)| {
-            let mut actions = actions.clone();
-            actions.sort_by(|a, b| action_rank(a).cmp(&action_rank(b)).then_with(|| a.cmp(b)));
+            let rendered: Vec<&str> = actions.iter().map(RepoAction::as_str).collect();
 
-            format!("repo:{}?action={}", repo, actions.join("&action="))
+            format!("repo:{}?action={}", repo, rendered.join("&action="))
         })
         .collect();
 
@@ -625,6 +625,23 @@ mod tests {
             expanded,
             "repo:io.atcr.manifest?action=create&action=update&action=delete \
              rpc:io.atcr.getManifest?aud=*"
+        );
+    }
+
+    #[test]
+    fn test_build_expanded_scopes_repo_unrecognized_action_skips_entry() {
+        let permissions = vec![PermissionEntry {
+            resource: "repo".to_string(),
+            action: Some(vec!["read".to_string()]),
+            collection: Some(vec!["io.atcr.manifest".to_string()]),
+            lxm: None,
+            aud: None,
+        }];
+
+        let expanded = build_expanded_scopes(&permissions, None, "io.atcr");
+        assert!(
+            expanded.is_empty(),
+            "an unrecognized repo action must not expand to all actions, got: {expanded}"
         );
     }
 

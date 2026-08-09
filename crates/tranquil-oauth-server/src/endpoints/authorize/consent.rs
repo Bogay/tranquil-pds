@@ -187,7 +187,7 @@ pub async fn consent_get(
     let grant_scope_str: Option<&str> =
         delegation_grant.as_ref().map(|g| g.granted_scopes.as_str());
     let is_restricted = |scope: &str| -> bool {
-        grant_scope_str.is_some_and(|g| !tranquil_pds::delegation::grant_covers(g, scope))
+        grant_scope_str.is_some_and(|g| !tranquil_pds::delegation::grant_permits(g, scope))
     };
 
     let make_scope_info = |scope: &str| -> ScopeInfo {

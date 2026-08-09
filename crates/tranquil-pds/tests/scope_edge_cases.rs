@@ -254,15 +254,18 @@ fn test_scope_with_multiple_params() {
 }
 
 #[test]
-fn test_scope_invalid_action_ignored() {
-    let scope = parse_scope("repo:*?action=invalid");
-    if let ParsedScope::Repo(repo) = scope {
-        assert!(repo.actions.contains(&RepoAction::Create));
-        assert!(repo.actions.contains(&RepoAction::Update));
-        assert!(repo.actions.contains(&RepoAction::Delete));
-    } else {
-        panic!("Expected Repo scope");
-    }
+fn test_scope_invalid_action_rejects_whole_scope() {
+    assert!(
+        matches!(
+            parse_scope("repo:*?action=invalid"),
+            ParsedScope::Unknown(_)
+        ),
+        "an unrecognized action must not fall back to granting every action"
+    );
+    assert!(matches!(
+        parse_scope("repo:*?action=create&action=invalid"),
+        ParsedScope::Unknown(_)
+    ));
 }
 
 #[test]

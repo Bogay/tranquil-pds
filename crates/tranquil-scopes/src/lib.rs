@@ -5,7 +5,7 @@ mod parser;
 mod permission_set;
 mod permissions;
 
-pub use coverage::covers;
+pub use coverage::{covers, narrow};
 pub use definitions::{
     SCOPE_DEFINITIONS, ScopeCategory, ScopeDefinition, format_scope_for_display,
     get_required_scopes, get_scope_definition, is_valid_scope,

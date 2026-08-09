@@ -15,6 +15,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const PERMISSION_SET_NSID: &str = "io.atcr.authFullApp";
 const PERMISSION_SET_GRANULAR_SCOPE: &str =
     "repo:io.atcr.manifest?action=create rpc:io.atcr.getManifest?aud=*";
+const PERMISSION_SET_MULTI_ACTION_SCOPE: &str =
+    "repo:io.atcr.manifest?action=create&action=update&action=delete";
+const EDITOR_SET_NSID: &str = "io.atcr.authEditorApp";
 
 fn disable_rate_limiting_once() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -106,6 +109,21 @@ async fn create_delegated_session_with_scope(
     redirect_uri: &str,
     scope: &str,
 ) -> (DelegatedSession, Value, MockServer) {
+    create_delegated_session_with_grant(
+        handle_prefix,
+        redirect_uri,
+        scope,
+        tranquil_pds::delegation::OWNER_FULL_SCOPES,
+    )
+    .await
+}
+
+async fn create_delegated_session_with_grant(
+    handle_prefix: &str,
+    redirect_uri: &str,
+    scope: &str,
+    controller_scopes: &str,
+) -> (DelegatedSession, Value, MockServer) {
     let url = base_url().await;
     disable_rate_limiting_once();
     let http_client = client();
@@ -119,7 +137,7 @@ async fn create_delegated_session_with_scope(
         .bearer_auth(&controller_jwt)
         .json(&json!({
             "handle": delegated_handle,
-            "controllerScopes": tranquil_pds::delegation::OWNER_FULL_SCOPES
+            "controllerScopes": controller_scopes
         }))
         .send()
         .await
@@ -372,6 +390,54 @@ async fn test_delegated_include_scope_shows_granular_on_consent() {
     assert!(
         !has_raw_include,
         "consent scopes[] should not carry the raw include: token"
+    );
+}
+
+#[tokio::test]
+async fn test_delegated_editor_grant_keeps_collapsed_permission_set() {
+    seed_permission_set(EDITOR_SET_NSID, PERMISSION_SET_MULTI_ACTION_SCOPE).await;
+
+    let scope = format!("atproto include:{}", EDITOR_SET_NSID);
+    let (session, consent_body, _mock) = create_delegated_session_with_grant(
+        "pse",
+        "https://example.com/permset-editor-callback",
+        &scope,
+        tranquil_pds::delegation::EDITOR_FULL_SCOPES,
+    )
+    .await;
+
+    let set_entry = consent_body["permission_sets"]
+        .as_array()
+        .expect("consent response should have a permission_sets array")
+        .iter()
+        .find(|s| s["nsid"].as_str() == Some(EDITOR_SET_NSID))
+        .unwrap_or_else(|| {
+            panic!(
+                "permission_sets should contain an entry for nsid '{}'. Got: {:?}",
+                EDITOR_SET_NSID, consent_body
+            )
+        });
+    assert_eq!(
+        set_entry["restricted"].as_bool(),
+        Some(false),
+        "an editor grant spells its actions as separate tokens, but it still permits every \
+         action in the collapsed set, so the set must not be marked restricted. Got: {:?}",
+        set_entry
+    );
+
+    let payload = decode_jwt_payload(&session.access_token);
+    let jwt_scope = tranquil_pds::auth::decode_scope(
+        payload["scope"]
+            .as_str()
+            .expect("access token JWT should have a scope claim"),
+    )
+    .expect("JWT scope claim should decode");
+    assert!(
+        jwt_scope.contains(PERMISSION_SET_MULTI_ACTION_SCOPE),
+        "delegated intersection must narrow the collapsed repo scope rather than discard it, \
+         expected '{}' in decoded scope, got: {}",
+        PERMISSION_SET_MULTI_ACTION_SCOPE,
+        jwt_scope
     );
 }
 

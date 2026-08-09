@@ -73,10 +73,13 @@ pub fn encode_scope(scope: &str) -> Result<String, ScopeEncodeError> {
         return Err(ScopeEncodeError::TooLarge);
     }
 
-    let encoded = URL_SAFE_NO_PAD.encode(brotli_compress(scope));
+    let tagged = format!(
+        "{COMPRESSED_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(brotli_compress(scope))
+    );
 
-    if COMPRESSED_PREFIX.len() + encoded.len() < scope.len() {
-        Ok(format!("{COMPRESSED_PREFIX}{encoded}"))
+    if tagged.len() < scope.len() || scope.starts_with(COMPRESSED_PREFIX) {
+        Ok(tagged)
     } else {
         Ok(scope.to_owned())
     }
@@ -159,6 +162,15 @@ mod tests {
             decode_scope(&format!("{COMPRESSED_PREFIX}{bomb}")),
             Err(ScopeDecodeError::TooLarge)
         );
+    }
+
+    #[test]
+    fn plaintext_that_looks_compressed_roundtrips() {
+        let scope = "$br$repo:*";
+        let encoded = encode_scope(scope).unwrap();
+
+        assert!(encoded.starts_with(COMPRESSED_PREFIX));
+        assert_eq!(decode_scope(&encoded).unwrap(), scope);
     }
 
     #[test]

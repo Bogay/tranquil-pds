@@ -28,7 +28,22 @@ pub struct RepoScope {
     pub actions: HashSet<RepoAction>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+impl RepoScope {
+    pub fn to_scope_string(&self) -> String {
+        let mut actions: Vec<RepoAction> = self.actions.iter().copied().collect();
+        actions.sort();
+
+        let rendered: Vec<&str> = actions.iter().map(RepoAction::as_str).collect();
+
+        format!(
+            "repo:{}?action={}",
+            self.collection.as_deref().unwrap_or("*"),
+            rendered.join("&action=")
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RepoAction {
     Create,
@@ -37,12 +52,22 @@ pub enum RepoAction {
 }
 
 impl RepoAction {
+    pub const ALL: [RepoAction; 3] = [Self::Create, Self::Update, Self::Delete];
+
     pub fn parse_str(s: &str) -> Option<Self> {
         match s {
             "create" => Some(Self::Create),
             "update" => Some(Self::Update),
             "delete" => Some(Self::Delete),
             _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Create => "create",
+            Self::Update => "update",
+            Self::Delete => "delete",
         }
     }
 }
@@ -150,6 +175,14 @@ fn parse_query_params(query: &str) -> HashMap<String, Vec<String>> {
         })
 }
 
+fn parse_repo_actions(params: &HashMap<String, Vec<String>>) -> Option<HashSet<RepoAction>> {
+    match params.get("action") {
+        None => Some(RepoAction::ALL.into_iter().collect()),
+        Some(values) if values.is_empty() => None,
+        Some(values) => values.iter().map(|s| RepoAction::parse_str(s)).collect(),
+    }
+}
+
 pub fn parse_scope(scope: &str) -> ParsedScope {
     match scope {
         "atproto" => return ParsedScope::Atproto,
@@ -169,20 +202,9 @@ pub fn parse_scope(scope: &str) -> ParsedScope {
             Some(rest.to_string())
         };
 
-        let actions: HashSet<RepoAction> = params
-            .get("action")
-            .map(|action_values| {
-                action_values
-                    .iter()
-                    .filter_map(|s| RepoAction::parse_str(s))
-                    .collect()
-            })
-            .filter(|set: &HashSet<RepoAction>| !set.is_empty())
-            .unwrap_or_else(|| {
-                [RepoAction::Create, RepoAction::Update, RepoAction::Delete]
-                    .into_iter()
-                    .collect()
-            });
+        let Some(actions) = parse_repo_actions(&params) else {
+            return ParsedScope::Unknown(scope.to_string());
+        };
 
         return ParsedScope::Repo(RepoScope {
             collection,
@@ -191,20 +213,10 @@ pub fn parse_scope(scope: &str) -> ParsedScope {
     }
 
     if base == "repo" {
-        let actions: HashSet<RepoAction> = params
-            .get("action")
-            .map(|action_values| {
-                action_values
-                    .iter()
-                    .filter_map(|s| RepoAction::parse_str(s))
-                    .collect()
-            })
-            .filter(|set: &HashSet<RepoAction>| !set.is_empty())
-            .unwrap_or_else(|| {
-                [RepoAction::Create, RepoAction::Update, RepoAction::Delete]
-                    .into_iter()
-                    .collect()
-            });
+        let Some(actions) = parse_repo_actions(&params) else {
+            return ParsedScope::Unknown(scope.to_string());
+        };
+
         return ParsedScope::Repo(RepoScope {
             collection: None,
             actions,
@@ -338,6 +350,22 @@ mod tests {
             }
             _ => panic!("Expected Repo scope"),
         }
+    }
+
+    #[test]
+    fn test_parse_repo_unrecognized_action_is_not_a_repo_scope() {
+        assert!(matches!(
+            parse_scope("repo:app.bsky.feed.post?action=read"),
+            ParsedScope::Unknown(_)
+        ));
+        assert!(matches!(
+            parse_scope("repo:app.bsky.feed.post?action="),
+            ParsedScope::Unknown(_)
+        ));
+        assert!(matches!(
+            parse_scope("repo?action=read"),
+            ParsedScope::Unknown(_)
+        ));
     }
 
     #[test]

@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
-use tranquil_scopes::{covers, parse_scope};
+use tranquil_scopes::{ParsedScope, narrow, parse_scope};
 
 pub use tranquil_db_traits::{
     DbScope as ValidatedDelegationScope, InvalidScopeError as InvalidDelegationScopeError,
@@ -47,34 +47,40 @@ pub const SCOPE_PRESETS: &[ScopePreset] = &[
 ];
 
 pub fn intersect_scopes(requested: &str, granted: &str) -> String {
-    let requested_set: HashSet<&str> = requested.split_whitespace().collect();
-    let granted_parsed: Vec<tranquil_scopes::ParsedScope> =
-        granted.split_whitespace().map(parse_scope).collect();
+    let granted_parsed: Vec<ParsedScope> = granted.split_whitespace().map(parse_scope).collect();
 
-    let mut scopes: Vec<&str> = requested_set
-        .iter()
-        .filter(|requested_scope| {
-            **requested_scope != "atproto" && any_granted_covers(requested_scope, &granted_parsed)
+    let scopes: BTreeSet<String> = requested
+        .split_whitespace()
+        .filter_map(|requested_scope| {
+            if requested_scope == "atproto" {
+                return Some(requested_scope.to_string());
+            }
+
+            let requested_parsed = parse_scope(requested_scope);
+            let narrowed = narrow(&granted_parsed, &requested_parsed)?;
+
+            if narrowed == requested_parsed {
+                return Some(requested_scope.to_string());
+            }
+
+            match &narrowed {
+                ParsedScope::Repo(repo) => Some(repo.to_scope_string()),
+                _ => Some(requested_scope.to_string()),
+            }
         })
-        .copied()
-        .chain(requested_set.contains("atproto").then_some("atproto"))
         .collect();
-    scopes.sort();
-    scopes.join(" ")
+
+    scopes.into_iter().collect::<Vec<String>>().join(" ")
 }
 
-pub fn grant_covers(granted: &str, scope: &str) -> bool {
+pub fn grant_permits(granted: &str, scope: &str) -> bool {
     if scope == "atproto" {
         return true;
     }
-    let granted_parsed: Vec<tranquil_scopes::ParsedScope> =
-        granted.split_whitespace().map(parse_scope).collect();
-    any_granted_covers(scope, &granted_parsed)
-}
 
-fn any_granted_covers(requested: &str, granted: &[tranquil_scopes::ParsedScope]) -> bool {
-    let requested_parsed = parse_scope(requested);
-    granted.iter().any(|g| covers(g, &requested_parsed))
+    let granted_parsed: Vec<ParsedScope> = granted.split_whitespace().map(parse_scope).collect();
+
+    narrow(&granted_parsed, &parse_scope(scope)).is_some()
 }
 
 #[cfg(test)]
@@ -220,12 +226,33 @@ mod tests {
     }
 
     #[test]
-    fn test_intersect_partial_action_grant_drops_actionless_request() {
+    fn test_intersect_partial_action_grant_narrows_actionless_request() {
         let result = intersect_scopes(
             "repo:app.bsky.feed.post",
             "repo:*?action=create&action=delete",
         );
-        assert_eq!(result, "");
+        assert_eq!(
+            result,
+            "repo:app.bsky.feed.post?action=create&action=delete"
+        );
+    }
+
+    #[test]
+    fn test_intersect_keeps_collapsed_request_under_split_action_grant() {
+        assert_eq!(
+            intersect_scopes(
+                "repo:io.atcr.manifest?action=create&action=delete",
+                EDITOR_FULL_SCOPES
+            ),
+            "repo:io.atcr.manifest?action=create&action=delete"
+        );
+        assert_eq!(
+            intersect_scopes(
+                "repo:io.atcr.manifest?action=create&action=delete",
+                "repo:*?action=create"
+            ),
+            "repo:io.atcr.manifest?action=create"
+        );
     }
 
     #[test]
@@ -262,33 +289,41 @@ mod tests {
     }
 
     #[test]
-    fn test_grant_covers_matches_intersection() {
+    fn test_grant_permits_matches_intersection() {
         let granted = "atproto repo:* blob:*/* account:*?action=manage";
         let intersected = intersect_scopes(
             "repo:app.bsky.feed.post?action=create identity:* account:*?action=manage",
             granted,
         );
-        assert!(grant_covers(
+        assert!(grant_permits(
             granted,
             "repo:app.bsky.feed.post?action=create"
         ));
-        assert!(grant_covers(granted, "account:*?action=manage"));
-        assert!(!grant_covers(granted, "identity:*"));
+        assert!(grant_permits(granted, "account:*?action=manage"));
+        assert!(!grant_permits(granted, "identity:*"));
         assert_eq!(
-            grant_covers(granted, "identity:*"),
+            grant_permits(granted, "identity:*"),
             intersected.contains("identity")
         );
     }
 
     #[test]
-    fn test_grant_covers_atproto_always_true() {
-        assert!(grant_covers("", "atproto"));
-        assert!(grant_covers("repo:*", "atproto"));
+    fn test_grant_permits_atproto_always_true() {
+        assert!(grant_permits("", "atproto"));
+        assert!(grant_permits("repo:*", "atproto"));
     }
 
     #[test]
-    fn test_grant_covers_empty_grant_covers_nothing_else() {
-        assert!(!grant_covers("", "repo:app.bsky.feed.post?action=create"));
-        assert!(!grant_covers("", "identity:*"));
+    fn test_grant_permits_empty_grant_permits_nothing_else() {
+        assert!(!grant_permits("", "repo:app.bsky.feed.post?action=create"));
+        assert!(!grant_permits("", "identity:*"));
+    }
+
+    #[test]
+    fn test_grant_permits_partially_granted_repo_scope() {
+        assert!(grant_permits(
+            EDITOR_FULL_SCOPES,
+            "repo:io.atcr.manifest?action=create&action=delete"
+        ));
     }
 }

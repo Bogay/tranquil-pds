@@ -1,7 +1,8 @@
 use crate::parser::{
     AccountAction, AccountAttr, AccountScope, BlobScope, IdentityAttr, IdentityScope, ParsedScope,
-    RepoScope, RpcScope,
+    RepoAction, RepoScope, RpcScope,
 };
+use std::collections::HashSet;
 
 pub fn covers(granted: &ParsedScope, requested: &ParsedScope) -> bool {
     use ParsedScope::*;
@@ -21,8 +22,8 @@ pub fn covers(granted: &ParsedScope, requested: &ParsedScope) -> bool {
     }
 }
 
-fn repo_covers(g: &RepoScope, r: &RepoScope) -> bool {
-    let collection_ok = match &g.collection {
+fn repo_collection_covers(g: &RepoScope, r: &RepoScope) -> bool {
+    match &g.collection {
         None => true,
         Some(gc) => match &r.collection {
             None => false,
@@ -33,8 +34,36 @@ fn repo_covers(g: &RepoScope, r: &RepoScope) -> bool {
                 None => gc == rc,
             },
         },
-    };
-    collection_ok && r.actions.is_subset(&g.actions)
+    }
+}
+
+fn repo_covers(g: &RepoScope, r: &RepoScope) -> bool {
+    repo_collection_covers(g, r) && r.actions.is_subset(&g.actions)
+}
+
+pub fn narrow(granted: &[ParsedScope], requested: &ParsedScope) -> Option<ParsedScope> {
+    if let ParsedScope::Repo(r) = requested {
+        let actions: HashSet<RepoAction> = granted
+            .iter()
+            .filter_map(|g| match g {
+                ParsedScope::Repo(g) if repo_collection_covers(g, r) => Some(&g.actions),
+                _ => None,
+            })
+            .flat_map(|granted_actions| granted_actions.intersection(&r.actions).copied())
+            .collect();
+
+        return (!actions.is_empty()).then(|| {
+            ParsedScope::Repo(RepoScope {
+                collection: r.collection.clone(),
+                actions,
+            })
+        });
+    }
+
+    granted
+        .iter()
+        .any(|g| covers(g, requested))
+        .then(|| requested.clone())
 }
 
 fn blob_covers(g: &BlobScope, r: &BlobScope) -> bool {
@@ -74,11 +103,21 @@ fn identity_covers(g: &IdentityScope, r: &IdentityScope) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::covers;
-    use crate::parser::parse_scope;
+    use super::{covers, narrow};
+    use crate::parser::{ParsedScope, parse_scope};
 
     fn c(granted: &str, requested: &str) -> bool {
         covers(&parse_scope(granted), &parse_scope(requested))
+    }
+
+    fn narrowed(granted: &str, requested: &str) -> Option<String> {
+        let granted: Vec<ParsedScope> = granted.split_whitespace().map(parse_scope).collect();
+
+        match narrow(&granted, &parse_scope(requested)) {
+            Some(ParsedScope::Repo(repo)) => Some(repo.to_scope_string()),
+            Some(_) => Some(requested.to_string()),
+            None => None,
+        }
     }
 
     #[test]
@@ -192,5 +231,35 @@ mod tests {
     fn unknown_exact_match_only() {
         assert!(c("weird:token", "weird:token"));
         assert!(!c("weird:token", "other:token"));
+    }
+
+    #[test]
+    fn narrow_intersects_repo_actions() {
+        assert_eq!(
+            narrowed(
+                "repo:*?action=create repo:*?action=update repo:*?action=delete",
+                "repo:io.atcr.manifest?action=create&action=delete"
+            ),
+            Some("repo:io.atcr.manifest?action=create&action=delete".to_string())
+        );
+        assert_eq!(
+            narrowed(
+                "repo:*?action=create",
+                "repo:io.atcr.manifest?action=create&action=delete"
+            ),
+            Some("repo:io.atcr.manifest?action=create".to_string())
+        );
+        assert_eq!(
+            narrowed(
+                "repo:*?action=create",
+                "repo:io.atcr.manifest?action=delete"
+            ),
+            None
+        );
+        assert_eq!(narrowed("repo:app.bsky.*?action=create", "repo:*"), None);
+        assert_eq!(
+            narrowed("identity:*", "identity:handle"),
+            Some("identity:handle".to_string())
+        );
     }
 }
