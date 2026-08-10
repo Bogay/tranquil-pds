@@ -31,11 +31,22 @@ pub struct EmailSender {
     from: Mailbox,
     mode: SendMode,
     dkim: Option<DkimSigner>,
+    atmos_categories: bool,
 }
 
 impl EmailSender {
-    pub fn new(from: Mailbox, mode: SendMode, dkim: Option<DkimSigner>) -> Self {
-        Self { from, mode, dkim }
+    pub fn new(
+        from: Mailbox,
+        mode: SendMode,
+        dkim: Option<DkimSigner>,
+        atmos_categories: bool,
+    ) -> Self {
+        Self {
+            from,
+            mode,
+            dkim,
+            atmos_categories,
+        }
     }
 
     pub fn from_config(cfg: &tranquil_config::TranquilConfig) -> Result<Option<Self>, SendError> {
@@ -55,8 +66,19 @@ impl EmailSender {
             Some(host) => build_smarthost(cfg, host)?,
             None => build_direct_mx(cfg)?,
         };
-        info!(?mode, dkim = dkim.is_some(), "Email sender initialized");
-        Ok(Some(Self { from, mode, dkim }))
+        let atmos_categories = cfg.email.smarthost.apply_atmos_categories;
+        info!(
+            ?mode,
+            dkim = dkim.is_some(),
+            atmos_categories,
+            "Email sender initialized"
+        );
+        Ok(Some(Self {
+            from,
+            mode,
+            dkim,
+            atmos_categories,
+        }))
     }
 }
 
@@ -183,7 +205,7 @@ impl CommsSender for EmailSender {
     }
 
     async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
-        let mut message = message::build(&self.from, notification)?;
+        let mut message = message::build(&self.from, notification, self.atmos_categories)?;
         if let Some(signer) = &self.dkim {
             signer.sign(&mut message);
         }

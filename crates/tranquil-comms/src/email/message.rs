@@ -1,25 +1,42 @@
 use lettre::Message;
 use lettre::message::Mailbox;
 use lettre::message::header::ContentType;
+use lettre::message::header::{Header, HeaderName, HeaderValue};
+use tranquil_db_traits::CommsType;
 use uuid::Uuid;
 
 use super::types::EmailDomain;
 use crate::sender::SendError;
 use crate::types::QueuedComms;
 
-pub(super) fn build(from: &Mailbox, qc: &QueuedComms) -> Result<Message, SendError> {
+pub(super) fn build(
+    from: &Mailbox,
+    qc: &QueuedComms,
+    apply_atmos_categories: bool,
+) -> Result<Message, SendError> {
     let to: Mailbox = qc
         .recipient
         .parse()
         .map_err(|e: lettre::address::AddressError| SendError::InvalidRecipient(e.to_string()))?;
     let subject = qc.subject.as_deref().unwrap_or("Notification");
     let message_id = format!("<{}@{}>", Uuid::new_v4(), from.email.domain());
-    Message::builder()
+    let builder = Message::builder()
         .from(from.clone())
         .to(to)
         .subject(subject)
         .message_id(Some(message_id))
-        .header(ContentType::TEXT_PLAIN)
+        .header(ContentType::TEXT_PLAIN);
+
+    let category = apply_atmos_categories
+        .then(|| atmos_category(qc.comms_type))
+        .flatten();
+
+    let builder = match category {
+        Some(category) => builder.header(category),
+        None => builder,
+    };
+
+    builder
         .body(qc.body.clone())
         .map_err(|e| SendError::MessageBuild(e.to_string()))
 }
@@ -32,6 +49,41 @@ pub(super) fn recipient_domain(message: &Message) -> Result<EmailDomain, SendErr
         .ok_or_else(|| SendError::MessageBuild("envelope has no recipients".to_string()))?;
     EmailDomain::parse(first.domain())
         .map_err(|e| SendError::InvalidRecipient(format!("invalid recipient domain: {e}")))
+}
+
+// for use with comail.at
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XAtmosCategory(&'static str);
+
+impl Header for XAtmosCategory {
+    fn name() -> HeaderName {
+        HeaderName::new_from_ascii_str("X-Atmos-Category")
+    }
+    fn parse(_s: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        //since we're never receiving email, we don't care about parsing
+        unimplemented!()
+    }
+    fn display(&self) -> HeaderValue {
+        HeaderValue::new(Self::name(), self.0.to_string())
+    }
+}
+
+fn atmos_category(comms_type: CommsType) -> Option<XAtmosCategory> {
+    use CommsType::*;
+    match comms_type {
+        EmailVerification
+        | ChannelVerification
+        | ChannelVerified
+        | MigrationVerification
+        | LegacyLoginAlert
+        | EmailUpdate
+        | PlcOperation
+        | AccountDeletion => Some(XAtmosCategory("verification")),
+        PasswordReset | PasskeyRecovery => Some(XAtmosCategory("password-reset")),
+        TwoFactorCode => Some(XAtmosCategory("mfa-otp")),
+        Welcome => Some(XAtmosCategory("bulk")),
+        AdminEmail => None,
+    }
 }
 
 #[cfg(test)]
@@ -71,6 +123,7 @@ mod tests {
         let msg = build(
             &from_mailbox(),
             &fixture("user@nel.pet", Some("Welcome"), "Hello world."),
+            false,
         )
         .unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();
@@ -87,6 +140,7 @@ mod tests {
         let msg = build(
             &from_mailbox(),
             &fixture("user@nel.pet", Some("héllo wörld"), "Body"),
+            false,
         )
         .unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();
@@ -99,6 +153,7 @@ mod tests {
         let result = build(
             &from_mailbox(),
             &fixture("x@nel.pet\r\nBcc: evil@x", Some("s"), "b"),
+            false,
         );
         assert!(matches!(result, Err(SendError::InvalidRecipient(_))));
     }
@@ -108,6 +163,7 @@ mod tests {
         let msg = build(
             &from_mailbox(),
             &fixture("user@nel.pet", Some("hi\r\nBcc: evil@nel.pet"), "body"),
+            false,
         )
         .expect("subject CRLF should be encoded, not rejected");
         let raw = String::from_utf8(msg.formatted()).unwrap();
@@ -123,7 +179,12 @@ mod tests {
 
     #[test]
     fn message_id_uses_from_domain() {
-        let msg = build(&from_mailbox(), &fixture("user@nel.pet", Some("s"), "b")).unwrap();
+        let msg = build(
+            &from_mailbox(),
+            &fixture("user@nel.pet", Some("s"), "b"),
+            false,
+        )
+        .unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();
         let line = raw
             .lines()
@@ -137,15 +198,58 @@ mod tests {
 
     #[test]
     fn missing_subject_uses_default() {
-        let msg = build(&from_mailbox(), &fixture("user@nel.pet", None, "Body")).unwrap();
+        let msg = build(
+            &from_mailbox(),
+            &fixture("user@nel.pet", None, "Body"),
+            false,
+        )
+        .unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();
         assert!(raw.contains("Subject: Notification"));
     }
 
     #[test]
     fn recipient_domain_extracted() {
-        let msg = build(&from_mailbox(), &fixture("user@Nel.PET", Some("s"), "b")).unwrap();
+        let msg = build(
+            &from_mailbox(),
+            &fixture("user@Nel.PET", Some("s"), "b"),
+            false,
+        )
+        .unwrap();
         let d = recipient_domain(&msg).unwrap();
         assert_eq!(d.as_str(), "nel.pet");
+    }
+
+    #[test]
+    fn atmos_category_header_present_when_enabled_and_mapped() {
+        let qc = QueuedComms {
+            comms_type: CommsType::PasswordReset,
+            ..fixture("user@nel.pet", Some("s"), "b")
+        };
+        let msg = build(&from_mailbox(), &qc, true).unwrap();
+        let raw = String::from_utf8(msg.formatted()).unwrap();
+        assert!(raw.contains("X-Atmos-Category: password-reset"));
+    }
+
+    #[test]
+    fn atmos_category_header_absent_when_disabled() {
+        let qc = QueuedComms {
+            comms_type: CommsType::PasswordReset,
+            ..fixture("user@nel.pet", Some("s"), "b")
+        };
+        let msg = build(&from_mailbox(), &qc, false).unwrap();
+        let raw = String::from_utf8(msg.formatted()).unwrap();
+        assert!(!raw.contains("X-Atmos-Category"));
+    }
+
+    #[test]
+    fn atmos_category_header_absent_when_unmapped() {
+        let qc = QueuedComms {
+            comms_type: CommsType::AdminEmail,
+            ..fixture("user@nel.pet", Some("s"), "b")
+        };
+        let msg = build(&from_mailbox(), &qc, true).unwrap();
+        let raw = String::from_utf8(msg.formatted()).unwrap();
+        assert!(!raw.contains("X-Atmos-Category"));
     }
 }

@@ -1124,6 +1124,10 @@ pub struct SmarthostConfig {
     /// stuck relay cannot stall the comms queue.
     #[config(env = "MAIL_SMARTHOST_TOTAL_TIMEOUT_SECS", default = 60)]
     pub total_timeout_secs: u64,
+
+    // Apply Atmos/Comail.at categories for headers to meet AUP.
+    #[config(env = "MAIL_APPLY_ATMOS_CATEGORIES", default = false)]
+    pub apply_atmos_categories: bool,
 }
 
 #[derive(Debug, Config)]
@@ -1985,6 +1989,7 @@ port = 587
                 pool_size: 4,
                 command_timeout_secs: 30,
                 total_timeout_secs: 60,
+                apply_atmos_categories: false,
             },
             direct_mx: DirectMxConfig {
                 command_timeout_secs: 30,
