@@ -55,6 +55,7 @@ fn build_smarthost_sender_with_total_timeout(
             total_timeout,
         },
         None,
+        false,
     )
 }
 
