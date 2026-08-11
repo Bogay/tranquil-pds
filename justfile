@@ -16,12 +16,15 @@ build-release:
 check:
     cargo check
 clippy:
-    cargo clippy -- -D warnings
+    cargo clippy --all-targets -- -D warnings
+lint-no-bsky:
+    cargo clippy -p tranquil-server --no-default-features --features frontend,postgres,s3,valkey --all-targets -- -D warnings
+    cargo clippy -p tranquil-pds --no-default-features --all-targets -- -D warnings
 fmt:
     cargo fmt
 fmt-check:
     cargo fmt -- --check
-lint: fmt-check clippy
+lint: fmt-check clippy lint-no-bsky
 
 test-store:
     SQLX_OFFLINE=true cargo nextest run -p tranquil-store --features tranquil-store/test-harness
