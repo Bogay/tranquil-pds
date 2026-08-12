@@ -10,7 +10,7 @@ Environment=SERVER_PORT=3000
 Volume=/srv/tranquil-pds/config/config.toml:/etc/tranquil-pds/config.toml:ro,Z
 Volume=/srv/tranquil-pds/blobs:/var/lib/tranquil-pds/blobs:Z
 Volume=/srv/tranquil-pds/store:/var/lib/tranquil-pds/store:Z
-HealthCmd=wget -q --spider http://localhost:3000/xrpc/_health
+HealthCmd=["/usr/local/bin/tranquil-pds", "healthcheck"]
 HealthInterval=30s
 HealthTimeout=10s
 HealthRetries=3
