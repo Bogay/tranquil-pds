@@ -10,6 +10,8 @@ pub struct ScopeInfo {
     pub display_name: String,
     pub granted: Option<bool>,
     pub restricted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_scope: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -186,20 +188,29 @@ pub async fn consent_get(
 
     let grant_scope_str: Option<&str> =
         delegation_grant.as_ref().map(|g| g.granted_scopes.as_str());
-    let is_restricted = |scope: &str| -> bool {
-        grant_scope_str.is_some_and(|g| !tranquil_pds::delegation::grant_permits(g, scope))
+    let coverage_of = |scope: &str| -> tranquil_pds::delegation::GrantCoverage {
+        match grant_scope_str {
+            Some(g) => tranquil_pds::delegation::grant_coverage(g, scope),
+            None => tranquil_pds::delegation::GrantCoverage::Full,
+        }
     };
 
     let make_scope_info = |scope: &str| -> ScopeInfo {
+        let (restricted, effective_scope) = match coverage_of(scope) {
+            tranquil_pds::delegation::GrantCoverage::Full => (false, None),
+            tranquil_pds::delegation::GrantCoverage::Narrowed(narrowed) => (false, Some(narrowed)),
+            tranquil_pds::delegation::GrantCoverage::Withheld => (true, None),
+        };
+        let described = effective_scope.as_deref().unwrap_or(scope);
         let (category, required, description, display_name) =
-            if let Some(def) = tranquil_pds::oauth::scopes::SCOPE_DEFINITIONS.get(scope) {
-                let desc = if scope == "atproto" && has_granular_scopes {
+            if let Some(def) = tranquil_pds::oauth::scopes::SCOPE_DEFINITIONS.get(described) {
+                let desc = if described == "atproto" && has_granular_scopes {
                     "AT Protocol baseline scope (permissions determined by selected options below)"
                         .to_string()
                 } else {
                     def.description.to_string()
                 };
-                let name = if scope == "atproto" && has_granular_scopes {
+                let name = if described == "atproto" && has_granular_scopes {
                     "AT Protocol Access".to_string()
                 } else {
                     def.display_name.to_string()
@@ -210,19 +221,19 @@ pub async fn consent_get(
                     desc,
                     name,
                 )
-            } else if scope.starts_with("ref:") {
+            } else if described.starts_with("ref:") {
                 (
                     "Reference".to_string(),
                     false,
                     "Referenced scope".to_string(),
-                    scope.to_string(),
+                    described.to_string(),
                 )
             } else {
                 (
                     "Other".to_string(),
                     false,
-                    format!("Access to {}", scope),
-                    scope.to_string(),
+                    format!("Access to {}", described),
+                    described.to_string(),
                 )
             };
         let granted = pref_map.get(scope).copied();
@@ -233,7 +244,8 @@ pub async fn consent_get(
             description,
             display_name,
             granted,
-            restricted: is_restricted(scope),
+            restricted,
+            effective_scope,
         }
     };
 

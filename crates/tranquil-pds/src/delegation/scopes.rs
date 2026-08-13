@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use tranquil_scopes::{ParsedScope, narrow, parse_scope};
+use tranquil_scopes::{Coverage, ParsedScope, coverage, parse_scope};
 
 pub use tranquil_db_traits::{
     DbScope as ValidatedDelegationScope, InvalidScopeError as InvalidDelegationScopeError,
@@ -46,41 +46,51 @@ pub const SCOPE_PRESETS: &[ScopePreset] = &[
     },
 ];
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GrantCoverage {
+    Full,
+    Narrowed(String),
+    Withheld,
+}
+
+fn scope_coverage(granted: &[ParsedScope], scope: &str) -> GrantCoverage {
+    if scope == "atproto" {
+        return GrantCoverage::Full;
+    }
+
+    match coverage(granted, &parse_scope(scope)) {
+        Coverage::Full => GrantCoverage::Full,
+        Coverage::Narrowed(ParsedScope::Repo(repo)) => {
+            GrantCoverage::Narrowed(repo.to_scope_string())
+        }
+        Coverage::Narrowed(_) => GrantCoverage::Full,
+        Coverage::Withheld => GrantCoverage::Withheld,
+    }
+}
+
+pub fn grant_coverage(granted: &str, scope: &str) -> GrantCoverage {
+    scope_coverage(&parse_grant(granted), scope)
+}
+
+fn parse_grant(granted: &str) -> Vec<ParsedScope> {
+    granted.split_whitespace().map(parse_scope).collect()
+}
+
 pub fn intersect_scopes(requested: &str, granted: &str) -> String {
-    let granted_parsed: Vec<ParsedScope> = granted.split_whitespace().map(parse_scope).collect();
+    let granted_parsed = parse_grant(granted);
 
     let scopes: BTreeSet<String> = requested
         .split_whitespace()
-        .filter_map(|requested_scope| {
-            if requested_scope == "atproto" {
-                return Some(requested_scope.to_string());
-            }
-
-            let requested_parsed = parse_scope(requested_scope);
-            let narrowed = narrow(&granted_parsed, &requested_parsed)?;
-
-            if narrowed == requested_parsed {
-                return Some(requested_scope.to_string());
-            }
-
-            match &narrowed {
-                ParsedScope::Repo(repo) => Some(repo.to_scope_string()),
-                _ => Some(requested_scope.to_string()),
-            }
-        })
+        .filter_map(
+            |requested_scope| match scope_coverage(&granted_parsed, requested_scope) {
+                GrantCoverage::Full => Some(requested_scope.to_string()),
+                GrantCoverage::Narrowed(narrowed) => Some(narrowed),
+                GrantCoverage::Withheld => None,
+            },
+        )
         .collect();
 
     scopes.into_iter().collect::<Vec<String>>().join(" ")
-}
-
-pub fn grant_permits(granted: &str, scope: &str) -> bool {
-    if scope == "atproto" {
-        return true;
-    }
-
-    let granted_parsed: Vec<ParsedScope> = granted.split_whitespace().map(parse_scope).collect();
-
-    narrow(&granted_parsed, &parse_scope(scope)).is_some()
 }
 
 #[cfg(test)]
@@ -289,41 +299,35 @@ mod tests {
     }
 
     #[test]
-    fn test_grant_permits_matches_intersection() {
+    fn test_grant_coverage_full_and_withheld() {
         let granted = "atproto repo:* blob:*/* account:*?action=manage";
-        let intersected = intersect_scopes(
-            "repo:app.bsky.feed.post?action=create identity:* account:*?action=manage",
-            granted,
-        );
-        assert!(grant_permits(
-            granted,
-            "repo:app.bsky.feed.post?action=create"
-        ));
-        assert!(grant_permits(granted, "account:*?action=manage"));
-        assert!(!grant_permits(granted, "identity:*"));
+        assert_eq!(grant_coverage(granted, "atproto"), GrantCoverage::Full);
         assert_eq!(
-            grant_permits(granted, "identity:*"),
-            intersected.contains("identity")
+            grant_coverage(granted, "repo:app.bsky.feed.post?action=create"),
+            GrantCoverage::Full
         );
+        assert_eq!(
+            grant_coverage(granted, "identity:*"),
+            GrantCoverage::Withheld
+        );
+        assert_eq!(grant_coverage("", "identity:*"), GrantCoverage::Withheld);
     }
 
     #[test]
-    fn test_grant_permits_atproto_always_true() {
-        assert!(grant_permits("", "atproto"));
-        assert!(grant_permits("repo:*", "atproto"));
-    }
-
-    #[test]
-    fn test_grant_permits_empty_grant_permits_nothing_else() {
-        assert!(!grant_permits("", "repo:app.bsky.feed.post?action=create"));
-        assert!(!grant_permits("", "identity:*"));
-    }
-
-    #[test]
-    fn test_grant_permits_partially_granted_repo_scope() {
-        assert!(grant_permits(
-            EDITOR_FULL_SCOPES,
-            "repo:io.atcr.manifest?action=create&action=delete"
-        ));
+    fn test_grant_coverage_narrowed_when_grant_is_a_strict_action_subset() {
+        assert_eq!(
+            grant_coverage(
+                EDITOR_FULL_SCOPES,
+                "repo:io.atcr.manifest?action=create&action=delete"
+            ),
+            GrantCoverage::Full
+        );
+        assert_eq!(
+            grant_coverage(
+                "atproto repo:*?action=create blob:*/*",
+                "repo:io.atcr.manifest?action=create&action=delete"
+            ),
+            GrantCoverage::Narrowed("repo:io.atcr.manifest?action=create".to_string())
+        );
     }
 }

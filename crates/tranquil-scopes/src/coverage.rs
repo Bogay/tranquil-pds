@@ -41,7 +41,14 @@ fn repo_covers(g: &RepoScope, r: &RepoScope) -> bool {
     repo_collection_covers(g, r) && r.actions.is_subset(&g.actions)
 }
 
-pub fn narrow(granted: &[ParsedScope], requested: &ParsedScope) -> Option<ParsedScope> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Coverage {
+    Full,
+    Narrowed(ParsedScope),
+    Withheld,
+}
+
+pub fn coverage(granted: &[ParsedScope], requested: &ParsedScope) -> Coverage {
     if let ParsedScope::Repo(r) = requested {
         let actions: HashSet<RepoAction> = granted
             .iter()
@@ -52,18 +59,29 @@ pub fn narrow(granted: &[ParsedScope], requested: &ParsedScope) -> Option<Parsed
             .flat_map(|granted_actions| granted_actions.intersection(&r.actions).copied())
             .collect();
 
-        return (!actions.is_empty()).then(|| {
-            ParsedScope::Repo(RepoScope {
+        return match actions.len() {
+            0 => Coverage::Withheld,
+            _ if actions == r.actions => Coverage::Full,
+            _ => Coverage::Narrowed(ParsedScope::Repo(RepoScope {
                 collection: r.collection.clone(),
                 actions,
-            })
-        });
+            })),
+        };
     }
 
-    granted
-        .iter()
-        .any(|g| covers(g, requested))
-        .then(|| requested.clone())
+    if granted.iter().any(|g| covers(g, requested)) {
+        Coverage::Full
+    } else {
+        Coverage::Withheld
+    }
+}
+
+pub fn narrow(granted: &[ParsedScope], requested: &ParsedScope) -> Option<ParsedScope> {
+    match coverage(granted, requested) {
+        Coverage::Full => Some(requested.clone()),
+        Coverage::Narrowed(scope) => Some(scope),
+        Coverage::Withheld => None,
+    }
 }
 
 fn blob_covers(g: &BlobScope, r: &BlobScope) -> bool {
@@ -103,7 +121,7 @@ fn identity_covers(g: &IdentityScope, r: &IdentityScope) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{covers, narrow};
+    use super::{Coverage, coverage, covers, narrow};
     use crate::parser::{ParsedScope, parse_scope};
 
     fn c(granted: &str, requested: &str) -> bool {
@@ -118,6 +136,16 @@ mod tests {
             Some(_) => Some(requested.to_string()),
             None => None,
         }
+    }
+
+    fn covered(granted: &str, requested: &str) -> Coverage {
+        let granted: Vec<ParsedScope> = granted.split_whitespace().map(parse_scope).collect();
+
+        coverage(&granted, &parse_scope(requested))
+    }
+
+    fn narrowed_to(scope: &str) -> Coverage {
+        Coverage::Narrowed(parse_scope(scope))
     }
 
     #[test]
@@ -260,6 +288,38 @@ mod tests {
         assert_eq!(
             narrowed("identity:*", "identity:handle"),
             Some("identity:handle".to_string())
+        );
+    }
+
+    #[test]
+    fn coverage_distinguishes_full_from_narrowed_repo_actions() {
+        assert_eq!(
+            covered(
+                "repo:*?action=create repo:*?action=update repo:*?action=delete",
+                "repo:io.atcr.manifest?action=create&action=delete"
+            ),
+            Coverage::Full
+        );
+        assert_eq!(
+            covered(
+                "repo:*?action=create",
+                "repo:io.atcr.manifest?action=create&action=delete"
+            ),
+            narrowed_to("repo:io.atcr.manifest?action=create")
+        );
+        assert_eq!(
+            covered(
+                "repo:*?action=create&action=delete",
+                "repo:io.atcr.manifest"
+            ),
+            narrowed_to("repo:io.atcr.manifest?action=create&action=delete")
+        );
+        assert_eq!(
+            covered(
+                "repo:*?action=create",
+                "repo:io.atcr.manifest?action=delete"
+            ),
+            Coverage::Withheld
         );
     }
 }

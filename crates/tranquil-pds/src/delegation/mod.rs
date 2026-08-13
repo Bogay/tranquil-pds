@@ -5,8 +5,8 @@ pub use roles::{
     CanAddControllers, CanControlAccounts, verify_can_add_controllers, verify_can_control_accounts,
 };
 pub use scopes::{
-    EDITOR_FULL_SCOPES, InvalidDelegationScopeError, OWNER_FULL_SCOPES, SCOPE_PRESETS, ScopePreset,
-    ValidatedDelegationScope, grant_permits, intersect_scopes,
+    EDITOR_FULL_SCOPES, GrantCoverage, InvalidDelegationScopeError, OWNER_FULL_SCOPES,
+    SCOPE_PRESETS, ScopePreset, ValidatedDelegationScope, grant_coverage, intersect_scopes,
 };
 pub use tranquil_db_traits::DelegationActionType;
 

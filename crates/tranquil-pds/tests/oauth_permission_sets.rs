@@ -18,6 +18,10 @@ const PERMISSION_SET_GRANULAR_SCOPE: &str =
 const PERMISSION_SET_MULTI_ACTION_SCOPE: &str =
     "repo:io.atcr.manifest?action=create&action=update&action=delete";
 const EDITOR_SET_NSID: &str = "io.atcr.authEditorApp";
+const SUBSET_SET_NSID: &str = "io.atcr.authSubsetApp";
+const PERMISSION_SET_CREATE_DELETE_SCOPE: &str =
+    "repo:io.atcr.manifest?action=create&action=delete";
+const CREATE_ONLY_GRANT: &str = "atproto repo:*?action=create blob:*/*";
 
 fn disable_rate_limiting_once() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -437,6 +441,83 @@ async fn test_delegated_editor_grant_keeps_collapsed_permission_set() {
         "delegated intersection must narrow the collapsed repo scope rather than discard it, \
          expected '{}' in decoded scope, got: {}",
         PERMISSION_SET_MULTI_ACTION_SCOPE,
+        jwt_scope
+    );
+}
+
+#[tokio::test]
+async fn test_delegated_consent_shows_the_scope_the_token_will_carry() {
+    seed_permission_set(SUBSET_SET_NSID, PERMISSION_SET_CREATE_DELETE_SCOPE).await;
+
+    let scope = format!("atproto include:{}", SUBSET_SET_NSID);
+    let (session, consent_body, _mock) = create_delegated_session_with_grant(
+        "pss",
+        "https://example.com/permset-subset-callback",
+        &scope,
+        CREATE_ONLY_GRANT,
+    )
+    .await;
+
+    let set_entry = consent_body["permission_sets"]
+        .as_array()
+        .expect("consent response should have a permission_sets array")
+        .iter()
+        .find(|s| s["nsid"].as_str() == Some(SUBSET_SET_NSID))
+        .unwrap_or_else(|| {
+            panic!(
+                "permission_sets should contain an entry for nsid '{}'. Got: {:?}",
+                SUBSET_SET_NSID, consent_body
+            )
+        });
+    assert_eq!(
+        set_entry["restricted"].as_bool(),
+        Some(false),
+        "the create action is still granted, so the set stays approvable. Got: {:?}",
+        set_entry
+    );
+
+    let repo = set_entry["expanded"]
+        .as_array()
+        .expect("permission_sets entry should have an expanded array")
+        .iter()
+        .find(|s| s["scope"].as_str() == Some(PERMISSION_SET_CREATE_DELETE_SCOPE))
+        .unwrap_or_else(|| {
+            panic!(
+                "expanded[] should list the requested scope '{}'. Got: {:?}",
+                PERMISSION_SET_CREATE_DELETE_SCOPE, set_entry
+            )
+        });
+    assert_eq!(
+        repo["restricted"].as_bool(),
+        Some(false),
+        "a partially-covered scope is neither fully granted nor withheld. Got: {:?}",
+        repo
+    );
+    let effective_scope = repo["effective_scope"].as_str().unwrap_or_else(|| {
+        panic!(
+            "a scope the grant narrows must report the actions it actually confers. Got: {:?}",
+            repo
+        )
+    });
+    assert_eq!(effective_scope, "repo:io.atcr.manifest?action=create");
+
+    let payload = decode_jwt_payload(&session.access_token);
+    let jwt_scope = tranquil_pds::auth::decode_scope(
+        payload["scope"]
+            .as_str()
+            .expect("access token JWT should have a scope claim"),
+    )
+    .expect("JWT scope claim should decode");
+    assert!(
+        jwt_scope.split_whitespace().any(|s| s == effective_scope),
+        "the consent screen must show the scope the token carries, expected '{}' in decoded \
+         scope, got: {}",
+        effective_scope,
+        jwt_scope
+    );
+    assert!(
+        !jwt_scope.contains("action=delete"),
+        "the grant confers no delete action, so the token must not carry one, got: {}",
         jwt_scope
     );
 }

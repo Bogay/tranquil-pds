@@ -10,6 +10,7 @@
     display_name: string
     granted: boolean | null
     restricted?: boolean
+    effective_scope?: string
   }
 
   const SCOPE_LOCALE_MAP: Record<string, string> = {
@@ -320,7 +321,7 @@
   )
 
   function getLocalizedScopeName(scope: ScopeInfo): string {
-    const localeKey = SCOPE_LOCALE_MAP[scope.scope]
+    const localeKey = SCOPE_LOCALE_MAP[scope.effective_scope ?? scope.scope]
     if (!localeKey) return scope.display_name
 
     if (scope.scope === 'atproto' && hasGranularScopes) {
@@ -333,7 +334,7 @@
   }
 
   function getLocalizedScopeDescription(scope: ScopeInfo): string {
-    const localeKey = SCOPE_LOCALE_MAP[scope.scope]
+    const localeKey = SCOPE_LOCALE_MAP[scope.effective_scope ?? scope.scope]
     if (!localeKey) return scope.description
 
     if (scope.scope === 'atproto' && hasGranularScopes) {
@@ -355,7 +356,7 @@
     const rpc: string[] = []
     const other: ScopeInfo[] = []
     for (const s of expanded) {
-      const [base, query = ''] = s.scope.split('?')
+      const [base, query = ''] = (s.effective_scope ?? s.scope).split('?')
       const params = new URLSearchParams(query)
       if (base.startsWith('repo:')) {
         const collection = base.slice('repo:'.length) || '*'
