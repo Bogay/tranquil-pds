@@ -14,10 +14,13 @@ pub struct ScopePreset {
     pub scopes: &'static str,
 }
 
-pub const OWNER_FULL_SCOPES: &str = "atproto repo:* blob:*/* identity:* account:*?action=manage";
+pub const OWNER_FULL_SCOPES: &str =
+    "atproto repo:* blob:*/* rpc:* identity:* account:*?action=manage";
+
+pub const ADMIN_FULL_SCOPES: &str = "atproto repo:* blob:*/* rpc:* account:*?action=manage";
 
 pub const EDITOR_FULL_SCOPES: &str =
-    "atproto repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*";
+    "atproto repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/* rpc:*";
 
 pub const SCOPE_PRESETS: &[ScopePreset] = &[
     ScopePreset {
@@ -30,7 +33,7 @@ pub const SCOPE_PRESETS: &[ScopePreset] = &[
         name: "admin",
         label: "Admin",
         description: "Manage account settings, post content, upload media",
-        scopes: "atproto repo:* blob:*/* account:*?action=manage",
+        scopes: ADMIN_FULL_SCOPES,
     },
     ScopePreset {
         name: "editor",
@@ -328,6 +331,96 @@ mod tests {
                 "repo:io.atcr.manifest?action=create&action=delete"
             ),
             GrantCoverage::Narrowed("repo:io.atcr.manifest?action=create".to_string())
+        );
+    }
+
+    // Tracks all known scope prefixes
+    const GRANULAR_SCOPE_TAXONOMY: &[(&str, &str)] = &[
+        ("repo", "repo:app.bsky.feed.post?action=create"),
+        ("blob", "blob:image/png"),
+        ("rpc", "rpc:app.bsky.actor.getProfile?aud=*"),
+        ("account", "account:email?action=manage"),
+        ("identity", "identity:handle"),
+    ];
+
+    // Verifies every scope prefix is reachable through at least one preset.
+    #[allow(dead_code)]
+    fn assert_taxonomy_is_exhaustive(scope: ParsedScope) {
+        match scope {
+            // Granular capabilities: each must appear in GRANULAR_SCOPE_TAXONOMY.
+            ParsedScope::Repo(_)
+            | ParsedScope::Blob(_)
+            | ParsedScope::Rpc(_)
+            | ParsedScope::Account(_)
+            | ParsedScope::Identity(_) => {}
+            ParsedScope::Atproto => {}
+            ParsedScope::TransitionGeneric
+            | ParsedScope::TransitionChat
+            | ParsedScope::TransitionEmail => {}
+            ParsedScope::Include(_) => {}
+            ParsedScope::Unknown(_) => {}
+        }
+    }
+
+    fn coverage_matrix() -> String {
+        GRANULAR_SCOPE_TAXONOMY
+            .iter()
+            .map(|(label, scope)| {
+                let granting: Vec<&str> = SCOPE_PRESETS
+                    .iter()
+                    .filter(|p| grant_coverage(p.scopes, scope) != GrantCoverage::Withheld)
+                    .map(|p| p.name)
+                    .collect();
+                match granting.is_empty() {
+                    true => format!("  {:<9} ({}) -> NONE", label, scope),
+                    false => format!("  {:<9} ({}) -> {}", label, scope, granting.join(", ")),
+                }
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn test_every_granular_scope_type_is_reachable_through_some_preset() {
+        let unreachable: Vec<&str> = GRANULAR_SCOPE_TAXONOMY
+            .iter()
+            .filter(|(_, scope)| {
+                SCOPE_PRESETS
+                    .iter()
+                    .all(|p| grant_coverage(p.scopes, scope) == GrantCoverage::Withheld)
+            })
+            .map(|(label, _)| *label)
+            .collect();
+
+        assert!(
+            unreachable.is_empty(),
+            "no delegation preset confers any `{}` scope, so delegated accounts cannot use \
+             that capability at all.\ncoverage by preset:\n{}",
+            unreachable.join("`, `"),
+            coverage_matrix()
+        );
+    }
+
+    #[test]
+    fn test_forbidden_rpc_wildcard_is_not_a_usable_grant() {
+        // `rpc:*?aud=*` wildcards both lxm and aud, which the spec forbids, so it parses to
+        // Unknown and confers nothing. A preset reaching for it to mean "all rpc" would look
+        // right and silently grant nothing -- `rpc:*` is the form that works.
+        assert_eq!(
+            grant_coverage("atproto rpc:*?aud=*", "rpc:app.bsky.actor.getProfile?aud=*"),
+            GrantCoverage::Withheld
+        );
+        assert_eq!(
+            grant_coverage("atproto rpc:*", "rpc:app.bsky.actor.getProfile?aud=*"),
+            GrantCoverage::Full
+        );
+    }
+
+    #[test]
+    fn test_forbidden_rpc_wildcard_request_stays_denied() {
+        assert_eq!(
+            grant_coverage("atproto rpc:*", "rpc:*?aud=*"),
+            GrantCoverage::Withheld
         );
     }
 }

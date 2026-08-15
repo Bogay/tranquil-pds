@@ -521,42 +521,68 @@ struct TranquilStoreWiring {
 }
 
 fn migrate_delegation_preset_scopes(metastore: &tranquil_store::metastore::Metastore) {
-    const MARKER_KEY: &str = "migration:delegation_preset_scopes_v1";
-    const LEGACY_EDITOR_SCOPES: &str =
+    const V1_MARKER: &str = "migration:delegation_preset_scopes_v1";
+    const V1_LEGACY_OWNER: &str = "atproto";
+    const V1_LEGACY_EDITOR: &str =
         "repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*";
 
+    // v2 adds `rpc:*` to the writing presets
+    // Without it delegated sessions can't hold rpc scopes
+    const V2_MARKER: &str = "migration:delegation_preset_scopes_v2";
+    const V2_LEGACY_OWNER: &str = "atproto repo:* blob:*/* identity:* account:*?action=manage";
+    const V2_LEGACY_ADMIN: &str = "atproto repo:* blob:*/* account:*?action=manage";
+    const V2_LEGACY_EDITOR: &str =
+        "atproto repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*";
+
+    let passes: [(&str, &[(&str, &str)]); 2] = [
+        (
+            V1_MARKER,
+            &[
+                (V1_LEGACY_OWNER, crate::delegation::OWNER_FULL_SCOPES),
+                (V1_LEGACY_EDITOR, crate::delegation::EDITOR_FULL_SCOPES),
+            ],
+        ),
+        (
+            V2_MARKER,
+            &[
+                (V2_LEGACY_OWNER, crate::delegation::OWNER_FULL_SCOPES),
+                (V2_LEGACY_ADMIN, crate::delegation::ADMIN_FULL_SCOPES),
+                (V2_LEGACY_EDITOR, crate::delegation::EDITOR_FULL_SCOPES),
+            ],
+        ),
+    ];
+
     let infra = metastore.infra_ops();
-    if infra.get_server_config(MARKER_KEY).ok().flatten().is_some() {
-        return;
-    }
-
     let ops = metastore.delegation_ops();
-    let owners = match ops.remap_grant_scopes("atproto", crate::delegation::OWNER_FULL_SCOPES) {
-        Ok(n) => n,
-        Err(e) => {
-            tracing::error!(error = ?e, "delegation owner-scope migration failed, will retry on next start");
-            return;
-        }
-    };
-    let editors = match ops
-        .remap_grant_scopes(LEGACY_EDITOR_SCOPES, crate::delegation::EDITOR_FULL_SCOPES)
-    {
-        Ok(n) => n,
-        Err(e) => {
-            tracing::error!(error = ?e, "delegation editor-scope migration failed, will retry on next start");
-            return;
-        }
-    };
-    if owners + editors > 0 {
-        tracing::info!(
-            owners,
-            editors,
-            "upgraded legacy delegation grants to preset scopes"
-        );
-    }
 
-    if let Err(e) = infra.upsert_server_config(MARKER_KEY, "done") {
-        tracing::error!(error = ?e, "failed to record delegation scope migration marker, will retry");
+    for (marker, remaps) in passes {
+        if infra.get_server_config(marker).ok().flatten().is_some() {
+            continue;
+        }
+
+        let mut migrated = 0usize;
+        for (from, to) in remaps {
+            match ops.remap_grant_scopes(from, to) {
+                Ok(n) => migrated += n,
+                Err(e) => {
+                    tracing::error!(error = ?e, marker, from, "delegation scope migration failed, will retry on next start");
+                    return;
+                }
+            }
+        }
+
+        if migrated > 0 {
+            tracing::info!(
+                marker,
+                migrated,
+                "upgraded legacy delegation grants to preset scopes"
+            );
+        }
+
+        if let Err(e) = infra.upsert_server_config(marker, "done") {
+            tracing::error!(error = ?e, marker, "failed to record delegation scope migration marker, will retry");
+            return;
+        }
     }
 }
 

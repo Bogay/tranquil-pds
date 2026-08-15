@@ -280,10 +280,11 @@ async fn test_delegated_consent_marks_restricted_scopes() {
     seed_permission_set(PERMISSION_SET_NSID, PERMISSION_SET_GRANULAR_SCOPE).await;
 
     let scope = format!("atproto include:{}", PERMISSION_SET_NSID);
-    let (_session, consent_body, _mock) = create_delegated_session_with_scope(
+    let (_session, consent_body, _mock) = create_delegated_session_with_grant(
         "psr",
         "https://example.com/permset-restricted-callback",
         &scope,
+        "atproto repo:*",
     )
     .await;
 
@@ -327,7 +328,53 @@ async fn test_delegated_consent_marks_restricted_scopes() {
     assert_eq!(
         rpc["restricted"].as_bool(),
         Some(true),
-        "rpc scope is not conferred by the OWNER grant and must be restricted"
+        "rpc scope is not conferred by a repo-only grant and must be restricted"
+    );
+}
+
+#[tokio::test]
+async fn test_delegated_owner_grant_confers_rpc_scopes() {
+    seed_permission_set(PERMISSION_SET_NSID, PERMISSION_SET_GRANULAR_SCOPE).await;
+
+    let scope = format!("atproto include:{}", PERMISSION_SET_NSID);
+    let (_session, consent_body, _mock) = create_delegated_session_with_scope(
+        "pso",
+        "https://example.com/permset-owner-rpc-callback",
+        &scope,
+    )
+    .await;
+
+    let set_entry = consent_body["permission_sets"]
+        .as_array()
+        .and_then(|sets| {
+            sets.iter()
+                .find(|s| s["nsid"].as_str() == Some(PERMISSION_SET_NSID))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a permission_sets entry for '{}'. Got: {:?}",
+                PERMISSION_SET_NSID, consent_body
+            )
+        });
+
+    let expanded = set_entry["expanded"]
+        .as_array()
+        .expect("permission_sets entry should have an expanded array");
+
+    let rpc = expanded
+        .iter()
+        .find(|s| s["scope"].as_str() == Some("rpc:io.atcr.getManifest?aud=*"))
+        .expect("expanded[] should list the rpc scope");
+    assert_eq!(
+        rpc["restricted"].as_bool(),
+        Some(false),
+        "the OWNER grant includes rpc:* and must confer rpc scopes"
+    );
+
+    assert_eq!(
+        set_entry["restricted"].as_bool(),
+        Some(false),
+        "a fully-covered set must not be flagged restricted"
     );
 }
 
