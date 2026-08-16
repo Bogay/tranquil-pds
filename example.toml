@@ -34,6 +34,13 @@
 # Default value: false
 #enable_pds_hosted_did_web = false
 
+# iykyk!
+#
+# Can also be specified via environment variable `RFC_MOO_COMPLIANCE`.
+#
+# Default value: false
+#rfc_moo_compliance = false
+
 # When set to true, skip age-assurance birthday prompt for all accounts.
 #
 # Can also be specified via environment variable `PDS_AGE_ASSURANCE_OVERRIDE`.
@@ -416,7 +423,9 @@
 # List of relay / crawler notification URLs.
 #
 # Can also be specified via environment variable `CRAWLERS`.
-#crawlers =
+#
+# Default value: ["https://relay.fire.hose.cam", "https://relay3.fr.hose.cam", "https://bsky.network", "https://northamerica.firehose.network", "https://europe.firehose.network", "https://asia.firehose.network", "https://atproto.africa", "https://relay.upcloud.world"]
+#crawlers = ["https://relay.fire.hose.cam", "https://relay3.fr.hose.cam", "https://bsky.network", "https://northamerica.firehose.network", "https://europe.firehose.network", "https://asia.firehose.network", "https://atproto.africa", "https://relay.upcloud.world"]
 
 [email]
 # Sender email address. When unset, email sending is disabled.

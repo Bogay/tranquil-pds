@@ -489,9 +489,15 @@ pub fn webhook_routes() -> axum::Router<AppState> {
 pub fn misc_routes() -> axum::Router<AppState> {
     use axum::routing::get;
 
-    axum::Router::new()
+    let router = axum::Router::new()
         .route("/health", get(server::health))
         .route("/robots.txt", get(server::robots_txt))
         .route("/favicon.ico", get(server::get_logo))
-        .route("/u/{handle}/did.json", get(identity::user_did_doc))
+        .route("/u/{handle}/did.json", get(identity::user_did_doc));
+
+    if tranquil_config::get().server.rfc_moo_compliance {
+        router.route("/cow.txt", get(server::cow_txt))
+    } else {
+        router
+    }
 }

@@ -445,6 +445,10 @@ pub struct ServerConfig {
     #[config(env = "ENABLE_PDS_HOSTED_DID_WEB", default = false)]
     pub enable_pds_hosted_did_web: bool,
 
+    /// iykyk!
+    #[config(env = "RFC_MOO_COMPLIANCE", default = false)]
+    pub rfc_moo_compliance: bool,
+
     /// When set to true, skip age-assurance birthday prompt for all accounts.
     #[config(env = "PDS_AGE_ASSURANCE_OVERRIDE", default = false)]
     pub age_assurance_override: bool,

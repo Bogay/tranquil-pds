@@ -29,6 +29,10 @@ pub async fn robots_txt() -> impl IntoResponse {
         "# Hello!\n\n# Crawling the public API is allowed\nUser-agent: *\nAllow: /\n",
     )
 }
+
+pub async fn cow_txt() -> &'static str {
+    include_str!("cow.txt")
+}
 pub fn is_self_hosted_did_web_enabled() -> bool {
     tranquil_config::get().server.enable_pds_hosted_did_web
 }

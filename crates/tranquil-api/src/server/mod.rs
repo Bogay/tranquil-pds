@@ -28,7 +28,7 @@ pub use email::{
 };
 pub use invite::{create_invite_code, create_invite_codes, get_account_invite_codes};
 pub use logo::get_logo;
-pub use meta::{describe_server, health, robots_txt};
+pub use meta::{cow_txt, describe_server, health, robots_txt};
 pub use migration::{get_did_document, update_did_document};
 pub use passkey_account::{
     complete_passkey_setup, create_passkey_account, recover_passkey_account,
