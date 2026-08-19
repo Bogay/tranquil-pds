@@ -182,19 +182,19 @@ fn test_permissions_rpc_lxm_wildcard_prefix() {
 }
 
 #[test]
-fn test_permissions_rpc_aud_service_id_is_normalized() {
+fn test_permissions_rpc_aud_service_id_must_match_verbatim() {
     let perms =
         ScopePermissions::from_scope_string(Some("rpc:app.bsky.feed.*?aud=did:web:api.bsky.app"));
     assert!(
-        perms.allows_rpc(
+        perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")),
+        "the granted audience must cover itself"
+    );
+    assert!(
+        !perms.allows_rpc(
             "did:web:api.bsky.app#bsky_appview",
             &c("app.bsky.feed.getTimeline")
         ),
-        "a scope granted for a service must cover a request naming one of its service ids"
-    );
-    assert!(
-        perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")),
-        "the bare form must keep working"
+        "a bare DID grants nothing to the services listed under it"
     );
     assert!(
         !perms.allows_rpc(
@@ -208,8 +208,22 @@ fn test_permissions_rpc_aud_service_id_is_normalized() {
         "rpc:app.bsky.feed.*?aud=did:web:api.bsky.app%23bsky_appview",
     ));
     assert!(
-        fragment_scope.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")),
-        "a scope granted with a service id must still cover the bare audience"
+        fragment_scope.allows_rpc(
+            "did:web:api.bsky.app#bsky_appview",
+            &c("app.bsky.feed.getTimeline")
+        ),
+        "the granted service id must cover itself"
+    );
+    assert!(
+        !fragment_scope.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")),
+        "a scope granted for one service must not widen to the whole DID"
+    );
+    assert!(
+        !fragment_scope.allows_rpc(
+            "did:web:api.bsky.app#atproto_labeler",
+            &c("app.bsky.feed.getTimeline")
+        ),
+        "the appview and the labeler are different audiences even on one DID"
     );
 }
 

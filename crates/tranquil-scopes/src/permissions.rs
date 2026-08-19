@@ -177,8 +177,6 @@ impl ScopePermissions {
             return Ok(());
         }
 
-        let aud_base = aud.split('#').next().unwrap_or(aud);
-
         let has_permission = self.find_rpc_scopes().any(|rpc_scope| {
             let lxm_matches = match &rpc_scope.lxm {
                 None => true,
@@ -193,10 +191,7 @@ impl ScopePermissions {
             let aud_matches = match &rpc_scope.aud {
                 None => true,
                 Some(scope_aud) if scope_aud == "*" => true,
-                Some(scope_aud) => {
-                    let scope_aud_base = scope_aud.split('#').next().unwrap_or(scope_aud);
-                    scope_aud_base == aud_base
-                }
+                Some(scope_aud) => scope_aud == aud,
             };
 
             lxm_matches && aud_matches
@@ -558,27 +553,47 @@ mod tests {
         let perms = ScopePermissions::from_scope_string(Some(
             "rpc:app.bsky.feed.getAuthorFeed?aud=did:web:api.bsky.app#bsky_appview",
         ));
-        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
         assert!(perms.allows_rpc(
             "did:web:api.bsky.app#bsky_appview",
             &c("app.bsky.feed.getAuthorFeed")
         ));
-        assert!(perms.allows_rpc(
-            "did:web:api.bsky.app#other_service",
-            &c("app.bsky.feed.getAuthorFeed")
-        ));
+        assert!(
+            !perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")),
+            "a scope naming one service must not cover the whole DID"
+        );
+        assert!(
+            !perms.allows_rpc(
+                "did:web:api.bsky.app#atproto_labeler",
+                &c("app.bsky.feed.getAuthorFeed")
+            ),
+            "a scope naming one service must not cover a sibling service on the same DID"
+        );
         assert!(!perms.allows_rpc("did:web:other.app", &c("app.bsky.feed.getAuthorFeed")));
         assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
     }
 
     #[test]
-    fn test_rpc_scope_without_fragment_matches_with_fragment() {
+    fn test_rpc_scope_without_fragment_does_not_cover_service_ids() {
         let perms = ScopePermissions::from_scope_string(Some(
             "rpc:app.bsky.feed.getAuthorFeed?aud=did:web:api.bsky.app",
         ));
         assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
+        assert!(
+            !perms.allows_rpc(
+                "did:web:api.bsky.app#bsky_appview",
+                &c("app.bsky.feed.getAuthorFeed")
+            ),
+            "the audience is compared verbatim, so a bare DID grants nothing to its services"
+        );
+    }
+
+    #[test]
+    fn test_rpc_scope_aud_wildcard_covers_service_ids() {
+        let perms =
+            ScopePermissions::from_scope_string(Some("rpc:app.bsky.feed.getAuthorFeed?aud=*"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
         assert!(perms.allows_rpc(
-            "did:web:api.bsky.app#bsky_appview",
+            "did:web:api.bsky.app#atproto_labeler",
             &c("app.bsky.feed.getAuthorFeed")
         ));
     }

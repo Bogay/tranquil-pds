@@ -1274,8 +1274,10 @@ async fn test_granular_scope_rpc_specific_method() {
 async fn test_granular_scope_rpc_aud_with_service_id() {
     let url = base_url().await;
     let http_client = client();
-    let (token, _, _) =
-        get_oauth_token_with_scope("rpc:app.bsky.feed.getTimeline?aud=did:web:api.bsky.app").await;
+    let (token, _, _) = get_oauth_token_with_scope(
+        "rpc:app.bsky.feed.getTimeline?aud=did:web:api.bsky.app#bsky_appview",
+    )
+    .await;
     let allowed_res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", url))
         .bearer_auth(&token)
@@ -1289,7 +1291,7 @@ async fn test_granular_scope_rpc_aud_with_service_id() {
     assert_eq!(
         allowed_res.status(),
         StatusCode::OK,
-        "A scope granted for a service must cover a request naming one of its service ids"
+        "the granted service id must cover a request naming it"
     );
     let body: Value = allowed_res.json().await.unwrap();
     let service_token = body["token"].as_str().unwrap();
@@ -1299,21 +1301,30 @@ async fn test_granular_scope_rpc_aud_with_service_id() {
         claims["aud"], "did:web:api.bsky.app#bsky_appview",
         "the service id must reach the signed claim even on the granular scope path"
     );
-    let blocked_res = http_client
-        .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", url))
-        .bearer_auth(&token)
-        .query(&[
-            ("aud", "did:web:other.example#bsky_appview"),
-            ("lxm", "app.bsky.feed.getTimeline"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        blocked_res.status(),
-        StatusCode::FORBIDDEN,
-        "A service id must not smuggle in a different audience"
-    );
+
+    for (aud, reason) in [
+        (
+            "did:web:api.bsky.app#atproto_labeler",
+            "a scope for the appview must not mint tokens for the labeler on the same DID",
+        ),
+        (
+            "did:web:api.bsky.app",
+            "a scope for one service must not widen to the whole DID",
+        ),
+        (
+            "did:web:other.example#bsky_appview",
+            "a service id must not smuggle in a different audience",
+        ),
+    ] {
+        let blocked_res = http_client
+            .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", url))
+            .bearer_auth(&token)
+            .query(&[("aud", aud), ("lxm", "app.bsky.feed.getTimeline")])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(blocked_res.status(), StatusCode::FORBIDDEN, "{reason}");
+    }
 }
 
 #[tokio::test]
