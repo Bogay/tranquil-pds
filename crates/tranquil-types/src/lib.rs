@@ -278,13 +278,9 @@ validated_string_newtype! {
     };
 }
 
-impl DidRef {
-    pub fn did(&self) -> &str {
-        self.0.split('#').next().unwrap_or(&self.0)
-    }
-
-    pub fn service_id(&self) -> Option<&str> {
-        self.0.split_once('#').map(|(_, service_id)| service_id)
+impl From<Did> for DidRef {
+    fn from(did: Did) -> Self {
+        Self(did.0)
     }
 }
 
@@ -1660,12 +1656,10 @@ mod validated_newtype_tests {
     #[test]
     fn a_bare_did_ref_names_no_service() {
         let aud = DidRef::new("did:plc:abc").unwrap();
-        assert_eq!(aud.as_str(), "did:plc:abc");
-        assert_eq!(aud.did(), "did:plc:abc");
         assert_eq!(
-            aud.service_id(),
-            None,
-            "an absent fragment is not the same as an empty one"
+            aud.as_str(),
+            "did:plc:abc",
+            "an absent fragment is not the same as an empty one, so nothing may be appended"
         );
     }
 
@@ -1678,8 +1672,6 @@ mod validated_newtype_tests {
             "the fragment is what tells the receiver which of its services was audienced, \
              so it must survive entirely"
         );
-        assert_eq!(aud.did(), "did:web:api.colibri.social");
-        assert_eq!(aud.service_id(), Some("colibri_appview"));
     }
 
     #[test]
@@ -1755,19 +1747,31 @@ mod validated_newtype_tests {
 
     #[test]
     fn an_over_long_did_ref_is_rejected() {
-        let long = format!("did:web:{}#def", "a".repeat(2048));
+        let did = format!("did:plc:{}", "a".repeat(DID_REF_MAX_LEN - "did:plc:".len()));
+        assert_eq!(did.len(), DID_REF_MAX_LEN);
         assert!(
-            DidRef::new(&long).is_err(),
-            "the lexicon bounds aud at 2048 bytes"
+            Did::new(&did).is_ok(),
+            "the DID half has to stand on its own, or the bound below proves nothing"
+        );
+        assert!(
+            DidRef::new(format!("{did}#x")).is_err(),
+            "the lexicon bounds aud at {DID_REF_MAX_LEN} bytes, which a whole DID plus the shortest service id already exceeds"
         );
     }
 
     #[test]
     fn a_did_ref_built_from_a_did_names_no_service() {
         let did = Did::new("did:plc:def").unwrap();
-        let aud = DidRef::from(&did);
-        assert_eq!(aud.as_str(), did.as_str());
-        assert_eq!(aud.service_id(), None);
+        assert_eq!(
+            DidRef::from(&did).as_str(),
+            did.as_str(),
+            "a DID that named no service must not gain one on the way in"
+        );
+        assert_eq!(
+            DidRef::from(did.clone()).as_str(),
+            did.as_str(),
+            "the owned conversion must land on the same bytes as the borrowed one"
+        );
     }
 
     #[test]

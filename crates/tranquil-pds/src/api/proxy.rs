@@ -361,7 +361,7 @@ async fn proxy_handler(
 
                 match crate::auth::create_service_token(
                     &auth_user.did,
-                    &DidRef::from(&token_aud),
+                    &DidRef::from(token_aud),
                     Some(&token_lxm),
                     None,
                     &key_bytes,

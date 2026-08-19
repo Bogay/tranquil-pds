@@ -169,20 +169,19 @@ pub async fn get_service_auth(
         }
     }
 
-    let service_token =
-        match tranquil_pds::auth::create_service_token(
-            &auth.did,
-            &params.aud,
-            lxm,
-            params.exp,
-            &key_bytes,
-        ) {
-            Ok(t) => t,
-            Err(e) => {
-                error!("Failed to create service token: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+    let service_token = match tranquil_pds::auth::create_service_token(
+        &auth.did,
+        &params.aud,
+        lxm,
+        params.exp,
+        &key_bytes,
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            error!("Failed to create service token: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
     (
         StatusCode::OK,
         Json(GetServiceAuthOutput {
