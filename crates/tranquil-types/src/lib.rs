@@ -225,6 +225,54 @@ impl Did {
     }
 }
 
+const DID_REF_MAX_LEN: usize = 2048;
+
+fn is_service_id(s: &str) -> bool {
+    !s.is_empty()
+        && !s
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '#' | '/' | '?'))
+}
+
+validated_string_newtype! {
+    pub struct DidRef;
+    error = DidRefError;
+    label = "DID reference";
+    validator = |s| {
+        if s.len() > DID_REF_MAX_LEN {
+            return Err(());
+        }
+        match s.split_once('#') {
+            None => jacquard_common::types::string::Did::new(s)
+                .map(|v| v.as_str().to_owned())
+                .map_err(|_| ()),
+            Some((did, service_id)) => {
+                if !is_service_id(service_id) {
+                    return Err(());
+                }
+                let base = jacquard_common::types::string::Did::new(did).map_err(|_| ())?;
+                Ok(format!("{}#{}", base.as_str(), service_id))
+            }
+        }
+    };
+}
+
+impl DidRef {
+    pub fn did(&self) -> &str {
+        self.0.split('#').next().unwrap_or(&self.0)
+    }
+
+    pub fn service_id(&self) -> Option<&str> {
+        self.0.split_once('#').map(|(_, service_id)| service_id)
+    }
+}
+
+impl From<&Did> for DidRef {
+    fn from(did: &Did) -> Self {
+        Self(did.0.clone())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, sqlx::Type)]
 #[serde(transparent)]
 #[sqlx(transparent)]
@@ -1586,6 +1634,97 @@ mod validated_newtype_tests {
             err.to_string().contains("at://not-a-did"),
             "the error names the caller's input, got {err}"
         );
+    }
+
+    #[test]
+    fn a_bare_did_ref_names_no_service() {
+        let aud = DidRef::new("did:plc:abc").unwrap();
+        assert_eq!(aud.as_str(), "did:plc:abc");
+        assert_eq!(aud.did(), "did:plc:abc");
+        assert_eq!(
+            aud.service_id(),
+            None,
+            "an absent fragment is not the same as an empty one"
+        );
+    }
+
+    #[test]
+    fn a_did_ref_keeps_the_service_id_it_was_given() {
+        let aud = DidRef::new("did:web:api.colibri.social#colibri_appview").unwrap();
+        assert_eq!(
+            aud.as_str(),
+            "did:web:api.colibri.social#colibri_appview",
+            "the fragment is what tells the receiver which of its services was audienced, \
+             so it must survive entirely"
+        );
+        assert_eq!(aud.did(), "did:web:api.colibri.social");
+        assert_eq!(aud.service_id(), Some("colibri_appview"));
+    }
+
+    #[test]
+    fn a_did_ref_normalizes_its_did_half_the_way_a_did_does() {
+        assert_eq!(
+            DidRef::new("at://did:plc:abc#colibri_appview")
+                .unwrap()
+                .as_str(),
+            "did:plc:abc#colibri_appview"
+        );
+        assert_eq!(
+            DidRef::new("did:plc:def").unwrap().as_str(),
+            Did::new("did:plc:def").unwrap().as_str(),
+            "a fragmentless DidRef must be byte-identical to the Did it replaces"
+        );
+    }
+
+    #[test]
+    fn a_did_ref_rejects_anything_that_cannot_name_one_service() {
+        for bad in [
+            "did:web:oyster.cafe#",
+            "did:web:oyster.cafe#a#b",
+            "did:web:oyster.cafe# whelk",
+            "did:web:oyster.cafe#a/b",
+            "did:web:oyster.cafe#a?b",
+            "not-a-did#colibri_appview",
+            "#colibri_appview",
+        ] {
+            assert!(
+                DidRef::new(bad).is_err(),
+                "{bad} should not parse as a DID reference"
+            );
+        }
+    }
+
+    #[test]
+    fn a_did_ref_does_not_second_guess_the_service_ids_it_has_not_seen() {
+        for good in [
+            "did:web:oyster.cafe#atproto_pds",
+            "did:web:oyster.cafe#atproto_labeler",
+            "did:plc:abc#bsky_chat",
+            "did:web:oyster.cafe#whelk.v2",
+        ] {
+            assert!(
+                DidRef::new(good).is_ok(),
+                "{good} names a service the receiver resolves in its own DID document, \
+                 so rejecting it here would recreate the bug this type exists to fix"
+            );
+        }
+    }
+
+    #[test]
+    fn an_over_long_did_ref_is_rejected() {
+        let long = format!("did:web:{}#def", "a".repeat(2048));
+        assert!(
+            DidRef::new(&long).is_err(),
+            "the lexicon bounds aud at 2048 bytes"
+        );
+    }
+
+    #[test]
+    fn a_did_ref_built_from_a_did_names_no_service() {
+        let did = Did::new("did:plc:def").unwrap();
+        let aud = DidRef::from(&did);
+        assert_eq!(aud.as_str(), did.as_str());
+        assert_eq!(aud.service_id(), None);
     }
 
     #[test]

@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::auth::extractor::{Auth, Permissive};
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::Did;
+use tranquil_pds::types::DidRef;
 use tranquil_types::Nsid;
 
 static CREATE_ACCOUNT_NSID: LazyLock<Nsid> =
@@ -45,7 +45,7 @@ static PROTECTED_METHODS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
 
 #[derive(Deserialize)]
 pub struct GetServiceAuthParams {
-    pub aud: Did,
+    pub aud: DidRef,
     pub lxm: Option<Nsid>,
     pub exp: Option<i64>,
 }
@@ -146,6 +146,8 @@ pub async fn get_service_auth(
         .into_response();
     }
 
+    // NOTE: exp is validated here but never reaches create_service_token, which hardcodes a 60
+    // second lifetime, so a client asking for longer silently gets 60 seconds
     if let Some(exp) = params.exp {
         let now = chrono::Utc::now().timestamp();
         let diff = exp - now;

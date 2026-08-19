@@ -14,7 +14,7 @@ use tranquil_pds::auth::{
     get_did_from_token, get_jti_from_token, verify_access_token, verify_refresh_token,
     verify_token,
 };
-use tranquil_types::{Did, Nsid};
+use tranquil_types::{Did, DidRef, Nsid};
 
 fn generate_user_key() -> Vec<u8> {
     let secret_key = SecretKey::random(&mut OsRng);
@@ -169,7 +169,7 @@ fn test_token_type_confusion() {
 
     let service_token = create_service_token(
         &did,
-        &Did::new("did:web:nel.pet").expect("valid DID"),
+        &DidRef::new("did:web:nel.pet").expect("valid DID reference"),
         Some(&Nsid::new("cafe.oyster.method").expect("valid NSID")),
         &key_bytes,
     )

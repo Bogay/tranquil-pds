@@ -1271,6 +1271,52 @@ async fn test_granular_scope_rpc_specific_method() {
 }
 
 #[tokio::test]
+async fn test_granular_scope_rpc_aud_with_service_id() {
+    let url = base_url().await;
+    let http_client = client();
+    let (token, _, _) =
+        get_oauth_token_with_scope("rpc:app.bsky.feed.getTimeline?aud=did:web:api.bsky.app").await;
+    let allowed_res = http_client
+        .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", url))
+        .bearer_auth(&token)
+        .query(&[
+            ("aud", "did:web:api.bsky.app#bsky_appview"),
+            ("lxm", "app.bsky.feed.getTimeline"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        allowed_res.status(),
+        StatusCode::OK,
+        "A scope granted for a service must cover a request naming one of its service ids"
+    );
+    let body: Value = allowed_res.json().await.unwrap();
+    let service_token = body["token"].as_str().unwrap();
+    let payload = service_token.split('.').nth(1).unwrap();
+    let claims: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).unwrap()).unwrap();
+    assert_eq!(
+        claims["aud"], "did:web:api.bsky.app#bsky_appview",
+        "the service id must reach the signed claim even on the granular scope path"
+    );
+    let blocked_res = http_client
+        .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", url))
+        .bearer_auth(&token)
+        .query(&[
+            ("aud", "did:web:other.example#bsky_appview"),
+            ("lxm", "app.bsky.feed.getTimeline"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        blocked_res.status(),
+        StatusCode::FORBIDDEN,
+        "A service id must not smuggle in a different audience"
+    );
+}
+
+#[tokio::test]
 async fn test_oauth_metadata_includes_prompt_values_supported() {
     let url = base_url().await;
     let client = client();

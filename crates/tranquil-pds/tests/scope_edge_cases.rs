@@ -182,6 +182,38 @@ fn test_permissions_rpc_lxm_wildcard_prefix() {
 }
 
 #[test]
+fn test_permissions_rpc_aud_service_id_is_normalized() {
+    let perms =
+        ScopePermissions::from_scope_string(Some("rpc:app.bsky.feed.*?aud=did:web:api.bsky.app"));
+    assert!(
+        perms.allows_rpc(
+            "did:web:api.bsky.app#bsky_appview",
+            &c("app.bsky.feed.getTimeline")
+        ),
+        "a scope granted for a service must cover a request naming one of its service ids"
+    );
+    assert!(
+        perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")),
+        "the bare form must keep working"
+    );
+    assert!(
+        !perms.allows_rpc(
+            "did:web:other.example#bsky_appview",
+            &c("app.bsky.feed.getTimeline")
+        ),
+        "a service id must not smuggle in a different audience"
+    );
+
+    let fragment_scope = ScopePermissions::from_scope_string(Some(
+        "rpc:app.bsky.feed.*?aud=did:web:api.bsky.app%23bsky_appview",
+    ));
+    assert!(
+        fragment_scope.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")),
+        "a scope granted with a service id must still cover the bare audience"
+    );
+}
+
+#[test]
 fn test_delegation_intersect_mismatched_params_empty() {
     let result = intersect_scopes("repo:*?action=create", "repo:*?action=delete");
     assert!(

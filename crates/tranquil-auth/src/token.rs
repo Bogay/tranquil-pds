@@ -10,7 +10,7 @@ use chrono::{DateTime, Duration, Utc};
 use hmac::{Hmac, Mac};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use sha2::Sha256;
-use tranquil_types::{Did, Jti, Nsid};
+use tranquil_types::{Did, DidRef, Jti, Nsid};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -127,7 +127,7 @@ pub fn create_refresh_token_with_jti(
 
 pub fn create_service_token(
     did: &Did,
-    aud: &Did,
+    aud: &DidRef,
     lxm: Option<&Nsid>,
     key_bytes: &[u8],
 ) -> Result<String> {

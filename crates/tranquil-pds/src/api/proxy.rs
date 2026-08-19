@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 use crate::api::error::ApiError;
 use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
-use crate::types::{Did, Nsid};
+use crate::types::{Did, DidRef, Nsid};
 use crate::util::get_header_str;
 use axum::{
     body::Bytes,
@@ -361,7 +361,7 @@ async fn proxy_handler(
 
                 match crate::auth::create_service_token(
                     &auth_user.did,
-                    &token_aud,
+                    &DidRef::from(&token_aud),
                     Some(&token_lxm),
                     &key_bytes,
                 ) {

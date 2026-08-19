@@ -132,6 +132,46 @@ async fn test_service_auth() {
     let lxm_payload = URL_SAFE_NO_PAD.decode(lxm_parts[1]).unwrap();
     let lxm_claims: Value = serde_json::from_slice(&lxm_payload).unwrap();
     assert_eq!(lxm_claims["lxm"], "com.atproto.repo.getRecord");
+    let fragment_res = client
+        .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", base))
+        .bearer_auth(&access_jwt)
+        .query(&[
+            ("aud", "did:web:example.com#colibri_appview"),
+            ("lxm", "com.atproto.repo.getRecord"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fragment_res.status(), StatusCode::OK);
+    let fragment_body: Value = fragment_res.json().await.unwrap();
+    let fragment_token = fragment_body["token"].as_str().unwrap();
+    let fragment_parts: Vec<&str> = fragment_token.split('.').collect();
+    let fragment_payload = URL_SAFE_NO_PAD.decode(fragment_parts[1]).unwrap();
+    let fragment_claims: Value = serde_json::from_slice(&fragment_payload).unwrap();
+    assert_eq!(
+        fragment_claims["aud"], "did:web:example.com#colibri_appview",
+        "the service id must survive into the signed claim so the receiver can match it \
+         against its own DID document"
+    );
+
+    let empty_fragment = client
+        .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", base))
+        .bearer_auth(&access_jwt)
+        .query(&[("aud", "did:web:example.com#")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(empty_fragment.status(), StatusCode::BAD_REQUEST);
+
+    let double_fragment = client
+        .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", base))
+        .bearer_auth(&access_jwt)
+        .query(&[("aud", "did:web:example.com#a#b")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(double_fragment.status(), StatusCode::BAD_REQUEST);
+
     let unauth = client
         .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", base))
         .query(&[("aud", "did:web:example.com")])

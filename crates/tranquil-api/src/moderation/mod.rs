@@ -12,7 +12,7 @@ use tranquil_pds::api::ApiError;
 use tranquil_pds::api::proxy_client::{is_ssrf_safe, proxy_client};
 use tranquil_pds::auth::{AnyUser, Auth};
 use tranquil_pds::state::AppState;
-use tranquil_pds::types::{Did, Nsid};
+use tranquil_pds::types::{Did, DidRef, Nsid};
 
 static CREATE_REPORT_NSID: LazyLock<Nsid> =
     LazyLock::new(|| "com.atproto.moderation.createReport".parse().unwrap());
@@ -151,7 +151,7 @@ async fn proxy_to_report_service(
 
     let service_token = match tranquil_pds::auth::create_service_token(
         &auth_user.did,
-        service_did,
+        &DidRef::from(service_did),
         Some(&CREATE_REPORT_NSID),
         &key_bytes,
     ) {
