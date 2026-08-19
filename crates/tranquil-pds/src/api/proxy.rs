@@ -363,6 +363,7 @@ async fn proxy_handler(
                     &auth_user.did,
                     &DidRef::from(&token_aud),
                     Some(&token_lxm),
+                    None,
                     &key_bytes,
                 ) {
                     Ok(new_token) => {

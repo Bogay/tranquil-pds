@@ -153,6 +153,7 @@ async fn proxy_to_report_service(
         &auth_user.did,
         &DidRef::from(service_did),
         Some(&CREATE_REPORT_NSID),
+        None,
         &key_bytes,
     ) {
         Ok(t) => t,

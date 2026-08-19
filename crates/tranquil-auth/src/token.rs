@@ -129,14 +129,18 @@ pub fn create_service_token(
     did: &Did,
     aud: &DidRef,
     lxm: Option<&Nsid>,
+    exp: Option<i64>,
     key_bytes: &[u8],
 ) -> Result<String> {
     let signing_key = SigningKey::from_slice(key_bytes)?;
 
-    let expiration = Utc::now()
-        .checked_add_signed(Duration::seconds(60))
-        .expect("valid timestamp")
-        .timestamp();
+    let expiration = match exp {
+        Some(exp) => exp,
+        None => Utc::now()
+            .checked_add_signed(Duration::seconds(60))
+            .expect("valid timestamp")
+            .timestamp(),
+    };
 
     let claims = Claims {
         iss: did.clone(),

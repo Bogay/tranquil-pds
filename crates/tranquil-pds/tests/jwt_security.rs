@@ -171,6 +171,7 @@ fn test_token_type_confusion() {
         &did,
         &DidRef::new("did:web:nel.pet").expect("valid DID reference"),
         Some(&Nsid::new("cafe.oyster.method").expect("valid NSID")),
+        None,
         &key_bytes,
     )
     .unwrap();

@@ -146,8 +146,6 @@ pub async fn get_service_auth(
         .into_response();
     }
 
-    // NOTE: exp is validated here but never reaches create_service_token, which hardcodes a 60
-    // second lifetime, so a client asking for longer silently gets 60 seconds
     if let Some(exp) = params.exp {
         let now = chrono::Utc::now().timestamp();
         let diff = exp - now;
@@ -172,7 +170,13 @@ pub async fn get_service_auth(
     }
 
     let service_token =
-        match tranquil_pds::auth::create_service_token(&auth.did, &params.aud, lxm, &key_bytes) {
+        match tranquil_pds::auth::create_service_token(
+            &auth.did,
+            &params.aud,
+            lxm,
+            params.exp,
+            &key_bytes,
+        ) {
             Ok(t) => t,
             Err(e) => {
                 error!("Failed to create service token: {:?}", e);
