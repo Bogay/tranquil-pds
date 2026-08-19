@@ -226,12 +226,33 @@ impl Did {
 }
 
 const DID_REF_MAX_LEN: usize = 2048;
+const SERVICE_ID_MAX_LEN: usize = 128;
+
+const fn is_pchar(b: u8) -> bool {
+    b.is_ascii_alphanumeric()
+        || matches!(
+            b,
+            b'-' | b'.'
+                | b'_'
+                | b'~'
+                | b'!'
+                | b'$'
+                | b'&'
+                | b'\''
+                | b'('
+                | b')'
+                | b'*'
+                | b'+'
+                | b','
+                | b';'
+                | b'='
+                | b':'
+                | b'@'
+        )
+}
 
 fn is_service_id(s: &str) -> bool {
-    !s.is_empty()
-        && !s
-            .chars()
-            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '#' | '/' | '?'))
+    !s.is_empty() && s.len() <= SERVICE_ID_MAX_LEN && s.bytes().all(is_pchar)
 }
 
 validated_string_newtype! {
@@ -1684,6 +1705,13 @@ mod validated_newtype_tests {
             "did:web:oyster.cafe# whelk",
             "did:web:oyster.cafe#a/b",
             "did:web:oyster.cafe#a?b",
+            "did:web:oyster.cafe#<script>",
+            "did:web:oyster.cafe#a%20b",
+            "did:web:oyster.cafe#a%5Fb",
+            "did:web:oyster.cafe#a\"b",
+            "did:web:oyster.cafe#a[b]",
+            "did:web:oyster.cafe#atproto_p\u{200b}ds",
+            "did:web:oyster.cafe#\u{feff}atproto_pds",
             "not-a-did#colibri_appview",
             "#colibri_appview",
         ] {
@@ -1701,6 +1729,8 @@ mod validated_newtype_tests {
             "did:web:oyster.cafe#atproto_labeler",
             "did:plc:abc#bsky_chat",
             "did:web:oyster.cafe#whelk.v2",
+            "did:web:oyster.cafe#atproto~pds",
+            "did:web:oyster.cafe#service:1",
         ] {
             assert!(
                 DidRef::new(good).is_ok(),
@@ -1708,6 +1738,19 @@ mod validated_newtype_tests {
                  so rejecting it here would recreate the bug this type exists to fix"
             );
         }
+    }
+
+    #[test]
+    fn an_over_long_service_id_is_rejected_before_the_did_ref_bound_bites() {
+        let did = "did:web:oyster.cafe";
+        let longest_accepted = format!("{did}#{}", "a".repeat(SERVICE_ID_MAX_LEN));
+        assert!(DidRef::new(&longest_accepted).is_ok());
+        let one_too_long = format!("{did}#{}", "a".repeat(SERVICE_ID_MAX_LEN + 1));
+        assert!(
+            DidRef::new(&one_too_long).is_err(),
+            "no service names itself in more than {SERVICE_ID_MAX_LEN} bytes, and the 2048-byte \
+             aud bound is far too loose to catch a fragment used as a payload"
+        );
     }
 
     #[test]
