@@ -35,14 +35,21 @@ pub fn is_valid_datetime(s: &str) -> bool {
 }
 
 pub fn is_valid_uri(s: &str) -> bool {
-    s.split_once("://").is_some_and(|(scheme, rest)| {
-        !scheme.is_empty()
-            && scheme
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '.' || c == '-')
-            && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
-            && !rest.is_empty()
-    })
+    let Some((scheme, rest)) = s.split_once(':') else {
+        return false;
+    };
+    let valid_scheme = !scheme.is_empty()
+        && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '.' || c == '-');
+    if !valid_scheme {
+        return false;
+    }
+    match rest.strip_prefix("//") {
+        Some(authority_and_path) => !authority_and_path.is_empty(),
+        None => !rest.is_empty(),
+    }
 }
 
 pub fn is_valid_cid(s: &str) -> bool {
@@ -149,6 +156,16 @@ mod tests {
         assert!(!is_valid_uri("not a uri"));
         assert!(!is_valid_uri("123://bad"));
         assert!(!is_valid_uri("https://"));
+    }
+
+    #[test]
+    fn test_valid_uris_without_authority() {
+        // RFC 3986 hier-part doesn't require "//": scheme ":" opaque-part is also a URI.
+        assert!(is_valid_uri("urn:isbn:9780141439518"));
+        assert!(is_valid_uri("mailto:user@example.com"));
+        assert!(is_valid_uri("mbid:70766a5a-3f95-4b19-96c8-a2c9c4a5e6e5"));
+        assert!(!is_valid_uri("urn:"));
+        assert!(!is_valid_uri(":no-scheme"));
     }
 
     #[test]
