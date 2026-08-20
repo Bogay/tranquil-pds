@@ -53,9 +53,9 @@ fn build_smarthost_sender_with_total_timeout(
         SendMode::Smarthost {
             transport: Box::new(transport),
             total_timeout,
+            apply_atmos_categories: false,
         },
         None,
-        false,
     )
 }
 

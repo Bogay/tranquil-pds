@@ -52,23 +52,35 @@ pub(super) fn recipient_domain(message: &Message) -> Result<EmailDomain, SendErr
 }
 
 // for use with comail.at
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct XAtmosCategory(&'static str);
-
-impl Header for XAtmosCategory {
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+enum AtmosCategory {
+    PasswordReset,
+    MfaOtp,
+    Verification,
+}
+impl AtmosCategory {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::PasswordReset => "password-reset",
+            Self::MfaOtp => "mfa-otp",
+            Self::Verification => "verification",
+        }
+    }
+}
+impl Header for AtmosCategory {
     fn name() -> HeaderName {
         HeaderName::new_from_ascii_str("X-Atmos-Category")
     }
     fn parse(_s: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         //since we're never receiving email, we don't care about parsing
-        unimplemented!()
+        Err("X-Atmos-Category is write-only".into())
     }
     fn display(&self) -> HeaderValue {
-        HeaderValue::new(Self::name(), self.0.to_string())
+        HeaderValue::new(Self::name(), self.as_str().to_string())
     }
 }
 
-fn atmos_category(comms_type: CommsType) -> Option<XAtmosCategory> {
+fn atmos_category(comms_type: CommsType) -> Option<AtmosCategory> {
     use CommsType::*;
     match comms_type {
         EmailVerification
@@ -78,10 +90,10 @@ fn atmos_category(comms_type: CommsType) -> Option<XAtmosCategory> {
         | LegacyLoginAlert
         | EmailUpdate
         | PlcOperation
-        | AccountDeletion => Some(XAtmosCategory("verification")),
-        PasswordReset | PasskeyRecovery => Some(XAtmosCategory("password-reset")),
-        TwoFactorCode => Some(XAtmosCategory("mfa-otp")),
-        Welcome => Some(XAtmosCategory("bulk")),
+        | AccountDeletion
+        | Welcome => Some(AtmosCategory::Verification),
+        PasswordReset | PasskeyRecovery => Some(AtmosCategory::PasswordReset),
+        TwoFactorCode => Some(AtmosCategory::MfaOtp),
         AdminEmail => None,
     }
 }

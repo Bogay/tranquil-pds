@@ -19,6 +19,7 @@ pub enum SendMode {
     Smarthost {
         transport: Box<AsyncSmtpTransport<Tokio1Executor>>,
         total_timeout: Duration,
+        apply_atmos_categories: bool,
     },
     DirectMx {
         resolver: Arc<TokioAsyncResolver>,
@@ -33,8 +34,15 @@ pub enum SendMode {
 impl std::fmt::Debug for SendMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Smarthost { total_timeout, .. } => {
-                write!(f, "SendMode::Smarthost(total_timeout={total_timeout:?})")
+            Self::Smarthost {
+                total_timeout,
+                apply_atmos_categories,
+                ..
+            } => {
+                write!(
+                    f,
+                    "SendMode::Smarthost(total_timeout={total_timeout:?}, apply_atmos_categories={apply_atmos_categories:?})"
+                )
             }
             Self::DirectMx {
                 helo, require_tls, ..
@@ -52,6 +60,7 @@ pub async fn dispatch(mode: &SendMode, message: Message) -> Result<(), SendError
         SendMode::Smarthost {
             transport,
             total_timeout,
+            ..
         } => with_total_timeout(*total_timeout, run_send(transport, message)).await,
         SendMode::DirectMx {
             resolver,

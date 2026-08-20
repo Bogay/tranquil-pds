@@ -31,22 +31,11 @@ pub struct EmailSender {
     from: Mailbox,
     mode: SendMode,
     dkim: Option<DkimSigner>,
-    atmos_categories: bool,
 }
 
 impl EmailSender {
-    pub fn new(
-        from: Mailbox,
-        mode: SendMode,
-        dkim: Option<DkimSigner>,
-        atmos_categories: bool,
-    ) -> Self {
-        Self {
-            from,
-            mode,
-            dkim,
-            atmos_categories,
-        }
+    pub fn new(from: Mailbox, mode: SendMode, dkim: Option<DkimSigner>) -> Self {
+        Self { from, mode, dkim }
     }
 
     pub fn from_config(cfg: &tranquil_config::TranquilConfig) -> Result<Option<Self>, SendError> {
@@ -66,19 +55,8 @@ impl EmailSender {
             Some(host) => build_smarthost(cfg, host)?,
             None => build_direct_mx(cfg)?,
         };
-        let atmos_categories = cfg.email.smarthost.apply_atmos_categories;
-        info!(
-            ?mode,
-            dkim = dkim.is_some(),
-            atmos_categories,
-            "Email sender initialized"
-        );
-        Ok(Some(Self {
-            from,
-            mode,
-            dkim,
-            atmos_categories,
-        }))
+        info!(?mode, dkim = dkim.is_some(), "Email sender initialized");
+        Ok(Some(Self { from, mode, dkim }))
     }
 }
 
@@ -146,6 +124,7 @@ fn build_smarthost(
     Ok(SendMode::Smarthost {
         transport: Box::new(builder.build()),
         total_timeout,
+        apply_atmos_categories: cfg.email.smarthost.apply_atmos_categories,
     })
 }
 
@@ -198,6 +177,16 @@ fn build_dkim(cfg: &tranquil_config::DkimConfig) -> Result<Option<DkimSigner>, S
     DkimSigner::load(selector, domain, path).map(Some)
 }
 
+fn wants_atmos_categories(mode: &SendMode) -> bool {
+    match mode {
+        SendMode::Smarthost {
+            apply_atmos_categories,
+            ..
+        } => *apply_atmos_categories,
+        SendMode::DirectMx { .. } => false,
+    }
+}
+
 #[async_trait]
 impl CommsSender for EmailSender {
     fn channel(&self) -> CommsChannel {
@@ -205,7 +194,8 @@ impl CommsSender for EmailSender {
     }
 
     async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
-        let mut message = message::build(&self.from, notification, self.atmos_categories)?;
+        let mut message =
+            message::build(&self.from, notification, wants_atmos_categories(&self.mode))?;
         if let Some(signer) = &self.dkim {
             signer.sign(&mut message);
         }
@@ -216,5 +206,47 @@ impl CommsSender for EmailSender {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lettre::Tokio1Executor;
+    use std::time::Duration;
+
+    fn dummy_smarthost(apply_atmos_categories: bool) -> SendMode {
+        let transport =
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous("localhost").build();
+        SendMode::Smarthost {
+            transport: Box::new(transport),
+            total_timeout: Duration::from_secs(10),
+            apply_atmos_categories,
+        }
+    }
+
+    fn dummy_direct_mx() -> SendMode {
+        SendMode::DirectMx {
+            resolver: Arc::new(TokioAsyncResolver::tokio(
+                ResolverConfig::default(),
+                ResolverOpts::default(),
+            )),
+            helo: HeloName::parse("mta.nel.pet").unwrap(),
+            command_timeout: Duration::from_secs(5),
+            total_timeout: Duration::from_secs(10),
+            require_tls: false,
+            inflight: Arc::new(Semaphore::new(1)),
+        }
+    }
+
+    #[tokio::test]
+    async fn smarthost_reflects_its_own_flag() {
+        assert!(wants_atmos_categories(&dummy_smarthost(true)));
+        assert!(!wants_atmos_categories(&dummy_smarthost(false)));
+    }
+
+    #[test]
+    fn direct_mx_never_wants_atmos_categories() {
+        assert!(!wants_atmos_categories(&dummy_direct_mx()));
     }
 }

@@ -1125,7 +1125,7 @@ pub struct SmarthostConfig {
     #[config(env = "MAIL_SMARTHOST_TOTAL_TIMEOUT_SECS", default = 60)]
     pub total_timeout_secs: u64,
 
-    // Apply Atmos/Comail.at categories for headers to meet AUP.
+    /// Apply Atmos/Comail.at categories for headers to meet AUP.
     #[config(env = "MAIL_APPLY_ATMOS_CATEGORIES", default = false)]
     pub apply_atmos_categories: bool,
 }
