@@ -142,7 +142,7 @@ impl ClientMetadataCache {
             response_types: vec!["code".into()],
             scope,
             token_endpoint_auth_method: Some("none".into()),
-            dpop_bound_access_tokens: Some(false),
+            dpop_bound_access_tokens: Some(true),
             jwks: None,
             jwks_uri: None,
             application_type: Some("native".into()),
