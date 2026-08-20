@@ -229,26 +229,7 @@ const DID_REF_MAX_LEN: usize = 2048;
 const SERVICE_ID_MAX_LEN: usize = 128;
 
 const fn is_pchar(b: u8) -> bool {
-    b.is_ascii_alphanumeric()
-        || matches!(
-            b,
-            b'-' | b'.'
-                | b'_'
-                | b'~'
-                | b'!'
-                | b'$'
-                | b'&'
-                | b'\''
-                | b'('
-                | b')'
-                | b'*'
-                | b'+'
-                | b','
-                | b';'
-                | b'='
-                | b':'
-                | b'@'
-        )
+    b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~')
 }
 
 fn is_service_id(s: &str) -> bool {
@@ -1722,7 +1703,6 @@ mod validated_newtype_tests {
             "did:plc:abc#bsky_chat",
             "did:web:oyster.cafe#whelk.v2",
             "did:web:oyster.cafe#atproto~pds",
-            "did:web:oyster.cafe#service:1",
         ] {
             assert!(
                 DidRef::new(good).is_ok(),
