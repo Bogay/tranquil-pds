@@ -1115,6 +1115,13 @@ impl ReachPolicy {
     pub const DEBUG_LOOPBACK: ReachPolicy = ReachPolicy::AllowLoopback;
     #[cfg(not(debug_assertions))]
     pub const DEBUG_LOOPBACK: ReachPolicy = ReachPolicy::GlobalOnly;
+
+    pub fn from_private_fetch(allow_private: bool) -> ReachPolicy {
+        match allow_private {
+            true => ReachPolicy::AllowPrivate,
+            false => ReachPolicy::DEBUG_LOOPBACK,
+        }
+    }
 }
 
 pub trait UrlKind {

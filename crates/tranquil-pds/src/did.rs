@@ -61,16 +61,15 @@ pub struct DidResolver {
     client: Client,
     cache_ttl: Duration,
     plc_directory_url: String,
+    fetch_policy: tranquil_types::ReachPolicy,
 }
 
 impl DidResolver {
     pub fn new(cache: Arc<dyn Cache>) -> Self {
         let cfg = tranquil_config::get();
 
-        let fetch_policy = match cfg.server.allow_private_fetch {
-            true => tranquil_types::ReachPolicy::AllowPrivate,
-            false => tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
-        };
+        let fetch_policy =
+            tranquil_types::ReachPolicy::from_private_fetch(cfg.server.allow_private_fetch);
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
@@ -87,6 +86,7 @@ impl DidResolver {
             client,
             cache_ttl: Duration::from_secs(cfg.plc.did_cache_ttl_secs),
             plc_directory_url: cfg.plc.directory_url.clone(),
+            fetch_policy,
         }
     }
 
@@ -155,7 +155,7 @@ impl DidResolver {
         &self,
         did: &Did,
     ) -> Result<serde_json::Value, DidResolutionError> {
-        let url = build_did_web_url(did)?;
+        let url = build_did_web_url(did, self.fetch_policy)?;
 
         debug!("Resolving did:web {} via {}", did, url);
 
@@ -214,7 +214,10 @@ impl DidResolver {
     }
 }
 
-fn build_did_web_url(did: &Did) -> Result<String, DidResolutionError> {
+fn build_did_web_url(
+    did: &Did,
+    policy: tranquil_types::ReachPolicy,
+) -> Result<String, DidResolutionError> {
     let host = did
         .strip_prefix("did:web:")
         .ok_or(DidResolutionError::InvalidDidWeb)?;
@@ -254,7 +257,7 @@ fn build_did_web_url(did: &Did) -> Result<String, DidResolutionError> {
     if tranquil_types::url_reach(&url) == Some(tranquil_types::HostReach::Loopback) {
         let _ = url.set_scheme("http");
     }
-    match tranquil_types::url_reach_permits(&url, tranquil_types::ReachPolicy::DEBUG_LOOPBACK) {
+    match tranquil_types::url_reach_permits(&url, policy) {
         true => Ok(url.to_string()),
         false => Err(DidResolutionError::DidWebHostRejected(host)),
     }

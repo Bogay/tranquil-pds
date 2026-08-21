@@ -225,13 +225,12 @@ struct CacheBound {
 impl CacheBound {
     fn new(cache: &Arc<dyn Cache>, sso_config: &'static SsoConfig) -> Self {
         tranquil_lexicon::LexiconRegistry::global().set_shared_cache(cache.clone());
-        let fetch_policy = match tranquil_config::get().server.allow_private_fetch {
-            true => tranquil_types::ReachPolicy::AllowPrivate,
-            false => tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
-        };
+        let fetch_policy = tranquil_types::ReachPolicy::from_private_fetch(
+            tranquil_config::get().server.allow_private_fetch,
+        );
         Self {
             did_resolver: Arc::new(DidResolver::new(cache.clone())),
-            cross_pds_oauth: Arc::new(CrossPdsOAuthClient::new(cache.clone())),
+            cross_pds_oauth: Arc::new(CrossPdsOAuthClient::new(cache.clone(), fetch_policy)),
             client_metadata_cache: ClientMetadataCache::new(
                 cache.clone(),
                 CLIENT_METADATA_TTL,

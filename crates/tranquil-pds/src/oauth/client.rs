@@ -10,7 +10,9 @@ use tranquil_oauth::{
     AuthorizationServerMetadata, ClientMetadata, compute_es256_jkt, compute_pkce_challenge,
     create_dpop_proof,
 };
-use tranquil_types::{AuthorizationCode, ClientId, CrossPdsState, Did, Issuer, PdsUrl};
+use tranquil_types::{
+    AuthorizationCode, ClientId, CrossPdsState, Did, Issuer, PdsUrl, ReachPolicy,
+};
 
 use crate::cache::Cache;
 
@@ -68,16 +70,12 @@ pub struct CrossPdsOAuthClient {
 }
 
 impl CrossPdsOAuthClient {
-    pub fn new(cache: Arc<dyn Cache>) -> Self {
+    pub fn new(cache: Arc<dyn Cache>, fetch_policy: ReachPolicy) -> Self {
         let http = Client::builder()
             .timeout(Duration::from_secs(15))
             .connect_timeout(Duration::from_secs(5))
-            .redirect(tranquil_types::redirect_policy(
-                tranquil_types::ReachPolicy::GlobalOnly,
-            ))
-            .dns_resolver(tranquil_types::dns_guard(
-                tranquil_types::ReachPolicy::GlobalOnly,
-            ))
+            .redirect(tranquil_types::redirect_policy(fetch_policy))
+            .dns_resolver(tranquil_types::dns_guard(fetch_policy))
             .build()
             .expect("failed to build cross-PDS OAuth HTTP client");
         Self { http, cache }

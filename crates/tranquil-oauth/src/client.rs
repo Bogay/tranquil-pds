@@ -72,6 +72,7 @@ pub struct ClientMetadataCache {
     cache: Arc<dyn Cache>,
     http_client: Client,
     cache_ttl: Duration,
+    fetch_policy: ReachPolicy,
 }
 
 impl ClientMetadataCache {
@@ -98,6 +99,7 @@ impl ClientMetadataCache {
                     .expect("failed to build client metadata HTTP client")
             },
             cache_ttl,
+            fetch_policy,
         }
     }
 
@@ -249,7 +251,7 @@ impl ClientMetadataCache {
     async fn fetch_metadata(&self, client_id: &ClientId) -> Result<ClientMetadata, OAuthError> {
         let url = reqwest::Url::parse(client_id)
             .map_err(|_| OAuthError::InvalidClient("client_id must be a URL".to_string()))?;
-        if !url_reach_permits(&url, ReachPolicy::DEBUG_LOOPBACK) {
+        if !url_reach_permits(&url, self.fetch_policy) {
             return Err(OAuthError::InvalidClient(
                 "client_id must be an https URL inside the allowed host reach".to_string(),
             ));
