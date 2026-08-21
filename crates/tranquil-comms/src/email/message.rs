@@ -2,12 +2,11 @@ use lettre::Message;
 use lettre::message::Mailbox;
 use lettre::message::header::ContentType;
 use lettre::message::header::{Header, HeaderName, HeaderValue};
-use tranquil_db_traits::CommsType;
 use uuid::Uuid;
 
 use super::types::EmailDomain;
 use crate::sender::SendError;
-use crate::types::QueuedComms;
+use crate::types::{CommsType, QueuedComms};
 
 pub(super) fn build(
     from: &Mailbox,
@@ -101,7 +100,7 @@ fn atmos_category(comms_type: CommsType) -> Option<AtmosCategory> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{CommsChannel, CommsStatus, CommsType};
+    use crate::types::{CommsChannel, CommsStatus};
     use chrono::Utc;
     use uuid::Uuid;
 

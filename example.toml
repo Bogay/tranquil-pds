@@ -501,6 +501,13 @@
 # Default value: 60
 #total_timeout_secs = 60
 
+# Apply Atmos/Comail.at categories for headers to meet AUP.
+#
+# Can also be specified via environment variable `MAIL_APPLY_ATMOS_CATEGORIES`.
+#
+# Default value: false
+#apply_atmos_categories = false
+
 [email.direct_mx]
 # Per-command SMTP timeout in seconds.
 #
