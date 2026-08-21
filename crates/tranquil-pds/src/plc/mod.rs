@@ -187,17 +187,17 @@ impl PlcClient {
             });
         let timeout_secs = cfg.map_or(10, |c| c.plc.timeout_secs);
         let connect_timeout_secs = cfg.map_or(5, |c| c.plc.connect_timeout_secs);
+        let fetch_policy = match cfg.map_or(false, |c| c.server.allow_private_fetch) {
+            true => tranquil_types::ReachPolicy::AllowPrivate,
+            false => tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
+        };
         let client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             .connect_timeout(Duration::from_secs(connect_timeout_secs))
             .pool_max_idle_per_host(5)
             .pool_idle_timeout(Duration::from_secs(90))
-            .redirect(tranquil_types::redirect_policy(
-                tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
-            ))
-            .dns_resolver(tranquil_types::dns_guard(
-                tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
-            ))
+            .redirect(tranquil_types::redirect_policy(fetch_policy))
+            .dns_resolver(tranquil_types::dns_guard(fetch_policy))
             .build()
             .expect("failed to build PLC directory HTTP client");
         Self {

@@ -465,6 +465,10 @@ pub struct ServerConfig {
     #[config(env = "DISABLE_RATE_LIMITING", default = false)]
     pub disable_rate_limiting: bool,
 
+    /// Allow outbound fetches to private network addresses. Useful for local development using docker compose.
+    #[config(env = "ALLOW_PRIVATE_FETCH", default = false)]
+    pub allow_private_fetch: bool,
+
     /// Skip the verified-comms-channel gate for login and record writes.
     /// Please keep this off unless you're an invite-only PDS!
     #[config(env = "DISABLE_ACCOUNT_VERIFICATION_GATE", default = false)]

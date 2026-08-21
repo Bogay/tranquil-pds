@@ -75,7 +75,7 @@ pub struct ClientMetadataCache {
 }
 
 impl ClientMetadataCache {
-    pub fn new(cache: Arc<dyn Cache>, cache_ttl: Duration) -> Self {
+    pub fn new(cache: Arc<dyn Cache>, cache_ttl: Duration, fetch_policy: ReachPolicy) -> Self {
         Self {
             cache,
             http_client: {
@@ -84,8 +84,8 @@ impl ClientMetadataCache {
                     .connect_timeout(std::time::Duration::from_secs(10))
                     .pool_max_idle_per_host(10)
                     .pool_idle_timeout(std::time::Duration::from_secs(90))
-                    .redirect(redirect_policy(ReachPolicy::DEBUG_LOOPBACK))
-                    .dns_resolver(dns_guard(ReachPolicy::DEBUG_LOOPBACK))
+                    .redirect(redirect_policy(fetch_policy))
+                    .dns_resolver(dns_guard(fetch_policy))
                     .user_agent(concat!(
                         "Tranquil-PDS/",
                         env!("CARGO_PKG_VERSION"),

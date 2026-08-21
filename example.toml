@@ -69,6 +69,13 @@
 # Default value: false
 #disable_rate_limiting = false
 
+# Allow outbound fetches to private network addresses. Useful for local development using docker compose.
+#
+# Can also be specified via environment variable `ALLOW_PRIVATE_FETCH`.
+#
+# Default value: false
+#allow_private_fetch = false
+
 # Skip the verified-comms-channel gate for login and record writes.
 # Please keep this off unless you're an invite-only PDS!
 #

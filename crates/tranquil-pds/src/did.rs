@@ -67,16 +67,16 @@ impl DidResolver {
     pub fn new(cache: Arc<dyn Cache>) -> Self {
         let cfg = tranquil_config::get();
 
+        let fetch_policy = match cfg.server.allow_private_fetch {
+            true => tranquil_types::ReachPolicy::AllowPrivate,
+            false => tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
+        };
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
             .pool_max_idle_per_host(10)
-            .redirect(tranquil_types::redirect_policy(
-                tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
-            ))
-            .dns_resolver(tranquil_types::dns_guard(
-                tranquil_types::ReachPolicy::DEBUG_LOOPBACK,
-            ))
+            .redirect(tranquil_types::redirect_policy(fetch_policy))
+            .dns_resolver(tranquil_types::dns_guard(fetch_policy))
             .build()
             .expect("failed to build DID resolver HTTP client");
 

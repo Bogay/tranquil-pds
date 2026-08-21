@@ -1,6 +1,7 @@
 [server]
 hostname = "pds.test"
 allow_http_proxy = true
+allow_private_fetch = true
 invite_code_required = false
 disable_rate_limiting = true
 
