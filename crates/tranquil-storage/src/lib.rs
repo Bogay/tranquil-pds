@@ -114,6 +114,7 @@ mod s3 {
     pub struct S3BlobStorage {
         client: Client,
         bucket: String,
+        path: String,
     }
 
     impl S3BlobStorage {
@@ -125,12 +126,23 @@ mod s3 {
                 .clone()
                 .expect("storage.s3_bucket (S3_BUCKET) must be set");
             let client = create_s3_client().await;
-            Self { client, bucket }
+            let path = cfg.storage.s3_path
+                .trim_start_matches("/")
+                .trim_end_matches("/")
+                .to_string();
+            Self {
+                client,
+                bucket,
+                path,
+            }
         }
 
-        pub async fn with_bucket(bucket: String) -> Self {
-            let client = create_s3_client().await;
-            Self { client, bucket }
+        fn resolve_path(&self, key: &str) -> String {
+            if self.path.is_empty() {
+                return key.to_string()
+            }
+
+            format!("{}/{}", self.path, key)
         }
     }
 
@@ -165,10 +177,11 @@ mod s3 {
         }
 
         async fn put_bytes(&self, key: &str, data: Bytes) -> Result<(), StorageError> {
+            let path = self.resolve_path(key);
             self.client
                 .put_object()
                 .bucket(&self.bucket)
-                .key(key)
+                .key(&path)
                 .body(ByteStream::from(data))
                 .send()
                 .await
@@ -182,11 +195,12 @@ mod s3 {
         }
 
         async fn get_bytes(&self, key: &str) -> Result<Bytes, StorageError> {
+            let path = self.resolve_path(key);
             let resp = self
                 .client
                 .get_object()
                 .bucket(&self.bucket)
-                .key(key)
+                .key(&path)
                 .send()
                 .await
                 .map_err(|e| StorageError::Backend(e.to_string()))?;
@@ -199,12 +213,13 @@ mod s3 {
         }
 
         async fn get_head(&self, key: &str, size: usize) -> Result<Bytes, StorageError> {
+            let path = self.resolve_path(key);
             let range = format!("bytes=0-{}", size.saturating_sub(1));
             let resp = self
                 .client
                 .get_object()
                 .bucket(&self.bucket)
-                .key(key)
+                .key(&path)
                 .range(range)
                 .send()
                 .await
@@ -218,10 +233,11 @@ mod s3 {
         }
 
         async fn delete(&self, key: &str) -> Result<(), StorageError> {
+            let path = self.resolve_path(key);
             self.client
                 .delete_object()
                 .bucket(&self.bucket)
-                .key(key)
+                .key(&path)
                 .send()
                 .await
                 .map_err(|e| StorageError::Backend(e.to_string()))?;
@@ -236,11 +252,12 @@ mod s3 {
         ) -> Result<StreamUploadResult, StorageError> {
             use futures::StreamExt;
 
+            let path = self.resolve_path(key);
             let create_resp = self
                 .client
                 .create_multipart_upload()
                 .bucket(&self.bucket)
-                .key(key)
+                .key(&path)
                 .send()
                 .await
                 .map_err(|e| {
@@ -263,13 +280,13 @@ mod s3 {
             > {
                 let client = client.clone();
                 let bucket = bucket.to_string();
-                let key = key.to_string();
+                let path = self.resolve_path(key);
                 let upload_id = upload_id.to_string();
                 Box::pin(async move {
                     let resp = client
                         .upload_part()
                         .bucket(&bucket)
-                        .key(&key)
+                        .key(&path)
                         .upload_id(&upload_id)
                         .part_number(part_num)
                         .body(ByteStream::from(data))
@@ -314,7 +331,7 @@ mod s3 {
                     .client
                     .abort_multipart_upload()
                     .bucket(&self.bucket)
-                    .key(key)
+                    .key(path)
                     .upload_id(&upload_id)
                     .send()
                     .await;
@@ -384,10 +401,11 @@ mod s3 {
                 .set_parts(Some(state.completed_parts))
                 .build();
 
+            let path = self.resolve_path(key);
             self.client
                 .complete_multipart_upload()
                 .bucket(&self.bucket)
-                .key(key)
+                .key(&path)
                 .upload_id(&upload_id)
                 .multipart_upload(completed_upload)
                 .send()
@@ -404,13 +422,15 @@ mod s3 {
         }
 
         async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
-            let copy_source = format!("{}/{}", self.bucket, src_key);
+            let src_path = self.resolve_path(src_key);
+            let copy_source = format!("{}/{}", self.bucket, &src_path);
+            let dst_path = self.resolve_path(dst_key);
 
             self.client
                 .copy_object()
                 .bucket(&self.bucket)
-                .copy_source(&copy_source)
-                .key(dst_key)
+                .copy_source(copy_source)
+                .key(&dst_path)
                 .send()
                 .await
                 .map_err(|e| StorageError::Backend(format!("Failed to copy object: {}", e)))?;

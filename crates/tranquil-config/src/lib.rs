@@ -770,6 +770,10 @@ pub struct StorageConfig {
     #[config(env = "S3_ENDPOINT")]
     pub s3_endpoint: Option<String>,
 
+    /// Path on the storage for the S3 blob backend.
+    #[config(env = "S3_PATH", default = "")]
+    pub s3_path: String,
+
     /// Repository backend: `postgres` by default, or `tranquil-store`, our embedded db.
     /// tranquil-store is EXPERIMENTAL!!!! RISK OF TOTAL DATA LOSS.
     #[config(env = "REPO_BACKEND", default = "postgres")]
