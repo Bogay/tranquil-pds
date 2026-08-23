@@ -34,6 +34,12 @@ pub fn is_valid_datetime(s: &str) -> bool {
     chrono::DateTime::parse_from_rfc3339(s).is_ok()
 }
 
+/// Checks the scheme only, not the character set or structure of what
+/// follows. The aim is to accept at least all valid URIs; we can always
+/// tighten this later. It does not parse the authority, because at-uris
+/// put colons in the authority (at://did:plc:abc123/collection/rkey) and
+/// any 3986 authority parser reads that as a non-numeric port and rejects
+/// it.
 pub fn is_valid_uri(s: &str) -> bool {
     let Some((scheme, rest)) = s.split_once(':') else {
         return false;
@@ -48,7 +54,7 @@ pub fn is_valid_uri(s: &str) -> bool {
     }
     match rest.strip_prefix("//") {
         Some(authority_and_path) => !authority_and_path.is_empty(),
-        None => !rest.is_empty(),
+        None => true,
     }
 }
 
@@ -167,12 +173,21 @@ mod tests {
         assert!(is_valid_uri(
             "has_an_underscore:70766a5a-3f95-4b19-96c8-a2c9c4a5e6e5"
         ));
+        assert!(is_valid_uri("urn:"));
     }
 
     #[test]
     fn test_invalid_uris_without_authority() {
-        assert!(!is_valid_uri("urn:"));
         assert!(!is_valid_uri(":no-scheme"));
+    }
+
+    #[test]
+    fn test_valid_uris_dont_reject_at_uri_authority_colons() {
+        // at-uri authorities contain colons (did:plc:...); is_valid_uri must not
+        // reject them the way a strict RFC 3986 authority parser would.
+        assert!(is_valid_uri(
+            "at://did:plc:cwdkf4xxjpznceembuuspt3d/sh.tangled.repo.pull/3mtjn7zouwn22"
+        ));
     }
 
     #[test]
