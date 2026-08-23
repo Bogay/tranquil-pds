@@ -10,6 +10,7 @@ dir = "/app/frontend/public"
 
 [database]
 url = "postgres://postgres:postgres@db:5432/pds"
+max_connections = 20
 
 [storage]
 path = "/var/lib/tranquil-pds/blobs"

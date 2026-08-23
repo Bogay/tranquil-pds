@@ -18,6 +18,12 @@ http:
       service: frontend
       priority: 1
       tls: {}
+    handles:
+      rule: 'HostRegexp(`^.+\.pds\.test$`)'
+      entryPoints:
+        - websecure
+      service: backend
+      tls: {}
 
   services:
     backend:

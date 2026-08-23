@@ -96,6 +96,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    ports:
+      - "2582:2582"
 
   mailpit:
     profiles: [dev]
