@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_uris_without_authority() {
+    fn test_invalid_uri_without_scheme() {
         assert!(!is_valid_uri(":no-scheme"));
     }
 
