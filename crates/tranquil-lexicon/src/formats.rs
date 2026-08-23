@@ -42,7 +42,7 @@ pub fn is_valid_uri(s: &str) -> bool {
         && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
         && scheme
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '.' || c == '-');
+            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '.' || c == '-' || c == '_');
     if !valid_scheme {
         return false;
     }
@@ -163,7 +163,14 @@ mod tests {
         // RFC 3986 hier-part doesn't require "//": scheme ":" opaque-part is also a URI.
         assert!(is_valid_uri("urn:isbn:9780141439518"));
         assert!(is_valid_uri("mailto:user@example.com"));
-        assert!(is_valid_uri("mbid:70766a5a-3f95-4b19-96c8-a2c9c4a5e6e5"));
+        assert!(is_valid_uri("mbid:70766a5a-3f95-4b19-96c8-a2c9c4a5e6e5")); //authority-less / path-rootless
+        assert!(is_valid_uri(
+            "has_an_underscore:70766a5a-3f95-4b19-96c8-a2c9c4a5e6e5"
+        ));
+    }
+
+    #[test]
+    fn test_invalid_uris_without_authority() {
         assert!(!is_valid_uri("urn:"));
         assert!(!is_valid_uri(":no-scheme"));
     }
