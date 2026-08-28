@@ -441,28 +441,20 @@ mod tests {
             GrantCoverage::Withheld
         );
     }
-}
 
-#[cfg(test)]
-mod scratch_transition_probe {
-    use super::*;
     #[test]
-    fn probe() {
-        let g = "atproto repo:* blob:*/* rpc:* identity:* account:*?action=manage transition:generic transition:chat transition:email";
-        println!(
-            "validate mixed grant: {:?}",
-            ValidatedDelegationScope::new(g).is_ok()
+    fn test_grant_may_mix_transition_and_granular_scopes() {
+        assert!(ValidatedDelegationScope::new(OWNER_FULL_SCOPES).is_ok());
+        assert_eq!(
+            intersect_scopes("atproto transition:generic", OWNER_FULL_SCOPES),
+            "atproto transition:generic"
         );
-        for s in ["transition:generic", "transition:chat", "transition:email"] {
-            println!("  {s} -> {:?}", grant_coverage(g, s));
-            println!(
-                "  {s} under CURRENT owner -> {:?}",
-                grant_coverage(OWNER_FULL_SCOPES, s)
-            );
-        }
-        println!(
-            "intersect(transition:generic, mixed grant) = {:?}",
-            intersect_scopes("atproto transition:generic", g)
+        assert_eq!(
+            intersect_scopes(
+                "atproto repo:app.bsky.feed.post?action=create",
+                OWNER_FULL_SCOPES
+            ),
+            "atproto repo:app.bsky.feed.post?action=create"
         );
     }
 }
