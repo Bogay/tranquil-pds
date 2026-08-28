@@ -534,7 +534,13 @@ fn migrate_delegation_preset_scopes(metastore: &tranquil_store::metastore::Metas
     const V2_LEGACY_EDITOR: &str =
         "atproto repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*";
 
-    let passes: [(&str, &[(&str, &str)]); 2] = [
+    // v3 adds the `transition:` scopes to the owner preset
+    // Without them an owner-level delegation withholds all transition scopes
+    const V3_MARKER: &str = "migration:delegation_preset_scopes_v3";
+    const V3_LEGACY_OWNER: &str =
+        "atproto repo:* blob:*/* rpc:* identity:* account:*?action=manage";
+
+    let passes: [(&str, &[(&str, &str)]); 3] = [
         (
             V1_MARKER,
             &[
@@ -549,6 +555,10 @@ fn migrate_delegation_preset_scopes(metastore: &tranquil_store::metastore::Metas
                 (V2_LEGACY_ADMIN, crate::delegation::ADMIN_FULL_SCOPES),
                 (V2_LEGACY_EDITOR, crate::delegation::EDITOR_FULL_SCOPES),
             ],
+        ),
+        (
+            V3_MARKER,
+            &[(V3_LEGACY_OWNER, crate::delegation::OWNER_FULL_SCOPES)],
         ),
     ];
 

@@ -14,8 +14,10 @@ pub struct ScopePreset {
     pub scopes: &'static str,
 }
 
-pub const OWNER_FULL_SCOPES: &str =
-    "atproto repo:* blob:*/* rpc:* identity:* account:*?action=manage";
+pub const OWNER_FULL_SCOPES: &str = concat!(
+    "atproto repo:* blob:*/* rpc:* identity:* account:*?action=manage ",
+    "transition:generic transition:chat.bsky transition:email"
+);
 
 pub const ADMIN_FULL_SCOPES: &str = "atproto repo:* blob:*/* rpc:* account:*?action=manage";
 
@@ -341,6 +343,9 @@ mod tests {
         ("rpc", "rpc:app.bsky.actor.getProfile?aud=*"),
         ("account", "account:email?action=manage"),
         ("identity", "identity:handle"),
+        ("transition:generic", "transition:generic"),
+        ("transition:chat.bsky", "transition:chat.bsky"),
+        ("transition:email", "transition:email"),
     ];
 
     /// The taxonomy label a scope type must be represented by, or `None` for scope types
@@ -352,10 +357,10 @@ mod tests {
             ParsedScope::Rpc(_) => Some("rpc"),
             ParsedScope::Account(_) => Some("account"),
             ParsedScope::Identity(_) => Some("identity"),
+            ParsedScope::TransitionGeneric => Some("transition:generic"),
+            ParsedScope::TransitionChat => Some("transition:chat.bsky"),
+            ParsedScope::TransitionEmail => Some("transition:email"),
             ParsedScope::Atproto => None,
-            ParsedScope::TransitionGeneric
-            | ParsedScope::TransitionChat
-            | ParsedScope::TransitionEmail => None,
             ParsedScope::Include(_) => None,
             ParsedScope::Unknown(_) => None,
         }
@@ -434,6 +439,30 @@ mod tests {
         assert_eq!(
             grant_coverage("atproto rpc:*", "rpc:*?aud=*"),
             GrantCoverage::Withheld
+        );
+    }
+}
+
+#[cfg(test)]
+mod scratch_transition_probe {
+    use super::*;
+    #[test]
+    fn probe() {
+        let g = "atproto repo:* blob:*/* rpc:* identity:* account:*?action=manage transition:generic transition:chat transition:email";
+        println!(
+            "validate mixed grant: {:?}",
+            ValidatedDelegationScope::new(g).is_ok()
+        );
+        for s in ["transition:generic", "transition:chat", "transition:email"] {
+            println!("  {s} -> {:?}", grant_coverage(g, s));
+            println!(
+                "  {s} under CURRENT owner -> {:?}",
+                grant_coverage(OWNER_FULL_SCOPES, s)
+            );
+        }
+        println!(
+            "intersect(transition:generic, mixed grant) = {:?}",
+            intersect_scopes("atproto transition:generic", g)
         );
     }
 }
