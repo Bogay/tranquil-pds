@@ -343,23 +343,36 @@ mod tests {
         ("identity", "identity:handle"),
     ];
 
-    // Verifies every scope prefix is reachable through at least one preset.
-    #[allow(dead_code)]
-    fn assert_taxonomy_is_exhaustive(scope: ParsedScope) {
+    /// The taxonomy label a scope type must be represented by, or `None` for scope types
+    /// delegation never gates.
+    fn taxonomy_label(scope: &ParsedScope) -> Option<&'static str> {
         match scope {
-            // Granular capabilities: each must appear in GRANULAR_SCOPE_TAXONOMY.
-            ParsedScope::Repo(_)
-            | ParsedScope::Blob(_)
-            | ParsedScope::Rpc(_)
-            | ParsedScope::Account(_)
-            | ParsedScope::Identity(_) => {}
-            ParsedScope::Atproto => {}
+            ParsedScope::Repo(_) => Some("repo"),
+            ParsedScope::Blob(_) => Some("blob"),
+            ParsedScope::Rpc(_) => Some("rpc"),
+            ParsedScope::Account(_) => Some("account"),
+            ParsedScope::Identity(_) => Some("identity"),
+            ParsedScope::Atproto => None,
             ParsedScope::TransitionGeneric
             | ParsedScope::TransitionChat
-            | ParsedScope::TransitionEmail => {}
-            ParsedScope::Include(_) => {}
-            ParsedScope::Unknown(_) => {}
+            | ParsedScope::TransitionEmail => None,
+            ParsedScope::Include(_) => None,
+            ParsedScope::Unknown(_) => None,
         }
+    }
+
+    #[test]
+    fn test_taxonomy_entries_parse_to_the_scope_type_they_claim() {
+        GRANULAR_SCOPE_TAXONOMY.iter().for_each(|(label, scope)| {
+            assert_eq!(
+                taxonomy_label(&parse_scope(scope)),
+                Some(*label),
+                "taxonomy entry `{}` does not parse to a `{}` scope, so the reachability \
+                 test is not actually exercising that scope type",
+                scope,
+                label
+            );
+        });
     }
 
     fn coverage_matrix() -> String {
