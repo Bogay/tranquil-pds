@@ -106,20 +106,7 @@ pub fn app_with_routes(state: AppState, external: ExternalRoutes) -> Router {
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-                .allow_headers(AllowHeaders::list(
-                    [
-                        http::header::AUTHORIZATION,
-                        http::header::CONTENT_TYPE,
-                        http::header::CONTENT_ENCODING,
-                        http::header::ACCEPT_ENCODING,
-                        http::header::USER_AGENT,
-                        util::HEADER_DPOP,
-                        util::HEADER_ATPROTO_PROXY,
-                        util::HEADER_ATPROTO_ACCEPT_LABELERS,
-                    ]
-                    .into_iter()
-                    .chain(util::CORS_BSKY_ALLOW_HEADERS),
-                ))
+                .allow_headers(AllowHeaders::mirror_request())
                 .expose_headers([
                     http::header::WWW_AUTHENTICATE,
                     util::HEADER_DPOP_NONCE,

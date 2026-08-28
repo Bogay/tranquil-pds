@@ -89,10 +89,6 @@ pub const HEADER_ATPROTO_CONTENT_LABELERS: HeaderName =
     HeaderName::from_static("atproto-content-labelers");
 #[cfg(feature = "bsky-support")]
 pub const HEADER_X_BSKY_TOPICS: HeaderName = HeaderName::from_static("x-bsky-topics");
-#[cfg(feature = "bsky-support")]
-pub const CORS_BSKY_ALLOW_HEADERS: [HeaderName; 1] = [HEADER_X_BSKY_TOPICS];
-#[cfg(not(feature = "bsky-support"))]
-pub const CORS_BSKY_ALLOW_HEADERS: [HeaderName; 0] = [];
 
 pub fn get_header_str(
     headers: &HeaderMap,
