@@ -118,18 +118,6 @@ pub async fn sign_plc_operation(
         }
     })?;
 
-    let signing_did_key = signing_key_to_did_key(&signing_key);
-    if let Some(rotation_keys) = unsigned_op.get("rotationKeys").and_then(Value::as_array) {
-        let rotation_key_strs: Vec<&str> = rotation_keys.iter().filter_map(Value::as_str).collect();
-        if let Some(missing) = missing_required_rotation_key(
-            &rotation_key_strs,
-            &signing_did_key,
-            tranquil_config::get().secrets.plc_rotation_key.as_deref(),
-        ) {
-            return Err(ApiError::InvalidRequest(missing.message().into()));
-        }
-    }
-
     let signed_op = sign_operation(&unsigned_op, &signing_key).map_err(|e| {
         error!("Failed to sign PLC operation: {:?}", e);
         ApiError::InternalError(None)
