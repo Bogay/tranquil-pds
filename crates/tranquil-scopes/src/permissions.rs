@@ -43,7 +43,26 @@ impl ScopePermissions {
             has_transition_email,
         }
     }
+}
 
+/// Whether holding `transition:generic` makes `scope` redundant.
+pub fn superseded_by_transition_generic(scope: &ParsedScope) -> bool {
+    match scope {
+        ParsedScope::Repo(_) | ParsedScope::Blob(_) => true,
+        ParsedScope::Rpc(rpc) => !rpc
+            .lxm
+            .as_deref()
+            .is_some_and(|lxm| lxm == "*" || lxm.starts_with("chat.bsky.")),
+        ParsedScope::Account(_)
+        | ParsedScope::Identity(_)
+        | ParsedScope::TransitionEmail
+        | ParsedScope::TransitionChat => false,
+        ParsedScope::Include(_) => false,
+        ParsedScope::TransitionGeneric | ParsedScope::Atproto | ParsedScope::Unknown(_) => false,
+    }
+}
+
+impl ScopePermissions {
     pub fn has_scope(&self, scope: &str) -> bool {
         self.scopes.contains(scope)
     }
@@ -158,22 +177,17 @@ impl ScopePermissions {
     }
 
     pub fn assert_rpc(&self, aud: &str, lxm: &Nsid) -> Result<(), ScopeError> {
-        if lxm.starts_with("chat.bsky.") {
-            if self.has_transition_chat {
-                return Ok(());
-            }
-            if self.has_transition_generic && !self.has_transition_chat {
-                return Err(ScopeError::InsufficientScope {
-                    required: "transition:chat.bsky".to_string(),
-                    message: format!(
-                        "Chat access requires transition:chat.bsky scope to call {}",
-                        lxm
-                    ),
-                });
-            }
+        let is_chat = lxm.starts_with("chat.bsky.");
+
+        if is_chat && self.has_transition_chat {
+            return Ok(());
         }
 
-        if self.has_transition_generic {
+        // `transition:generic` covers every lexicon except chat. Note it does not *block* chat:
+        // holding it must never remove access a granular `rpc:chat.bsky.*` scope would grant on
+        // its own, so chat requests fall through to the granular check below rather than
+        // failing here.
+        if self.has_transition_generic && !is_chat {
             return Ok(());
         }
 
@@ -198,13 +212,24 @@ impl ScopePermissions {
         });
 
         if has_permission {
-            Ok(())
-        } else {
-            Err(ScopeError::InsufficientScope {
+            return Ok(());
+        }
+
+        // Point a caller holding only `transition:generic` at the scope it actually needs,
+        // rather than at a granular rpc scope it probably did not mean to request.
+        Err(match is_chat && self.has_transition_generic {
+            true => ScopeError::InsufficientScope {
+                required: "transition:chat.bsky".to_string(),
+                message: format!(
+                    "Chat access requires transition:chat.bsky scope to call {}",
+                    lxm
+                ),
+            },
+            false => ScopeError::InsufficientScope {
                 required: format!("rpc:{}?aud={}", lxm, aud),
                 message: format!("Insufficient scope to call {} on {}", lxm, aud),
-            })
-        }
+            },
+        })
     }
 
     pub fn assert_account(
@@ -212,10 +237,6 @@ impl ScopePermissions {
         attr: AccountAttr,
         action: AccountAction,
     ) -> Result<(), ScopeError> {
-        if self.has_transition_generic {
-            return Ok(());
-        }
-
         if attr == AccountAttr::Email && action == AccountAction::Read && self.has_transition_email
         {
             return Ok(());
@@ -245,8 +266,7 @@ impl ScopePermissions {
     }
 
     pub fn allows_email_read(&self) -> bool {
-        self.has_transition_generic
-            || self.has_transition_email
+        self.has_transition_email
             || self
                 .find_account_scopes()
                 .any(|a| a.attr == AccountAttr::Email || a.attr == AccountAttr::Wildcard)
@@ -269,10 +289,6 @@ impl ScopePermissions {
     }
 
     pub fn assert_identity(&self, attr: IdentityAttr) -> Result<(), ScopeError> {
-        if self.has_transition_generic {
-            return Ok(());
-        }
-
         let has_permission = self.find_identity_scopes().any(|identity_scope| {
             identity_scope.attr == IdentityAttr::Wildcard || identity_scope.attr == attr
         });
@@ -336,6 +352,7 @@ impl Default for ScopePermissions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::parse_scope;
 
     fn c(s: &str) -> Nsid {
         s.parse().unwrap()
@@ -512,10 +529,10 @@ mod tests {
     }
 
     #[test]
-    fn test_transition_generic_grants_identity() {
+    fn test_transition_generic_does_not_grant_identity() {
         let perms = ScopePermissions::from_scope_string(Some("transition:generic"));
-        assert!(perms.allows_identity(IdentityAttr::Handle));
-        assert!(perms.allows_identity(IdentityAttr::Wildcard));
+        assert!(!perms.allows_identity(IdentityAttr::Handle));
+        assert!(!perms.allows_identity(IdentityAttr::Wildcard));
     }
 
     #[test]
@@ -596,5 +613,161 @@ mod tests {
             "did:web:api.bsky.app#atproto_labeler",
             &c("app.bsky.feed.getAuthorFeed")
         ));
+    }
+
+    #[test]
+    fn transition_generic_supersedes_granular_scopes() {
+        for scope in [
+            "repo:app.bsky.feed.post?action=create",
+            "blob:image/png",
+            "rpc:app.bsky.actor.getProfile?aud=*",
+        ] {
+            assert!(
+                superseded_by_transition_generic(&parse_scope(scope)),
+                "{scope} should be superseded by transition:generic"
+            );
+        }
+    }
+
+    #[test]
+    fn transition_generic_does_not_supersede_chat() {
+        // assert_rpc rejects chat.bsky.* when transition:generic is held without
+        // transition:chat.bsky, so neither the transition scope nor an rpc scope that
+        // could reach a chat lexicon is covered by it.
+        for scope in [
+            "transition:chat.bsky",
+            "rpc:chat.bsky.convo.sendMessage?aud=*",
+            "rpc:*?aud=did:web:api.bsky.app",
+            "account:email?action=manage",
+            "account:email?action=read",
+            "account:status?action=read",
+            "identity:handle",
+            "identity:*",
+            "transition:email",
+        ] {
+            assert!(
+                !superseded_by_transition_generic(&parse_scope(scope)),
+                "{scope} must not be treated as superseded"
+            );
+        }
+    }
+
+    #[test]
+    fn transition_generic_does_not_supersede_itself_or_baseline() {
+        assert!(!superseded_by_transition_generic(&parse_scope(
+            "transition:generic"
+        )));
+        assert!(!superseded_by_transition_generic(&parse_scope("atproto")));
+    }
+
+    #[test]
+    fn superseded_matches_enforcement_for_chat_and_feed() {
+        // Cross-check against ScopePermissions so the two cannot drift apart.
+        let perms = ScopePermissions::from_scope_string(Some("atproto transition:generic"));
+        let feed = Nsid::new("app.bsky.feed.getTimeline").unwrap();
+        let chat = Nsid::new("chat.bsky.convo.sendMessage").unwrap();
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &feed));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", &chat));
+    }
+
+    #[test]
+    fn granular_chat_rpc_works_without_transition_generic() {
+        // Baseline for the test below: on its own, a granular chat rpc scope grants chat.
+        let perms = ScopePermissions::from_scope_string(Some(
+            "atproto rpc:chat.bsky.convo.sendMessage?aud=*",
+        ));
+        assert!(perms.allows_rpc("did:web:api.bsky.chat", &c("chat.bsky.convo.sendMessage")));
+    }
+
+    #[test]
+    fn transition_generic_does_not_revoke_granular_chat_rpc() {
+        // Adding a broader scope must never remove access. transition:generic does not cover
+        // chat lexicons, but it must not stop a granular chat rpc scope from doing so either.
+        let perms = ScopePermissions::from_scope_string(Some(
+            "atproto transition:generic rpc:chat.bsky.convo.sendMessage?aud=*",
+        ));
+        assert!(perms.allows_rpc("did:web:api.bsky.chat", &c("chat.bsky.convo.sendMessage")));
+        // ...and still grants everything else it covers.
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
+    }
+
+    #[test]
+    fn transition_generic_does_not_widen_granular_chat_rpc() {
+        // The granular scope grants exactly one chat lexicon; transition:generic must not be
+        // read as covering the rest of chat.
+        let perms = ScopePermissions::from_scope_string(Some(
+            "atproto transition:generic rpc:chat.bsky.convo.sendMessage?aud=*",
+        ));
+        assert!(!perms.allows_rpc("did:web:api.bsky.chat", &c("chat.bsky.convo.deleteMessage")));
+    }
+
+    #[test]
+    fn chat_denial_still_names_the_scope_the_caller_needs() {
+        // transition:generic alone: the useful advice is "ask for transition:chat.bsky",
+        // not "ask for rpc:chat.bsky.convo.listConvos".
+        let generic = ScopePermissions::from_scope_string(Some("atproto transition:generic"));
+        let err = generic
+            .assert_rpc("did:web:api.bsky.chat", &c("chat.bsky.convo.listConvos"))
+            .expect_err("chat must be denied without transition:chat.bsky");
+        match err {
+            ScopeError::InsufficientScope { required, .. } => {
+                assert_eq!(required, "transition:chat.bsky");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        // Without transition:generic the granular scope is the right thing to name.
+        let bare = ScopePermissions::from_scope_string(Some("atproto"));
+        let err = bare
+            .assert_rpc("did:web:api.bsky.chat", &c("chat.bsky.convo.listConvos"))
+            .expect_err("chat must be denied with no rpc scope at all");
+        match err {
+            ScopeError::InsufficientScope { required, .. } => {
+                assert!(required.starts_with("rpc:chat.bsky.convo.listConvos"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn transition_generic_does_not_grant_account_management() {
+        // "no account management actions: change handle, change email, delete or deactivate
+        // account, migrate account" -- atproto OAuth spec.
+        let perms = ScopePermissions::from_scope_string(Some("atproto transition:generic"));
+        assert!(!perms.allows_account(AccountAttr::Email, AccountAction::Manage));
+        assert!(!perms.allows_account(AccountAttr::Repo, AccountAction::Manage));
+        assert!(!perms.allows_account(AccountAttr::Status, AccountAction::Manage));
+    }
+
+    #[test]
+    fn transition_generic_does_not_grant_email_read() {
+        // Reading the account email is what transition:email is for.
+        let perms = ScopePermissions::from_scope_string(Some("atproto transition:generic"));
+        assert!(!perms.allows_email_read());
+        assert!(!perms.allows_account(AccountAttr::Email, AccountAction::Read));
+    }
+
+    #[test]
+    fn granular_scopes_still_grant_alongside_transition_generic() {
+        // Removing the short-circuit must not stop an explicitly granted scope from working.
+        let perms = ScopePermissions::from_scope_string(Some(
+            "atproto transition:generic account:email?action=manage identity:handle",
+        ));
+        assert!(perms.allows_account(AccountAttr::Email, AccountAction::Manage));
+        assert!(perms.allows_identity(IdentityAttr::Handle));
+
+        let with_email = ScopePermissions::from_scope_string(Some(
+            "atproto transition:generic transition:email",
+        ));
+        assert!(with_email.allows_email_read());
+    }
+
+    #[test]
+    fn transition_generic_still_grants_what_the_spec_says_it_does() {
+        let perms = ScopePermissions::from_scope_string(Some("atproto transition:generic"));
+        assert!(perms.allows_repo(RepoAction::Create, &c("app.bsky.feed.post")));
+        assert!(perms.allows_repo(RepoAction::Delete, &c("app.bsky.feed.post")));
+        assert!(perms.allows_blob("image/png"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
     }
 }

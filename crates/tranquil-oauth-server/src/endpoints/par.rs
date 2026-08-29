@@ -187,32 +187,6 @@ fn validate_scope(
         )));
     }
 
-    let has_transition = requested_scopes.iter().any(|s| {
-        matches!(
-            parse_scope(s),
-            ParsedScope::TransitionGeneric
-                | ParsedScope::TransitionChat
-                | ParsedScope::TransitionEmail
-        )
-    });
-    let has_granular = requested_scopes.iter().any(|s| {
-        matches!(
-            parse_scope(s),
-            ParsedScope::Repo(_)
-                | ParsedScope::Blob(_)
-                | ParsedScope::Rpc(_)
-                | ParsedScope::Account(_)
-                | ParsedScope::Identity(_)
-                | ParsedScope::Include(_)
-        )
-    });
-
-    if has_transition && has_granular {
-        return Err(OAuthError::InvalidScope(
-            "Cannot mix transition scopes with granular scopes. Use either transition:* scopes OR granular scopes (repo:*, blob:*, rpc:*, account:*, include:*), not both.".to_string()
-        ));
-    }
-
     if let Some(client_scope) = &client_metadata.scope {
         let client_scopes: Vec<&str> = client_scope.split_whitespace().collect();
         if let Some(unregistered) = requested_scopes

@@ -1,4 +1,5 @@
 use super::*;
+use tranquil_scopes::{ParsedScope, parse_scope};
 use tranquil_types::Nsid;
 
 #[derive(Debug, Serialize)]
@@ -10,6 +11,7 @@ pub struct ScopeInfo {
     pub display_name: String,
     pub granted: Option<bool>,
     pub restricted: bool,
+    pub superseded: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_scope: Option<String>,
 }
@@ -27,6 +29,7 @@ pub struct PermissionSetInfo {
     pub expanded: Vec<ScopeInfo>,
     pub granted: Option<bool>,
     pub restricted: bool,
+    pub superseded: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,6 +52,7 @@ pub struct ConsentResponse {
     pub logo_uri: Option<String>,
     pub scopes: Vec<ScopeInfo>,
     pub permission_sets: Vec<PermissionSetInfo>,
+    pub transition_supersedes: bool,
     pub failed_sets: Vec<FailedSetInfo>,
     pub show_consent: bool,
     pub did: Did,
@@ -185,6 +189,9 @@ pub async fn consent_get(
     .await
     .unwrap_or(true);
     let has_granular_scopes = requested_scopes.iter().any(|s| is_granular_scope(s));
+    let has_transition_generic = requested_scopes
+        .iter()
+        .any(|s| matches!(parse_scope(s), ParsedScope::TransitionGeneric));
 
     let grant_scope_str: Option<&str> =
         delegation_grant.as_ref().map(|g| g.granted_scopes.as_str());
@@ -237,6 +244,8 @@ pub async fn consent_get(
                 )
             };
         let granted = pref_map.get(scope).copied();
+        let superseded = has_transition_generic
+            && tranquil_scopes::superseded_by_transition_generic(&parse_scope(scope));
         ScopeInfo {
             scope: scope.to_string(),
             category,
@@ -245,6 +254,7 @@ pub async fn consent_get(
             display_name,
             granted,
             restricted,
+            superseded,
             effective_scope,
         }
     };
@@ -267,6 +277,7 @@ pub async fn consent_get(
             };
             let expanded: Vec<ScopeInfo> = g.expanded.iter().map(|s| make_scope_info(s)).collect();
             let restricted = !expanded.is_empty() && expanded.iter().all(|s| s.restricted);
+            let superseded = !expanded.is_empty() && expanded.iter().all(|s| s.superseded);
             PermissionSetInfo {
                 nsid: g.nsid.clone(),
                 aud: g.aud.clone(),
@@ -276,6 +287,7 @@ pub async fn consent_get(
                 include_scope,
                 expanded,
                 restricted,
+                superseded,
             }
         })
         .collect();
@@ -340,6 +352,7 @@ pub async fn consent_get(
         logo_uri: client_metadata.as_ref().and_then(|m| m.logo_uri.clone()),
         scopes,
         permission_sets,
+        transition_supersedes: has_transition_generic && has_granular_scopes,
         failed_sets,
         show_consent,
         did: did.clone(),

@@ -1085,7 +1085,8 @@ button.forget-btn:hover {
   color: var(--text-muted);
 }
 
-.restricted-note {
+.restricted-note,
+.superseded-note {
   display: block;
   font-size: 0.75em;
   color: var(--text-muted);
@@ -1588,4 +1589,8 @@ button.forget-btn:hover {
     max-width: 400px;
     margin-left: auto;
   }
+}
+
+.scope-item:has(input:disabled:checked) .scope-name {
+  color: var(--text-muted);
 }

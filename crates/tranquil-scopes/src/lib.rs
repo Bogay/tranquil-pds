@@ -19,4 +19,4 @@ pub use permission_set::{
     ExpansionOutcome, FailedSet, FetchedSet, ResolveFailure, ResolvedSetGroup, ScopeExpansionError,
     fetch_and_expand, parse_include_scope,
 };
-pub use permissions::ScopePermissions;
+pub use permissions::{ScopePermissions, superseded_by_transition_generic};

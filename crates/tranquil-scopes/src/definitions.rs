@@ -48,7 +48,7 @@ pub static SCOPE_DEFINITIONS: LazyLock<HashMap<&'static str, ScopeDefinition>> =
                 category: ScopeCategory::Transition,
                 required: false,
                 description: "Generic transition scope for compatibility",
-                display_name: "Transition Access",
+                display_name: "Generic Access",
             },
             ScopeDefinition {
                 scope: "transition:chat.bsky",

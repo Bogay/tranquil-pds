@@ -634,7 +634,13 @@
         "title": "Unexpected State",
         "description": "The consent page is in an unexpected state. Please check the browser console for errors.",
         "reload": "Reload Page"
-      }
+      },
+      "supersedeWarningTitle": "This app asked for broad access",
+      "supersedeWarningBody": "This application has requested full read and write access to your account.",
+      "supersededNote": "Already covered by transition:generic",
+      "deselectedWarningTitle": "Some permissions are disabled",
+      "deselectedWarningBody": "You have disabled some of the permissions requested by this app. This may cause some parts of the app to be broken or unavailable.",
+      "supersedeWarningBodyMixed": "This application has requested full read and write access to your account, alongside more specific permissions. The specific permissions are meaningless if you grant the application complete and total control by leaving transition:generic selected."
     },
     "accounts": {
       "title": "Choose account",

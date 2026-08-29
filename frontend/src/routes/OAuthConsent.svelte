@@ -10,6 +10,7 @@
     display_name: string
     granted: boolean | null
     restricted?: boolean
+    superseded?: boolean
     effective_scope?: string
   }
 
@@ -43,6 +44,7 @@
     expanded: ScopeInfo[]
     granted: boolean | null
     restricted?: boolean
+    superseded?: boolean
   }
 
   type SetFailureReason =
@@ -81,6 +83,7 @@
     logo_uri: string | null
     scopes: ScopeInfo[]
     permission_sets: PermissionSetInfo[]
+    transition_supersedes?: boolean
     failed_sets: FailedSetInfo[]
     show_consent: boolean
     did: string
@@ -264,10 +267,32 @@
     }
   }
 
+  const TRANSITION_GENERIC = 'transition:generic'
+
+  let transitionGenericSelected = $derived(scopeSelections[TRANSITION_GENERIC] === true)
+
+  let anyDeselected = $derived(
+    Object.values(scopeSelections).some((selected) => selected === false)
+  )
+
+  function isSupersededNow(item: { superseded?: boolean }): boolean {
+    return Boolean(consentData?.transition_supersedes && item.superseded && transitionGenericSelected)
+  }
+
   function handleScopeToggle(scope: string) {
     const scopeInfo = consentData?.scopes.find(s => s.scope === scope)
     if (scopeInfo?.required) return
-    scopeSelections[scope] = !scopeSelections[scope]
+    if (scopeInfo && isSupersededNow(scopeInfo)) return
+    const next = !scopeSelections[scope]
+    scopeSelections[scope] = next
+    if (scope === TRANSITION_GENERIC && next) {
+      for (const s of consentData?.scopes ?? []) {
+        if (s.superseded && !s.restricted) scopeSelections[s.scope] = true
+      }
+      for (const set of consentData?.permission_sets ?? []) {
+        if (set.superseded && !set.restricted) scopeSelections[set.include_scope] = true
+      }
+    }
   }
 
   const CATEGORY_ORDER = [
@@ -460,6 +485,30 @@
             <span class="consent-account-did">{consentData.did}</span>
           {/if}
         </div>
+
+        {#if transitionGenericSelected}
+          <div class="permissions-notice" role="status">
+            <div class="notice-header">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>{$_('oauth.consent.supersedeWarningTitle')}</span>
+            </div>
+            <p class="notice-text">
+              {consentData.transition_supersedes
+                ? $_('oauth.consent.supersedeWarningBodyMixed')
+                : $_('oauth.consent.supersedeWarningBody')}
+            </p>
+          </div>
+        {/if}
+
+        {#if anyDeselected}
+          <div class="permissions-notice" role="status">
+            <div class="notice-header">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>{$_('oauth.consent.deselectedWarningTitle')}</span>
+            </div>
+            <p class="notice-text">{$_('oauth.consent.deselectedWarningBody')}</p>
+          </div>
+        {/if}
       </div>
 
       <div class="permissions-panel">
@@ -482,8 +531,8 @@
                   <label class="scope-item" class:required={scope.required}>
                     <input
                       type="checkbox"
-                      checked={scopeSelections[scope.scope]}
-                      disabled={scope.required || submitting}
+                      checked={isSupersededNow(scope) ? true : scopeSelections[scope.scope]}
+                      disabled={scope.required || submitting || isSupersededNow(scope)}
                       onchange={() => handleScopeToggle(scope.scope)}
                     />
                     <div class="scope-info">
@@ -491,6 +540,9 @@
                       <span class="scope-description">{getLocalizedScopeDescription(scope)}</span>
                       {#if scope.required}
                         <span class="required-badge">{$_('oauth.consent.required')}</span>
+                      {/if}
+                      {#if isSupersededNow(scope)}
+                        <span class="superseded-note">{$_('oauth.consent.supersededNote')}</span>
                       {/if}
                     </div>
                   </label>
@@ -509,7 +561,7 @@
                 <label class="scope-item">
                   <input
                     type="checkbox"
-                    checked={scopeSelections[set.include_scope]}
+                    checked={isSupersededNow(set) ? true : scopeSelections[set.include_scope]}
                     disabled={submitting}
                     onchange={() => handleScopeToggle(set.include_scope)}
                   />
