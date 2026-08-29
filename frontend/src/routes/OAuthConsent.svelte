@@ -562,7 +562,7 @@
                   <input
                     type="checkbox"
                     checked={isSupersededNow(set) ? true : scopeSelections[set.include_scope]}
-                    disabled={submitting}
+                    disabled={submitting || isSupersededNow(set)}
                     onchange={() => handleScopeToggle(set.include_scope)}
                   />
                   <div class="scope-info">

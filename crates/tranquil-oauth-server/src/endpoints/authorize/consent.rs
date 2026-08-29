@@ -344,6 +344,9 @@ pub async fn consent_get(
             (None, None, None, None)
         };
 
+    let transition_supersedes =
+        scopes.iter().any(|s| s.superseded) || permission_sets.iter().any(|s| s.superseded);
+
     Json(ConsentResponse {
         request_uri: query.request_uri.clone(),
         client_id: request_data.parameters.client_id.clone(),
@@ -352,7 +355,7 @@ pub async fn consent_get(
         logo_uri: client_metadata.as_ref().and_then(|m| m.logo_uri.clone()),
         scopes,
         permission_sets,
-        transition_supersedes: has_transition_generic && has_granular_scopes,
+        transition_supersedes,
         failed_sets,
         show_consent,
         did: did.clone(),
