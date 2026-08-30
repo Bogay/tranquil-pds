@@ -9,10 +9,7 @@ use tranquil_pds::api::ApiError;
 use tranquil_pds::api::error::DbResultExt;
 use tranquil_pds::auth::{Auth, Permissive};
 use tranquil_pds::circuit_breaker::with_circuit_breaker;
-use tranquil_pds::plc::{
-    PlcError, PlcService, create_update_op, missing_required_rotation_key, sign_operation,
-    signing_key_to_did_key,
-};
+use tranquil_pds::plc::{PlcError, PlcService, create_update_op, sign_operation};
 use tranquil_pds::state::AppState;
 
 #[derive(Debug, Deserialize)]

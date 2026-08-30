@@ -76,7 +76,7 @@ in
           server = {
             host = mkOption {
               type = types.str;
-              default = "127.0.0.1";
+              default = "[::1]";
               description = "Host for tranquil-pds to listen on";
             };
 

@@ -188,7 +188,7 @@ impl PlcClient {
         let timeout_secs = cfg.map_or(10, |c| c.plc.timeout_secs);
         let connect_timeout_secs = cfg.map_or(5, |c| c.plc.connect_timeout_secs);
         let fetch_policy = tranquil_types::ReachPolicy::from_private_fetch(
-            cfg.map_or(false, |c| c.server.allow_private_fetch),
+            cfg.is_some_and(|c| c.server.allow_private_fetch),
         );
         let client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs))

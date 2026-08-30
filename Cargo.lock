@@ -7780,6 +7780,8 @@ name = "tranquil-config"
 version = "0.6.6"
 dependencies = [
  "confique",
+ "serde",
+ "tranquil-types",
 ]
 
 [[package]]

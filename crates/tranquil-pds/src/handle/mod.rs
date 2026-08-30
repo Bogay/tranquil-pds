@@ -3,7 +3,15 @@ pub mod reserved;
 use crate::types::{Did, Handle};
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+use std::sync::LazyLock;
 use thiserror::Error;
+
+pub use tranquil_types::Domain;
+
+static HOSTNAME_DOMAIN: LazyLock<Domain> = LazyLock::new(|| {
+    Domain::new(tranquil_config::get().server.hostname_without_port())
+        .expect("server.hostname is validated at config load")
+});
 
 #[derive(Error, Debug)]
 pub enum HandleResolutionError {
@@ -85,28 +93,137 @@ pub async fn verify_handle_ownership(
     }
 }
 
-pub fn is_service_domain_handle(handle: &str, hostname: &str) -> bool {
-    if !handle.contains('.') {
-        return true;
+#[derive(Clone, Copy)]
+pub struct ServiceDomains<'a> {
+    user_domains: &'a [Domain],
+    hostname: &'a Domain,
+    serve_hostname: bool,
+}
+
+impl ServiceDomains<'static> {
+    pub fn for_user_handles() -> Self {
+        Self::from_config(false)
     }
-    let service_domains = tranquil_config::try_get()
-        .map(|c| c.server.user_handle_domain_list())
-        .unwrap_or_else(|| vec![hostname.to_string()]);
-    service_domains
-        .iter()
-        .any(|domain| handle.ends_with(&format!(".{}", domain)) || handle == domain)
+
+    pub fn served() -> Self {
+        Self::from_config(true)
+    }
+
+    fn from_config(serve_hostname: bool) -> Self {
+        let server = &tranquil_config::get().server;
+        Self {
+            user_domains: server.user_handle_domains.as_deref().unwrap_or_default(),
+            hostname: &HOSTNAME_DOMAIN,
+            serve_hostname,
+        }
+    }
+}
+
+impl<'a> ServiceDomains<'a> {
+    pub fn iter(&self) -> impl Iterator<Item = &'a Domain> {
+        let hostname = (self.serve_hostname || self.user_domains.is_empty())
+            .then_some(self.hostname)
+            .filter(|h| !self.user_domains.contains(h));
+        self.user_domains.iter().chain(hostname)
+    }
+
+    pub fn primary(&self) -> &'a Domain {
+        self.user_domains.first().unwrap_or(self.hostname)
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.iter().any(|d| d.eq_name(name))
+    }
+
+    pub fn split_handle<'h>(&self, handle: &'h str) -> Option<(&'a Domain, &'h str)> {
+        self.iter()
+            .filter_map(|d| d.strip_from(handle).map(|short| (d, short)))
+            .max_by_key(|(d, _)| d.as_str().len())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Domain, ServiceDomains};
+    use std::sync::LazyLock;
+
+    static HOST: LazyLock<Domain> = LazyLock::new(|| "pds.oyster.cafe".parse().unwrap());
+
+    fn domains(user_domains: &[Domain], serve_hostname: bool) -> ServiceDomains<'_> {
+        ServiceDomains {
+            user_domains,
+            hostname: &HOST,
+            serve_hostname,
+        }
+    }
+
+    fn owned(list: &[&str]) -> Vec<Domain> {
+        list.iter().map(|d| d.parse().unwrap()).collect()
+    }
 
     #[test]
-    fn test_is_service_domain_handle() {
-        assert!(is_service_domain_handle("nel.oyster.cafe", "oyster.cafe"));
-        assert!(is_service_domain_handle("oyster.cafe", "oyster.cafe"));
-        assert!(is_service_domain_handle("myhandle", "oyster.cafe"));
-        assert!(!is_service_domain_handle("lyna.nel.pet", "oyster.cafe"));
-        assert!(!is_service_domain_handle("myhandle.xyz", "oyster.cafe"));
+    fn thostname_until_domains_are_configured() {
+        assert!(domains(&[], false).contains("pds.oyster.cafe"));
+        assert_eq!(domains(&[], false).primary(), "pds.oyster.cafe");
+        let configured = owned(&["oyster.cafe"]);
+        assert!(!domains(&configured, false).contains("pds.oyster.cafe"));
+        assert!(domains(&configured, false).contains("oyster.cafe"));
+    }
+
+    #[test]
+    fn served_set_covers_hostname_and_handle_domains() {
+        let configured = owned(&["oyster.cafe"]);
+        assert!(domains(&configured, true).contains("pds.oyster.cafe"));
+        assert!(domains(&configured, true).contains("oyster.cafe"));
+    }
+
+    #[test]
+    fn hostname_in_list_is_yielded_once() {
+        let configured = owned(&["pds.oyster.cafe", "oyster.cafe"]);
+        let served: Vec<&str> = domains(&configured, true)
+            .iter()
+            .map(Domain::as_str)
+            .collect();
+        assert_eq!(served, ["pds.oyster.cafe", "oyster.cafe"]);
+        let configured = owned(&["PDS.Oyster.Cafe"]);
+        let served: Vec<&str> = domains(&configured, true)
+            .iter()
+            .map(Domain::as_str)
+            .collect();
+        assert_eq!(served, ["pds.oyster.cafe"]);
+    }
+
+    #[test]
+    fn matching_case_insensitive() {
+        let configured = owned(&["oyster.cafe"]);
+        assert!(domains(&configured, false).contains("Oyster.Cafe"));
+        let (domain, short) = domains(&configured, false)
+            .split_handle("NEL.OYSTER.CAFE")
+            .unwrap();
+        assert_eq!(domain, "oyster.cafe");
+        assert_eq!(short, "NEL");
+    }
+
+    #[test]
+    fn longest_matching_domain_wins() {
+        let configured = owned(&["oyster.cafe", "pets.oyster.cafe"]);
+        let (domain, short) = domains(&configured, false)
+            .split_handle("nel.pets.oyster.cafe")
+            .unwrap();
+        assert_eq!(domain, "pets.oyster.cafe");
+        assert_eq!(short, "nel");
+    }
+
+    #[test]
+    fn split_handle_requires_a_dot() {
+        let configured = owned(&["oyster.cafe"]);
+        assert_eq!(
+            domains(&configured, false).split_handle("oyster.cafe"),
+            None
+        );
+        assert_eq!(
+            domains(&configured, false).split_handle("notoyster.cafe"),
+            None
+        );
     }
 }

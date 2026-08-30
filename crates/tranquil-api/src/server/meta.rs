@@ -77,7 +77,12 @@ pub async fn describe_server(State(state): State<AppState>) -> Json<DescribeServ
     let pds_hostname = &cfg.server.hostname;
 
     Json(DescribeServerOutput {
-        available_user_domains: cfg.server.user_handle_domain_list(),
+        available_user_domains: match cfg.server.user_handle_domains.as_deref() {
+            Some(domains) if !domains.is_empty() => {
+                domains.iter().map(|d| d.as_str().to_owned()).collect()
+            }
+            _ => vec![cfg.server.hostname_without_port().to_owned()],
+        },
         invite_code_required: cfg.server.invite_code_required,
         did: format!("did:web:{}", pds_hostname),
         links: DescribeServerLinks {

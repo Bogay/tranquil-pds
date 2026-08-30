@@ -789,13 +789,16 @@ pub async fn check_handle_available(
         }
     };
 
-    let available_domains = tranquil_config::get().server.available_user_domain_list();
-    if let Some(ref d) = query.domain
-        && !available_domains.iter().any(|ad| ad == d)
+    let available_domains = tranquil_pds::handle::ServiceDomains::for_user_handles();
+    if let Some(d) = &query.domain
+        && !available_domains.contains(d.as_str())
     {
         return Err(ApiError::InvalidRequest("Unknown user domain".into()));
     }
-    let domain = query.domain.as_deref().unwrap_or(&available_domains[0]);
+    let domain = query
+        .domain
+        .as_deref()
+        .unwrap_or_else(|| available_domains.primary().as_str());
     let full_handle = format!("{}.{}", validated, domain);
     let handle: tranquil_pds::types::Handle = match full_handle.parse() {
         Ok(h) => h,
@@ -882,34 +885,33 @@ pub async fn complete_registration(
 
     let cfg = tranquil_config::get();
     let hostname = &cfg.server.hostname;
-    let available_domains = cfg.server.available_user_domain_list();
+    let available_domains = tranquil_pds::handle::ServiceDomains::for_user_handles();
 
-    let matched_domain = available_domains
-        .iter()
-        .filter(|d| input.handle.ends_with(&format!(".{}", d)))
-        .max_by_key(|d| d.len());
+    let split = available_domains.split_handle(&input.handle);
 
-    let handle: tranquil_pds::types::Handle =
-        if !input.handle.contains('.') || matched_domain.is_some() {
-            let handle_to_validate = match matched_domain {
-                Some(domain) => input
-                    .handle
-                    .strip_suffix(&format!(".{}", domain))
-                    .unwrap_or(&input.handle),
-                None => &input.handle,
-            };
-            match tranquil_pds::api::validation::validate_short_handle(handle_to_validate) {
-                Ok(h) => format!("{}.{}", h, matched_domain.unwrap_or(&available_domains[0]))
-                    .parse()
-                    .map_err(|_| ApiError::InvalidHandle(None))?,
-                Err(_) => return Err(ApiError::InvalidHandle(None)),
-            }
-        } else {
-            match tranquil_pds::api::validation::validate_full_domain_handle(&input.handle) {
-                Ok(h) => h,
-                Err(_) => return Err(ApiError::InvalidHandle(None)),
-            }
+    let handle: tranquil_pds::types::Handle = if !input.handle.contains('.') || split.is_some() {
+        let handle_to_validate = match split {
+            Some((_domain, short)) => short,
+            None => input.handle.as_str(),
         };
+        match tranquil_pds::api::validation::validate_short_handle(handle_to_validate) {
+            Ok(h) => format!(
+                "{}.{}",
+                h,
+                split
+                    .map(|(d, _)| d)
+                    .unwrap_or_else(|| available_domains.primary())
+            )
+            .parse()
+            .map_err(|_| ApiError::InvalidHandle(None))?,
+            Err(_) => return Err(ApiError::InvalidHandle(None)),
+        }
+    } else {
+        match tranquil_pds::api::validation::validate_full_domain_handle(&input.handle) {
+            Ok(h) => h,
+            Err(_) => return Err(ApiError::InvalidHandle(None)),
+        }
+    };
 
     let verification_channel = input
         .verification_channel

@@ -111,7 +111,6 @@ pub enum HandleValidationError {
     InvalidSyntax,
     DisallowedTld,
     UnusableHandleDomain,
-    NoHandleDomains,
 }
 
 impl std::fmt::Display for HandleValidationError {
@@ -143,9 +142,6 @@ impl std::fmt::Display for HandleValidationError {
                 f,
                 "This server's handle domain has a reserved TLD, so no handle under it is a valid atproto handle"
             ),
-            Self::NoHandleDomains => {
-                write!(f, "No handle domains are configured on this server")
-            }
         }
     }
 }
@@ -215,21 +211,14 @@ pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationErr
 }
 
 pub fn resolve_handle_input(input: &str) -> Result<Handle, HandleValidationError> {
-    let available_domains = tranquil_config::get().server.available_user_domain_list();
-    let matched_domain = available_domains
-        .iter()
-        .filter(|d| input.ends_with(&format!(".{}", d)))
-        .max_by_key(|d| d.len());
+    let domains = crate::handle::ServiceDomains::for_user_handles();
+    let split = domains.split_handle(input);
 
-    if !input.contains('.') || matched_domain.is_some() {
-        let handle_to_validate = match matched_domain {
-            Some(domain) => input.strip_suffix(&format!(".{}", domain)).unwrap_or(input),
-            None => input,
-        };
-        let validated = validate_short_handle(handle_to_validate)?;
-        let domain = matched_domain
-            .or_else(|| available_domains.first())
-            .ok_or(HandleValidationError::NoHandleDomains)?;
+    if !input.contains('.') || split.is_some() {
+        let (short, domain) = split
+            .map(|(domain, short)| (short, domain))
+            .unwrap_or((input, domains.primary()));
+        let validated = validate_short_handle(short)?;
         let handle = Handle::new(format!("{}.{}", validated, domain))
             .map_err(|_| HandleValidationError::InvalidSyntax)?;
         match handle.has_disallowed_tld() {
@@ -246,11 +235,9 @@ pub fn domain_forms_valid_handles(domain: &str) -> bool {
 }
 
 pub fn warn_unusable_handle_domains() {
-    tranquil_config::get()
-        .server
-        .user_handle_domain_list()
+    crate::handle::ServiceDomains::for_user_handles()
         .iter()
-        .filter(|domain| !domain_forms_valid_handles(domain))
+        .filter(|domain| !domain_forms_valid_handles(domain.as_str()))
         .for_each(|domain| {
             tracing::error!(
                 domain = %domain,

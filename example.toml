@@ -10,8 +10,8 @@
 #
 # Can also be specified via environment variable `SERVER_HOST`.
 #
-# Default value: "127.0.0.1"
-#host = "127.0.0.1"
+# Default value: "[::1]"
+#host = "[::1]"
 
 # Port to bind the HTTP server to.
 #
@@ -33,6 +33,17 @@
 #
 # Default value: false
 #enable_pds_hosted_did_web = false
+
+# The caddy on-demand TLS requires we serve
+# the endpoint `/.well-known/caddy/ask`.
+# It will be used so that caddy can create TLS
+# certs for us on the fly
+# and we don't have to do annoying wildcard certs.
+#
+# Can also be specified via environment variable `ENABLE_CADDY_ON_DEMAND_TLS`.
+#
+# Default value: true
+#enable_caddy_on_demand_tls = true
 
 # iykyk!
 #

@@ -98,43 +98,56 @@ test-store-asan:
 test-unit:
     SQLX_OFFLINE=true cargo test --test dpop_unit --test validation_edge_cases --test scope_edge_cases
 
+store_test := "SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run -E 'not package(tranquil-store) and not binary(store_parity)'"
+
 test-auth:
-    ./scripts/run-tests.sh --test oauth --test oauth_lifecycle --test oauth_scopes --test oauth_security --test jwt_security --test session_management --test change_password --test password_reset
+    {{store_test}} --test oauth --test oauth_lifecycle --test oauth_scopes --test oauth_security --test jwt_security --test session_management --test change_password --test password_reset
 
 test-admin:
-    ./scripts/run-tests.sh --test admin_email --test admin_invite --test admin_moderation --test admin_search --test admin_stats
+    {{store_test}} --test admin_email --test admin_invite --test admin_moderation --test admin_search --test admin_stats
 
 test-sync:
-    ./scripts/run-tests.sh --test sync_repo --test sync_blob --test sync_conformance --test sync_deprecated --test firehose_validation
+    {{store_test}} --test sync_repo --test sync_blob --test sync_conformance --test sync_deprecated --test firehose_validation
 
 test-repo:
-    ./scripts/run-tests.sh --test repo_batch --test repo_blob --test record_validation --test lifecycle_record
+    {{store_test}} --test repo_batch --test repo_blob --test record_validation --test lifecycle_record
 
 test-identity:
-    ./scripts/run-tests.sh --test identity --test did_web --test plc_migration --test plc_operations --test plc_validation
+    {{store_test}} --test identity --test did_web --test plc_migration --test plc_operations --test plc_validation
 
 test-account:
-    ./scripts/run-tests.sh --test lifecycle_session --test delete_account --test invite --test email_update --test account_notifications
+    {{store_test}} --test lifecycle_session --test delete_account --test invite --test email_update --test account_notifications
 
 test-security:
-    ./scripts/run-tests.sh --test security_fixes --test banned_words --test rate_limit --test moderation
+    {{store_test}} --test security_fixes --test banned_words --test rate_limit --test moderation
 
 test-import:
-    ./scripts/run-tests.sh --test import_verification --test import_with_verification
+    {{store_test}} --test import_verification --test import_with_verification
 
 test-misc:
-    ./scripts/run-tests.sh --test actor --test commit_signing --test image_processing --test lifecycle_social --test notifications --test server --test signing_key --test verify_live_commit
+    {{store_test}} --test actor --test commit_signing --test image_processing --test lifecycle_social --test notifications --test server --test signing_key --test verify_live_commit
 
 test *args:
     @just test-unit
-    ./scripts/run-tests.sh {{args}}
-
-test-embedded *args:
-    @just test-unit
-    SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run -E 'not binary(store_parity)' {{args}}
+    {{store_test}} {{args}}
 
 test-one name:
-    ./scripts/run-tests.sh --test {{name}}
+    {{store_test}} --test {{name}}
+
+test-full *args:
+    @just test-unit
+    @just services-up
+    eval "$(tranquil-dev-services env)" && SQLX_OFFLINE=true cargo nextest run --features tranquil-pds/s3 -E 'not package(tranquil-store)' {{args}}
+
+test-pg *args:
+    @just test-unit
+    ./scripts/run-tests.sh {{args}}
+
+services-up:
+    tranquil-dev-services up
+
+services-down:
+    tranquil-dev-services down
 
 infra-start:
     ./scripts/test-infra.sh start

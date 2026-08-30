@@ -77,9 +77,12 @@ async fn main() -> ExitCode {
                 }
                 config
                     .server
-                    .user_handle_domain_list()
+                    .user_handle_domains
                     .iter()
-                    .filter(|d| !tranquil_pds::api::validation::domain_forms_valid_handles(d))
+                    .flatten()
+                    .filter(|d| {
+                        !tranquil_pds::api::validation::domain_forms_valid_handles(d.as_str())
+                    })
                     .for_each(|d| {
                         eprintln!(
                             "account creation under handle domain {d} will be rejected because its TLD is reserved"

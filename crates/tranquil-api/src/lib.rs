@@ -467,9 +467,15 @@ pub fn api_routes() -> axum::Router<AppState> {
 pub fn well_known_api_routes() -> axum::Router<AppState> {
     use axum::routing::get;
 
-    axum::Router::new()
+    let routes = axum::Router::new()
         .route("/did.json", get(identity::well_known_did))
-        .route("/atproto-did", get(identity::well_known_atproto_did))
+        .route("/atproto-did", get(identity::well_known_atproto_did));
+
+    if tranquil_config::get().server.enable_caddy_on_demand_tls {
+        routes.route("/caddy/ask", get(server::caddy_ask))
+    } else {
+        routes
+    }
 }
 
 pub fn webhook_routes() -> axum::Router<AppState> {

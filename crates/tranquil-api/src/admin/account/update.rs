@@ -66,11 +66,11 @@ pub async fn update_account_handle(
     {
         return Err(ApiError::InvalidHandle(None));
     }
-    let available_domains = tranquil_config::get().server.available_user_domain_list();
-    let handle = if !input_handle.contains('.') {
-        format!("{}.{}", input_handle, &available_domains[0])
-    } else {
+    let primary = tranquil_pds::handle::ServiceDomains::for_user_handles().primary();
+    let handle = if input_handle.contains('.') {
         input_handle.to_string()
+    } else {
+        format!("{}.{}", input_handle, primary)
     };
     let old_handle = state.repos.user.get_handle_by_did(did).await.ok().flatten();
     let user_id = state

@@ -132,12 +132,9 @@ pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -
     let host_header = get_header_str(&headers, http::header::HOST).unwrap_or(hostname);
     let host_without_port = host_header.split(':').next().unwrap_or(host_header);
     if host_without_port != hostname_without_port {
-        let is_subdomain = cfg
-            .server
-            .available_user_domain_list()
-            .into_iter()
-            .chain(std::iter::once(hostname_without_port.to_string()))
-            .any(|d| host_without_port.ends_with(&format!(".{}", d)));
+        let is_subdomain = tranquil_pds::handle::ServiceDomains::served()
+            .split_handle(host_without_port)
+            .is_some();
         if is_subdomain {
             return serve_handle_did_doc(&state, host_without_port, hostname).await;
         }
@@ -582,26 +579,16 @@ pub async fn update_handle(
             "Inappropriate language in handle".into(),
         )));
     }
-    let handle_domains = tranquil_config::get().server.user_handle_domain_list();
-    let matched_handle_domain = handle_domains
-        .iter()
-        .filter(|d| new_handle.ends_with(&format!(".{}", d)))
-        .max_by_key(|d| d.len())
-        .cloned();
-    let is_domain_itself = handle_domains.iter().any(|d| d == &new_handle);
-    let handle: Handle = if (!new_handle.contains('.') || matched_handle_domain.is_some())
-        && !is_domain_itself
-    {
-        let (short_part, full_handle) = match &matched_handle_domain {
-            Some(domain) => {
-                let suffix = format!(".{}", domain);
-                let short = new_handle.strip_suffix(&suffix).unwrap_or(&new_handle);
-                (short.to_string(), new_handle.clone())
-            }
-            None => {
-                let primary = &handle_domains[0];
-                (new_handle.clone(), format!("{}.{}", new_handle, primary))
-            }
+    let handle_domains = tranquil_pds::handle::ServiceDomains::for_user_handles();
+    let split = handle_domains.split_handle(&new_handle);
+    let is_domain_itself = handle_domains.contains(&new_handle);
+    let handle: Handle = if (!new_handle.contains('.') || split.is_some()) && !is_domain_itself {
+        let (short_part, full_handle) = match split {
+            Some((_domain, short)) => (short.to_string(), new_handle.clone()),
+            None => (
+                new_handle.clone(),
+                format!("{}.{}", new_handle, handle_domains.primary()),
+            ),
         };
         if full_handle == current_handle {
             let handle: Handle = match full_handle.parse() {

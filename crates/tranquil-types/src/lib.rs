@@ -330,6 +330,38 @@ pub enum HandleError {
     Invalid(String),
 }
 
+validated_string_newtype! {
+    pub struct Domain;
+    error = DomainError;
+    label = "domain";
+    validator = |s| {
+        let normalized = s.to_ascii_lowercase();
+        (normalized.len() <= 253
+            && !normalized.is_empty()
+            && normalized.split('.').all(|label| {
+                !label.is_empty()
+                    && !label.starts_with('-')
+                    && !label.ends_with('-')
+                    && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            }))
+        .then_some(normalized)
+        .ok_or(())
+    };
+}
+
+impl Domain {
+    pub fn eq_name(&self, name: &str) -> bool {
+        self.as_str().eq_ignore_ascii_case(name)
+    }
+
+    pub fn strip_from<'h>(&self, handle: &'h str) -> Option<&'h str> {
+        let domain_len = self.as_str().len();
+        (handle.len() > domain_len + 1 && handle.as_bytes()[handle.len() - domain_len - 1] == b'.')
+            .then(|| &handle[..handle.len() - domain_len - 1])
+            .filter(|_| handle[handle.len() - domain_len..].eq_ignore_ascii_case(self.as_str()))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AtIdentifier {
     Did(Did),

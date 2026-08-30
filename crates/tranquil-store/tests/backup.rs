@@ -344,8 +344,12 @@ fn verify_backup_detects_checksum_mismatch() {
             .unwrap();
 
         let manifest = read_manifest(backup_dir.path()).unwrap();
-        let first_file = &manifest.files[0];
-        let file_path = backup_dir.path().join(&first_file.path);
+        let target = manifest
+            .files
+            .iter()
+            .find(|f| f.size > 0)
+            .expect("backup manifest must list a file with content");
+        let file_path = backup_dir.path().join(&target.path);
         let mut data = std::fs::read(&file_path).unwrap();
         data.iter_mut().take(8).for_each(|b| *b ^= 0xFF);
         std::fs::write(&file_path, &data).unwrap();
@@ -901,8 +905,12 @@ fn restore_fails_cleanly_on_corrupted_backup() {
             .create_backup(backup_dir.path())
             .unwrap();
 
-        let first_file = &manifest.files[0];
-        let file_path = backup_dir.path().join(&first_file.path);
+        let target = manifest
+            .files
+            .iter()
+            .find(|f| f.size > 0)
+            .expect("backup manifest must list a file with content");
+        let file_path = backup_dir.path().join(&target.path);
         let mut data = std::fs::read(&file_path).unwrap();
         data.iter_mut().take(16).for_each(|b| *b ^= 0xFF);
         std::fs::write(&file_path, &data).unwrap();

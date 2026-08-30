@@ -2,6 +2,7 @@ use confique::Config;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use tranquil_types::Domain;
 
 static CONFIG: OnceLock<TranquilConfig> = OnceLock::new();
 
@@ -30,7 +31,6 @@ impl fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
-
 /// Initialize the global configuration. Must be called once at startup before
 /// any other code accesses the configuration. Panics if called more than once.
 pub fn init(config: TranquilConfig) {
@@ -222,6 +222,12 @@ impl TranquilConfig {
                         .to_string(),
                 );
             }
+        }
+
+        if let Err(e) = Domain::new(self.server.hostname_without_port()) {
+            errors.push(format!(
+                "server.hostname (PDS_HOSTNAME) must be a plain domain, {e}"
+            ));
         }
 
         // -- email -----------------------------------------------------------
@@ -428,7 +434,7 @@ pub struct ServerConfig {
     pub hostname: String,
 
     /// Address to bind the HTTP server to.
-    #[config(env = "SERVER_HOST", default = "127.0.0.1")]
+    #[config(env = "SERVER_HOST", default = "[::1]")]
     pub host: String,
 
     /// Port to bind the HTTP server to.
@@ -438,12 +444,20 @@ pub struct ServerConfig {
     /// List of domains for user handles.
     /// Defaults to the PDS hostname when not set.
     #[config(env = "PDS_USER_HANDLE_DOMAINS", parse_env = split_comma_list)]
-    pub user_handle_domains: Option<Vec<String>>,
+    pub user_handle_domains: Option<Vec<Domain>>,
 
     /// Enable PDS-hosted did:web identities.  Hosting did:web requires a
     /// long-term commitment to serve DID documents; opt-in only.
     #[config(env = "ENABLE_PDS_HOSTED_DID_WEB", default = false)]
     pub enable_pds_hosted_did_web: bool,
+
+    /// The caddy on-demand TLS requires we serve
+    /// the endpoint `/.well-known/caddy/ask`.
+    /// It will be used so that caddy can create TLS
+    /// certs for us on the fly
+    /// and we don't have to do annoying wildcard certs.
+    #[config(env = "ENABLE_CADDY_ON_DEMAND_TLS", default = true)]
+    pub enable_caddy_on_demand_tls: bool,
 
     /// iykyk!
     #[config(env = "RFC_MOO_COMPLIANCE", default = false)]
@@ -572,20 +586,6 @@ impl ServerConfig {
     /// Returns the extra banned words list, or an empty vec when unset.
     pub fn banned_word_list(&self) -> Vec<String> {
         self.banned_words.clone().unwrap_or_default()
-    }
-
-    /// Returns the user handle domains, falling back to `[hostname_without_port]`.
-    pub fn user_handle_domain_list(&self) -> Vec<String> {
-        self.user_handle_domains
-            .as_deref()
-            .filter(|v| !v.is_empty())
-            .map(|v| v.to_vec())
-            .unwrap_or_else(|| vec![self.hostname_without_port().to_string()])
-    }
-
-    /// Alias for `user_handle_domain_list` (for callers that were using the now-removed `available_user_domains` field).
-    pub fn available_user_domain_list(&self) -> Vec<String> {
-        self.user_handle_domain_list()
     }
 }
 
@@ -1484,12 +1484,13 @@ pub struct ImportConfig {
 /// trimming whitespace and dropping empty entries.
 ///
 /// Signature matches confique's `parse_env` expectation: `fn(&str) -> Result<T, E>`.
-fn split_comma_list(value: &str) -> Result<Vec<String>, std::convert::Infallible> {
-    Ok(value
+fn split_comma_list<T: std::str::FromStr>(value: &str) -> Result<Vec<T>, T::Err> {
+    value
         .split(',')
-        .map(|item| item.trim().to_string())
+        .map(str::trim)
         .filter(|item| !item.is_empty())
-        .collect())
+        .map(T::from_str)
+        .collect()
 }
 
 #[derive(Debug, Config)]

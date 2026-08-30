@@ -66,7 +66,7 @@ See [example.toml](https://tangled.org/tranquil.farm/tranquil-pds/blob/main/exam
         # by default, tranquil runs on port 3000.
         # You can change this with the tranquil-pds.settings.server.port option in the service config.
         extraConfig = ''
-          reverse_proxy localhost:3000
+          reverse_proxy [::1]:3000
         '';
       };
     };

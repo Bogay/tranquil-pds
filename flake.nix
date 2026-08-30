@@ -24,6 +24,7 @@
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.callPackage ./shell.nix { };
+        full = pkgs.callPackage ./shells/full.nix { };
       });
 
       nixosModules = {

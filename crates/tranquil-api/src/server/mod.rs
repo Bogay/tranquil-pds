@@ -1,5 +1,6 @@
 pub mod account_status;
 pub mod app_password;
+pub mod caddy;
 pub mod email;
 pub mod invite;
 pub mod logo;
@@ -22,6 +23,7 @@ pub use account_status::{
     request_account_delete,
 };
 pub use app_password::{create_app_password, list_app_passwords, revoke_app_password};
+pub use caddy::caddy_ask;
 pub use email::{
     authorize_email_update, check_channel_verified, check_email_in_use, check_email_update_status,
     check_email_verified, confirm_email, request_email_update, update_email,

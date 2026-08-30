@@ -5,8 +5,6 @@
 
   # repo tooling
   just,
-  podman,
-  podman-compose,
 
   # rust tooling
   clippy,
@@ -38,8 +36,6 @@ mkShell {
 
   packages = [
     just
-    podman
-    podman-compose
 
     clippy
     rustfmt
