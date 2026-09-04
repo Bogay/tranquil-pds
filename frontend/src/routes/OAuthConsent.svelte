@@ -69,9 +69,24 @@
     return known[reason] ?? 'oauth.consent.setFailureReason.unknown'
   }
 
+  const SCOPE_REJECTION_LOCALE_KEYS = {
+    unrecognized: 'oauth.consent.scopeRejectionReason.unrecognized',
+    not_registered: 'oauth.consent.scopeRejectionReason.not_registered',
+  }
+
+  function scopeRejectionLocaleKey(reason: string): string {
+    const known: Partial<Record<string, string>> = SCOPE_REJECTION_LOCALE_KEYS
+    return known[reason] ?? 'oauth.consent.scopeRejectionReason.unknown'
+  }
+
   interface FailedSetInfo {
     nsid: string
     aud?: string
+    reason: string
+  }
+
+  interface RejectedScopeInfo {
+    scope: string
     reason: string
   }
 
@@ -85,6 +100,7 @@
     permission_sets: PermissionSetInfo[]
     transition_supersedes?: boolean
     failed_sets: FailedSetInfo[]
+    rejected_scopes: RejectedScopeInfo[]
     show_consent: boolean
     did: string
     handle?: string
@@ -336,8 +352,12 @@
     consentData ? (consentData.permission_sets ?? []).filter(s => s.expanded.some(e => e.restricted)) : []
   )
   let failedSets = $derived(consentData?.failed_sets ?? [])
+  let rejectedScopes = $derived(consentData?.rejected_scopes ?? [])
   let hasUnavailable = $derived(
-    restrictedScopes.length > 0 || limitedBundles.length > 0 || failedSets.length > 0
+    restrictedScopes.length > 0 ||
+      limitedBundles.length > 0 ||
+      failedSets.length > 0 ||
+      rejectedScopes.length > 0
   )
 
   let hasGranularScopes = $derived(
@@ -648,6 +668,18 @@
                     <div class="scope-info">
                       <span class="scope-name">{f.nsid}{#if f.aud} ({f.aud}){/if}</span>
                       <span class="scope-description">{$_(setFailureLocaleKey(f.reason))}</span>
+                    </div>
+                  </div>
+                {/each}
+              {/if}
+
+              {#if rejectedScopes.length}
+                <p class="unavailable-subhead">{$_('oauth.consent.unavailableRejected')}</p>
+                {#each rejectedScopes as r}
+                  <div class="scope-item failed">
+                    <div class="scope-info">
+                      <span class="scope-name scope-raw">{r.scope}</span>
+                      <span class="scope-description">{$_(scopeRejectionLocaleKey(r.reason))}</span>
                     </div>
                   </div>
                 {/each}

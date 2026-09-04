@@ -65,6 +65,7 @@ const consentPayload = {
   ],
   permission_sets: [],
   failed_sets: [],
+  rejected_scopes: [],
   show_consent: true,
   did: "did:plc:example",
 };

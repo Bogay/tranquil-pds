@@ -157,6 +157,7 @@ pub async fn handle_authorization_code_grant(
         &*state.cache,
         requested_for_resolve,
         authority,
+        client_metadata.scope.as_deref(),
     )
     .await;
     if !effective.outcome.failures.is_empty() {
@@ -274,10 +275,17 @@ async fn recompute_resolved_scope(
         Some(g) => crate::endpoints::authorize::scope_resolution::Authority::Delegated(g),
         None => crate::endpoints::authorize::scope_resolution::Authority::FullSelf,
     };
+    let client_scope = state
+        .client_metadata_cache
+        .get(&token_data.client_id)
+        .await
+        .ok()
+        .and_then(|m| m.scope);
     let effective = crate::endpoints::authorize::scope_resolution::resolve_effective_scopes(
         &*state.cache,
         requested,
         authority,
+        client_scope.as_deref(),
     )
     .await;
     if !effective.outcome.failures.is_empty() {

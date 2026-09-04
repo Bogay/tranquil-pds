@@ -44,6 +44,19 @@ pub enum ResolveFailure {
     EmptyPermissions,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeRejection {
+    Unrecognized,
+    NotRegistered,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectedScope {
+    pub scope: String,
+    pub reason: ScopeRejection,
+}
+
 #[derive(Debug, Clone)]
 pub struct FailedSet {
     // NSID and aud are left as strings to avoid issues from malformed requests.
@@ -61,11 +74,21 @@ pub struct ResolvedSetGroup {
     pub expanded: Vec<String>,
 }
 
+impl ResolvedSetGroup {
+    pub fn include_token(&self) -> String {
+        match &self.aud {
+            Some(aud) => format!("include:{}?aud={}", self.nsid, aud),
+            None => format!("include:{}", self.nsid),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ExpansionOutcome {
     pub passthrough: Vec<String>,
     pub sets: Vec<ResolvedSetGroup>,
     pub failures: Vec<FailedSet>,
+    pub rejected: Vec<RejectedScope>,
 }
 
 impl ExpansionOutcome {
@@ -811,6 +834,7 @@ mod tests {
                 given_aud: None,
                 reason: ResolveFailure::NotFound,
             }],
+            rejected: vec![],
         };
         let flat = out.flat_scopes();
         assert_eq!(
@@ -839,6 +863,7 @@ mod tests {
                 expanded: vec!["repo:x".into(), "rpc:io.atcr.getManifest".into()],
             }],
             failures: vec![],
+            rejected: vec![],
         };
         let flat = out.flat_scopes();
         assert_eq!(flat, vec!["repo:x", "rpc:io.atcr.getManifest"]);

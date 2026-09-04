@@ -78,12 +78,10 @@ fn is_granular_scope(s: &str) -> bool {
 }
 
 fn is_valid_scope(s: &str) -> bool {
-    s == "atproto"
-        || s == "transition:generic"
-        || s == "transition:chat.bsky"
-        || s == "transition:email"
-        || is_granular_scope(s)
-        || s.starts_with("include:")
+    !matches!(
+        tranquil_pds::oauth::scopes::parse_scope(s),
+        tranquil_pds::oauth::scopes::ParsedScope::Unknown(_)
+    )
 }
 
 fn extract_device_cookie(headers: &HeaderMap) -> Option<tranquil_types::DeviceId> {

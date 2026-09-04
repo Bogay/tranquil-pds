@@ -3,8 +3,8 @@ use crate::cache_keys::permission_set_key;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tranquil_scopes::{
-    ExpansionOutcome, FailedSet, ResolveFailure, ResolvedSetGroup, ScopeExpansionError,
-    fetch_and_expand, parse_include_scope,
+    ExpansionOutcome, FailedSet, ParsedScope, RejectedScope, ResolveFailure, ResolvedSetGroup,
+    ScopeExpansionError, ScopeRejection, fetch_and_expand, parse_include_scope, parse_scope,
 };
 use tranquil_types::Nsid;
 
@@ -32,6 +32,12 @@ pub async fn expand_scopes(cache: &dyn Cache, scope_string: &str) -> ExpansionOu
     let mut outcome = ExpansionOutcome::default();
     for tok in scope_string.split_whitespace() {
         match tok.strip_prefix("include:") {
+            None if matches!(parse_scope(tok), ParsedScope::Unknown(_)) => {
+                outcome.rejected.push(RejectedScope {
+                    scope: tok.to_string(),
+                    reason: ScopeRejection::Unrecognized,
+                })
+            }
             None => outcome.passthrough.push(tok.to_string()),
             Some(rest) => {
                 let (nsid, aud) = parse_include_scope(rest);
@@ -235,5 +241,29 @@ mod tests {
         assert_eq!(out.sets.len(), 0);
         assert_eq!(out.failures.len(), 1);
         assert_eq!(out.failures[0].given_nsid, "nonexistent.fake.permissionSet");
+    }
+
+    #[tokio::test]
+    async fn unrecognized_scopes_are_rejected_not_passed_through() {
+        let cache = MemoryCache::new();
+        let out = expand_scopes(&cache, "atproto chat").await;
+        assert_eq!(out.passthrough, vec!["atproto".to_string()]);
+        assert!(
+            !out.flat_scopes().iter().any(|s| s == "chat"),
+            "an unrecognized scope must never reach the effective scope set"
+        );
+        assert_eq!(out.rejected.len(), 1);
+        assert_eq!(out.rejected[0].scope, "chat");
+        assert_eq!(out.rejected[0].reason, ScopeRejection::Unrecognized);
+    }
+
+    #[tokio::test]
+    async fn structurally_invalid_granular_scopes_are_rejected() {
+        let cache = MemoryCache::new();
+        let out = expand_scopes(&cache, "atproto rpc:*?aud=*").await;
+        assert_eq!(out.passthrough, vec!["atproto".to_string()]);
+        assert_eq!(out.rejected.len(), 1);
+        assert_eq!(out.rejected[0].scope, "rpc:*?aud=*");
+        assert_eq!(out.rejected[0].reason, ScopeRejection::Unrecognized);
     }
 }

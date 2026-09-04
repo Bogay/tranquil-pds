@@ -693,3 +693,145 @@ async fn test_dereference_scope_requires_auth() {
         "Should require authentication"
     );
 }
+
+#[tokio::test]
+async fn test_unrecognized_scope_reaches_consent_and_is_never_granted() {
+    let url = base_url().await;
+    let http_client = client();
+    let redirect_uri = "https://example.com/callback";
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    let handle = format!("badscope{}", suffix);
+    let email = format!("badscope{}@example.com", suffix);
+    let password = "BadscopePass123!";
+
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({ "handle": handle, "email": email, "password": password }))
+        .send()
+        .await
+        .expect("Account creation failed");
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let user_did = account["did"].as_str().unwrap().to_string();
+    let _ = verify_new_account(&http_client, &user_did).await;
+
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (code_verifier, code_challenge) = generate_pkce();
+
+    let par_res = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto chat"),
+        ])
+        .send()
+        .await
+        .expect("PAR failed");
+    assert!(
+        par_res.status() == StatusCode::OK || par_res.status() == StatusCode::CREATED,
+        "PAR must not reject an unrecognized scope, got {}",
+        par_res.status()
+    );
+    let par_body: Value = par_res.json().await.unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap().to_string();
+
+    let auth_res = http_client
+        .post(format!("{}/oauth/authorize", url))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "username": &handle,
+            "password": password,
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .expect("Authorize failed");
+    assert_eq!(auth_res.status(), StatusCode::OK);
+    let auth_body: Value = auth_res.json().await.unwrap();
+    let location = auth_body["redirect_uri"].as_str().unwrap().to_string();
+    assert!(
+        location.contains("/oauth/consent"),
+        "should land on the consent screen, got {}",
+        location
+    );
+
+    let consent_get: Value = http_client
+        .get(format!(
+            "{}/oauth/authorize/consent?request_uri={}",
+            url, request_uri
+        ))
+        .send()
+        .await
+        .expect("Consent GET failed")
+        .json()
+        .await
+        .unwrap();
+
+    let rejected = consent_get["rejected_scopes"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1, "got {:?}", rejected);
+    assert_eq!(rejected[0]["scope"].as_str(), Some("chat"));
+    assert_eq!(rejected[0]["reason"].as_str(), Some("unrecognized"));
+    assert!(
+        !consent_get["scopes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["scope"] == "chat"),
+        "an unrecognized scope must never be offered as grantable"
+    );
+
+    let consent_res = http_client
+        .post(format!("{}/oauth/authorize/consent", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "approved_scopes": ["atproto", "chat"],
+            "remember": false
+        }))
+        .send()
+        .await
+        .expect("Consent POST failed");
+    assert_eq!(consent_res.status(), StatusCode::OK);
+    let consent_body: Value = consent_res.json().await.unwrap();
+    let location = consent_body["redirect_uri"].as_str().unwrap().to_string();
+    let code = location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
+
+    let token_res = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
+        .expect("Token request failed");
+    assert_eq!(token_res.status(), StatusCode::OK);
+    let token_body: Value = token_res.json().await.unwrap();
+    let granted = token_body["scope"].as_str().unwrap();
+    assert!(
+        granted.split_whitespace().any(|s| s == "atproto"),
+        "granted scope was {:?}",
+        granted
+    );
+    assert!(
+        !granted.split_whitespace().any(|s| s == "chat"),
+        "an unrecognized scope leaked into the issued token: {:?}",
+        granted
+    );
+}

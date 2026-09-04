@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use tranquil_pds::oauth::{
     AuthorizationRequestParameters, ClientAuth, CodeChallengeMethod, OAuthError, Prompt,
     RequestData, RequestId, ResponseMode, ResponseType,
-    scopes::{ParsedScope, parse_scope},
 };
 use tranquil_pds::rate_limit::{OAuthParLimit, OAuthRateLimited};
 use tranquil_pds::state::AppState;
@@ -84,7 +83,7 @@ pub async fn pushed_authorization_request(
     let client_metadata = client_cache.get(&request.client_id).await?;
     client_cache.validate_redirect_uri(&client_metadata, &request.redirect_uri)?;
     let client_auth = determine_client_auth(&request)?;
-    let validated_scope = validate_scope(&request.scope, &client_metadata)?;
+    let validated_scope = normalize_scope(&request.scope)?;
     let request_id = RequestId::generate();
     let expires_at = Utc::now() + Duration::seconds(PAR_EXPIRY_SECONDS);
     let response_mode = parse_response_mode(request.response_mode.as_deref())?;
@@ -165,10 +164,7 @@ fn determine_client_auth(request: &ParRequest) -> Result<ClientAuth, OAuthError>
     Ok(ClientAuth::None)
 }
 
-fn validate_scope(
-    requested_scope: &Option<String>,
-    client_metadata: &tranquil_pds::oauth::ClientMetadata,
-) -> Result<Option<String>, OAuthError> {
+fn normalize_scope(requested_scope: &Option<String>) -> Result<Option<String>, OAuthError> {
     let scope_str = match requested_scope {
         Some(s) if !s.is_empty() => s,
         _ => return Ok(Some("atproto".to_string())),
@@ -177,52 +173,7 @@ fn validate_scope(
     if requested_scopes.is_empty() {
         return Ok(Some("atproto".to_string()));
     }
-    if let Some(unknown) = requested_scopes
-        .iter()
-        .find(|s| matches!(parse_scope(s), ParsedScope::Unknown(_)))
-    {
-        return Err(OAuthError::InvalidScope(format!(
-            "Unsupported scope: {}",
-            unknown
-        )));
-    }
-
-    if let Some(client_scope) = &client_metadata.scope {
-        let client_scopes: Vec<&str> = client_scope.split_whitespace().collect();
-        if let Some(unregistered) = requested_scopes
-            .iter()
-            .find(|scope| !client_scopes.iter().any(|cs| scope_matches(cs, scope)))
-        {
-            return Err(OAuthError::InvalidScope(format!(
-                "Scope '{}' not registered for this client",
-                unregistered
-            )));
-        }
-    }
     Ok(Some(requested_scopes.join(" ")))
-}
-
-fn scope_matches(client_scope: &str, requested_scope: &str) -> bool {
-    if client_scope == requested_scope {
-        return true;
-    }
-
-    fn get_resource_type(scope: &str) -> &str {
-        let base = scope.split('?').next().unwrap_or(scope);
-        base.split(':').next().unwrap_or(base)
-    }
-
-    let client_type = get_resource_type(client_scope);
-    let requested_type = get_resource_type(requested_scope);
-
-    if client_type == requested_type {
-        let client_base = client_scope.split('?').next().unwrap_or(client_scope);
-        if client_base.contains('*') {
-            return true;
-        }
-    }
-
-    false
 }
 
 fn parse_response_type(value: &str) -> Result<ResponseType, OAuthError> {

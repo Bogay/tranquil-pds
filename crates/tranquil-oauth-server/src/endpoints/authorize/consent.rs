@@ -44,6 +44,13 @@ pub struct FailedSetInfo {
 }
 
 #[derive(Debug, Serialize)]
+pub struct RejectedScopeInfo {
+    // The scope exactly as the client requested it, which may be invalid or malformed.
+    pub scope: String,
+    pub reason: tranquil_scopes::ScopeRejection,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ConsentResponse {
     pub request_uri: String,
     pub client_id: ClientId,
@@ -54,6 +61,7 @@ pub struct ConsentResponse {
     pub permission_sets: Vec<PermissionSetInfo>,
     pub transition_supersedes: bool,
     pub failed_sets: Vec<FailedSetInfo>,
+    pub rejected_scopes: Vec<RejectedScopeInfo>,
     pub show_consent: bool,
     pub did: Did,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -156,9 +164,13 @@ pub async fn consent_get(
         Some(grant) => scope_resolution::Authority::Delegated(&grant.granted_scopes),
         None => scope_resolution::Authority::FullSelf,
     };
-    let effective =
-        scope_resolution::resolve_effective_scopes(&*state.cache, requested_scope_str, authority)
-            .await;
+    let effective = scope_resolution::resolve_effective_scopes(
+        &*state.cache,
+        requested_scope_str,
+        authority,
+        client_metadata.as_ref().and_then(|m| m.scope.as_deref()),
+    )
+    .await;
     let requested_scopes: Vec<&str> = effective.permitted.split_whitespace().collect();
     let preferences = state
         .repos
@@ -175,10 +187,7 @@ pub async fn consent_get(
         .passthrough
         .iter()
         .cloned()
-        .chain(effective.outcome.sets.iter().map(|g| match &g.aud {
-            Some(a) => format!("include:{}?aud={}", g.nsid, a),
-            None => format!("include:{}", g.nsid),
-        }))
+        .chain(effective.outcome.sets.iter().map(|g| g.include_token()))
         .collect();
     let show_consent = should_show_consent(
         state.repos.oauth.as_ref(),
@@ -271,10 +280,7 @@ pub async fn consent_get(
         .sets
         .iter()
         .map(|g| {
-            let include_scope = match &g.aud {
-                Some(a) => format!("include:{}?aud={}", g.nsid, a),
-                None => format!("include:{}", g.nsid),
-            };
+            let include_scope = g.include_token();
             let expanded: Vec<ScopeInfo> = g.expanded.iter().map(|s| make_scope_info(s)).collect();
             let restricted = !expanded.is_empty() && expanded.iter().all(|s| s.restricted);
             let superseded = !expanded.is_empty() && expanded.iter().all(|s| s.superseded);
@@ -300,6 +306,16 @@ pub async fn consent_get(
             given_nsid: f.given_nsid.clone(),
             given_aud: f.given_aud.clone(),
             reason: f.reason.clone(),
+        })
+        .collect();
+
+    let rejected_scopes: Vec<RejectedScopeInfo> = effective
+        .outcome
+        .rejected
+        .iter()
+        .map(|r| RejectedScopeInfo {
+            scope: r.scope.clone(),
+            reason: r.reason,
         })
         .collect();
 
@@ -357,6 +373,7 @@ pub async fn consent_get(
         permission_sets,
         transition_supersedes,
         failed_sets,
+        rejected_scopes,
         show_consent,
         did: did.clone(),
         handle: account_handle,
@@ -448,9 +465,19 @@ pub async fn consent_post(
         Some(grant) => scope_resolution::Authority::Delegated(&grant.granted_scopes),
         None => scope_resolution::Authority::FullSelf,
     };
-    let effective =
-        scope_resolution::resolve_effective_scopes(&*state.cache, original_scope_str, authority)
-            .await;
+    let client_scope = state
+        .client_metadata_cache
+        .get(&request_data.parameters.client_id)
+        .await
+        .ok()
+        .and_then(|m| m.scope);
+    let effective = scope_resolution::resolve_effective_scopes(
+        &*state.cache,
+        original_scope_str,
+        authority,
+        client_scope.as_deref(),
+    )
+    .await;
     let include_token = |nsid: &str, aud: &Option<String>| -> String {
         match aud {
             Some(a) => format!("include:{}?aud={}", nsid, a),
@@ -482,13 +509,7 @@ pub async fn consent_post(
         .passthrough
         .iter()
         .cloned()
-        .chain(
-            effective
-                .outcome
-                .sets
-                .iter()
-                .map(|g| include_token(&g.nsid, &g.aud)),
-        )
+        .chain(effective.outcome.sets.iter().map(|g| g.include_token()))
         .collect();
     let atproto_was_requested = presented_items.iter().any(|s| s == "atproto");
     if atproto_was_requested && !form.approved_scopes.contains(&"atproto".to_string()) {
