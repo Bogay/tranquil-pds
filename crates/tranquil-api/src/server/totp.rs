@@ -6,8 +6,8 @@ use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{
     Active, Auth, decrypt_totp_secret, encrypt_totp_secret, generate_backup_codes,
     generate_qr_png_base64, generate_totp_secret, generate_totp_uri, hash_backup_code,
-    is_backup_code_format, require_legacy_session_mfa, verify_backup_code, verify_password_mfa,
-    verify_totp_code, verify_totp_mfa,
+    is_backup_code_format, verify_backup_code, verify_password_mfa, verify_totp_code,
+    verify_totp_mfa,
 };
 use tranquil_pds::rate_limit::{TotpVerifyLimit, check_user_rate_limit_with_message};
 use tranquil_pds::state::AppState;
@@ -163,11 +163,9 @@ pub async fn disable_totp(
     auth: Auth<Active>,
     Json(input): Json<DisableTotpInput>,
 ) -> Result<Json<EmptyResponse>, ApiError> {
-    let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
-
     let _rate_limit = check_user_rate_limit_with_message::<TotpVerifyLimit>(
         &state,
-        session_mfa.did(),
+        auth.did.as_str(),
         "Too many verification attempts. Please try again in a few minutes.",
     )
     .await?;
@@ -184,7 +182,7 @@ pub async fn disable_totp(
 
     tranquil_pds::auth::legacy_2fa::clear_challenge(state.cache.as_ref(), &auth.did).await;
 
-    info!(did = %session_mfa.did(), "TOTP disabled (verified via {} and {})", password_mfa.method(), totp_mfa.method());
+    info!(did = %password_mfa.did(), "TOTP disabled (verified via {} and {})", password_mfa.method(), totp_mfa.method());
 
     Ok(Json(EmptyResponse {}))
 }
