@@ -7,7 +7,10 @@ use smallvec::SmallVec;
 use uuid::Uuid;
 
 use super::MetastoreError;
-use super::blobs::{BlobMetaValue, blob_by_cid_key, blob_meta_key, blob_user_prefix, blobs_prefix};
+use super::blobs::{
+    BlobContentValue, BlobMetaValue, blob_by_cid_key, blob_by_cid_prefix, blob_meta_key,
+    blob_user_prefix,
+};
 use super::commit_ops::{RecordBlobsValue, record_blobs_user_prefix};
 use super::encoding::{KeyReader, exclusive_upper_bound};
 use super::keys::{KeyTag, UserHash};
@@ -55,69 +58,62 @@ impl BlobOps {
 
         let user_hash = self.resolve_user_hash(created_by_user)?;
         let cid_str = cid.as_str();
-
-        let cid_index_key = blob_by_cid_key(cid_str);
-        let existing = self
+        let marker_key = blob_meta_key(user_hash, cid_str);
+        if self
             .repo_data
-            .get(cid_index_key.as_slice())
-            .map_err(MetastoreError::Fjall)?;
-        if existing.is_some() {
+            .get(marker_key.as_slice())
+            .map_err(MetastoreError::Fjall)?
+            .is_some()
+        {
             return Ok(None);
         }
 
-        let value = BlobMetaValue {
-            size_bytes,
-            mime_type: mime_type.to_owned(),
-            storage_key: storage_key.to_owned(),
-            takedown_ref: None,
-            created_at_ms: chrono::Utc::now().timestamp_millis(),
+        let cid_index_key = blob_by_cid_key(cid_str);
+        let content = match point_lookup(
+            &self.repo_data,
+            cid_index_key.as_slice(),
+            BlobContentValue::deserialize,
+            "corrupt blob_content value",
+        )? {
+            Some(mut existing) => {
+                existing.ref_count = existing.ref_count.saturating_add(1);
+                existing
+            }
+            None => BlobContentValue {
+                meta: BlobMetaValue {
+                    size_bytes,
+                    mime_type: mime_type.to_owned(),
+                    storage_key: storage_key.to_owned(),
+                    takedown_ref: None,
+                    created_at_ms: chrono::Utc::now().timestamp_millis(),
+                },
+                ref_count: 1,
+            },
         };
 
-        let primary_key = blob_meta_key(user_hash, cid_str);
-
         let mut batch = self.db.batch();
-        batch.insert(&self.repo_data, primary_key.as_slice(), value.serialize());
+        batch.insert(&self.repo_data, marker_key.as_slice(), &[] as &[u8]);
         batch.insert(
             &self.repo_data,
             cid_index_key.as_slice(),
-            user_hash.raw().to_be_bytes(),
+            content.serialize(),
         );
         batch.commit().map_err(MetastoreError::Fjall)?;
 
         Ok(Some(cid.clone()))
     }
 
-    fn lookup_user_hash_by_cid(&self, cid_str: &str) -> Result<Option<UserHash>, MetastoreError> {
-        let key = blob_by_cid_key(cid_str);
-        match self
-            .repo_data
-            .get(key.as_slice())
-            .map_err(MetastoreError::Fjall)?
-        {
-            Some(raw) => {
-                let arr: [u8; 8] = raw
-                    .as_ref()
-                    .try_into()
-                    .map_err(|_| MetastoreError::CorruptData("blob_by_cid value not 8 bytes"))?;
-                Ok(Some(UserHash::from_raw(u64::from_be_bytes(arr))))
-            }
-            None => Ok(None),
-        }
+    fn get_blob_content(&self, cid: &CidLink) -> Result<Option<BlobContentValue>, MetastoreError> {
+        point_lookup(
+            &self.repo_data,
+            blob_by_cid_key(cid.as_str()).as_slice(),
+            BlobContentValue::deserialize,
+            "corrupt blob_content value",
+        )
     }
 
     fn get_blob_value(&self, cid: &CidLink) -> Result<Option<BlobMetaValue>, MetastoreError> {
-        let cid_str = cid.as_str();
-        let user_hash = match self.lookup_user_hash_by_cid(cid_str)? {
-            Some(h) => h,
-            None => return Ok(None),
-        };
-        let key = blob_meta_key(user_hash, cid_str);
-        point_lookup(
-            &self.repo_data,
-            key.as_slice(),
-            BlobMetaValue::deserialize,
-            "corrupt blob_meta value",
-        )
+        Ok(self.get_blob_content(cid)?.map(|c| c.meta))
     }
 
     pub fn get_blob_metadata(
@@ -186,14 +182,14 @@ impl BlobOps {
     }
 
     pub fn sum_blob_storage(&self) -> Result<i64, MetastoreError> {
-        let prefix = blobs_prefix();
+        let prefix = blob_by_cid_prefix();
         self.repo_data
             .prefix(prefix.as_slice())
             .try_fold(0i64, |acc, guard| {
                 let (_, val_bytes) = guard.into_inner().map_err(MetastoreError::Fjall)?;
-                let value = BlobMetaValue::deserialize(&val_bytes)
-                    .ok_or(MetastoreError::CorruptData("corrupt blob_meta in sum"))?;
-                Ok::<_, MetastoreError>(acc.saturating_add(value.size_bytes))
+                let content = BlobContentValue::deserialize(&val_bytes)
+                    .ok_or(MetastoreError::CorruptData("corrupt blob_content in sum"))?;
+                Ok::<_, MetastoreError>(acc.saturating_add(content.meta.size_bytes))
             })
     }
 
@@ -202,50 +198,34 @@ impl BlobOps {
         cid: &CidLink,
         takedown_ref: Option<&str>,
     ) -> Result<bool, MetastoreError> {
-        let cid_str = cid.as_str();
-        let user_hash = match self.lookup_user_hash_by_cid(cid_str)? {
-            Some(h) => h,
-            None => return Ok(false),
-        };
-        let key = blob_meta_key(user_hash, cid_str);
-        let mut value = match point_lookup(
-            &self.repo_data,
-            key.as_slice(),
-            BlobMetaValue::deserialize,
-            "corrupt blob_meta value",
-        )? {
-            Some(v) => v,
+        let mut content = match self.get_blob_content(cid)? {
+            Some(c) => c,
             None => return Ok(false),
         };
 
-        value.takedown_ref = takedown_ref.map(str::to_owned);
+        content.meta.takedown_ref = takedown_ref.map(str::to_owned);
         let mut batch = self.db.batch();
-        batch.insert(&self.repo_data, key.as_slice(), value.serialize());
+        batch.insert(
+            &self.repo_data,
+            blob_by_cid_key(cid.as_str()).as_slice(),
+            content.serialize(),
+        );
         batch.commit().map_err(MetastoreError::Fjall)?;
         Ok(true)
     }
 
     pub fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<bool, MetastoreError> {
-        let cid_str = cid.as_str();
-        let user_hash = match self.lookup_user_hash_by_cid(cid_str)? {
-            Some(h) => h,
-            None => return Ok(false),
-        };
-
-        let primary_key = blob_meta_key(user_hash, cid_str);
-        let exists = self
+        let cid_index_key = blob_by_cid_key(cid.as_str());
+        if self
             .repo_data
-            .get(primary_key.as_slice())
+            .get(cid_index_key.as_slice())
             .map_err(MetastoreError::Fjall)?
-            .is_some();
-        if !exists {
+            .is_none()
+        {
             return Ok(false);
         }
 
-        let cid_index_key = blob_by_cid_key(cid_str);
-
         let mut batch = self.db.batch();
-        batch.remove(&self.repo_data, primary_key.as_slice());
         batch.remove(&self.repo_data, cid_index_key.as_slice());
         batch.commit().map_err(MetastoreError::Fjall)?;
 
@@ -255,7 +235,6 @@ impl BlobOps {
     pub fn delete_blobs_by_user(&self, user_id: Uuid) -> Result<u64, MetastoreError> {
         let user_hash = self.resolve_user_hash(user_id)?;
         let prefix = blob_user_prefix(user_hash);
-        let user_hash_bytes = user_hash.raw().to_be_bytes();
 
         let (final_batch, remaining, total) = self
             .repo_data
@@ -273,14 +252,25 @@ impl BlobOps {
                         blob_meta_key(user_hash, &cid_str).as_slice(),
                     );
                     let cid_index_key = blob_by_cid_key(&cid_str);
-                    let owns_cid = self
-                        .repo_data
-                        .get(cid_index_key.as_slice())
-                        .map_err(MetastoreError::Fjall)?
-                        .is_some_and(|raw| raw.as_ref() == user_hash_bytes);
-                    if owns_cid {
-                        batch.remove(&self.repo_data, cid_index_key.as_slice());
+
+                    if let Some(mut content) = point_lookup(
+                        &self.repo_data,
+                        cid_index_key.as_slice(),
+                        BlobContentValue::deserialize,
+                        "corrupt blob_content value",
+                    )? {
+                        content.ref_count = content.ref_count.saturating_sub(1);
+                        if content.ref_count == 0 {
+                            batch.remove(&self.repo_data, cid_index_key.as_slice());
+                        } else {
+                            batch.insert(
+                                &self.repo_data,
+                                cid_index_key.as_slice(),
+                                content.serialize(),
+                            );
+                        }
                     }
+
                     let new_count = count + 1;
                     if new_count >= DELETE_BATCH_SIZE {
                         batch.commit().map_err(MetastoreError::Fjall)?;
@@ -311,11 +301,14 @@ impl BlobOps {
         self.repo_data
             .prefix(prefix.as_slice())
             .map(|guard| {
-                let (_, val_bytes) = guard.into_inner().map_err(MetastoreError::Fjall)?;
-                let value = BlobMetaValue::deserialize(&val_bytes)
-                    .ok_or(MetastoreError::CorruptData("corrupt blob_meta value"))?;
-                Ok(value.storage_key)
+                let (key_bytes, _) = guard.into_inner().map_err(MetastoreError::Fjall)?;
+                let cid = parse_blob_cid_from_key(key_bytes.as_ref())?;
+                Ok(self
+                    .get_blob_content(&cid)?
+                    .filter(|c| c.ref_count == 1)
+                    .map(|c| c.meta.storage_key))
             })
+            .filter_map(Result::transpose)
             .collect()
     }
 
@@ -346,12 +339,7 @@ impl BlobOps {
                         if acc.contains_key(&cid_str) {
                             return Ok(());
                         }
-                        let key = blob_meta_key(user_hash, &cid_str);
-                        let exists = self
-                            .repo_data
-                            .get(key.as_slice())
-                            .map_err(MetastoreError::Fjall)?
-                            .is_some();
+                        let exists = self.get_blob_content(&cid_link)?.is_some();
                         if !exists {
                             acc.insert(cid_str, record_uri.clone());
                         }
@@ -415,17 +403,11 @@ impl BlobOps {
                     Ok(c) => c,
                     Err(e) => return Some(Err(e)),
                 };
-                let key = blob_meta_key(user_hash, cid_link.as_str());
-                match point_lookup(
-                    &self.repo_data,
-                    key.as_slice(),
-                    BlobMetaValue::deserialize,
-                    "corrupt blob_meta value",
-                ) {
-                    Ok(Some(v)) => Some(Ok(tranquil_db_traits::BlobForExport {
+                match self.get_blob_content(&cid_link) {
+                    Ok(Some(c)) => Some(Ok(tranquil_db_traits::BlobForExport {
                         cid: cid_link,
-                        storage_key: v.storage_key,
-                        mime_type: v.mime_type,
+                        storage_key: c.meta.storage_key,
+                        mime_type: c.meta.mime_type,
                     })),
                     Ok(None) => None,
                     Err(e) => Some(Err(e)),
@@ -532,26 +514,6 @@ mod tests {
         );
         assert!(
             ops.insert_blob(&cid, "image/png", 100, user_id, "k1")
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn insert_same_cid_different_user_returns_none() {
-        let (_dir, ms) = open_fresh();
-        let (user_a, _) = setup_user(&ms);
-        let (user_b, _) = setup_user(&ms);
-        let ops = ms.blob_ops();
-
-        let cid = test_cid_link(80);
-        assert!(
-            ops.insert_blob(&cid, "image/png", 100, user_a, "ka")
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            ops.insert_blob(&cid, "image/png", 100, user_b, "kb")
                 .unwrap()
                 .is_none()
         );
@@ -704,7 +666,7 @@ mod tests {
 
         ops.delete_blob_by_cid(&cid).unwrap();
 
-        assert!(ops.lookup_user_hash_by_cid(cid.as_str()).unwrap().is_none());
+        assert!(ops.get_blob_metadata(&cid).unwrap().is_none());
     }
 
     #[test]
@@ -735,7 +697,7 @@ mod tests {
 
         ops.delete_blobs_by_user(user_id).unwrap();
 
-        assert!(ops.lookup_user_hash_by_cid(cid.as_str()).unwrap().is_none());
+        assert!(ops.get_blob_metadata(&cid).unwrap().is_none());
     }
 
     #[test]
@@ -786,5 +748,53 @@ mod tests {
         assert_eq!(ops.count_blobs_by_user(user_a).unwrap(), 1);
         assert_eq!(ops.count_blobs_by_user(user_b).unwrap(), 1);
         assert_eq!(ops.sum_blob_storage().unwrap(), 30);
+    }
+
+    #[test]
+    fn blob_shared_between_users() {
+        let (_dir, ms) = open_fresh();
+        let (user_a, _) = setup_user(&ms);
+        let (user_b, _) = setup_user(&ms);
+        let ops = ms.blob_ops();
+
+        let cid = test_cid_link(80);
+
+        assert!(
+            ops.insert_blob(&cid, "a/b", 10, user_a, "k")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            ops.insert_blob(&cid, "a/b", 10, user_b, "k")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            ops.insert_blob(&cid, "a/b", 10, user_b, "k")
+                .unwrap()
+                .is_none()
+        );
+
+        assert_eq!(ops.count_blobs_by_user(user_a).unwrap(), 1);
+        assert_eq!(ops.count_blobs_by_user(user_b).unwrap(), 1);
+        assert_eq!(
+            ops.list_blobs_by_user(user_b, None, 100).unwrap(),
+            vec![cid.clone()]
+        );
+
+        assert_eq!(ops.sum_blob_storage().unwrap(), 10);
+        assert!(
+            ops.get_blob_storage_keys_by_user(user_a)
+                .unwrap()
+                .is_empty()
+        );
+
+        ops.delete_blobs_by_user(user_a).unwrap();
+        assert_eq!(ops.count_blobs_by_user(user_b).unwrap(), 1);
+        assert!(ops.get_blob_metadata(&cid).unwrap().is_some());
+        assert_eq!(
+            ops.get_blob_storage_keys_by_user(user_b).unwrap(),
+            vec!["k".to_string()]
+        );
     }
 }

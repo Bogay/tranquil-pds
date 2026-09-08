@@ -33,7 +33,7 @@ impl BlobRepository for PostgresBlobRepository {
         let result = sqlx::query_scalar!(
             r#"INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key)
                VALUES ($1, $2, $3, $4, $5)
-               ON CONFLICT (cid) DO NOTHING RETURNING cid"#,
+               ON CONFLICT (cid, created_by_user) DO NOTHING RETURNING cid"#,
             cid.as_str(),
             mime_type,
             size_bytes,
@@ -49,7 +49,7 @@ impl BlobRepository for PostgresBlobRepository {
 
     async fn get_blob_metadata(&self, cid: &CidLink) -> Result<Option<BlobMetadata>, DbError> {
         let result = sqlx::query!(
-            "SELECT storage_key, mime_type, size_bytes FROM blobs WHERE cid = $1",
+            "SELECT storage_key, mime_type, size_bytes FROM blobs WHERE cid = $1 LIMIT 1",
             cid.as_str()
         )
         .fetch_optional(&self.pool)
@@ -68,7 +68,7 @@ impl BlobRepository for PostgresBlobRepository {
         cid: &CidLink,
     ) -> Result<Option<BlobWithTakedown>, DbError> {
         let result = sqlx::query!(
-            "SELECT cid, takedown_ref FROM blobs WHERE cid = $1",
+            "SELECT cid, takedown_ref FROM blobs WHERE cid = $1 ORDER BY takedown_ref NULLS LAST LIMIT 1",
             cid.as_str()
         )
         .fetch_optional(&self.pool)
@@ -86,11 +86,13 @@ impl BlobRepository for PostgresBlobRepository {
     }
 
     async fn get_blob_storage_key(&self, cid: &CidLink) -> Result<Option<String>, DbError> {
-        let result =
-            sqlx::query_scalar!("SELECT storage_key FROM blobs WHERE cid = $1", cid.as_str())
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let result = sqlx::query_scalar!(
+            "SELECT storage_key FROM blobs WHERE cid = $1 LIMIT 1",
+            cid.as_str()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
 
         Ok(result)
     }
@@ -147,7 +149,8 @@ impl BlobRepository for PostgresBlobRepository {
 
     async fn sum_blob_storage(&self) -> Result<i64, DbError> {
         let result = sqlx::query_scalar!(
-            r#"SELECT COALESCE(SUM(size_bytes), 0)::BIGINT as "total!" FROM blobs"#
+            r#"SELECT COALESCE(SUM(size_bytes), 0)::BIGINT as "total!"
+               FROM (SELECT DISTINCT cid, size_bytes FROM blobs) t"#
         )
         .fetch_one(&self.pool)
         .await
@@ -193,7 +196,12 @@ impl BlobRepository for PostgresBlobRepository {
 
     async fn get_blob_storage_keys_by_user(&self, user_id: Uuid) -> Result<Vec<String>, DbError> {
         let results = sqlx::query_scalar!(
-            r#"SELECT storage_key as "storage_key!" FROM blobs WHERE created_by_user = $1"#,
+            r#"SELECT storage_key as "storage_key!" FROM blobs b
+               WHERE created_by_user = $1
+                 AND NOT EXISTS (
+                     SELECT 1 FROM blobs o
+                     WHERE o.cid = b.cid AND o.created_by_user <> $1
+                 )"#,
             user_id
         )
         .fetch_all(&self.pool)

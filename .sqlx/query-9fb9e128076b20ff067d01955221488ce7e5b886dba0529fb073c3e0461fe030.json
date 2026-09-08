@@ -1,22 +1,22 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT storage_key as \"storage_key!\" FROM blobs WHERE created_by_user = $1",
+  "query": "SELECT storage_key FROM blobs WHERE cid = $1 LIMIT 1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "storage_key!",
+        "name": "storage_key",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "f59010ecdd7f782489e0e03288a06dacd72b33d04c1e2b98475018ad25485852"
+  "hash": "9fb9e128076b20ff067d01955221488ce7e5b886dba0529fb073c3e0461fe030"
 }

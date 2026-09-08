@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key)\n               VALUES ($1, $2, $3, $4, $5)\n               ON CONFLICT (cid) DO NOTHING RETURNING cid",
+  "query": "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key)\n               VALUES ($1, $2, $3, $4, $5)\n               ON CONFLICT (cid, created_by_user) DO NOTHING RETURNING cid",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "8afea2b745385348f4c78b51f74145d6718bfcf9a3a0c218109ec691aeb930ba"
+  "hash": "996e5513fb55670fe3304a6046381e377da6a187dfa3347bd285078a7b4410f2"
 }

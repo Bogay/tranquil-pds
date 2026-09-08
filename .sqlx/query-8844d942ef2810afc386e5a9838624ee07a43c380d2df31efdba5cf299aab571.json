@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT storage_key as \"storage_key!\" FROM blobs b\n               WHERE created_by_user = $1\n                 AND NOT EXISTS (\n                     SELECT 1 FROM blobs o\n                     WHERE o.cid = b.cid AND o.created_by_user <> $1\n                 )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "storage_key!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8844d942ef2810afc386e5a9838624ee07a43c380d2df31efdba5cf299aab571"
+}

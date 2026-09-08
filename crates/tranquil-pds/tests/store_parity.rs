@@ -986,6 +986,86 @@ async fn parity_blob_duplicate_insert() {
     assert_eq!(pg_dup, store_dup);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn parity_blob_shared_between_repos() {
+    let f = ParityFixture::new().await;
+
+    let did_a = test_did("shareda");
+    let did_b = test_did("sharedb");
+    let (pg_a, store_a) = seed_repos(&f, &did_a, &test_handle("shareda")).await;
+    let (pg_b, store_b) = seed_repos(&f, &did_b, &test_handle("sharedb")).await;
+
+    let cid = test_cid(210);
+
+    let pg_first =
+        f.pg.blob
+            .insert_blob(&cid, "image/png", 100, pg_a, "blobs/shared.png")
+            .await
+            .unwrap();
+    let store_first = f
+        .store
+        .blob
+        .insert_blob(&cid, "image/png", 100, store_a, "blobs/shared.png")
+        .await
+        .unwrap();
+    assert_eq!(pg_first, store_first);
+
+    let pg_second =
+        f.pg.blob
+            .insert_blob(&cid, "image/png", 100, pg_b, "blobs/shared.png")
+            .await
+            .unwrap();
+    let store_second = f
+        .store
+        .blob
+        .insert_blob(&cid, "image/png", 100, store_b, "blobs/shared.png")
+        .await
+        .unwrap();
+    assert_eq!(pg_second, store_second);
+    assert!(pg_second.is_some());
+
+    for (pg_uid, store_uid) in [(pg_a, store_a), (pg_b, store_b)] {
+        assert_eq!(f.pg.blob.count_blobs_by_user(pg_uid).await.unwrap(), 1);
+        assert_eq!(
+            f.store.blob.count_blobs_by_user(store_uid).await.unwrap(),
+            1
+        );
+        assert_eq!(
+            f.pg.blob
+                .list_blobs_by_user(pg_uid, None, 100)
+                .await
+                .unwrap(),
+            vec![cid.clone()]
+        );
+        assert_eq!(
+            f.store
+                .blob
+                .list_blobs_by_user(store_uid, None, 100)
+                .await
+                .unwrap(),
+            vec![cid.clone()]
+        );
+        assert!(
+            f.pg.blob
+                .get_blob_storage_keys_by_user(pg_uid)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            f.store
+                .blob
+                .get_blob_storage_keys_by_user(store_uid)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    assert_eq!(f.pg.blob.sum_blob_storage().await.unwrap(), 100);
+    assert_eq!(f.store.blob.sum_blob_storage().await.unwrap(), 100);
+}
+
 #[tokio::test]
 async fn parity_get_all_records() {
     let f = ParityFixture::new().await;

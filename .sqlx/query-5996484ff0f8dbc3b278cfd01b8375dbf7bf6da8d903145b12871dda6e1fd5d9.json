@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT cid, takedown_ref FROM blobs WHERE cid = $1",
+  "query": "SELECT cid, takedown_ref FROM blobs WHERE cid = $1 ORDER BY takedown_ref NULLS LAST LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       true
     ]
   },
-  "hash": "62942bd21d545eb15bfea4f46378b6c2ebfe12b8bc9e27c63a6c0f77a9105303"
+  "hash": "5996484ff0f8dbc3b278cfd01b8375dbf7bf6da8d903145b12871dda6e1fd5d9"
 }

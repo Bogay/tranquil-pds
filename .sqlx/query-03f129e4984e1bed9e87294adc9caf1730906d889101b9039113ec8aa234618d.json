@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT storage_key, mime_type, size_bytes FROM blobs WHERE cid = $1",
+  "query": "SELECT storage_key, mime_type, size_bytes FROM blobs WHERE cid = $1 LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -30,5 +30,5 @@
       false
     ]
   },
-  "hash": "dd1b61d6ec81fd891d4effd3b51e6c22308b878acdc5355dfcb04c5664c9463b"
+  "hash": "03f129e4984e1bed9e87294adc9caf1730906d889101b9039113ec8aa234618d"
 }

@@ -1011,11 +1011,13 @@ impl InfraRepository for PostgresInfraRepository {
     }
 
     async fn get_blob_storage_key_by_cid(&self, cid: &CidLink) -> Result<Option<String>, DbError> {
-        let result =
-            sqlx::query_scalar!("SELECT storage_key FROM blobs WHERE cid = $1", cid.as_str())
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let result = sqlx::query_scalar!(
+            "SELECT storage_key FROM blobs WHERE cid = $1 LIMIT 1",
+            cid.as_str()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
 
         Ok(result)
     }

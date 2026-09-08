@@ -148,7 +148,13 @@ pub async fn upload_blob(
         size, cid_str
     );
 
-    match state
+    if let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
+        let _ = state.blob_store.delete(&temp_key).await;
+        error!("Failed to copy blob to final location: {:?}", e);
+        return Err(ApiError::InternalError(Some("Failed to store blob".into())));
+    }
+
+    if let Err(e) = state
         .repos
         .blob
         .insert_blob(
@@ -160,24 +166,9 @@ pub async fn upload_blob(
         )
         .await
     {
-        Ok(_) => {}
-        Err(e) => {
-            let _ = state.blob_store.delete(&temp_key).await;
-            error!("Failed to insert blob record: {:?}", e);
-            return Err(ApiError::InternalError(None));
-        }
-    };
-
-    if let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
         let _ = state.blob_store.delete(&temp_key).await;
-        if let Err(db_err) = state.repos.blob.delete_blob_by_cid(&cid_link).await {
-            error!(
-                "Failed to clean up orphaned blob record after copy failure: {:?}",
-                db_err
-            );
-        }
-        error!("Failed to copy blob to final location: {:?}", e);
-        return Err(ApiError::InternalError(Some("Failed to store blob".into())));
+        error!("Failed to insert blob record: {:?}", e);
+        return Err(ApiError::InternalError(None));
     }
 
     let _ = state.blob_store.delete(&temp_key).await;

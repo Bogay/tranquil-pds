@@ -33,6 +33,33 @@ impl BlobMetaValue {
     }
 }
 
+const BLOB_CONTENT_SCHEMA_VERSION: u8 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlobContentValue {
+    pub meta: BlobMetaValue,
+    pub ref_count: u32,
+}
+
+impl BlobContentValue {
+    pub fn serialize(&self) -> Vec<u8> {
+        let payload =
+            postcard::to_allocvec(self).expect("BlobContentValue serialization cannot fail");
+        let mut buf = Vec::with_capacity(1 + payload.len());
+        buf.push(BLOB_CONTENT_SCHEMA_VERSION);
+        buf.extend_from_slice(&payload);
+        buf
+    }
+
+    pub fn deserialize(bytes: &[u8]) -> Option<Self> {
+        let (&version, payload) = bytes.split_first()?;
+        match version {
+            BLOB_CONTENT_SCHEMA_VERSION => postcard::from_bytes(payload).ok(),
+            _ => None,
+        }
+    }
+}
+
 pub fn blob_meta_key(user_hash: UserHash, cid_str: &str) -> SmallVec<[u8; 128]> {
     KeyBuilder::new()
         .tag(KeyTag::BLOBS)
@@ -57,6 +84,10 @@ pub fn blob_by_cid_key(cid_str: &str) -> SmallVec<[u8; 128]> {
         .tag(KeyTag::BLOB_BY_CID)
         .string(cid_str)
         .build()
+}
+
+pub fn blob_by_cid_prefix() -> SmallVec<[u8; 128]> {
+    KeyBuilder::new().tag(KeyTag::BLOB_BY_CID).build()
 }
 
 #[cfg(test)]

@@ -35,11 +35,12 @@ use std::sync::Arc;
 
 use fjall::{Database, Keyspace};
 
+use self::encoding::KeyReader;
 use self::keys::KeyTag;
 use self::partitions::Partition;
 use self::user_hash::UserHashMap;
 
-const CURRENT_FORMAT_VERSION: u64 = 2;
+const CURRENT_FORMAT_VERSION: u64 = 3;
 
 #[derive(Debug, Clone)]
 pub struct MetastoreConfig {
@@ -240,6 +241,7 @@ impl Metastore {
                             "upgrading metastore format and rebuilding derived indexes"
                         );
                         repo_data.remove(records::record_by_cid_built_key().as_slice())?;
+                        Self::migrate_blob_ownership(db, repo_data)?;
                         repo_data.insert(version_key, version_bytes)?;
                         db.persist(fjall::PersistMode::SyncData)?;
                         Ok(())
@@ -252,6 +254,47 @@ impl Metastore {
                 Ok(())
             }
         }
+    }
+
+    fn migrate_blob_ownership(db: &Database, repo_data: &Keyspace) -> Result<(), MetastoreError> {
+        let entries: Vec<(Vec<u8>, Vec<u8>)> = repo_data
+            .prefix(blobs::blobs_prefix().as_slice())
+            .map(|guard| {
+                let (k, v) = guard.into_inner()?;
+                Ok((k.as_ref().to_vec(), v.as_ref().to_vec()))
+            })
+            .collect::<Result<_, fjall::Error>>()?;
+
+        for (key_bytes, val_bytes) in entries {
+            let Some(meta) = blobs::BlobMetaValue::deserialize(&val_bytes) else {
+                continue;
+            };
+            let mut reader = KeyReader::new(&key_bytes);
+            reader.tag();
+            reader.u64();
+            let Some(cid_str) = reader.string() else {
+                continue;
+            };
+
+            let cid_index_key = blobs::blob_by_cid_key(cid_str.as_str());
+            let content = match repo_data
+                .get(cid_index_key.as_slice())?
+                .and_then(|raw| blobs::BlobContentValue::deserialize(raw.as_ref()))
+            {
+                Some(mut existing) => {
+                    existing.ref_count = existing.ref_count.saturating_add(1);
+                    existing
+                }
+                None => blobs::BlobContentValue { meta, ref_count: 1 },
+            };
+
+            let mut batch = db.batch();
+            batch.insert(repo_data, cid_index_key.as_slice(), content.serialize());
+            batch.insert(repo_data, key_bytes.as_slice(), &[] as &[u8]);
+            batch.commit()?;
+        }
+
+        Ok(())
     }
 
     pub fn path(&self) -> &Path {
