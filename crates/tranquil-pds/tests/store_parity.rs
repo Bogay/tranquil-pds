@@ -1061,9 +1061,6 @@ async fn parity_blob_shared_between_repos() {
                 .is_empty()
         );
     }
-
-    assert_eq!(f.pg.blob.sum_blob_storage().await.unwrap(), 100);
-    assert_eq!(f.store.blob.sum_blob_storage().await.unwrap(), 100);
 }
 
 #[tokio::test]

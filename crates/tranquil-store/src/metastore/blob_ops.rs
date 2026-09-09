@@ -339,7 +339,11 @@ impl BlobOps {
                         if acc.contains_key(&cid_str) {
                             return Ok(());
                         }
-                        let exists = self.get_blob_content(&cid_link)?.is_some();
+                        let exists = self
+                            .repo_data
+                            .get(blob_meta_key(user_hash, &cid_str).as_slice())
+                            .map_err(MetastoreError::Fjall)?
+                            .is_some();
                         if !exists {
                             acc.insert(cid_str, record_uri.clone());
                         }

@@ -246,7 +246,7 @@ impl BlobRepository for PostgresBlobRepository {
         let results = sqlx::query!(
             r#"SELECT rb.blob_cid, rb.record_uri
                FROM record_blobs rb
-               LEFT JOIN blobs b ON rb.blob_cid = b.cid
+               LEFT JOIN blobs b ON rb.blob_cid = b.cid AND b.created_by_user = $1
                WHERE rb.repo_id = $1 AND b.cid IS NULL AND rb.blob_cid > $2
                ORDER BY rb.blob_cid
                LIMIT $3"#,
