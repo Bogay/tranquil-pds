@@ -680,6 +680,7 @@ export const api = {
     discordUsername?: string;
     telegramUsername?: string;
     signalUsername?: string;
+    legacyLoginAlerts?: boolean;
   }): Promise<UpdateNotificationPrefsResponse> {
     return xrpc("_account.updateNotificationPrefs", {
       method: "POST",

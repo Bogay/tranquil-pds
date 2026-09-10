@@ -323,15 +323,31 @@ pub async fn create_session(
             "Legacy login on TOTP-enabled account - sending notification"
         );
         let hostname = &tranquil_config::get().server.hostname;
-        if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_legacy_login(
-            state.repos.user.as_ref(),
-            state.repos.infra.as_ref(),
-            row.id,
-            hostname,
-            client_ip,
-            row.preferred_comms_channel,
-        )
-        .await
+
+        let alerts_enabled = state
+            .repos
+            .infra
+            .get_account_preferences(row.id)
+            .await
+            .map(|prefs| {
+                prefs
+                    .iter()
+                    .find(|(name, _)| name == "legacy_login_alerts")
+                    .and_then(|(_, value)| value.as_bool())
+                    .unwrap_or(true)
+            })
+            .unwrap_or(true);
+
+        if alerts_enabled
+            && let Err(e) = tranquil_pds::comms::comms_repo::enqueue_legacy_login(
+                state.repos.user.as_ref(),
+                state.repos.infra.as_ref(),
+                row.id,
+                hostname,
+                client_ip,
+                row.preferred_comms_channel,
+            )
+            .await
         {
             error!("Failed to queue legacy login notification: {:?}", e);
         }

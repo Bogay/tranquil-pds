@@ -458,7 +458,12 @@
     "failedToLoad": "設定の読み込みに失敗しました",
     "failedToSave": "設定の保存に失敗しました",
     "failedToVerify": "確認に失敗しました",
-    "failedToLoadHistory": "メッセージ履歴の読み込みに失敗しました"
+    "failedToLoadHistory": "メッセージ履歴の読み込みに失敗しました",
+    "securityAlerts": "セキュリティ警告",
+    "legacyLoginAlerts": "レガシーログインアラート",
+    "legacyLoginAlertsDescription": "誰かが従来のログイン方法を使用してTOTP対応アカウントにサインインしたときに通知を受け取ります。",
+    "enableLegacyLoginAlerts": "レガシーログインアラートを有効にする",
+    "disableLegacyLoginAlerts": "レガシーログインアラートを無効にする"
   },
   "repoExplorer": {
     "collections": "コレクション",

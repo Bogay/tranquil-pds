@@ -458,7 +458,12 @@
     "failedToLoad": "Asetusten lataus epäonnistui",
     "failedToSave": "Asetusten tallennus epäonnistui",
     "failedToVerify": "Vahvistus epäonnistui",
-    "failedToLoadHistory": "Viestihistorian lataus epäonnistui"
+    "failedToLoadHistory": "Viestihistorian lataus epäonnistui",
+    "securityAlerts": "Turvallisuushälytykset",
+    "legacyLoginAlerts": "Vanhat kirjautumisilmoitukset",
+    "legacyLoginAlertsDescription": "Saat ilmoituksen, kun joku kirjautuu TOTP-yhteensopivalle tilillesi käyttämällä vanhoja kirjautumistapoja.",
+    "enableLegacyLoginAlerts": "Ota käyttöön vanhat kirjautumisilmoitukset",
+    "disableLegacyLoginAlerts": "Poista käytöstä vanhat kirjautumisilmoitukset"
   },
   "repoExplorer": {
     "collections": "Kokoelmat",

@@ -19,6 +19,7 @@ pub struct NotificationPrefsOutput {
     pub telegram_verified: bool,
     pub signal_username: Option<String>,
     pub signal_verified: bool,
+    pub legacy_login_alerts: bool,
 }
 
 pub async fn get_notification_prefs(
@@ -32,6 +33,26 @@ pub async fn get_notification_prefs(
         .await
         .log_db_err("get notification prefs")?
         .ok_or(ApiError::AccountNotFound)?;
+
+    let user_id = state
+        .repos
+        .user
+        .get_id_by_did(&auth.did)
+        .await
+        .log_db_err("get user by did")?
+        .ok_or(ApiError::AccountNotFound)?;
+
+    let legacy_login_alerts = state
+        .repos
+        .infra
+        .get_account_preferences(user_id)
+        .await
+        .log_db_err("get legacy login alert prefs")?
+        .iter()
+        .find(|(name, _)| name == "legacy_login_alerts")
+        .and_then(|(_, value)| value.as_bool())
+        .unwrap_or(true);
+
     Ok(Json(NotificationPrefsOutput {
         preferred_channel: prefs.preferred_channel,
         email: prefs.email,
@@ -41,6 +62,7 @@ pub async fn get_notification_prefs(
         telegram_verified: prefs.telegram_verified,
         signal_username: prefs.signal_username,
         signal_verified: prefs.signal_verified,
+        legacy_login_alerts,
     }))
 }
 
@@ -121,6 +143,7 @@ pub struct UpdateNotificationPrefsInput {
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
     pub signal_username: Option<String>,
+    pub legacy_login_alerts: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -433,6 +456,15 @@ pub async fn update_notification_prefs(
             &mut verification_required,
         )
         .await?;
+    }
+
+    if let Some(alerts) = input.legacy_login_alerts {
+        state
+            .repos
+            .infra
+            .upsert_account_preference(user_id, "legacy_login_alerts", json!(alerts))
+            .await
+            .log_db_err("update legacy login alert prefs")?;
     }
 
     Ok(Json(UpdateNotificationPrefsOutput {

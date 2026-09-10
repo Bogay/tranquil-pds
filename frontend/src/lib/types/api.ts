@@ -232,6 +232,7 @@ export interface NotificationPrefs {
   telegramVerified: boolean;
   signalUsername: string | null;
   signalVerified: boolean;
+  legacyLoginAlerts: boolean;
 }
 
 export interface NotificationHistoryItem {

@@ -30,6 +30,7 @@
   let savedDiscordUsername = $state('')
   let savedTelegramUsername = $state('')
   let savedSignalUsername = $state('')
+  let legacyLoginAlerts = $state(true)
   let verifyingChannel = $state<string | null>(null)
   let verificationCode = $state('')
   let historyLoading = $state(true)
@@ -62,6 +63,7 @@
       telegramVerified = prefs.telegramVerified
       signalUsername = prefs.signalUsername ?? ''
       signalVerified = prefs.signalVerified
+      legacyLoginAlerts = prefs.legacyLoginAlerts ?? true
       savedDiscordUsername = discordUsername
       savedTelegramUsername = telegramUsername
       savedSignalUsername = signalUsername
@@ -85,6 +87,7 @@
         discordUsername: discordUsername !== savedDiscordUsername ? discordUsername : undefined,
         telegramUsername: telegramUsername !== savedTelegramUsername ? telegramUsername : undefined,
         signalUsername: signalUsername !== savedSignalUsername ? signalUsername : undefined,
+        legacyLoginAlerts,
       })
       await refreshSession()
       toast.success($_('comms.preferencesSaved'))
@@ -313,6 +316,25 @@
               {/if}
             </div>
           {/if}
+        </div>
+      </section>
+
+      <section>
+        <h3>{$_('comms.securityAlerts')}</h3>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <span class="toggle-label">{$_('comms.legacyLoginAlerts')}</span>
+            <span class="toggle-description">{$_('comms.legacyLoginAlertsDescription')}</span>
+          </div>
+          <button
+            type="button"
+            class="toggle-button {legacyLoginAlerts ? 'on' : 'off'}"
+            onclick={() => legacyLoginAlerts = !legacyLoginAlerts}
+            disabled={saving}
+            aria-label={legacyLoginAlerts ? $_('comms.disableLegacyLoginAlerts') : $_('comms.enableLegacyLoginAlerts')}
+          >
+            <span class="toggle-slider"></span>
+          </button>
         </div>
       </section>
 

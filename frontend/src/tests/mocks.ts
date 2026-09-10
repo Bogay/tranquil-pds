@@ -260,6 +260,7 @@ export const mockData = {
     telegramVerified: false,
     signalUsername: null,
     signalVerified: false,
+    legacyLoginAlerts: true,
     ...overrides,
   }),
   describeServer: (overrides?: Record<string, unknown>) => ({

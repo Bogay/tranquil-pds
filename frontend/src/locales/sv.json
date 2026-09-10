@@ -458,7 +458,12 @@
     "failedToLoad": "Kunde inte ladda inställningar",
     "failedToSave": "Kunde inte spara inställningar",
     "failedToVerify": "Verifiering misslyckades",
-    "failedToLoadHistory": "Kunde inte ladda meddelandehistorik"
+    "failedToLoadHistory": "Kunde inte ladda meddelandehistorik",
+    "securityAlerts": "Säkerhetsvarningar",
+    "legacyLoginAlerts": "Varningar för föråldrade inloggningsmetoder",
+    "legacyLoginAlertsDescription": "Bli notifierad när en inloggning sker med föråldrade inloggningsmetoder, när du har TOTP aktiverat.",
+    "enableLegacyLoginAlerts": "Aktivera föråldrad inloggningsmetodsvarning",
+    "disableLegacyLoginAlerts": "Avaktivera föråldrad inloggningsmetodsvarning"
   },
   "repoExplorer": {
     "collections": "Samlingar",

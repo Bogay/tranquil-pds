@@ -458,7 +458,12 @@
     "failedToLoad": "설정 로딩 실패",
     "failedToSave": "설정 저장 실패",
     "failedToVerify": "인증 실패",
-    "failedToLoadHistory": "메시지 기록 로딩 실패"
+    "failedToLoadHistory": "메시지 기록 로딩 실패",
+    "securityAlerts": "보안 경고",
+    "legacyLoginAlerts": "레거시 로그인 알림",
+    "legacyLoginAlertsDescription": "레거시 로그인 방법을 사용하여 누군가가 TOTP 지원 계정에 로그인하면 알림을 받습니다.",
+    "enableLegacyLoginAlerts": "레거시 로그인 알림 활성화",
+    "disableLegacyLoginAlerts": "레거시 로그인 알림 비활성화"
   },
   "repoExplorer": {
     "collections": "컬렉션",

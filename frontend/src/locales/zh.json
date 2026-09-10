@@ -458,7 +458,12 @@
     "failedToLoad": "加载偏好设置失败",
     "failedToSave": "保存偏好设置失败",
     "failedToVerify": "验证失败",
-    "failedToLoadHistory": "加载消息历史失败"
+    "failedToLoadHistory": "加载消息历史失败",
+    "securityAlerts": "安全警报",
+    "legacyLoginAlerts": "旧版登录提醒",
+    "legacyLoginAlertsDescription": "当有人使用传统登录方式登录您的启用了TOTP的帐户时，会收到通知。",
+    "enableLegacyLoginAlerts": "启用旧版登录警报",
+    "disableLegacyLoginAlerts": "禁用旧版登录警报"
   },
   "repoExplorer": {
     "collections": "集合",

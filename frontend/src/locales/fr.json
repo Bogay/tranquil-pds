@@ -458,7 +458,12 @@
     "telegramStartBot": "Ou envoyez /start {handle} à @{botUsername} manuellement",
     "telegramOpenLink": "Ouvrir Telegram pour vérifier",
     "discordStartBot": "Envoyez un DM à @{botUsername} sur Discord avec /start {handle}",
-    "discordOpenLink": "Ouvrir Discord pour vérifier"
+    "discordOpenLink": "Ouvrir Discord pour vérifier",
+    "securityAlerts": "Alertes de sécurité",
+    "legacyLoginAlerts": "Anciennes alertes de connexion",
+    "legacyLoginAlertsDescription": "Recevez une notification lorsque quelqu'un se connecte à votre compte TOTP à l'aide de méthodes de connexion héritées.",
+    "enableLegacyLoginAlerts": "Activer les alertes de connexion héritées",
+    "disableLegacyLoginAlerts": "Désactiver les alertes de connexion héritées"
   },
   "repoExplorer": {
     "collections": "Collections",
