@@ -202,6 +202,22 @@ impl BlobRepository for PostgresBlobRepository {
         Ok(results)
     }
 
+    async fn ensure_blob_ownership(&self, user_id: Uuid, cid: &CidLink) -> Result<bool, DbError> {
+        let result = sqlx::query!(
+            r#"INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key)
+               SELECT DISTINCT b.cid, b.mime_type, b.size_bytes, $1::uuid, b.storage_key
+               FROM blobs b WHERE b.cid = $2
+               ON CONFLICT (cid, created_by_user) DO NOTHING"#,
+            user_id,
+            cid.as_str()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn insert_record_blobs(
         &self,
         repo_id: Uuid,

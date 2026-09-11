@@ -26,7 +26,7 @@ use crate::io::{RealIO, StorageIO};
 
 use tranquil_db_traits::{
     ApplyCommitError, ApplyCommitInput, ApplyCommitResult, ImportBlock, ImportRecord,
-    ImportRepoError, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
+    ImportRepoError, RepoIdentity, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
 };
 use tranquil_types::{AtUri, CidLink, Did, Tid};
 
@@ -401,6 +401,21 @@ impl<S: StorageIO + 'static> CommitOps<S> {
         )
     }
 
+    pub fn get_all_repo_identities(&self) -> Result<Vec<RepoIdentity>, MetastoreError> {
+        self.scan_users(
+            |_, _| Ok(true),
+            |meta, user_id| {
+                let did = match meta.did {
+                    None => Err(MetastoreError::CorruptData("repo_meta missing DID field")),
+                    Some(d) => Did::new(d)
+                        .map_err(|_| MetastoreError::CorruptData("corrupt repo_meta did")),
+                }?;
+                Ok(RepoIdentity { user_id, did })
+            },
+            usize::MAX,
+        )
+    }
+
     fn scan_users_missing_prefix<T, F, P>(
         &self,
         make_prefix: P,
@@ -410,6 +425,33 @@ impl<S: StorageIO + 'static> CommitOps<S> {
     where
         F: Fn(RepoMetaValue, Uuid) -> Result<T, MetastoreError>,
         P: Fn(UserHash) -> SmallVec<[u8; 128]>,
+    {
+        self.scan_users(
+            |ops, user_hash| match ops
+                .repo_data
+                .prefix(make_prefix(user_hash).as_slice())
+                .next()
+            {
+                Some(guard) => guard
+                    .into_inner()
+                    .map(|_| false)
+                    .map_err(MetastoreError::Fjall),
+                None => Ok(true),
+            },
+            build_result,
+            limit,
+        )
+    }
+
+    fn scan_users<T, F, P>(
+        &self,
+        include: P,
+        build_result: F,
+        limit: usize,
+    ) -> Result<Vec<T>, MetastoreError>
+    where
+        F: Fn(RepoMetaValue, Uuid) -> Result<T, MetastoreError>,
+        P: Fn(&Self, UserHash) -> Result<bool, MetastoreError>,
     {
         let prefix = repo_meta_prefix();
 
@@ -429,18 +471,10 @@ impl<S: StorageIO + 'static> CommitOps<S> {
                     }
                 };
 
-                let check_prefix = make_prefix(user_hash);
-                let has_entries = match self.repo_data.prefix(check_prefix.as_slice()).next() {
-                    Some(guard) => match guard.into_inner() {
-                        Ok(_) => true,
-                        Err(e) => return Some(Err(MetastoreError::Fjall(e))),
-                    },
-                    None => false,
-                };
-
-                match has_entries {
-                    true => None,
-                    false => {
+                match include(self, user_hash) {
+                    Err(e) => return Some(Err(e)),
+                    Ok(false) => None,
+                    Ok(true) => {
                         let meta = match RepoMetaValue::deserialize(&val_bytes) {
                             Some(v) => v,
                             None => {

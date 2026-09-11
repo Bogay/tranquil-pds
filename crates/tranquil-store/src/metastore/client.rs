@@ -14,17 +14,18 @@ use tranquil_db_traits::{
     InviteCodeSortOrder, InviteCodeUse, MigrationReactivationError, MigrationReactivationInput,
     NotificationHistoryRow, NotificationPrefs, OAuthTokenWithUser, PasswordResetResult,
     PlcTokenInfo, PruneCount, QueuedComms, ReactivatedAccountInfo, RecoverPasskeyAccountInput,
-    RecoverPasskeyAccountResult, RepoAccountInfo, RepoInfo, RepoListItem, RepoWithoutRev,
-    ReservedSigningKey, ReservedSigningKeyFull, ScheduledDeletionAccount, ScopePreference,
-    SequenceNumber, SequencedEvent, StoredBackupCode, StoredPasskey, TokenFamilyId, TotpRecord,
-    TotpRecordState, User2faStatus, UserAuthInfo, UserCommsPrefs, UserConfirmSignup,
-    UserDidWebInfo, UserEmailInfo, UserForDeletion, UserForDidDoc, UserForDidDocBuild,
-    UserForPasskeyRecovery, UserForPasskeySetup, UserForRecovery, UserForVerification,
-    UserIdAndHandle, UserIdAndPasswordHash, UserIdHandleEmail, UserInfoForAuth, UserKeyInfo,
-    UserKeyWithId, UserLegacyLoginPref, UserLoginCheck, UserLoginFull, UserLoginInfo,
-    UserNeedingRecordBlobsBackfill, UserPasswordInfo, UserResendVerification, UserResetCodeInfo,
-    UserRow, UserSessionInfo, UserStatus, UserVerificationInfo, UserWithKey, UserWithoutBlocks,
-    ValidatedInviteCode, WebauthnChallengeType,
+    RecoverPasskeyAccountResult, RepoAccountInfo, RepoIdentity, RepoInfo, RepoListItem,
+    RepoWithoutRev, ReservedSigningKey, ReservedSigningKeyFull, ScheduledDeletionAccount,
+    ScopePreference, SequenceNumber, SequencedEvent, StoredBackupCode, StoredPasskey,
+    TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus, UserAuthInfo, UserCommsPrefs,
+    UserConfirmSignup, UserDidWebInfo, UserEmailInfo, UserForDeletion, UserForDidDoc,
+    UserForDidDocBuild, UserForPasskeyRecovery, UserForPasskeySetup, UserForRecovery,
+    UserForVerification, UserIdAndHandle, UserIdAndPasswordHash, UserIdHandleEmail,
+    UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref, UserLoginCheck,
+    UserLoginFull, UserLoginInfo, UserNeedingRecordBlobsBackfill, UserPasswordInfo,
+    UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus,
+    UserVerificationInfo, UserWithKey, UserWithoutBlocks, ValidatedInviteCode,
+    WebauthnChallengeType,
 };
 use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
@@ -782,6 +783,14 @@ impl<S: StorageIO + 'static> tranquil_db_traits::RepoRepository for MetastoreCli
         recv(rx).await
     }
 
+    async fn get_all_repo_identities(&self) -> Result<Vec<RepoIdentity>, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool.send(MetastoreRequest::Commit(Box::new(
+            CommitRequest::GetAllRepoIdentities { tx },
+        )))?;
+        recv(rx).await
+    }
+
     async fn insert_record_blobs(
         &self,
         repo_id: Uuid,
@@ -870,6 +879,17 @@ impl<S: StorageIO + 'static> tranquil_db_traits::BlobRepository for MetastoreCli
                 size_bytes,
                 created_by_user,
                 storage_key: storage_key.to_owned(),
+                tx,
+            }))?;
+        recv(rx).await
+    }
+
+    async fn ensure_blob_ownership(&self, user_id: Uuid, cid: &CidLink) -> Result<bool, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::Blob(BlobRequest::EnsureBlobOwnership {
+                user_id,
+                cid: cid.clone(),
                 tx,
             }))?;
         recv(rx).await

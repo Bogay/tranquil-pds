@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key)\n               SELECT DISTINCT b.cid, b.mime_type, b.size_bytes, $1::uuid, b.storage_key\n               FROM blobs b WHERE b.cid = $2\n               ON CONFLICT (cid, created_by_user) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e248d71f595abf0207b01bc2f4e1f312d0c96b0f2f5131dfc13bfbb42a79d886"
+}

@@ -74,6 +74,8 @@ pub trait BlobRepository: Send + Sync {
 
     async fn get_blob_storage_keys_by_user(&self, user_id: Uuid) -> Result<Vec<String>, DbError>;
 
+    async fn ensure_blob_ownership(&self, user_id: Uuid, cid: &CidLink) -> Result<bool, DbError>;
+
     async fn insert_record_blobs(
         &self,
         repo_id: Uuid,

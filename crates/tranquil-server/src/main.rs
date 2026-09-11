@@ -10,7 +10,8 @@ use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender
 
 use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
 use tranquil_pds::scheduled::{
-    backfill_record_blobs, backfill_repo_rev, backfill_user_blocks, start_scheduled_tasks,
+    backfill_blob_ownership, backfill_record_blobs, backfill_repo_rev, backfill_user_blocks,
+    start_scheduled_tasks,
 };
 use tranquil_pds::state::AppState;
 
@@ -195,11 +196,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let backfill_repo_repo = state.repos.repo.clone();
     let backfill_block_store = state.block_store.clone();
+    let ownership_repo_repo = state.repos.repo.clone();
+    let ownership_infra_repo = state.repos.infra.clone();
+    let ownership_blob_repo = state.repos.blob.clone();
+    let ownership_block_store = state.block_store.clone();
     tokio::spawn(async move {
         tokio::join!(
             backfill_repo_rev(backfill_repo_repo.clone(), backfill_block_store.clone()),
             backfill_user_blocks(backfill_repo_repo.clone(), backfill_block_store.clone()),
             backfill_record_blobs(backfill_repo_repo, backfill_block_store),
+            backfill_blob_ownership(
+                ownership_infra_repo,
+                ownership_repo_repo,
+                ownership_blob_repo,
+                ownership_block_store
+            )
         );
     });
 

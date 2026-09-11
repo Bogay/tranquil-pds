@@ -16,17 +16,17 @@ use tranquil_db_traits::{
     MigrationReactivationError, MigrationReactivationInput, NotificationHistoryRow,
     NotificationPrefs, OAuthTokenWithUser, PasswordResetResult, PlcTokenInfo, QueuedComms,
     ReactivatedAccountInfo, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
-    RefreshSessionResult, ReservedSigningKey, ReservedSigningKeyFull, ScheduledDeletionAccount,
-    ScopePreference, SequenceNumber, SequencedEvent, SessionId, StoredBackupCode, StoredPasskey,
-    TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus, UserAuthInfo, UserCommsPrefs,
-    UserConfirmSignup, UserDidWebInfo, UserEmailInfo, UserForDeletion, UserForDidDoc,
-    UserForDidDocBuild, UserForPasskeyRecovery, UserForPasskeySetup, UserForRecovery,
-    UserForVerification, UserIdAndHandle, UserIdAndPasswordHash, UserIdHandleEmail,
-    UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref, UserLoginCheck,
-    UserLoginFull, UserLoginInfo, UserNeedingRecordBlobsBackfill, UserPasswordInfo,
-    UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus,
-    UserVerificationInfo, UserWithKey, UserWithoutBlocks, ValidatedInviteCode,
-    WebauthnChallengeType,
+    RefreshSessionResult, RepoIdentity, ReservedSigningKey, ReservedSigningKeyFull,
+    ScheduledDeletionAccount, ScopePreference, SequenceNumber, SequencedEvent, SessionId,
+    StoredBackupCode, StoredPasskey, TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus,
+    UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo,
+    UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
+    UserForPasskeySetup, UserForRecovery, UserForVerification, UserIdAndHandle,
+    UserIdAndPasswordHash, UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId,
+    UserLegacyLoginPref, UserLoginCheck, UserLoginFull, UserLoginInfo,
+    UserNeedingRecordBlobsBackfill, UserPasswordInfo, UserResendVerification, UserResetCodeInfo,
+    UserRow, UserSessionInfo, UserStatus, UserVerificationInfo, UserWithKey, UserWithoutBlocks,
+    ValidatedInviteCode, WebauthnChallengeType,
 };
 use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
@@ -499,6 +499,9 @@ pub enum CommitRequest {
         limit: i64,
         tx: Tx<Vec<UserNeedingRecordBlobsBackfill>>,
     },
+    GetAllRepoIdentities {
+        tx: Tx<Vec<RepoIdentity>>,
+    },
     InsertRecordBlobs {
         repo_id: Uuid,
         record_uris: Vec<AtUri>,
@@ -516,7 +519,8 @@ impl CommitRequest {
                 repo_id: user_id, ..
             } => uuid_to_routing(user_hashes, user_id),
             Self::GetUsersWithoutBlocks { .. }
-            | Self::GetUsersNeedingRecordBlobsBackfill { .. } => Routing::Global,
+            | Self::GetUsersNeedingRecordBlobsBackfill { .. }
+            | Self::GetAllRepoIdentities { .. } => Routing::Global,
         }
     }
 }
@@ -565,6 +569,11 @@ pub enum BlobRequest {
         created_by_user: Uuid,
         storage_key: String,
         tx: Tx<Option<CidLink>>,
+    },
+    EnsureBlobOwnership {
+        user_id: Uuid,
+        cid: CidLink,
+        tx: Tx<bool>,
     },
     GetBlobMetadata {
         cid: CidLink,
@@ -628,9 +637,9 @@ pub enum BlobRequest {
 impl BlobRequest {
     fn routing(&self, user_hashes: &UserHashMap) -> Routing {
         match self {
-            Self::InsertBlob { cid, .. } | Self::UpdateBlobTakedown { cid, .. } => {
-                cid_to_routing(cid)
-            }
+            Self::InsertBlob { cid, .. }
+            | Self::EnsureBlobOwnership { cid, .. }
+            | Self::UpdateBlobTakedown { cid, .. } => cid_to_routing(cid),
 
             Self::DeleteBlobsByUser { user_id, .. } => uuid_to_routing(user_hashes, user_id),
 
@@ -3074,6 +3083,14 @@ fn dispatch_commit<S: StorageIO + 'static>(state: &HandlerState<S>, req: CommitR
                     .map_err(metastore_to_db),
             );
         }
+        CommitRequest::GetAllRepoIdentities { tx } => {
+            let _ = tx.send(
+                state
+                    .commit_ops
+                    .get_all_repo_identities()
+                    .map_err(metastore_to_db),
+            );
+        }
         CommitRequest::InsertRecordBlobs {
             repo_id,
             record_uris,
@@ -3176,6 +3193,14 @@ fn dispatch_blob<S: StorageIO + 'static>(state: &HandlerState<S>, req: BlobReque
                 .metastore
                 .blob_ops()
                 .insert_blob(&cid, &mime_type, size_bytes, created_by_user, &storage_key)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        BlobRequest::EnsureBlobOwnership { user_id, cid, tx } => {
+            let result = state
+                .metastore
+                .blob_ops()
+                .ensure_blob_ownership(user_id, &cid)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }

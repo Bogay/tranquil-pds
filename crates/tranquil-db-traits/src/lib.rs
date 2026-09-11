@@ -36,8 +36,8 @@ pub use repo::{
     AccountStatus, ApplyCommitError, ApplyCommitInput, ApplyCommitResult, CommitEventData,
     EventBlockInline, EventBlocks, FullRecordInfo, ImportBlock, ImportRecord, ImportRepoError,
     PruneCount, RecordDelete, RecordInfo, RecordUpsert, RecordWithTakedown, RepoAccountInfo,
-    RepoEventNotifier, RepoEventReceiver, RepoEventType, RepoInfo, RepoListItem, RepoRepository,
-    RepoSeqEvent, RepoWithoutRev, SequencedEvent, UserNeedingRecordBlobsBackfill,
+    RepoEventNotifier, RepoEventReceiver, RepoEventType, RepoIdentity, RepoInfo, RepoListItem,
+    RepoRepository, RepoSeqEvent, RepoWithoutRev, SequencedEvent, UserNeedingRecordBlobsBackfill,
     UserWithoutBlocks,
 };
 pub use scope::{DbScope, InvalidScopeError};

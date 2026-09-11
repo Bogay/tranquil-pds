@@ -4,8 +4,9 @@ use sqlx::PgPool;
 use tranquil_db_traits::{
     AccountStatus, CommitEventData, DbError, EventBlockInline, EventBlocks, FullRecordInfo,
     ImportBlock, ImportRecord, ImportRepoError, PruneCount, RecordInfo, RecordWithTakedown,
-    RepoAccountInfo, RepoEventType, RepoInfo, RepoListItem, RepoRepository, RepoWithoutRev,
-    SequenceNumber, SequencedEvent, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
+    RepoAccountInfo, RepoEventType, RepoIdentity, RepoInfo, RepoListItem, RepoRepository,
+    RepoWithoutRev, SequenceNumber, SequencedEvent, UserNeedingRecordBlobsBackfill,
+    UserWithoutBlocks,
 };
 use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey, Tid};
 use uuid::Uuid;
@@ -1643,6 +1644,28 @@ impl RepoRepository for PostgresRepoRepository {
         rows.into_iter()
             .map(|r| {
                 Ok(UserNeedingRecordBlobsBackfill {
+                    user_id: r.user_id,
+                    did: column(r.did, col::USERS_DID)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn get_all_repo_identities(&self) -> Result<Vec<RepoIdentity>, DbError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT u.id as user_id, u.did
+            FROM users u
+            JOIN repos r ON r.user_id = u.id
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter()
+            .map(|r| {
+                Ok(RepoIdentity {
                     user_id: r.user_id,
                     did: column(r.did, col::USERS_DID)?,
                 })

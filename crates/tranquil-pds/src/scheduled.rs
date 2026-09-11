@@ -3,13 +3,16 @@ use cid::Cid;
 use ipld_core::ipld::Ipld;
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
-use tranquil_db_traits::{BlobRepository, RepoRepository, SsoRepository, UserRepository};
+use tranquil_db_traits::{
+    BlobRepository, InfraRepository, RepoRepository, SsoRepository, UserRepository,
+};
 use tranquil_store::blockstore::CidBytes;
 use tranquil_store::bloom::BloomFilter;
 use tranquil_types::{AtUri, CidLink, Did};
@@ -307,6 +310,58 @@ async fn process_record_blobs(
     Ok((user_id, did, blob_refs_found))
 }
 
+const OWNERSHIP_CHUNK_SIZE: usize = 500;
+
+async fn process_blob_ownership(
+    repo_repo: &dyn RepoRepository,
+    blob_repo: &dyn BlobRepository,
+    block_store: &AnyBlockStore,
+    user_id: uuid::Uuid,
+    did: Did,
+) -> Result<(uuid::Uuid, Did, u64), (uuid::Uuid, &'static str)> {
+    let records = repo_repo
+        .get_all_records(user_id)
+        .await
+        .map_err(|_| (user_id, "failed to fetch records"))?;
+
+    let mut cids: BTreeSet<CidLink> = BTreeSet::new();
+
+    for chunk in records.chunks(OWNERSHIP_CHUNK_SIZE) {
+        futures::future::join_all(chunk.iter().map(|record| async move {
+            let cid = Cid::from_str(record.record_cid.as_str()).ok()?;
+            let block_bytes = block_store.get(&cid).await.ok()??;
+            let record_ipld: Ipld = serde_ipld_dagcbor::from_slice(&block_bytes).ok()?;
+
+            Some(
+                crate::sync::import::find_blob_refs_ipld(&record_ipld, 0)
+                    .into_iter()
+                    .map(|blob_ref| blob_ref.cid)
+                    .collect::<Vec<_>>(),
+            )
+        }))
+        .await
+        .into_iter()
+        .flatten()
+        .flatten()
+        .for_each(|cid| {
+            cids.insert(cid);
+        });
+    }
+
+    let mut granted = 0u64;
+    for cid in &cids {
+        if blob_repo
+            .ensure_blob_ownership(user_id, cid)
+            .await
+            .map_err(|_| (user_id, "failed to grant ownership"))?
+        {
+            granted += 1;
+        }
+    }
+
+    Ok((user_id, did, granted))
+}
+
 pub async fn backfill_record_blobs(repo_repo: Arc<dyn RepoRepository>, block_store: AnyBlockStore) {
     let users_needing_backfill = match repo_repo.get_users_needing_record_blobs_backfill(100).await
     {
@@ -350,6 +405,90 @@ pub async fn backfill_record_blobs(repo_repo: Arc<dyn RepoRepository>, block_sto
     });
 
     info!(success, failed, "Completed record_blobs backfill");
+}
+
+const BLOB_OWNERSHIP_BACKFILL_KEY: &str = "blob_ownership_backfilled";
+
+pub async fn backfill_blob_ownership(
+    infra_repo: Arc<dyn InfraRepository>,
+    repo_repo: Arc<dyn RepoRepository>,
+    blob_repo: Arc<dyn BlobRepository>,
+    block_store: AnyBlockStore,
+) {
+    match infra_repo
+        .get_server_config(BLOB_OWNERSHIP_BACKFILL_KEY)
+        .await
+    {
+        Ok(Some(_)) => return,
+        Ok(None) => {}
+        Err(e) => {
+            error!("Failed to read blob ownership backfill marker: {:?}", e);
+            return;
+        }
+    }
+
+    let repos = match repo_repo.get_all_repo_identities().await {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to query repos for blob ownership backfill: {:?}", e);
+            return;
+        }
+    };
+
+    if repos.is_empty() {
+        debug!("No repos need blob ownership backfill",);
+        return;
+    }
+
+    info!(
+        count = repos.len(),
+        "Backfilling blob ownership for existing repos"
+    );
+
+    let mut success = 0;
+    let mut failed = 0;
+
+    for chunk in repos.chunks(OWNERSHIP_CHUNK_SIZE) {
+        let results = futures::future::join_all(chunk.iter().map(|repo| {
+            let repo_repo = repo_repo.clone();
+            let blob_repo = blob_repo.clone();
+            let block_store = block_store.clone();
+
+            async move {
+                process_blob_ownership(
+                    repo_repo.as_ref(),
+                    blob_repo.as_ref(),
+                    &block_store,
+                    repo.user_id,
+                    repo.did.clone(),
+                )
+                .await
+            }
+        }))
+        .await;
+
+        results.iter().for_each(|r| match r {
+            Ok((user_id, did, granted)) => {
+                if *granted > 0 {
+                    info!(user_id = %user_id, did = %did, granted = granted, "Granted blob ownership");
+                }
+                success += 1;
+            }
+            Err((user_id, reason)) => {
+                warn!(user_id = %user_id, reason = reason, "Failed to backfill blob ownership");
+                failed += 1;
+            }
+        });
+    }
+
+    if let Err(e) = infra_repo
+        .upsert_server_config(BLOB_OWNERSHIP_BACKFILL_KEY, "1")
+        .await
+    {
+        error!("Failed to set blob ownership backfill marker: {:?}", e);
+    }
+
+    info!(success, failed, "Completed blob ownership backfill");
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -111,6 +111,43 @@ impl BlobOps {
         Ok(Some(cid.clone()))
     }
 
+    pub fn ensure_blob_ownership(
+        &self,
+        user_id: Uuid,
+        cid: &CidLink,
+    ) -> Result<bool, MetastoreError> {
+        let _guard = self.counter_lock.lock();
+        let user_hash = self.resolve_user_hash(user_id)?;
+        let cid_str = cid.as_str();
+        let marker_key = blob_meta_key(user_hash, cid_str);
+
+        if self
+            .repo_data
+            .get(marker_key.as_slice())
+            .map_err(MetastoreError::Fjall)?
+            .is_some()
+        {
+            return Ok(false);
+        }
+
+        let cid_index_key = blob_by_cid_key(cid_str);
+        let Some(mut content) = self.get_blob_content(cid)? else {
+            return Ok(false);
+        };
+        content.ref_count = content.ref_count.saturating_add(1);
+
+        let mut batch = self.db.batch();
+        batch.insert(&self.repo_data, marker_key.as_slice(), &[] as &[u8]);
+        batch.insert(
+            &self.repo_data,
+            cid_index_key.as_slice(),
+            content.serialize(),
+        );
+        batch.commit().map_err(MetastoreError::Fjall)?;
+
+        Ok(true)
+    }
+
     fn get_blob_content(&self, cid: &CidLink) -> Result<Option<BlobContentValue>, MetastoreError> {
         point_lookup(
             &self.repo_data,
@@ -761,5 +798,40 @@ mod tests {
             ops.get_blob_storage_keys_by_user(user_b).unwrap(),
             vec!["k".to_string()]
         );
+    }
+
+    #[test]
+    fn ensure_blob_ownership_grants_to_second_user() {
+        let (_dir, ms) = open_fresh();
+        let (user_a, _) = setup_user(&ms);
+        let (user_b, _) = setup_user(&ms);
+        let ops = ms.blob_ops();
+
+        let cid = test_cid_link(81);
+        ops.insert_blob(&cid, "a/b", 10, user_a, "k").unwrap();
+
+        assert!(ops.ensure_blob_ownership(user_b, &cid).unwrap());
+        assert!(!ops.ensure_blob_ownership(user_b, &cid).unwrap());
+
+        assert_eq!(ops.count_blobs_by_user(user_b).unwrap(), 1);
+        assert_eq!(ops.sum_blob_storage().unwrap(), 10);
+        assert!(
+            ops.get_blob_storage_keys_by_user(user_a)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn ensure_blob_ownership_ignores_absent_blob() {
+        let (_dir, ms) = open_fresh();
+        let (user_id, _) = setup_user(&ms);
+        let ops = ms.blob_ops();
+
+        assert!(
+            !ops.ensure_blob_ownership(user_id, &test_cid_link(82))
+                .unwrap()
+        );
+        assert_eq!(ops.count_blobs_by_user(user_id).unwrap(), 0);
     }
 }

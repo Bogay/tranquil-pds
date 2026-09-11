@@ -171,6 +171,12 @@ pub struct UserNeedingRecordBlobsBackfill {
     pub did: Did,
 }
 
+#[derive(Debug, Clone)]
+pub struct RepoIdentity {
+    pub user_id: Uuid,
+    pub did: Did,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoSeqEvent {
     pub seq: SequenceNumber,
@@ -544,6 +550,8 @@ pub trait RepoRepository: Send + Sync {
         &self,
         limit: i64,
     ) -> Result<Vec<UserNeedingRecordBlobsBackfill>, DbError>;
+
+    async fn get_all_repo_identities(&self) -> Result<Vec<RepoIdentity>, DbError>;
 
     async fn insert_record_blobs(
         &self,
