@@ -461,7 +461,7 @@
     "discordOpenLink": "Open Discord to verify",
     "securityAlerts": "Security alerts",
     "legacyLoginAlerts": "Legacy login alerts",
-    "legacyLoginAlertsDescription": "Get notified when someone signs in to your TOTP enabled account without using legacy login methods.",
+    "legacyLoginAlertsDescription": "Get notified when someone signs in to your TOTP enabled account using legacy login methods.",
     "enableLegacyLoginAlerts": "Enable legacy login alerts",
     "disableLegacyLoginAlerts": "Disable legacy login alerts"
   },

@@ -317,29 +317,26 @@ pub async fn create_session(
         return Err(ApiError::InternalError(None));
     }
     if is_legacy_login && !used_totp_factor {
-        warn!(
-            did = %row.did,
-            ip = %client_ip,
-            "Legacy login on TOTP-enabled account - sending notification"
-        );
-        let hostname = &tranquil_config::get().server.hostname;
+        let alerts_enabled = match state.repos.infra.get_account_preferences(row.id).await {
+            Ok(prefs) => prefs
+                .iter()
+                .find(|(name, _)| name == "legacy_login_alerts")
+                .and_then(|(_, value)| value.as_bool())
+                .unwrap_or(true),
+            Err(e) => {
+                warn!("Failed to fetch legacy login alert preference: {:?}", e);
+                true
+            }
+        };
 
-        let alerts_enabled = state
-            .repos
-            .infra
-            .get_account_preferences(row.id)
-            .await
-            .map(|prefs| {
-                prefs
-                    .iter()
-                    .find(|(name, _)| name == "legacy_login_alerts")
-                    .and_then(|(_, value)| value.as_bool())
-                    .unwrap_or(true)
-            })
-            .unwrap_or(true);
-
-        if alerts_enabled
-            && let Err(e) = tranquil_pds::comms::comms_repo::enqueue_legacy_login(
+        if alerts_enabled {
+            warn!(
+                did = %row.did,
+                ip = %client_ip,
+                "Legacy login on TOTP-enabled account - sending notification"
+            );
+            let hostname = &tranquil_config::get().server.hostname;
+            if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_legacy_login(
                 state.repos.user.as_ref(),
                 state.repos.infra.as_ref(),
                 row.id,
@@ -348,8 +345,9 @@ pub async fn create_session(
                 row.preferred_comms_channel,
             )
             .await
-        {
-            error!("Failed to queue legacy login notification: {:?}", e);
+            {
+                error!("Failed to queue legacy login notification: {:?}", e);
+            }
         }
     }
     let handle = row.handle.clone();
