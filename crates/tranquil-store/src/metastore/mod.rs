@@ -354,6 +354,7 @@ impl Metastore {
             self.db.clone(),
             self.partitions[Partition::RepoData.index()].clone(),
             Arc::clone(&self.user_hashes),
+            Arc::clone(&self.counter_lock),
         )
     }
 

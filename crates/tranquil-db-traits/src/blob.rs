@@ -70,8 +70,6 @@ pub trait BlobRepository: Send + Sync {
         takedown_ref: Option<&str>,
     ) -> Result<bool, DbError>;
 
-    async fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<bool, DbError>;
-
     async fn delete_blobs_by_user(&self, user_id: Uuid) -> Result<u64, DbError>;
 
     async fn get_blob_storage_keys_by_user(&self, user_id: Uuid) -> Result<Vec<String>, DbError>;

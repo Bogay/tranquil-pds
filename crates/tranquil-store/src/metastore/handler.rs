@@ -601,10 +601,6 @@ pub enum BlobRequest {
         takedown_ref: Option<String>,
         tx: Tx<bool>,
     },
-    DeleteBlobByCid {
-        cid: CidLink,
-        tx: Tx<bool>,
-    },
     DeleteBlobsByUser {
         user_id: Uuid,
         tx: Tx<u64>,
@@ -632,9 +628,9 @@ pub enum BlobRequest {
 impl BlobRequest {
     fn routing(&self, user_hashes: &UserHashMap) -> Routing {
         match self {
-            Self::InsertBlob { cid, .. }
-            | Self::UpdateBlobTakedown { cid, .. }
-            | Self::DeleteBlobByCid { cid, .. } => cid_to_routing(cid),
+            Self::InsertBlob { cid, .. } | Self::UpdateBlobTakedown { cid, .. } => {
+                cid_to_routing(cid)
+            }
 
             Self::DeleteBlobsByUser { user_id, .. } => uuid_to_routing(user_hashes, user_id),
 
@@ -3264,14 +3260,6 @@ fn dispatch_blob<S: StorageIO + 'static>(state: &HandlerState<S>, req: BlobReque
                 .metastore
                 .blob_ops()
                 .update_blob_takedown(&cid, takedown_ref.as_deref())
-                .map_err(metastore_to_db);
-            let _ = tx.send(result);
-        }
-        BlobRequest::DeleteBlobByCid { cid, tx } => {
-            let result = state
-                .metastore
-                .blob_ops()
-                .delete_blob_by_cid(&cid)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }

@@ -975,16 +975,6 @@ impl<S: StorageIO + 'static> tranquil_db_traits::BlobRepository for MetastoreCli
         recv(rx).await
     }
 
-    async fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<bool, DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool
-            .send(MetastoreRequest::Blob(BlobRequest::DeleteBlobByCid {
-                cid: cid.clone(),
-                tx,
-            }))?;
-        recv(rx).await
-    }
-
     async fn delete_blobs_by_user(&self, user_id: Uuid) -> Result<u64, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool

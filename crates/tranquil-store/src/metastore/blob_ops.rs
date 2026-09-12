@@ -25,14 +25,21 @@ pub struct BlobOps {
     db: Database,
     repo_data: Keyspace,
     user_hashes: Arc<UserHashMap>,
+    counter_lock: Arc<parking_lot::Mutex<()>>,
 }
 
 impl BlobOps {
-    pub fn new(db: Database, repo_data: Keyspace, user_hashes: Arc<UserHashMap>) -> Self {
+    pub fn new(
+        db: Database,
+        repo_data: Keyspace,
+        user_hashes: Arc<UserHashMap>,
+        counter_lock: Arc<parking_lot::Mutex<()>>,
+    ) -> Self {
         Self {
             db,
             repo_data,
             user_hashes,
+            counter_lock,
         }
     }
 
@@ -50,6 +57,7 @@ impl BlobOps {
         created_by_user: Uuid,
         storage_key: &str,
     ) -> Result<Option<CidLink>, MetastoreError> {
+        let _guard = self.counter_lock.lock();
         if size_bytes < 0 {
             return Err(MetastoreError::InvalidInput(
                 "size_bytes must be non-negative",
@@ -198,6 +206,7 @@ impl BlobOps {
         cid: &CidLink,
         takedown_ref: Option<&str>,
     ) -> Result<bool, MetastoreError> {
+        let _guard = self.counter_lock.lock();
         let mut content = match self.get_blob_content(cid)? {
             Some(c) => c,
             None => return Ok(false),
@@ -214,25 +223,8 @@ impl BlobOps {
         Ok(true)
     }
 
-    pub fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<bool, MetastoreError> {
-        let cid_index_key = blob_by_cid_key(cid.as_str());
-        if self
-            .repo_data
-            .get(cid_index_key.as_slice())
-            .map_err(MetastoreError::Fjall)?
-            .is_none()
-        {
-            return Ok(false);
-        }
-
-        let mut batch = self.db.batch();
-        batch.remove(&self.repo_data, cid_index_key.as_slice());
-        batch.commit().map_err(MetastoreError::Fjall)?;
-
-        Ok(true)
-    }
-
     pub fn delete_blobs_by_user(&self, user_id: Uuid) -> Result<u64, MetastoreError> {
+        let _guard = self.counter_lock.lock();
         let user_hash = self.resolve_user_hash(user_id)?;
         let prefix = blob_user_prefix(user_hash);
 
@@ -640,37 +632,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(ops.sum_blob_storage().unwrap(), 350);
-    }
-
-    #[test]
-    fn delete_blob_by_cid() {
-        let (_dir, ms) = open_fresh();
-        let (user_id, _) = setup_user(&ms);
-        let ops = ms.blob_ops();
-
-        let cid = test_cid_link(40);
-        ops.insert_blob(&cid, "image/png", 100, user_id, "k")
-            .unwrap();
-
-        assert!(ops.delete_blob_by_cid(&cid).unwrap());
-        assert!(ops.get_blob_metadata(&cid).unwrap().is_none());
-        assert!(!ops.delete_blob_by_cid(&cid).unwrap());
-    }
-
-    #[test]
-    fn delete_blob_cleans_up_indexes() {
-        let (_dir, ms) = open_fresh();
-        let (user_id, _) = setup_user(&ms);
-        let ops = ms.blob_ops();
-
-        let cid = test_cid_link(41);
-        ops.insert_blob(&cid, "image/png", 100, user_id, "storage/abc")
-            .unwrap();
-        assert!(ops.get_blob_storage_key(&cid).unwrap().is_some());
-
-        ops.delete_blob_by_cid(&cid).unwrap();
-
-        assert!(ops.get_blob_metadata(&cid).unwrap().is_none());
     }
 
     #[test]

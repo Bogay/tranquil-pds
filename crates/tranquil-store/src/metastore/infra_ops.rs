@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use uuid::Uuid;
 
 use super::MetastoreError;
-use super::blobs::{BlobMetaValue, blob_by_cid_key, blob_meta_key};
+use super::blobs::{BlobContentValue, blob_by_cid_key};
 use super::infra_schema::{
     DeletionRequestValue, InviteCodeUseValue, InviteCodeValue, NotificationHistoryValue,
     QueuedCommsValue, ReportValue, SigningKeyValue, account_pref_key, account_pref_prefix,
@@ -1220,57 +1220,20 @@ impl InfraOps {
         &self,
         cid: &CidLink,
     ) -> Result<Option<String>, MetastoreError> {
-        let cid_str = cid.as_str();
-        let cid_index_key = blob_by_cid_key(cid_str);
-        let user_hash_raw = match self
-            .repo_data
-            .get(cid_index_key.as_slice())
-            .map_err(MetastoreError::Fjall)?
-        {
-            Some(raw) => {
-                let arr: [u8; 8] = raw
-                    .as_ref()
-                    .try_into()
-                    .map_err(|_| MetastoreError::CorruptData("blob_by_cid value not 8 bytes"))?;
-                u64::from_be_bytes(arr)
-            }
-            None => return Ok(None),
-        };
-        let user_hash = UserHash::from_raw(user_hash_raw);
-        let key = blob_meta_key(user_hash, cid_str);
-        let val: Option<BlobMetaValue> = point_lookup(
+        let val: Option<BlobContentValue> = point_lookup(
             &self.repo_data,
-            key.as_slice(),
-            BlobMetaValue::deserialize,
-            "corrupt blob_meta value",
+            blob_by_cid_key(cid.as_str()).as_slice(),
+            BlobContentValue::deserialize,
+            "corrupt blob_content value",
         )?;
-        Ok(val.map(|v| v.storage_key))
+        Ok(val.map(|v| v.meta.storage_key))
     }
 
     pub fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<(), MetastoreError> {
-        let cid_str = cid.as_str();
-        let cid_index_key = blob_by_cid_key(cid_str);
-        let user_hash_raw = match self
-            .repo_data
-            .get(cid_index_key.as_slice())
-            .map_err(MetastoreError::Fjall)?
-        {
-            Some(raw) => {
-                let arr: [u8; 8] = raw
-                    .as_ref()
-                    .try_into()
-                    .map_err(|_| MetastoreError::CorruptData("blob_by_cid value not 8 bytes"))?;
-                u64::from_be_bytes(arr)
-            }
-            None => return Ok(()),
-        };
-        let user_hash = UserHash::from_raw(user_hash_raw);
-        let primary_key = blob_meta_key(user_hash, cid_str);
-
-        let mut batch = self.db.batch();
-        batch.remove(&self.repo_data, primary_key.as_slice());
-        batch.remove(&self.repo_data, cid_index_key.as_slice());
-        batch.commit().map_err(MetastoreError::Fjall)
+        let _guard = self.counter_lock.lock();
+        self.repo_data
+            .remove(blob_by_cid_key(cid.as_str()).as_slice())
+            .map_err(MetastoreError::Fjall)
     }
 
     pub fn get_admin_account_info_by_did(

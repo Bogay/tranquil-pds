@@ -1644,7 +1644,7 @@ async fn parity_plc_tokens() {
 }
 
 #[tokio::test]
-async fn parity_blob_delete_and_takedown() {
+async fn parity_blob_takedown() {
     let f = ParityFixture::new().await;
     let did = test_did("blobdel");
     let handle = test_handle("blobdel");
@@ -1681,14 +1681,6 @@ async fn parity_blob_delete_and_takedown() {
         pg_with_td.as_ref().map(|b| b.takedown_ref.as_deref()),
         store_with_td.as_ref().map(|b| b.takedown_ref.as_deref())
     );
-
-    f.pg.blob.delete_blob_by_cid(&cid).await.unwrap();
-    f.store.blob.delete_blob_by_cid(&cid).await.unwrap();
-
-    let pg_meta = f.pg.blob.get_blob_metadata(&cid).await.unwrap();
-    let store_meta = f.store.blob.get_blob_metadata(&cid).await.unwrap();
-    assert!(pg_meta.is_none());
-    assert!(store_meta.is_none());
 }
 
 #[tokio::test]

@@ -176,15 +176,6 @@ impl BlobRepository for PostgresBlobRepository {
         Ok(result.rows_affected() > 0)
     }
 
-    async fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<bool, DbError> {
-        let result = sqlx::query!("DELETE FROM blobs WHERE cid = $1", cid.as_str())
-            .execute(&self.pool)
-            .await
-            .map_err(map_sqlx_error)?;
-
-        Ok(result.rows_affected() > 0)
-    }
-
     async fn delete_blobs_by_user(&self, user_id: Uuid) -> Result<u64, DbError> {
         let result = sqlx::query!("DELETE FROM blobs WHERE created_by_user = $1", user_id)
             .execute(&self.pool)
