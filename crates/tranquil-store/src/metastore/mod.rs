@@ -277,16 +277,7 @@ impl Metastore {
             };
 
             let cid_index_key = blobs::blob_by_cid_key(cid_str.as_str());
-            let content = match repo_data
-                .get(cid_index_key.as_slice())?
-                .and_then(|raw| blobs::BlobContentValue::deserialize(raw.as_ref()))
-            {
-                Some(mut existing) => {
-                    existing.ref_count = existing.ref_count.saturating_add(1);
-                    existing
-                }
-                None => blobs::BlobContentValue { meta, ref_count: 1 },
-            };
+            let content = blobs::BlobContentValue { meta, ref_count: 1 };
 
             let mut batch = db.batch();
             batch.insert(repo_data, cid_index_key.as_slice(), content.serialize());
