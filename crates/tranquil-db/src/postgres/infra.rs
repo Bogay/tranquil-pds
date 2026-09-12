@@ -7,7 +7,7 @@ use tranquil_db_traits::{
     InviteCodeSortOrder, InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo,
     QueuedComms, ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
-use tranquil_types::{CidLink, Did, InviteCode};
+use tranquil_types::{Did, InviteCode};
 use uuid::Uuid;
 
 use super::col;
@@ -1003,27 +1003,6 @@ impl InfraRepository for PostgresInfraRepository {
     async fn delete_server_config(&self, key: &str) -> Result<(), DbError> {
         sqlx::query("DELETE FROM server_config WHERE key = $1")
             .bind(key)
-            .execute(&self.pool)
-            .await
-            .map_err(map_sqlx_error)?;
-
-        Ok(())
-    }
-
-    async fn get_blob_storage_key_by_cid(&self, cid: &CidLink) -> Result<Option<String>, DbError> {
-        let result = sqlx::query_scalar!(
-            "SELECT storage_key FROM blobs WHERE cid = $1 LIMIT 1",
-            cid.as_str()
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(result)
-    }
-
-    async fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<(), DbError> {
-        sqlx::query!("DELETE FROM blobs WHERE cid = $1", cid.as_str())
             .execute(&self.pool)
             .await
             .map_err(map_sqlx_error)?;

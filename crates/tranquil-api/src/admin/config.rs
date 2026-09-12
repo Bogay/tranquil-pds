@@ -1,10 +1,8 @@
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
-use tracing::{error, warn};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Admin, Auth};
 use tranquil_pds::state::AppState;
-use tranquil_types::CidLink;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -183,46 +181,6 @@ pub async fn update_server_config(
     }
 
     if let Some(ref logo_cid) = req.logo_cid {
-        let old_logo_cid = state
-            .repos
-            .infra
-            .get_server_config("logo_cid")
-            .await
-            .ok()
-            .flatten();
-
-        let should_delete_old = match (&old_logo_cid, logo_cid.is_empty()) {
-            (Some(old), true) => Some(old.clone()),
-            (Some(old), false) if old != logo_cid => Some(old.clone()),
-            _ => None,
-        };
-
-        if let Some(old_cid_str) = should_delete_old {
-            match CidLink::new(old_cid_str) {
-                Ok(old_cid) => {
-                    if let Ok(Some(storage_key)) = state
-                        .repos
-                        .infra
-                        .get_blob_storage_key_by_cid(&old_cid)
-                        .await
-                    {
-                        if let Err(e) = state.blob_store.delete(&storage_key).await {
-                            error!("Failed to delete old logo blob from storage: {:?}", e);
-                        }
-                        if let Err(e) = state.repos.infra.delete_blob_by_cid(&old_cid).await {
-                            error!("Failed to delete old logo blob record: {:?}", e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Old logo CID in database is invalid, skipping cleanup: {:?}",
-                        e
-                    );
-                }
-            }
-        }
-
         if logo_cid.is_empty() {
             state
                 .repos

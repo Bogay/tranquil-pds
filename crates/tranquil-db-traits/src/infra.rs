@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tranquil_types::{CidLink, Did, Handle, InviteCode};
+use tranquil_types::{Did, Handle, InviteCode};
 use uuid::Uuid;
 
 use crate::DbError;
@@ -416,10 +416,6 @@ pub trait InfraRepository: Send + Sync {
     async fn upsert_server_config(&self, key: &str, value: &str) -> Result<(), DbError>;
 
     async fn delete_server_config(&self, key: &str) -> Result<(), DbError>;
-
-    async fn get_blob_storage_key_by_cid(&self, cid: &CidLink) -> Result<Option<String>, DbError>;
-
-    async fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<(), DbError>;
 
     async fn get_admin_account_info_by_did(
         &self,

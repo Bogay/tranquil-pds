@@ -6,7 +6,6 @@ use smallvec::SmallVec;
 use uuid::Uuid;
 
 use super::MetastoreError;
-use super::blobs::{BlobContentValue, blob_by_cid_key};
 use super::infra_schema::{
     DeletionRequestValue, InviteCodeUseValue, InviteCodeValue, NotificationHistoryValue,
     QueuedCommsValue, ReportValue, SigningKeyValue, account_pref_key, account_pref_prefix,
@@ -28,12 +27,11 @@ use tranquil_db_traits::{
     InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo, QueuedComms,
     ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
-use tranquil_types::{CidLink, Did, Handle, InviteCode};
+use tranquil_types::{Did, Handle, InviteCode};
 
 pub struct InfraOps {
     db: Database,
     infra: Keyspace,
-    repo_data: Keyspace,
     users: Keyspace,
     user_hashes: Arc<UserHashMap>,
     comms_seq: Arc<std::sync::atomic::AtomicU32>,
@@ -44,7 +42,6 @@ impl InfraOps {
     pub fn new(
         db: Database,
         infra: Keyspace,
-        repo_data: Keyspace,
         users: Keyspace,
         user_hashes: Arc<UserHashMap>,
         comms_seq: Arc<std::sync::atomic::AtomicU32>,
@@ -53,7 +50,6 @@ impl InfraOps {
         Self {
             db,
             infra,
-            repo_data,
             users,
             user_hashes,
             comms_seq,
@@ -1214,26 +1210,6 @@ impl InfraOps {
                 });
                 Ok(acc)
             })
-    }
-
-    pub fn get_blob_storage_key_by_cid(
-        &self,
-        cid: &CidLink,
-    ) -> Result<Option<String>, MetastoreError> {
-        let val: Option<BlobContentValue> = point_lookup(
-            &self.repo_data,
-            blob_by_cid_key(cid.as_str()).as_slice(),
-            BlobContentValue::deserialize,
-            "corrupt blob_content value",
-        )?;
-        Ok(val.map(|v| v.meta.storage_key))
-    }
-
-    pub fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<(), MetastoreError> {
-        let _guard = self.counter_lock.lock();
-        self.repo_data
-            .remove(blob_by_cid_key(cid.as_str()).as_slice())
-            .map_err(MetastoreError::Fjall)
     }
 
     pub fn get_admin_account_info_by_did(

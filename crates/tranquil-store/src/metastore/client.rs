@@ -2352,27 +2352,6 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         recv(rx).await
     }
 
-    async fn get_blob_storage_key_by_cid(&self, cid: &CidLink) -> Result<Option<String>, DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool.send(MetastoreRequest::Infra(
-            InfraRequest::GetBlobStorageKeyByCid {
-                cid: cid.clone(),
-                tx,
-            },
-        ))?;
-        recv(rx).await
-    }
-
-    async fn delete_blob_by_cid(&self, cid: &CidLink) -> Result<(), DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool
-            .send(MetastoreRequest::Infra(InfraRequest::DeleteBlobByCid {
-                cid: cid.clone(),
-                tx,
-            }))?;
-        recv(rx).await
-    }
-
     async fn get_admin_account_info_by_did(
         &self,
         did: &Did,

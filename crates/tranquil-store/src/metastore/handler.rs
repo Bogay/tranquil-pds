@@ -2009,14 +2009,6 @@ pub enum InfraRequest {
         key: String,
         tx: Tx<()>,
     },
-    GetBlobStorageKeyByCid {
-        cid: CidLink,
-        tx: Tx<Option<String>>,
-    },
-    DeleteBlobByCid {
-        cid: CidLink,
-        tx: Tx<()>,
-    },
     GetAdminAccountInfoByDid {
         did: Did,
         tx: Tx<Option<AdminAccountInfo>>,
@@ -2103,9 +2095,6 @@ impl InfraRequest {
             | Self::GetDeletionRequestByDid { did, .. }
             | Self::GetPlcTokensByDid { did, .. }
             | Self::CountPlcTokensByDid { did, .. } => did_to_routing(did),
-            Self::GetBlobStorageKeyByCid { cid, .. } | Self::DeleteBlobByCid { cid, .. } => {
-                cid_to_routing(cid)
-            }
             _ => Routing::Global,
         }
     }
@@ -4294,22 +4283,6 @@ fn dispatch_infra<S: StorageIO>(state: &HandlerState<S>, req: InfraRequest) {
                 .metastore
                 .infra_ops()
                 .delete_server_config(&key)
-                .map_err(metastore_to_db);
-            let _ = tx.send(result);
-        }
-        InfraRequest::GetBlobStorageKeyByCid { cid, tx } => {
-            let result = state
-                .metastore
-                .infra_ops()
-                .get_blob_storage_key_by_cid(&cid)
-                .map_err(metastore_to_db);
-            let _ = tx.send(result);
-        }
-        InfraRequest::DeleteBlobByCid { cid, tx } => {
-            let result = state
-                .metastore
-                .infra_ops()
-                .delete_blob_by_cid(&cid)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
