@@ -328,9 +328,34 @@ async fn process_blob_ownership(
 
     for chunk in records.chunks(OWNERSHIP_CHUNK_SIZE) {
         futures::future::join_all(chunk.iter().map(|record| async move {
-            let cid = Cid::from_str(record.record_cid.as_str()).ok()?;
-            let block_bytes = block_store.get(&cid).await.ok()??;
-            let record_ipld: Ipld = serde_ipld_dagcbor::from_slice(&block_bytes).ok()?;
+            let uri = format!("{}/{}", record.collection.as_str(), record.rkey.as_str());
+            let cid = match Cid::from_str(record.record_cid.as_str()) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!(user_id = %user_id, record = %uri, error = %e, "skipping record with unparseable CID");
+                    return None;
+                }
+            };
+
+            let block_bytes = match block_store.get(&cid).await {
+                Ok(Some(b)) => b,
+                Ok(None) => {
+                    warn!(user_id = %user_id, record = %uri, "skipping record where block is missing in the block store");
+                    return None;
+                }
+                Err(e) => {
+                    warn!(user_id = %user_id, record = %uri, error = %e, "skipping record because block couldn't be read");
+                    return None;
+                }
+            };
+
+            let record_ipld: Ipld = match serde_ipld_dagcbor::from_slice(&block_bytes) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(user_id = %user_id, record = %uri, error = %e, "skipping record because block couldn't be decoded");
+                    return None;
+                }
+            };
 
             Some(
                 crate::sync::import::find_blob_refs_ipld(&record_ipld, 0)

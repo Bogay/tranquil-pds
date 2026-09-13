@@ -472,7 +472,7 @@ impl<S: StorageIO + 'static> CommitOps<S> {
                 };
 
                 match include(self, user_hash) {
-                    Err(e) => return Some(Err(e)),
+                    Err(e) => Some(Err(e)),
                     Ok(false) => None,
                     Ok(true) => {
                         let meta = match RepoMetaValue::deserialize(&val_bytes) {
