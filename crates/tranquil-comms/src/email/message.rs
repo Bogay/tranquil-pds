@@ -1,6 +1,6 @@
 use lettre::Message;
 use lettre::message::Mailbox;
-use lettre::message::header::ContentType;
+use lettre::message::header::{ContentType, MIME_VERSION_1_0};
 use lettre::message::header::{Header, HeaderName, HeaderValue};
 use uuid::Uuid;
 
@@ -24,6 +24,7 @@ pub(super) fn build(
         .to(to)
         .subject(subject)
         .message_id(Some(message_id))
+        .header(MIME_VERSION_1_0)
         .header(ContentType::TEXT_PLAIN);
 
     let category = apply_atmos_categories
@@ -142,6 +143,7 @@ mod tests {
         assert!(raw.contains("From: \"Test Sender\" <noreply@nel.pet>"));
         assert!(raw.contains("To: user@nel.pet"));
         assert!(raw.contains("Subject: Welcome"));
+        assert!(raw.contains("MIME-Version: 1.0"));
         assert!(lower.contains("content-type: text/plain"));
         assert!(raw.contains("Hello world."));
     }
