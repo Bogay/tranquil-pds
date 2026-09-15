@@ -77,13 +77,6 @@ fn is_granular_scope(s: &str) -> bool {
         || s.starts_with("identity:")
 }
 
-fn is_valid_scope(s: &str) -> bool {
-    !matches!(
-        tranquil_pds::oauth::scopes::parse_scope(s),
-        tranquil_pds::oauth::scopes::ParsedScope::Unknown(_)
-    )
-}
-
 fn extract_device_cookie(headers: &HeaderMap) -> Option<tranquil_types::DeviceId> {
     headers
         .get("cookie")

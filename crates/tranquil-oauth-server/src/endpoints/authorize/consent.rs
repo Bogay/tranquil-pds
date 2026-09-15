@@ -529,14 +529,6 @@ pub async fn consent_post(
         );
     }
     let approved_scope_str = final_approved.join(" ");
-    let has_valid_scope = final_approved.iter().all(|s| is_valid_scope(s));
-    if !has_valid_scope {
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "Invalid scope format",
-        );
-    }
     if form.remember {
         let preferences: Vec<ScopePreference> = presented_items
             .iter()
