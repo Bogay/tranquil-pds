@@ -1057,7 +1057,7 @@ async fn test_granular_scope_repo_create_only() {
     let url = base_url().await;
     let http_client = client();
     let (token, did, _) =
-        get_oauth_token_with_scope("repo:app.bsky.feed.post?action=create blob:*/*").await;
+        get_oauth_token_with_scope("atproto repo:app.bsky.feed.post?action=create blob:*/*").await;
     let now = chrono::Utc::now().to_rfc3339();
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.repo.createRecord", url))
@@ -1111,7 +1111,7 @@ async fn test_granular_scope_wildcard_collection() {
     let url = base_url().await;
     let http_client = client();
     let (token, did, _) = get_oauth_token_with_scope(
-        "repo:app.bsky.*?action=create&action=update&action=delete blob:*/*",
+        "atproto repo:app.bsky.*?action=create&action=update&action=delete blob:*/*",
     )
     .await;
     let now = chrono::Utc::now().to_rfc3339();
@@ -1168,7 +1168,7 @@ async fn test_granular_scope_wildcard_collection() {
 async fn test_granular_scope_email_read() {
     let url = base_url().await;
     let http_client = client();
-    let (token, did, _) = get_oauth_token_with_scope("account:email?action=read").await;
+    let (token, did, _) = get_oauth_token_with_scope("atproto account:email?action=read").await;
     let session_res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getSession", url))
         .bearer_auth(&token)
@@ -1189,7 +1189,7 @@ async fn test_granular_scope_email_read() {
 async fn test_granular_scope_no_email_access() {
     let url = base_url().await;
     let http_client = client();
-    let (token, did, _) = get_oauth_token_with_scope("repo:*?action=create blob:*/*").await;
+    let (token, did, _) = get_oauth_token_with_scope("atproto repo:*?action=create blob:*/*").await;
     let session_res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getSession", url))
         .bearer_auth(&token)
@@ -1210,7 +1210,8 @@ async fn test_granular_scope_no_email_access() {
 async fn test_granular_scope_rpc_specific_method() {
     let url = base_url().await;
     let http_client = client();
-    let (token, _, _) = get_oauth_token_with_scope("rpc:app.bsky.feed.getTimeline?aud=*").await;
+    let (token, _, _) =
+        get_oauth_token_with_scope("atproto rpc:app.bsky.feed.getTimeline?aud=*").await;
     let allowed_res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", url))
         .bearer_auth(&token)
@@ -1275,7 +1276,7 @@ async fn test_granular_scope_rpc_aud_with_service_id() {
     let url = base_url().await;
     let http_client = client();
     let (token, _, _) = get_oauth_token_with_scope(
-        "rpc:app.bsky.feed.getTimeline?aud=did:web:api.bsky.app#bsky_appview",
+        "atproto rpc:app.bsky.feed.getTimeline?aud=did:web:api.bsky.app#bsky_appview",
     )
     .await;
     let allowed_res = http_client

@@ -960,6 +960,35 @@ fn has_scope(scope_str: &str, scope: &str) -> bool {
 }
 
 #[tokio::test]
+async fn test_par_rejects_scope_without_atproto() {
+    let url = base_url().await;
+    let mock = setup_mock_client_metadata(REDIRECT_URI).await;
+    let client_id = mock.uri();
+    let (_, code_challenge) = generate_pkce();
+    let par_res = client()
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", REDIRECT_URI),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "repo:*?action=create"),
+        ])
+        .send()
+        .await
+        .expect("PAR failed");
+    assert_eq!(par_res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = par_res.json().await.unwrap();
+    assert_eq!(
+        body["error"].as_str(),
+        Some("invalid_scope"),
+        "got {:?}",
+        body
+    );
+}
+
+#[tokio::test]
 async fn test_scope_missing_from_client_metadata_is_not_registered_on_consent() {
     let pending = par_and_login(
         "unreg",

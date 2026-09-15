@@ -173,6 +173,11 @@ fn normalize_scope(requested_scope: &Option<String>) -> Result<Option<String>, O
     if requested_scopes.is_empty() {
         return Ok(Some("atproto".to_string()));
     }
+    if !requested_scopes.contains(&"atproto") {
+        return Err(OAuthError::InvalidScope(
+            "The atproto scope is required".to_string(),
+        ));
+    }
     Ok(Some(requested_scopes.join(" ")))
 }
 
@@ -223,5 +228,47 @@ fn parse_prompt(value: Option<&str>) -> Result<Option<Prompt>, OAuthError> {
             "Unsupported prompt value: {}",
             other
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn normalized(scope: Option<&str>) -> Result<Option<String>, OAuthError> {
+        normalize_scope(&scope.map(str::to_string))
+    }
+
+    #[test]
+    fn absent_or_blank_scope_defaults_to_atproto() {
+        assert_eq!(normalized(None).unwrap().as_deref(), Some("atproto"));
+        assert_eq!(normalized(Some("")).unwrap().as_deref(), Some("atproto"));
+        assert_eq!(normalized(Some("   ")).unwrap().as_deref(), Some("atproto"));
+    }
+
+    #[test]
+    fn scope_without_atproto_is_invalid() {
+        assert!(matches!(
+            normalized(Some("repo:*?action=create blob:*/*")),
+            Err(OAuthError::InvalidScope(_))
+        ));
+    }
+
+    #[test]
+    fn atproto_need_not_come_first() {
+        assert_eq!(
+            normalized(Some("repo:*?action=create  atproto"))
+                .unwrap()
+                .as_deref(),
+            Some("repo:*?action=create atproto")
+        );
+    }
+
+    #[test]
+    fn unrecognized_scopes_still_pass_par() {
+        assert_eq!(
+            normalized(Some("atproto chat")).unwrap().as_deref(),
+            Some("atproto chat")
+        );
     }
 }
