@@ -2,7 +2,9 @@ use tranquil_db_traits::DbScope;
 use tranquil_pds::cache::Cache;
 use tranquil_pds::delegation::{GrantCoverage, grant_coverage, intersect_scopes};
 use tranquil_pds::oauth::permission_set_resolver::expand_scopes;
-use tranquil_scopes::{ExpansionOutcome, RejectedScope, ScopeRejection};
+use tranquil_scopes::{
+    ExpansionOutcome, ParsedScope, RejectedScope, RepoScope, ScopeRejection, parse_scope,
+};
 
 pub enum Authority<'a> {
     FullSelf,
@@ -38,7 +40,13 @@ fn reject_unregistered(outcome: &mut ExpansionOutcome, registered: &str) {
     let mut rejected = Vec::new();
     let mut keep = |scope: String| match grant_coverage(registered, &scope) {
         GrantCoverage::Full => Some(scope),
-        GrantCoverage::Narrowed(narrowed) => Some(narrowed),
+        GrantCoverage::Narrowed(narrowed) => {
+            rejected.extend(narrowed_out(&scope, &narrowed).map(|scope| RejectedScope {
+                scope,
+                reason: ScopeRejection::NotRegistered,
+            }));
+            Some(narrowed)
+        }
         GrantCoverage::Withheld => {
             rejected.push(RejectedScope {
                 scope,
@@ -58,6 +66,28 @@ fn reject_unregistered(outcome: &mut ExpansionOutcome, registered: &str) {
         .collect();
 
     outcome.rejected.extend(rejected);
+}
+
+/// The repo actions dropped when `requested` was narrowed to `narrowed`, as a scope of their own.
+/// Only repo scopes are ever narrowed; anything else yields `None`.
+fn narrowed_out(requested: &str, narrowed: &str) -> Option<String> {
+    let (ParsedScope::Repo(requested), ParsedScope::Repo(narrowed)) =
+        (parse_scope(requested), parse_scope(narrowed))
+    else {
+        return None;
+    };
+    let actions: std::collections::HashSet<_> = requested
+        .actions
+        .difference(&narrowed.actions)
+        .copied()
+        .collect();
+    (!actions.is_empty()).then(|| {
+        RepoScope {
+            collection: requested.collection,
+            actions,
+        }
+        .to_scope_string()
+    })
 }
 
 #[cfg(test)]
@@ -204,5 +234,31 @@ mod tests {
             "a permission set legitimately expands to scopes the client never registered"
         );
         assert!(eff.permitted.contains("identity:*"));
+    }
+
+    #[tokio::test]
+    async fn actions_narrowed_out_by_client_metadata_are_reported_as_rejected() {
+        let c = MemoryCache::new();
+        let eff = resolve_effective_scopes(
+            &c,
+            "atproto repo:app.bsky.feed.post?action=create&action=delete",
+            Authority::FullSelf,
+            Some("atproto repo:*?action=create"),
+        )
+        .await;
+        assert!(
+            eff.permitted
+                .split_whitespace()
+                .any(|s| s == "repo:app.bsky.feed.post?action=create"),
+            "permitted was {:?}",
+            eff.permitted
+        );
+        assert_eq!(
+            eff.outcome.rejected,
+            vec![RejectedScope {
+                scope: "repo:app.bsky.feed.post?action=delete".to_string(),
+                reason: ScopeRejection::NotRegistered,
+            }]
+        );
     }
 }
