@@ -182,13 +182,7 @@ pub async fn consent_get(
         .iter()
         .map(|p| (p.scope.as_str(), p.granted))
         .collect();
-    let presented_item_strings: Vec<String> = effective
-        .outcome
-        .passthrough
-        .iter()
-        .cloned()
-        .chain(effective.outcome.sets.iter().map(|g| g.include_token()))
-        .collect();
+    let presented_item_strings = effective.outcome.unexpanded_scopes();
     let show_consent = should_show_consent(
         state.repos.oauth.as_ref(),
         &did,
@@ -504,13 +498,7 @@ pub async fn consent_post(
             ),
         );
     }
-    let presented_items: Vec<String> = effective
-        .outcome
-        .passthrough
-        .iter()
-        .cloned()
-        .chain(effective.outcome.sets.iter().map(|g| g.include_token()))
-        .collect();
+    let presented_items = effective.outcome.unexpanded_scopes();
     let atproto_was_requested = presented_items.iter().any(|s| s == "atproto");
     if atproto_was_requested && !form.approved_scopes.contains(&"atproto".to_string()) {
         return json_error(

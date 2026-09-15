@@ -110,6 +110,16 @@ impl ExpansionOutcome {
     pub fn to_scope_string(&self) -> String {
         self.flat_scopes().join(" ")
     }
+
+    /// The scopes that survived filtering, as requested: passthrough scopes plus the `include:`
+    /// token of each resolved set, without expanding the sets.
+    pub fn unexpanded_scopes(&self) -> Vec<String> {
+        self.passthrough
+            .iter()
+            .cloned()
+            .chain(self.sets.iter().map(ResolvedSetGroup::include_token))
+            .collect()
+    }
 }
 
 #[derive(Debug, Deserialize)]

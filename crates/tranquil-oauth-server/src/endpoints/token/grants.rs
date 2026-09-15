@@ -202,7 +202,10 @@ pub async fn handle_authorization_code_grant(
         details: None,
         code: None,
         current_refresh_token: Some(refresh_token.clone()),
-        scope: requested_scope.clone(),
+        // Filtered but unexpanded: a remembered consent skips the consent screen, so the raw
+        // request can still hold scopes the client no longer registers. Sets stay as `include:`
+        // tokens so refresh re-resolves them.
+        scope: Some(effective.outcome.unexpanded_scopes().join(" ")),
         controller_did: controller_did.clone(),
     };
     state
@@ -275,17 +278,13 @@ async fn recompute_resolved_scope(
         Some(g) => crate::endpoints::authorize::scope_resolution::Authority::Delegated(g),
         None => crate::endpoints::authorize::scope_resolution::Authority::FullSelf,
     };
-    let client_scope = state
-        .client_metadata_cache
-        .get(&token_data.client_id)
-        .await
-        .ok()
-        .and_then(|m| m.scope);
+    // No client metadata check here: `token_data.scope` was already filtered against it when
+    // the token was issued, so there is nothing for a re-check to remove.
     let effective = crate::endpoints::authorize::scope_resolution::resolve_effective_scopes(
         &*state.cache,
         requested,
         authority,
-        client_scope.as_deref(),
+        None,
     )
     .await;
     if !effective.outcome.failures.is_empty() {

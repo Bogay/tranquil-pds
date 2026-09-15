@@ -3,7 +3,7 @@ mod helpers;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
-use common::{base_url, client};
+use common::{base_url, client, get_test_repos};
 use helpers::verify_new_account;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
@@ -1032,4 +1032,85 @@ async fn test_scope_missing_from_client_metadata_is_not_registered_on_consent() 
     let token = exchange_code(&pending, consent_body["redirect_uri"].as_str().unwrap()).await;
     let granted = token["scope"].as_str().unwrap();
     assert!(!has_scope(granted, "identity:*"), "granted {:?}", granted);
+}
+
+/// A remembered consent skips the consent screen, so the scope stored on the token must be
+/// filtered at issuance rather than copied from the raw request. Otherwise a scope the client
+/// has since dropped from its metadata survives in storage and comes back on refresh.
+#[tokio::test]
+async fn test_remembered_scope_later_unregistered_never_reaches_a_token() {
+    let pending = par_and_login(
+        "remember",
+        "atproto identity:*",
+        Some("atproto"),
+        async |did, client_id| {
+            let prefs =
+                ["atproto", "identity:*"].map(|scope| tranquil_pds::oauth::db::ScopePreference {
+                    scope: scope.to_string(),
+                    granted: true,
+                });
+            get_test_repos()
+                .await
+                .oauth
+                .upsert_scope_preferences(
+                    &did.parse().unwrap(),
+                    &tranquil_types::ClientId::new(client_id.to_string()),
+                    &prefs,
+                )
+                .await
+                .expect("seeding scope preferences failed");
+        },
+    )
+    .await;
+    assert!(
+        !pending.location.contains("/oauth/consent"),
+        "remembered consent should skip the consent screen, got {}",
+        pending.location
+    );
+
+    let token = exchange_code(&pending, &pending.location).await;
+    assert!(!has_scope(token["scope"].as_str().unwrap(), "identity:*"));
+
+    let token_id = {
+        let payload = token["access_token"]
+            .as_str()
+            .unwrap()
+            .split('.')
+            .nth(1)
+            .unwrap();
+        let claims: Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).unwrap()).unwrap();
+        tranquil_types::TokenId::new(claims["sid"].as_str().expect("sid claim"))
+    };
+    let row = get_test_repos()
+        .await
+        .oauth
+        .get_token_by_id(&token_id)
+        .await
+        .expect("get_token_by_id query failed")
+        .expect("token row should exist");
+    let row_scope = row.scope.expect("token row should have a scope");
+    assert!(
+        !has_scope(&row_scope, "identity:*"),
+        "stored {:?}",
+        row_scope
+    );
+
+    let refresh_res = client()
+        .post(format!("{}/oauth/token", base_url().await))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", token["refresh_token"].as_str().unwrap()),
+            ("client_id", &pending.client_id),
+        ])
+        .send()
+        .await
+        .expect("Refresh request failed");
+    assert_eq!(refresh_res.status(), StatusCode::OK);
+    let refreshed: Value = refresh_res.json().await.unwrap();
+    assert!(
+        !has_scope(refreshed["scope"].as_str().unwrap(), "identity:*"),
+        "refresh granted {:?}",
+        refreshed["scope"]
+    );
 }
