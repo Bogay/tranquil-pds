@@ -22,9 +22,16 @@ fn generate_pkce() -> (String, String) {
 }
 
 async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
+    setup_mock_client_metadata_with_scope(redirect_uri, None).await
+}
+
+async fn setup_mock_client_metadata_with_scope(
+    redirect_uri: &str,
+    scope: Option<&str>,
+) -> MockServer {
     let mock_server = MockServer::start().await;
     let client_id = mock_server.uri();
-    let metadata = json!({
+    let mut metadata = json!({
         "client_id": client_id,
         "client_name": "Test OAuth Scope Client",
         "redirect_uris": [redirect_uri],
@@ -33,6 +40,9 @@ async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
         "token_endpoint_auth_method": "none",
         "dpop_bound_access_tokens": false
     });
+    if let Some(scope) = scope {
+        metadata["scope"] = json!(scope);
+    }
     Mock::given(method("GET"))
         .and(path("/"))
         .respond_with(ResponseTemplate::new(200).set_body_json(metadata))
@@ -834,4 +844,163 @@ async fn test_unrecognized_scope_reaches_consent_and_is_never_granted() {
         "an unrecognized scope leaked into the issued token: {:?}",
         granted
     );
+}
+
+struct PendingAuthorization {
+    client_id: String,
+    request_uri: String,
+    code_verifier: String,
+    // Where authorize sent us: the consent screen, or straight to the client with a code.
+    location: String,
+    _mock: MockServer,
+}
+
+const REDIRECT_URI: &str = "https://example.com/callback";
+
+async fn par_and_login(
+    handle_prefix: &str,
+    requested_scope: &str,
+    client_scope: Option<&str>,
+    before_login: impl AsyncFnOnce(&str, &str),
+) -> PendingAuthorization {
+    let url = base_url().await;
+    let http_client = client();
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    let handle = format!("{}{}", handle_prefix, suffix);
+    let password = format!("{}Pass123!", handle_prefix);
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({
+            "handle": handle,
+            "email": format!("{}{}@example.com", handle_prefix, suffix),
+            "password": password
+        }))
+        .send()
+        .await
+        .expect("Account creation failed");
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let did = account["did"].as_str().unwrap().to_string();
+    let _ = verify_new_account(&http_client, &did).await;
+
+    let mock = setup_mock_client_metadata_with_scope(REDIRECT_URI, client_scope).await;
+    let client_id = mock.uri();
+    let (code_verifier, code_challenge) = generate_pkce();
+    let par_res = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", REDIRECT_URI),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", requested_scope),
+        ])
+        .send()
+        .await
+        .expect("PAR failed");
+    assert_eq!(par_res.status(), StatusCode::CREATED, "PAR should succeed");
+    let par_body: Value = par_res.json().await.unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap().to_string();
+
+    before_login(&did, &client_id).await;
+
+    let auth_res = http_client
+        .post(format!("{}/oauth/authorize", url))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "username": &handle,
+            "password": &password,
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .expect("Authorize failed");
+    assert_eq!(auth_res.status(), StatusCode::OK);
+    let auth_body: Value = auth_res.json().await.unwrap();
+    let location = auth_body["redirect_uri"].as_str().unwrap().to_string();
+
+    PendingAuthorization {
+        client_id,
+        request_uri,
+        code_verifier,
+        location,
+        _mock: mock,
+    }
+}
+
+async fn exchange_code(pending: &PendingAuthorization, location: &str) -> Value {
+    let code = location
+        .split("code=")
+        .nth(1)
+        .expect("redirect should carry a code")
+        .split('&')
+        .next()
+        .unwrap();
+    let token_res = client()
+        .post(format!("{}/oauth/token", base_url().await))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", REDIRECT_URI),
+            ("code_verifier", &pending.code_verifier),
+            ("client_id", &pending.client_id),
+        ])
+        .send()
+        .await
+        .expect("Token request failed");
+    assert_eq!(token_res.status(), StatusCode::OK);
+    token_res.json().await.unwrap()
+}
+
+fn has_scope(scope_str: &str, scope: &str) -> bool {
+    scope_str.split_whitespace().any(|s| s == scope)
+}
+
+#[tokio::test]
+async fn test_scope_missing_from_client_metadata_is_not_registered_on_consent() {
+    let pending = par_and_login(
+        "unreg",
+        "atproto identity:*",
+        Some("atproto"),
+        async |_, _| {},
+    )
+    .await;
+    assert!(pending.location.contains("/oauth/consent"));
+
+    let url = base_url().await;
+    let consent_get: Value = client()
+        .get(format!(
+            "{}/oauth/authorize/consent?request_uri={}",
+            url, pending.request_uri
+        ))
+        .send()
+        .await
+        .expect("Consent GET failed")
+        .json()
+        .await
+        .unwrap();
+    let rejected = consent_get["rejected_scopes"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1, "got {:?}", rejected);
+    assert_eq!(rejected[0]["scope"].as_str(), Some("identity:*"));
+    assert_eq!(rejected[0]["reason"].as_str(), Some("not_registered"));
+
+    let consent_res = client()
+        .post(format!("{}/oauth/authorize/consent", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": pending.request_uri,
+            "approved_scopes": ["atproto", "identity:*"],
+            "remember": false
+        }))
+        .send()
+        .await
+        .expect("Consent POST failed");
+    assert_eq!(consent_res.status(), StatusCode::OK);
+    let consent_body: Value = consent_res.json().await.unwrap();
+    let token = exchange_code(&pending, consent_body["redirect_uri"].as_str().unwrap()).await;
+    let granted = token["scope"].as_str().unwrap();
+    assert!(!has_scope(granted, "identity:*"), "granted {:?}", granted);
 }
