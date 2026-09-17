@@ -396,6 +396,10 @@
       <input
         id="username"
         type="text"
+        inputmode="url"
+        autocapitalize="none"
+        autocorrect="off"
+        spellcheck="false"
         bind:value={username}
         placeholder={handlePlaceholder}
         disabled={submitting}

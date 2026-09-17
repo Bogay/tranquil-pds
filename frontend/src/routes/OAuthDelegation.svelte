@@ -163,6 +163,10 @@
         <input
           id="controller-identifier"
           type="text"
+          inputmode="url"
+          autocapitalize="none"
+          autocorrect="off"
+          spellcheck="false"
           bind:value={controllerIdentifier}
           disabled={submitting}
           required

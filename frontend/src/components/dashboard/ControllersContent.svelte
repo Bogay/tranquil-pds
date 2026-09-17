@@ -422,6 +422,10 @@
               <input
                 id="controllerIdentifier"
                 type="text"
+                inputmode="url"
+                autocapitalize="none"
+                autocorrect="off"
+                spellcheck="false"
                 value={addControllerIdentifier}
                 oninput={(e) => onControllerInput((e.target as HTMLInputElement).value)}
                 onblur={() => { setTimeout(() => { showTypeahead = false }, 200) }}
@@ -541,6 +545,10 @@
             <input
               id="delegatedHandle"
               type="text"
+              inputmode="url"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
               bind:value={newDelegatedHandle}
               placeholder="username"
               disabled={creatingDelegated}

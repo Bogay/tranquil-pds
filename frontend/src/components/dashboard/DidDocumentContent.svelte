@@ -208,6 +208,10 @@
           <input
             id="new-handle"
             type="text"
+            inputmode="url"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
             bind:value={newHandle}
             placeholder={$_('didEditor.handlePlaceholder')}
           />

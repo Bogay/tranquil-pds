@@ -461,6 +461,10 @@
 
     <input
       type="text"
+      inputmode="url"
+      autocapitalize="none"
+      autocorrect="off"
+      spellcheck="false"
       value={searchQuery}
       oninput={(e) => onSearchInput(e.currentTarget.value)}
       placeholder={$_('admin.searchPlaceholder')}

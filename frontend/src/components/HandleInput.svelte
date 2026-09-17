@@ -64,6 +64,10 @@
   <input
     {id}
     type="text"
+    inputmode="url"
+    autocapitalize="none"
+    autocorrect="off"
+    spellcheck="false"
     value={value}
     {placeholder}
     {disabled}

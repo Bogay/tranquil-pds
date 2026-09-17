@@ -53,6 +53,10 @@
         <input
           id="identifier"
           type="text"
+          inputmode="email"
+          autocapitalize="none"
+          autocorrect="off"
+          spellcheck="false"
           bind:value={identifier}
           placeholder={$_('requestPasskeyRecovery.emailPlaceholder')}
           disabled={submitting}
@@ -75,4 +79,3 @@
     <a href={getFullUrl(routes.login)}>{$_('common.backToLogin')}</a>
   </p>
 </div>
-

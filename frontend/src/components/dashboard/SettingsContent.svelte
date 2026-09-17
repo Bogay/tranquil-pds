@@ -342,7 +342,18 @@
         <form onsubmit={handleUpdateHandle}>
           <div>
             <label for="new-handle-byo">{$_('settings.yourDomain')}</label>
-            <input id="new-handle-byo" type="text" bind:value={newHandle} placeholder={$_('settings.yourDomainPlaceholder')} disabled={handleLoading} required />
+            <input
+              id="new-handle-byo"
+              type="text"
+              inputmode="url"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+              bind:value={newHandle}
+              placeholder={$_('settings.yourDomainPlaceholder')}
+              disabled={handleLoading}
+              required
+            />
           </div>
           <button type="submit" disabled={handleLoading || !newHandle}>
             {handleLoading ? $_('common.verifying') : $_('settings.verifyAndUpdate')}

@@ -377,6 +377,10 @@
           <input
             id="source-handle"
             type="text"
+            inputmode="url"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
             placeholder={$_('migration.inbound.sourceAuth.handlePlaceholder')}
             bind:value={handleInput}
             disabled={loading || isResuming}

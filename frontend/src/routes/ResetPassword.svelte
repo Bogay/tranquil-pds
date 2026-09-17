@@ -120,6 +120,10 @@
         <input
           id="email"
           type="text"
+          inputmode="email"
+          autocapitalize="none"
+          autocorrect="off"
+          spellcheck="false"
           bind:value={email}
           placeholder={$_('resetPassword.emailPlaceholder')}
           disabled={submitting}
@@ -136,4 +140,3 @@
     <a href="/app/login">{$_('common.backToLogin')}</a>
   </p>
 </div>
-
