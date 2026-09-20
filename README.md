@@ -79,6 +79,7 @@ We currently don't have a shared space to chat and organize Tranquil things, but
 
 - [@oyster.cafe](https://tangled.org/did:plc:3fwecdnvtcscjnrx2p4n7alz)
 - [@nel.pet](https://tangled.org/did:plc:h5wsnqetncv6lu2weom35lg2)
+- [@jola.dev](https://tangled.org/did:plc:bvraa6gajy4tfr3eh2sisdkr)
 
 ### Amazing contributors
 
