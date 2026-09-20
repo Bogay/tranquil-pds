@@ -15,12 +15,7 @@ async fn test_delete_record_marks_blocks_obsolete() {
     let (did, jwt) = setup_new_user("gc-after-delete").await;
     let did = Did::new(did).expect("setup_new_user returned a valid DID");
 
-    let user_id = repos
-        .user
-        .get_id_by_did(&did)
-        .await
-        .expect("DB error")
-        .expect("User not found");
+    let user_id = user_id_of(repos, &did).await;
 
     let collection = Nsid::new("app.bsky.feed.post".to_string()).expect("valid NSID");
     let rkey = Rkey::new(format!("gc_test_{}", Utc::now().timestamp_millis())).expect("valid rkey");
@@ -110,12 +105,7 @@ async fn test_update_record_marks_old_record_block_obsolete() {
     let (did, jwt) = setup_new_user("gc-after-update").await;
     let did = Did::new(did).expect("setup_new_user returned a valid DID");
 
-    let user_id = repos
-        .user
-        .get_id_by_did(&did)
-        .await
-        .expect("DB error")
-        .expect("User not found");
+    let user_id = user_id_of(repos, &did).await;
 
     let collection = Nsid::new("app.bsky.feed.post".to_string()).expect("valid NSID");
     let rkey =

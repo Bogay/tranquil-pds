@@ -1,7 +1,6 @@
 use tranquil_lexicon::is_valid_did;
 use tranquil_pds::api::validation::{
-    HandleValidationError, MAX_DOMAIN_LABEL_LENGTH, MAX_EMAIL_LENGTH, MAX_LOCAL_PART_LENGTH,
-    MAX_SERVICE_HANDLE_LOCAL_PART, is_valid_email, validate_short_handle,
+    HandleValidationError, MAX_SERVICE_HANDLE_LOCAL_PART, validate_short_handle,
 };
 use tranquil_pds::validation::{validate_collection_nsid, validate_password, validate_record_key};
 
@@ -260,84 +259,4 @@ fn test_handle_whitespace_handling() {
         validate_short_handle("a\nb"),
         Err(HandleValidationError::ContainsSpaces)
     ));
-}
-
-#[test]
-fn test_email_length_boundaries() {
-    let long_local = format!("{}@example.com", "a".repeat(MAX_LOCAL_PART_LENGTH));
-    assert!(is_valid_email(&long_local));
-
-    let too_long_local = format!("{}@example.com", "a".repeat(MAX_LOCAL_PART_LENGTH + 1));
-    assert!(!is_valid_email(&too_long_local));
-
-    let very_long_email = format!("a@{}.com", "a".repeat(240));
-    if very_long_email.len() <= MAX_EMAIL_LENGTH {
-        assert!(is_valid_email(&very_long_email) || !is_valid_email(&very_long_email));
-    }
-}
-
-#[test]
-fn test_email_local_part_special_chars() {
-    assert!(is_valid_email("user.name@example.com"));
-    assert!(is_valid_email("user+tag@example.com"));
-    assert!(is_valid_email("user!def@example.com"));
-    assert!(is_valid_email("user#abc@example.com"));
-    assert!(is_valid_email("user$def@example.com"));
-    assert!(is_valid_email("user%abc@example.com"));
-    assert!(is_valid_email("user&def@example.com"));
-    assert!(is_valid_email("user'abc@example.com"));
-    assert!(is_valid_email("user*def@example.com"));
-    assert!(is_valid_email("user=abc@example.com"));
-    assert!(is_valid_email("user?def@example.com"));
-    assert!(is_valid_email("user^abc@example.com"));
-    assert!(is_valid_email("user_def@example.com"));
-    assert!(is_valid_email("user`abc@example.com"));
-    assert!(is_valid_email("user{def@example.com"));
-    assert!(is_valid_email("user|abc@example.com"));
-    assert!(is_valid_email("user}def@example.com"));
-    assert!(is_valid_email("user~abc@example.com"));
-    assert!(is_valid_email("user-def@example.com"));
-}
-
-#[test]
-fn test_email_local_part_dots() {
-    assert!(!is_valid_email(".user@example.com"));
-    assert!(!is_valid_email("user.@example.com"));
-    assert!(!is_valid_email("user..name@example.com"));
-    assert!(is_valid_email("user.name@example.com"));
-    assert!(is_valid_email("u.s.e.r@example.com"));
-}
-
-#[test]
-fn test_email_domain_labels() {
-    let long_label = "a".repeat(MAX_DOMAIN_LABEL_LENGTH);
-    let valid_domain = format!("user@{}.com", long_label);
-    assert!(is_valid_email(&valid_domain));
-
-    let too_long_label = "a".repeat(MAX_DOMAIN_LABEL_LENGTH + 1);
-    let invalid_domain = format!("user@{}.com", too_long_label);
-    assert!(!is_valid_email(&invalid_domain));
-}
-
-#[test]
-fn test_email_domain_hyphens() {
-    assert!(!is_valid_email("user@-example.com"));
-    assert!(!is_valid_email("user@example-.com"));
-    assert!(is_valid_email("user@ex-ample.com"));
-    assert!(is_valid_email("user@ex--ample.com"));
-}
-
-#[test]
-fn test_email_domain_must_have_dot() {
-    assert!(!is_valid_email("user@localhost"));
-    assert!(!is_valid_email("user@example"));
-    assert!(is_valid_email("user@a.b"));
-}
-
-#[test]
-fn test_email_invalid_chars() {
-    assert!(!is_valid_email("user name@example.com"));
-    assert!(!is_valid_email("user\t@example.com"));
-    assert!(!is_valid_email("user\n@example.com"));
-    assert!(!is_valid_email("user@exam ple.com"));
 }

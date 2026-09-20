@@ -1,11 +1,12 @@
 use bcrypt::{DEFAULT_COST, hash};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use tracing::error;
+use tracing::{error, warn};
 use tranquil_db_traits::{CommsChannel, DidWebOverrides, SessionRepository, UserRepository};
 use tranquil_pds::api::error::ApiError;
 use tranquil_pds::api::error::DbResultExt;
 use tranquil_pds::types::{AtIdentifier, Did, Handle, PasswordHash};
+use tranquil_types::{DiscordUsername, SignalUsername, TelegramUsername};
 
 pub struct ResolvedRepo {
     pub user_id: uuid::Uuid,
@@ -156,42 +157,70 @@ pub struct ChannelInput<'a> {
 pub fn extract_verification_recipient(
     channel: CommsChannel,
     input: &ChannelInput<'_>,
-) -> Result<String, ApiError> {
+) -> Result<tranquil_pds::comms::VerificationTarget, ApiError> {
     match channel {
-        CommsChannel::Email => match input.email {
-            Some(e) if !e.trim().is_empty() => Ok(e.trim().to_string()),
-            _ => Err(ApiError::MissingEmail),
-        },
-        CommsChannel::Discord => match input.discord_username {
-            Some(username) if !username.trim().is_empty() => {
-                let clean = username.trim().to_lowercase();
-                if !tranquil_pds::api::validation::is_valid_discord_username(&clean) {
-                    return Err(ApiError::InvalidRequest(
-                        "Invalid Discord username. Must be 2-32 lowercase characters (letters, numbers, underscores, periods)".into(),
-                    ));
-                }
-                Ok(clean)
-            }
-            _ => Err(ApiError::MissingDiscordId),
-        },
-        CommsChannel::Telegram => match input.telegram_username {
-            Some(username) if !username.trim().is_empty() => {
-                let clean = username.trim().trim_start_matches('@');
-                if !tranquil_pds::api::validation::is_valid_telegram_username(clean) {
-                    return Err(ApiError::InvalidRequest(
-                        "Invalid Telegram username. Must be 5-32 characters, alphanumeric or underscore".into(),
-                    ));
-                }
-                Ok(clean.to_string())
-            }
-            _ => Err(ApiError::MissingTelegramUsername),
-        },
-        CommsChannel::Signal => match input.signal_username {
-            Some(username) if !username.trim().is_empty() => {
-                Ok(username.trim().trim_start_matches('@').to_lowercase())
-            }
-            _ => Err(ApiError::MissingSignalNumber),
-        },
+        CommsChannel::Email => {
+            let raw = trimmed(input.email).ok_or(ApiError::MissingEmail)?;
+            let address = tranquil_types::EmailAddress::new(raw)?;
+            Ok(tranquil_pds::comms::VerificationTarget::direct(
+                tranquil_db_traits::Recipient::Email(address),
+            ))
+        }
+        CommsChannel::Signal => {
+            let raw = trimmed(input.signal_username).ok_or(ApiError::MissingSignalNumber)?;
+            let username = SignalUsername::new(raw)?;
+            Ok(tranquil_pds::comms::VerificationTarget::direct(
+                tranquil_db_traits::Recipient::Signal(username),
+            ))
+        }
+        CommsChannel::Telegram => {
+            let raw = trimmed(input.telegram_username).ok_or(ApiError::MissingTelegramUsername)?;
+            let username = TelegramUsername::new(raw)?;
+            tranquil_pds::comms::VerificationTarget::resolve(
+                channel,
+                username.as_str(),
+                input.email,
+            )
+        }
+        CommsChannel::Discord => {
+            let raw = trimmed(input.discord_username).ok_or(ApiError::MissingDiscordId)?;
+            let username = DiscordUsername::new(raw)?;
+            tranquil_pds::comms::VerificationTarget::resolve(
+                channel,
+                username.as_str(),
+                input.email,
+            )
+        }
+    }
+}
+
+fn trimmed(raw: Option<&str>) -> Option<&str> {
+    raw.map(str::trim).filter(|value| !value.is_empty())
+}
+
+pub async fn implicitly_verify_channel(
+    user_repo: &dyn UserRepository,
+    did: &Did,
+    user_id: uuid::Uuid,
+    preferred_channel: CommsChannel,
+    context: &'static str,
+) {
+    let Ok(Some(prefs)) = user_repo.get_comms_prefs(user_id).await else {
+        return;
+    };
+    let Some(recipient) = tranquil_pds::comms::recipient_for(&prefs, preferred_channel) else {
+        warn!(
+            did = %did,
+            preferred = ?preferred_channel,
+            "We skipped implicit verification on {context} because the account doesn't have a valid recipient"
+        );
+        return;
+    };
+    if let Err(e) = user_repo
+        .set_channel_verified(did, recipient.channel())
+        .await
+    {
+        warn!("Implicit verification on {context} failed: {:?}", e);
     }
 }
 

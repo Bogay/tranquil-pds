@@ -781,7 +781,11 @@ impl UserOps {
         }))
     }
 
-    pub fn admin_update_email(&self, did: &Did, email: &str) -> Result<u64, MetastoreError> {
+    pub fn admin_update_email(
+        &self,
+        did: &Did,
+        email: &tranquil_types::EmailAddress,
+    ) -> Result<u64, MetastoreError> {
         let user_hash = self.resolve_hash(did.as_str());
         let val = match self.load_user(user_hash)? {
             Some(v) => v,
@@ -796,12 +800,12 @@ impl UserOps {
 
         batch.insert(
             &self.users,
-            user_by_email_key(email).as_slice(),
+            user_by_email_key(email.as_str()).as_slice(),
             user_hash.raw().to_be_bytes(),
         );
 
         let mut updated = val;
-        updated.email = Some(email.to_owned());
+        updated.email = Some(email.as_str().to_owned());
 
         batch.insert(
             &self.users,
@@ -1022,11 +1026,11 @@ impl UserOps {
 
     pub fn store_telegram_chat_id(
         &self,
-        telegram_username: &str,
+        telegram_username: &tranquil_types::TelegramUsername,
         chat_id: i64,
         handle: Option<&str>,
     ) -> Result<Option<Uuid>, MetastoreError> {
-        let idx_key = telegram_lookup_key(telegram_username);
+        let idx_key = telegram_lookup_key(telegram_username.as_str());
         let raw = match self
             .users
             .get(idx_key.as_slice())
@@ -1060,11 +1064,6 @@ impl UserOps {
             u.telegram_chat_id = Some(chat_id);
         })?;
         Ok(Some(uid))
-    }
-
-    pub fn get_telegram_chat_id(&self, user_id: Uuid) -> Result<Option<i64>, MetastoreError> {
-        let user_hash = self.resolve_hash_from_uuid(user_id)?;
-        Ok(self.load_user(user_hash)?.and_then(|v| v.telegram_chat_id))
     }
 
     pub fn set_unverified_discord(
@@ -1105,11 +1104,11 @@ impl UserOps {
 
     pub fn store_discord_user_id(
         &self,
-        discord_username: &str,
-        discord_id: &str,
+        discord_username: &tranquil_types::DiscordUsername,
+        discord_id: &tranquil_types::DiscordUserId,
         handle: Option<&str>,
     ) -> Result<Option<Uuid>, MetastoreError> {
-        let idx_key = discord_lookup_key(discord_username);
+        let idx_key = discord_lookup_key(discord_username.as_str());
         let raw = match self
             .users
             .get(idx_key.as_slice())
@@ -1124,7 +1123,7 @@ impl UserOps {
                     };
                     let user_hash = UserHash::from_did(&val.did);
                     self.mutate_user(user_hash, |u| {
-                        u.discord_id = Some(discord_id.to_owned());
+                        u.discord_id = Some(discord_id.as_str().to_owned());
                     })?;
                     return Ok(Some(val.id));
                 }
@@ -1140,7 +1139,7 @@ impl UserOps {
         };
         let uid = val.id;
         self.mutate_user(user_hash, |u| {
-            u.discord_id = Some(discord_id.to_owned());
+            u.discord_id = Some(discord_id.as_str().to_owned());
         })?;
         Ok(Some(uid))
     }

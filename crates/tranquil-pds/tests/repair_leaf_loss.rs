@@ -57,12 +57,7 @@ async fn repair_fails_loud_on_missing_leaf_block() {
         res.text().await
     );
 
-    let user_id = repos
-        .user
-        .get_id_by_did(&Did::new(did.clone()).unwrap())
-        .await
-        .expect("DB error")
-        .expect("user not found");
+    let user_id = user_id_of(repos, &Did::new(did.clone()).unwrap()).await;
 
     let root_str = repos
         .repo

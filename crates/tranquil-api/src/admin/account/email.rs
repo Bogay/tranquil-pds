@@ -38,7 +38,8 @@ pub async fn send_email(
         .log_db_err("in send_email")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let email = user.email.ok_or(ApiError::NoEmail)?;
+    let email = tranquil_types::EmailAddress::new(&user.email.ok_or(ApiError::NoEmail)?)
+        .map_err(|e| ApiError::InvalidRequest(e.to_string()))?;
     let (user_id, handle) = (user.id, user.handle);
     let hostname = &tranquil_config::get().server.hostname;
     let subject = input
@@ -50,9 +51,8 @@ pub async fn send_email(
         .infra
         .enqueue_comms(
             Some(user_id),
-            tranquil_db_traits::CommsChannel::Email,
+            &tranquil_types::Recipient::Email(email),
             tranquil_db_traits::CommsType::AdminEmail,
-            &email,
             Some(&subject),
             content,
             None,

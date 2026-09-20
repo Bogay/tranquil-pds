@@ -660,10 +660,14 @@ impl UserRepository for PostgresUserRepository {
         }))
     }
 
-    async fn admin_update_email(&self, did: &Did, email: &str) -> Result<u64, DbError> {
+    async fn admin_update_email(
+        &self,
+        did: &Did,
+        email: &tranquil_types::EmailAddress,
+    ) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "UPDATE users SET email = $1 WHERE did = $2",
-            email,
+            email.as_str(),
             did.as_str()
         )
         .execute(&self.pool)
@@ -3300,10 +3304,11 @@ impl UserRepository for PostgresUserRepository {
 
     async fn store_discord_user_id(
         &self,
-        discord_username: &str,
-        discord_id: &str,
+        discord_username: &tranquil_types::DiscordUsername,
+        discord_id: &tranquil_types::DiscordUserId,
         handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError> {
+        let (discord_username, discord_id) = (discord_username.as_str(), discord_id.as_str());
         let result = match handle {
             Some(h) => sqlx::query_scalar!(
                 "UPDATE users SET discord_id = $2, discord_verified = TRUE, updated_at = NOW() WHERE LOWER(discord_username) = LOWER($1) AND discord_username IS NOT NULL AND handle = $3 RETURNING id",
@@ -3362,10 +3367,11 @@ impl UserRepository for PostgresUserRepository {
 
     async fn store_telegram_chat_id(
         &self,
-        telegram_username: &str,
+        telegram_username: &tranquil_types::TelegramUsername,
         chat_id: i64,
         handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError> {
+        let telegram_username = telegram_username.as_str();
         let result = match handle {
             Some(h) => sqlx::query_scalar!(
                 "UPDATE users SET telegram_chat_id = $2, telegram_verified = TRUE, updated_at = NOW() WHERE LOWER(telegram_username) = LOWER($1) AND telegram_username IS NOT NULL AND handle = $3 RETURNING id",
@@ -3391,14 +3397,6 @@ impl UserRepository for PostgresUserRepository {
             .map_err(map_sqlx_error)?,
         };
         Ok(result)
-    }
-
-    async fn get_telegram_chat_id(&self, user_id: Uuid) -> Result<Option<i64>, DbError> {
-        let row = sqlx::query_scalar!("SELECT telegram_chat_id FROM users WHERE id = $1", user_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(map_sqlx_error)?;
-        Ok(row.flatten())
     }
 
     async fn get_password_reset_info(

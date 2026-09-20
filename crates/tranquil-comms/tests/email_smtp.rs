@@ -32,6 +32,10 @@ fn fixture(recipient: &str, subject: &str, body: &str) -> QueuedComms {
     }
 }
 
+fn to(recipient: &str) -> tranquil_types::Recipient {
+    tranquil_types::Recipient::new(CommsChannel::Email, recipient).unwrap()
+}
+
 fn build_smarthost_sender(host: &str, port: u16) -> EmailSender {
     build_smarthost_sender_with_total_timeout(host, port, Duration::from_secs(10))
 }
@@ -101,7 +105,9 @@ async fn spawn_stub(rcpt_response: &'static [u8]) -> u16 {
 async fn rcpt_550_classifies_as_smtp_permanent() {
     let port = spawn_stub(b"550 5.1.1 user unknown\r\n").await;
     let sender = build_smarthost_sender("127.0.0.1", port);
-    let result = sender.send(&fixture("nel@nel.pet", "x", "x")).await;
+    let result = sender
+        .send(&fixture("oys@nel.pet", "x", "x"), &to("oys@nel.pet"))
+        .await;
     match result {
         Err(SendError::SmtpPermanent(_)) => {}
         other => panic!("expected SmtpPermanent, got {other:?}"),
@@ -112,7 +118,9 @@ async fn rcpt_550_classifies_as_smtp_permanent() {
 async fn rcpt_421_classifies_as_smtp_transient() {
     let port = spawn_stub(b"421 4.7.0 try again later\r\n").await;
     let sender = build_smarthost_sender("127.0.0.1", port);
-    let result = sender.send(&fixture("nel@nel.pet", "x", "x")).await;
+    let result = sender
+        .send(&fixture("oys@nel.pet", "x", "x"), &to("oys@nel.pet"))
+        .await;
     match result {
         Err(SendError::SmtpTransient(_)) => {}
         other => panic!("expected SmtpTransient, got {other:?}"),
@@ -120,10 +128,13 @@ async fn rcpt_421_classifies_as_smtp_transient() {
 }
 
 #[tokio::test]
-async fn invalid_recipient_classifies_as_invalid_recipient() {
+async fn send_rejects_mismatched_recipient_variant() {
     let port = spawn_stub(b"250 OK\r\n").await;
     let sender = build_smarthost_sender("127.0.0.1", port);
-    let result = sender.send(&fixture("not-an-address", "x", "x")).await;
+    let recipient = tranquil_types::Recipient::new(CommsChannel::Signal, "oys.01").unwrap();
+    let result = sender
+        .send(&fixture("oys@nel.pet", "x", "x"), &recipient)
+        .await;
     match result {
         Err(SendError::InvalidRecipient(_)) => {}
         other => panic!("expected InvalidRecipient, got {other:?}"),
@@ -146,7 +157,9 @@ async fn smarthost_silent_relay_hits_total_timeout() {
     let sender =
         build_smarthost_sender_with_total_timeout("127.0.0.1", port, Duration::from_millis(500));
     let start = std::time::Instant::now();
-    let result = sender.send(&fixture("nel@nel.pet", "x", "x")).await;
+    let result = sender
+        .send(&fixture("oys@nel.pet", "x", "x"), &to("oys@nel.pet"))
+        .await;
     let elapsed = start.elapsed();
     match result {
         Err(SendError::Timeout) => {}

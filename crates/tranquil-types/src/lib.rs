@@ -141,6 +141,7 @@ macro_rules! simple_string_newtype_no_sqlx {
     };
 }
 
+// I keep coming back to this. Is this too tricksy? Let me know.
 macro_rules! validated_string_newtype {
     (
         $(#[$meta:meta])*
@@ -948,6 +949,19 @@ impl CommsChannel {
         }
     }
 
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            CommsChannel::Email => "email",
+            CommsChannel::Discord => "Discord",
+            CommsChannel::Telegram => "Telegram",
+            CommsChannel::Signal => "Signal",
+        }
+    }
+
+    pub fn verifies_via_bot(&self) -> bool {
+        matches!(self, CommsChannel::Telegram | CommsChannel::Discord)
+    }
+
     pub fn from_str_opt(s: &str) -> Option<Self> {
         match s {
             "email" => Some(CommsChannel::Email),
@@ -956,6 +970,420 @@ impl CommsChannel {
             "signal" => Some(CommsChannel::Signal),
             _ => None,
         }
+    }
+}
+
+impl std::str::FromStr for CommsChannel {
+    type Err = InvalidCommsChannel;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        CommsChannel::from_str_opt(s).ok_or(InvalidCommsChannel)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidCommsChannel;
+
+impl fmt::Display for InvalidCommsChannel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("invalid comms channel")
+    }
+}
+
+impl std::error::Error for InvalidCommsChannel {}
+
+fn normalize_signal_username(raw: &str) -> Result<String, ()> {
+    let trimmed = raw.trim();
+    let clean = trimmed.strip_prefix('@').unwrap_or(trimmed).to_lowercase();
+    let shaped = clean.rsplit_once('.').is_some_and(|(base, discriminator)| {
+        matches!(base.len(), 3..=32)
+            && base.starts_with(|c: char| c.is_ascii_alphabetic())
+            && base.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && is_valid_discriminator(discriminator)
+    });
+    shaped.then_some(clean).ok_or(())
+}
+
+fn is_valid_discriminator(s: &str) -> bool {
+    if !s.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    if !matches!(s.len(), 2..=20) {
+        return false;
+    }
+    if s.len() > 2 && s.starts_with('0') {
+        return false;
+    }
+    s.parse::<u64>().is_ok_and(|n| n != 0)
+}
+
+validated_string_newtype! {
+    pub struct SignalUsername;
+    error = InvalidSignalUsername;
+    label = "Signal username. Must be 3-32 characters starting with a letter, then a full-stop, then at least two digits, like oys.01";
+    validator = normalize_signal_username;
+}
+
+fn normalize_telegram_username(raw: &str) -> Result<String, ()> {
+    let trimmed = raw.trim();
+    let clean = trimmed.strip_prefix('@').unwrap_or(trimmed).to_lowercase();
+    let shaped = (5..=32).contains(&clean.len())
+        && clean.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    shaped.then_some(clean).ok_or(())
+}
+
+validated_string_newtype! {
+    pub struct TelegramUsername;
+    error = InvalidTelegramUsername;
+    label = "Telegram username. Must be 5-32 characters of letters, digits, or underscores";
+    validator = normalize_telegram_username;
+}
+
+fn normalize_discord_username(raw: &str) -> Result<String, ()> {
+    let clean = raw.trim().to_lowercase();
+    let shaped = (2..=32).contains(&clean.len())
+        && !clean.contains("..")
+        && clean
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.');
+    shaped.then_some(clean).ok_or(())
+}
+
+validated_string_newtype! {
+    pub struct DiscordUsername;
+    error = InvalidDiscordUsername;
+    label = "Discord username. Must be 2-32 lowercase letters, digits, underscores, or full-stops";
+    validator = normalize_discord_username;
+}
+
+const MAX_EMAIL_LENGTH: usize = 254;
+const MAX_EMAIL_LOCAL_PART_LENGTH: usize = 64;
+const MAX_EMAIL_DOMAIN_LENGTH: usize = 253;
+const MAX_EMAIL_DOMAIN_LABEL_LENGTH: usize = 63;
+const EMAIL_LOCAL_FUNNY_CHARS: &str = ".!#$%&'*+/=?^_`{|}~-";
+
+validated_string_newtype! {
+    pub struct EmailAddress;
+    error = InvalidEmailAddress;
+    label = "email address";
+    validator = |raw| {
+        let clean = raw.trim().to_ascii_lowercase();
+        is_valid_email(&clean).then_some(clean).ok_or(())
+    };
+}
+
+fn is_valid_email(email: &str) -> bool {
+    email.len() <= MAX_EMAIL_LENGTH
+        && email.rsplit_once('@').is_some_and(|(local, domain)| {
+            valid_email_local_part(local) && valid_email_domain(domain)
+        })
+}
+
+fn valid_email_local_part(local: &str) -> bool {
+    !local.is_empty()
+        && local.len() <= MAX_EMAIL_LOCAL_PART_LENGTH
+        && !local.starts_with('.')
+        && !local.ends_with('.')
+        && !local.contains("..")
+        && local
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || EMAIL_LOCAL_FUNNY_CHARS.contains(c))
+}
+
+fn valid_email_domain(domain: &str) -> bool {
+    !domain.is_empty()
+        && domain.len() <= MAX_EMAIL_DOMAIN_LENGTH
+        && domain.contains('.')
+        && domain.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= MAX_EMAIL_DOMAIN_LABEL_LENGTH
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+}
+
+fn valid_telegram_chat_id(raw: &str) -> Result<String, ()> {
+    let digits = raw.strip_prefix('-').unwrap_or(raw);
+    let accepted = !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && raw.len() <= 20
+        && raw.parse::<i64>().is_ok_and(|id| id != 0);
+    accepted.then(|| raw.to_string()).ok_or(())
+}
+
+validated_string_newtype! {
+    pub struct TelegramChatId;
+    error = InvalidTelegramChatId;
+    label = "Telegram chat ID";
+    validator = valid_telegram_chat_id;
+}
+
+// Particularly from having been stored in the DB as a 0, so that the state is shown nicely within our engine.
+impl TelegramChatId {
+    pub fn from_i64(id: i64) -> Option<Self> {
+        (id != 0).then(|| Self(id.to_string()))
+    }
+}
+
+fn valid_discord_user_id(raw: &str) -> Result<String, ()> {
+    raw.parse::<u64>()
+        .is_ok_and(|id| id > 0)
+        .then(|| raw.to_string())
+        .ok_or(())
+}
+
+validated_string_newtype! {
+    pub struct DiscordUserId;
+    error = InvalidDiscordUserId;
+    label = "Discord user ID";
+    validator = valid_discord_user_id;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Recipient {
+    Email(EmailAddress),
+    Signal(SignalUsername),
+    Telegram(TelegramChatId),
+    Discord(DiscordUserId),
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidRecipient {
+    channel: CommsChannel,
+    raw: String,
+}
+
+impl fmt::Display for InvalidRecipient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid {} recipient: {}", self.channel, self.raw)
+    }
+}
+
+impl std::error::Error for InvalidRecipient {}
+
+impl Recipient {
+    pub fn new(channel: CommsChannel, raw: &str) -> Result<Self, InvalidRecipient> {
+        let parsed = match channel {
+            CommsChannel::Email => EmailAddress::new(raw).ok().map(Self::Email),
+            CommsChannel::Signal => SignalUsername::new(raw).ok().map(Self::Signal),
+            CommsChannel::Telegram => TelegramChatId::new(raw).ok().map(Self::Telegram),
+            CommsChannel::Discord => DiscordUserId::new(raw).ok().map(Self::Discord),
+        };
+        parsed.ok_or(InvalidRecipient {
+            channel,
+            raw: raw.to_string(),
+        })
+    }
+
+    pub fn channel(&self) -> CommsChannel {
+        match self {
+            Self::Email(_) => CommsChannel::Email,
+            Self::Signal(_) => CommsChannel::Signal,
+            Self::Telegram(_) => CommsChannel::Telegram,
+            Self::Discord(_) => CommsChannel::Discord,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Email(address) => address.as_str(),
+            Self::Signal(username) => username.as_str(),
+            Self::Telegram(chat_id) => chat_id.as_str(),
+            Self::Discord(user_id) => user_id.as_str(),
+        }
+    }
+}
+
+impl fmt::Display for Recipient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod recipient_tests {
+    use super::*;
+
+    #[test]
+    fn email_new_normalizes_and_validates() {
+        let address = EmailAddress::new("  User@Example.PET \n").unwrap();
+        assert_eq!(address.as_str(), "user@example.pet");
+        assert!(EmailAddress::new("").is_err());
+        assert!(EmailAddress::new("no-at-sign").is_err());
+        assert!(EmailAddress::new("a@-bad.label.pet").is_err());
+        assert!(EmailAddress::new("dot..dot@jola.dev").is_err());
+        assert!(EmailAddress::new(".user@nel.pet").is_err());
+        assert!(EmailAddress::new("user.@nel.pet").is_err());
+        assert!(EmailAddress::new("u.s.e.r@jola.dev").is_ok());
+        assert!(EmailAddress::new("a b@nel.pet").is_err());
+        assert!(EmailAddress::new("user\t@nel.pet").is_err());
+        assert!(EmailAddress::new("user@exam ple.pet").is_err());
+        assert!(EmailAddress::new("user@localhost").is_err());
+        assert!(EmailAddress::new("user@ex-ample.pet").is_ok());
+        assert!(EmailAddress::new("user@ex--ample.pet").is_ok());
+        assert!(EmailAddress::new("user@example-.pet").is_err());
+        assert!(EmailAddress::new("USER@JOLA.DEV").is_ok());
+    }
+
+    #[test]
+    fn email_accepts_every_local_part_special_char() {
+        for special in [
+            "user.name",
+            "user+tag",
+            "user!def",
+            "user#abc",
+            "user$def",
+            "user%abc",
+            "user&def",
+            "user'abc",
+            "user*def",
+            "user=abc",
+            "user?def",
+            "user^abc",
+            "user_def",
+            "user`abc",
+            "user{def",
+            "user|def",
+            "user}def",
+            "user~def",
+            "user-def",
+        ] {
+            assert!(
+                EmailAddress::new(format!("{special}@jola.dev")).is_ok(),
+                "{special} is an allowed local part character"
+            );
+        }
+    }
+
+    #[test]
+    fn telegram_chat_id_accepts_groups_and_rejects_usernames() {
+        assert_eq!(
+            TelegramChatId::new("-1001234567890").unwrap().as_str(),
+            "-1001234567890"
+        );
+        assert_eq!(TelegramChatId::new("42").unwrap().as_str(), "42");
+        assert_eq!(
+            TelegramChatId::from_i64(-1001234567890).unwrap().as_str(),
+            "-1001234567890"
+        );
+        assert!(TelegramChatId::from_i64(0).is_none());
+        let every_minted_value_parses = [1, -1, -1001234567890, i64::MAX, i64::MIN]
+            .into_iter()
+            .filter_map(TelegramChatId::from_i64)
+            .all(|id| TelegramChatId::new(id.to_string()).is_ok());
+        assert!(every_minted_value_parses);
+        assert!(TelegramChatId::new("oys_01").is_err());
+        assert!(TelegramChatId::new("+42").is_err());
+        assert!(TelegramChatId::new("").is_err());
+        assert!(TelegramChatId::new("9999999999999999999999").is_err());
+        assert!(TelegramChatId::new("0").is_err());
+        assert!(TelegramChatId::new("-0").is_err());
+    }
+
+    #[test]
+    fn email_enforces_length_boundaries() {
+        let domain_189 = format!("{}.{}.{}", "a".repeat(63), "b".repeat(63), "c".repeat(61));
+        let max = format!("{}@{}", "d".repeat(64), domain_189);
+        assert_eq!(max.len(), 254);
+        assert!(EmailAddress::new(&max).is_ok());
+
+        let domain_190 = format!("{}.{}.{}", "a".repeat(63), "b".repeat(63), "c".repeat(62));
+        let over = format!("{}@{}", "d".repeat(64), domain_190);
+        assert_eq!(over.len(), 255);
+        assert!(EmailAddress::new(&over).is_err());
+
+        assert!(EmailAddress::new(format!("{}@nel.pet", "a".repeat(64))).is_ok());
+        assert!(EmailAddress::new(format!("{}@jola.dev", "a".repeat(65))).is_err());
+        assert!(EmailAddress::new(format!("a@{}.pet", "b".repeat(63))).is_ok());
+        assert!(EmailAddress::new(format!("a@{}.pet", "b".repeat(64))).is_err());
+    }
+
+    #[test]
+    fn discord_user_id_requires_positive_snowflake() {
+        assert_eq!(
+            DiscordUserId::new("274656283714826240").unwrap().as_str(),
+            "274656283714826240"
+        );
+        assert!(DiscordUserId::new("0").is_err());
+        assert!(DiscordUserId::new("-1").is_err());
+        assert!(DiscordUserId::new("oys").is_err());
+        assert!(DiscordUserId::new("18446744073709551616").is_err());
+    }
+
+    #[test]
+    fn username_new_normalizes_sigil_and_case() {
+        assert_eq!(
+            TelegramUsername::new("  @Oys_01 ").unwrap().as_str(),
+            "oys_01"
+        );
+        assert_eq!(
+            DiscordUsername::new(" Oys.Cafe ").unwrap().as_str(),
+            "oys.cafe"
+        );
+        assert_eq!(SignalUsername::new("@Oys.01").unwrap().as_str(), "oys.01");
+        assert!(TelegramUsername::new("oys").is_err());
+        assert!(TelegramUsername::new("oys-01").is_err());
+        assert!(TelegramUsername::new("123456789012345678901234567890123").is_err());
+        assert!(DiscordUsername::new("a").is_err());
+        assert!(DiscordUsername::new("user..name").is_err());
+        assert!(DiscordUsername::new("user-name").is_err());
+    }
+
+    #[test]
+    fn signal_discriminators_have_exact_boundaries() {
+        for valid in [
+            "oys.01",
+            "oyster_cafe.99",
+            "user123.42",
+            "lu1.01",
+            "a_very_long_username_here.55",
+            "oys.123",
+            "oys.999999999",
+            "oys.18446744073709551615",
+        ] {
+            assert!(SignalUsername::new(valid).is_ok(), "{valid}");
+        }
+        for invalod in [
+            "",
+            "oys",
+            "oys.1",
+            "oys.001",
+            "abc.00",
+            "oys.0",
+            "oys.999999999999999999999",
+            ".01",
+            "ab.01",
+            "1oys.01",
+            "oys!.01",
+            "oys .01",
+            "oys.01; rm -rf /",
+            "oys.01 && cat /etc/passwd",
+            "oys.01`id`",
+            "oys.01$(whoami)",
+        ] {
+            assert!(SignalUsername::new(invalod).is_err(), "{invalod}");
+        }
+        assert!(SignalUsername::new("a".repeat(33)).is_err());
+        assert!(SignalUsername::new(format!("{}.01", "a".repeat(32))).is_ok());
+    }
+
+    #[test]
+    fn recipient_parse_binds_channel_to_value() {
+        let email = Recipient::new(CommsChannel::Email, "oys@nel.pet").unwrap();
+        assert_eq!(email.channel(), CommsChannel::Email);
+        assert_eq!(email.as_str(), "oys@nel.pet");
+        let signal = Recipient::new(CommsChannel::Signal, "oys.01").unwrap();
+        assert_eq!(signal.channel(), CommsChannel::Signal);
+        let telegram = Recipient::new(CommsChannel::Telegram, "-100").unwrap();
+        assert_eq!(telegram.channel(), CommsChannel::Telegram);
+        let discord = Recipient::new(CommsChannel::Discord, "274656283714826240").unwrap();
+        assert_eq!(discord.channel(), CommsChannel::Discord);
+
+        let mismatch = Recipient::new(CommsChannel::Telegram, "oys_01").unwrap_err();
+        assert_eq!(mismatch.to_string(), "invalid telegram recipient: oys_01");
+        assert!(Recipient::new(CommsChannel::Discord, "oys#0001").is_err());
+        assert!(Recipient::new(CommsChannel::Signal, "oys").is_err());
     }
 }
 

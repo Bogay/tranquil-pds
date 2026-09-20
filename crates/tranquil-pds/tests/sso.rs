@@ -3,7 +3,7 @@ mod common;
 use common::{base_url, client, create_account_and_login, get_test_repos};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use tranquil_db_traits::{CommsChannel, SsoAction, SsoProviderType};
+use tranquil_db_traits::{CommsChannel, CommsType, SsoAction, SsoProviderType};
 use tranquil_oauth::{
     AuthorizationRequestParameters, CodeChallengeMethod, RequestData, ResponseType,
 };
@@ -781,6 +781,7 @@ async fn test_sso_complete_registration_multichannel_discord() {
         .json(&json!({
             "token": token,
             "handle": handle_prefix,
+            "email": "sso_discord_reg@jola.dev",
             "verification_channel": "discord",
             "discord_username": discord_id
         }))
@@ -810,6 +811,14 @@ async fn test_sso_complete_registration_multichannel_discord() {
     let user = user.unwrap();
     assert_eq!(user.channel, CommsChannel::Discord);
     assert_eq!(user.discord_username.as_deref(), Some(discord_id));
+    let quered = repos
+        .infra
+        .get_latest_comms_for_user(user.id, CommsType::EmailVerification, 1)
+        .await
+        .unwrap();
+    let comms = quered.first().expect("We queued up a verification email");
+    assert_eq!(comms.channel, CommsChannel::Email);
+    assert_eq!(comms.recipient, "sso_discord_reg@jola.dev");
 }
 
 #[tokio::test]

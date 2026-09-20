@@ -586,6 +586,8 @@ async fn spawn_server(config: ServerConfig) -> ServerInstance {
     TEST_BLOCK_STORE.set(state.block_store.clone()).ok();
     if let Some((cache, distributed_rate_limiter)) = config.cache {
         state = state.with_cache(cache, distributed_rate_limiter);
+    } else {
+        tranquil_pds::state::set_rate_limiting_disabled(true);
     }
     TEST_APP_STATE.set(state.clone()).ok();
     tranquil_sync::listener::start_sequencer_listener(state.clone()).await;
@@ -922,6 +924,19 @@ pub async fn get_test_db_pool() -> &'static sqlx::PgPool {
 pub async fn get_test_repos() -> &'static Arc<tranquil_db::PostgresRepositories> {
     base_url().await;
     TEST_REPOS.get().expect("TEST_REPOS not initialized")
+}
+
+#[allow(dead_code)]
+pub async fn user_id_of(
+    repos: &tranquil_db::PostgresRepositories,
+    did: &tranquil_types::Did,
+) -> uuid::Uuid {
+    repos
+        .user
+        .get_id_by_did(did)
+        .await
+        .expect("DB error")
+        .expect("User not found")
 }
 
 #[allow(dead_code)]

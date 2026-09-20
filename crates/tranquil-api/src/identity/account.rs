@@ -51,7 +51,7 @@ async fn try_reactivate_migration(
     handle: &Handle,
     email: &Option<String>,
     verification_channel: tranquil_db_traits::CommsChannel,
-    verification_recipient: Option<&str>,
+    verification_recipient: Option<&tranquil_pds::comms::VerificationTarget>,
 ) -> Option<Response> {
     let reactivate_input = tranquil_db_traits::MigrationReactivationInput {
         did: did.clone(),
@@ -271,8 +271,8 @@ pub async fn create_account(
         .as_ref()
         .map(|e| e.trim().to_string())
         .filter(|e| !e.is_empty());
-    if let Some(ref email) = email
-        && !tranquil_pds::api::validation::is_valid_email(email)
+    if let Some(email) = &email
+        && tranquil_types::EmailAddress::new(email).is_err()
     {
         return ApiError::InvalidEmail.into_response();
     }
@@ -393,7 +393,7 @@ pub async fn create_account(
             &handle,
             &email,
             verification_channel,
-            verification_recipient.as_deref(),
+            verification_recipient.as_ref(),
         )
         .await
     {

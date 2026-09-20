@@ -6,15 +6,16 @@ use uuid::Uuid;
 
 use super::types::EmailDomain;
 use crate::sender::SendError;
-use crate::types::{CommsType, QueuedComms};
+use crate::{CommsType, QueuedComms};
 
 pub(super) fn build(
     from: &Mailbox,
     qc: &QueuedComms,
+    to: &tranquil_types::EmailAddress,
     apply_atmos_categories: bool,
 ) -> Result<Message, SendError> {
-    let to: Mailbox = qc
-        .recipient
+    let to: Mailbox = to
+        .as_str()
         .parse()
         .map_err(|e: lettre::address::AddressError| SendError::InvalidRecipient(e.to_string()))?;
     let subject = qc.subject.as_deref().unwrap_or("Notification");
@@ -101,12 +102,16 @@ fn atmos_category(comms_type: CommsType) -> Option<AtmosCategory> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{CommsChannel, CommsStatus};
+    use crate::{CommsChannel, CommsStatus};
     use chrono::Utc;
     use uuid::Uuid;
 
     fn from_mailbox() -> Mailbox {
         "Test Sender <noreply@nel.pet>".parse().unwrap()
+    }
+
+    fn to(recipient: &str) -> tranquil_types::EmailAddress {
+        tranquil_types::EmailAddress::new(recipient).unwrap()
     }
 
     fn fixture(recipient: &str, subject: Option<&str>, body: &str) -> QueuedComms {
@@ -135,6 +140,7 @@ mod tests {
         let msg = build(
             &from_mailbox(),
             &fixture("user@nel.pet", Some("Welcome"), "Hello world."),
+            &to("user@nel.pet"),
             false,
         )
         .unwrap();
@@ -153,6 +159,7 @@ mod tests {
         let msg = build(
             &from_mailbox(),
             &fixture("user@nel.pet", Some("héllo wörld"), "Body"),
+            &to("user@jola.dev"),
             false,
         )
         .unwrap();
@@ -163,12 +170,8 @@ mod tests {
 
     #[test]
     fn header_injection_rejected() {
-        let result = build(
-            &from_mailbox(),
-            &fixture("x@nel.pet\r\nBcc: evil@x", Some("s"), "b"),
-            false,
-        );
-        assert!(matches!(result, Err(SendError::InvalidRecipient(_))));
+        let result = tranquil_types::EmailAddress::new("x@jola.dev\r\nBcc: evil@x");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -176,13 +179,14 @@ mod tests {
         let msg = build(
             &from_mailbox(),
             &fixture("user@nel.pet", Some("hi\r\nBcc: evil@nel.pet"), "body"),
+            &to("user@jola.dev"),
             false,
         )
         .expect("subject CRLF should be encoded, not rejected");
         let raw = String::from_utf8(msg.formatted()).unwrap();
         assert!(
             !raw.contains("Bcc:"),
-            "CRLF in subject must not produce a Bcc header: {raw}"
+            "CRLF in subject mustn't produce a Bcc header: {raw}"
         );
         assert!(
             raw.contains("Subject: ="),
@@ -195,6 +199,7 @@ mod tests {
         let msg = build(
             &from_mailbox(),
             &fixture("user@nel.pet", Some("s"), "b"),
+            &to("user@jola.dev"),
             false,
         )
         .unwrap();
@@ -214,6 +219,7 @@ mod tests {
         let msg = build(
             &from_mailbox(),
             &fixture("user@nel.pet", None, "Body"),
+            &to("user@nel.pet"),
             false,
         )
         .unwrap();
@@ -226,6 +232,7 @@ mod tests {
         let msg = build(
             &from_mailbox(),
             &fixture("user@Nel.PET", Some("s"), "b"),
+            &to("user@nel.pet"),
             false,
         )
         .unwrap();
@@ -239,7 +246,7 @@ mod tests {
             comms_type: CommsType::PasswordReset,
             ..fixture("user@nel.pet", Some("s"), "b")
         };
-        let msg = build(&from_mailbox(), &qc, true).unwrap();
+        let msg = build(&from_mailbox(), &qc, &to("user@jola.dev"), true).unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();
         assert!(raw.contains("X-Atmos-Category: password-reset"));
     }
@@ -250,7 +257,7 @@ mod tests {
             comms_type: CommsType::PasswordReset,
             ..fixture("user@nel.pet", Some("s"), "b")
         };
-        let msg = build(&from_mailbox(), &qc, false).unwrap();
+        let msg = build(&from_mailbox(), &qc, &to("user@nel.pet"), false).unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();
         assert!(!raw.contains("X-Atmos-Category"));
     }
@@ -261,7 +268,7 @@ mod tests {
             comms_type: CommsType::AdminEmail,
             ..fixture("user@nel.pet", Some("s"), "b")
         };
-        let msg = build(&from_mailbox(), &qc, true).unwrap();
+        let msg = build(&from_mailbox(), &qc, &to("user@nel.pet"), true).unwrap();
         let raw = String::from_utf8(msg.formatted()).unwrap();
         assert!(!raw.contains("X-Atmos-Category"));
     }

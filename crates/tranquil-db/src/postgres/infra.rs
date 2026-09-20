@@ -5,7 +5,7 @@ use tranquil_db_traits::{
     AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DbError, DeletionRequest,
     DeletionRequestWithToken, InfraRepository, InviteCodeError, InviteCodeInfo, InviteCodeRow,
     InviteCodeSortOrder, InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo,
-    QueuedComms, ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
+    QueuedComms, Recipient, ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
 use tranquil_types::{Did, InviteCode};
 use uuid::Uuid;
@@ -29,9 +29,8 @@ impl InfraRepository for PostgresInfraRepository {
     async fn enqueue_comms(
         &self,
         user_id: Option<Uuid>,
-        channel: CommsChannel,
+        recipient: &Recipient,
         comms_type: CommsType,
-        recipient: &str,
         subject: Option<&str>,
         body: &str,
         metadata: Option<serde_json::Value>,
@@ -42,9 +41,9 @@ impl InfraRepository for PostgresInfraRepository {
                VALUES ($1, $2, $3, $4, $5, $6, $7)
                RETURNING id"#,
             user_id,
-            channel as CommsChannel,
+            recipient.channel() as CommsChannel,
             comms_type as CommsType,
-            recipient,
+            recipient.as_str(),
             subject,
             body,
             metadata

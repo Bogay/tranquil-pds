@@ -315,18 +315,17 @@ pub async fn enqueue_signup_verification(
     user_id: uuid::Uuid,
     did: &Did,
     channel: CommsChannel,
-    recipient: &str,
+    target: &tranquil_pds::comms::VerificationTarget,
 ) {
     let token =
-        tranquil_pds::auth::verification_token::generate_signup_token(did, channel, recipient);
+        tranquil_pds::auth::verification_token::generate_signup_token(did, channel, &target.id);
     let formatted = tranquil_pds::auth::verification_token::format_token_for_display(&token);
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         user_id,
-        channel,
-        recipient,
+        target,
         &formatted,
         hostname,
     )
@@ -341,18 +340,17 @@ pub async fn enqueue_migration_verification(
     user_id: uuid::Uuid,
     did: &Did,
     channel: CommsChannel,
-    recipient: &str,
+    target: &tranquil_pds::comms::VerificationTarget,
 ) {
     let token =
-        tranquil_pds::auth::verification_token::generate_migration_token(did, channel, recipient);
+        tranquil_pds::auth::verification_token::generate_migration_token(did, channel, &target.id);
     let formatted = tranquil_pds::auth::verification_token::format_token_for_display(&token);
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_migration_verification(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         user_id,
-        channel,
-        recipient,
+        target,
         &formatted,
         hostname,
     )

@@ -22,9 +22,9 @@ use super::user_hash::UserHashMap;
 use super::users::UserValue;
 
 use tranquil_db_traits::{
-    AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DeletionRequest,
-    DeletionRequestWithToken, InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder,
-    InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo, QueuedComms,
+    AdminAccountInfo, CommsStatus, CommsType, DeletionRequest, DeletionRequestWithToken,
+    InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder, InviteCodeState,
+    InviteCodeUse, NotificationHistoryRow, PlcTokenInfo, QueuedComms, Recipient,
     ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
 use tranquil_types::{Did, Handle, InviteCode};
@@ -145,13 +145,11 @@ impl InfraOps {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn enqueue_comms(
         &self,
         user_id: Option<Uuid>,
-        channel: CommsChannel,
+        recipient: &Recipient,
         comms_type: CommsType,
-        recipient: &str,
         subject: Option<&str>,
         body: &str,
         metadata: Option<serde_json::Value>,
@@ -162,9 +160,9 @@ impl InfraOps {
         let value = QueuedCommsValue {
             id,
             user_id,
-            channel: channel_to_u8(channel),
+            channel: channel_to_u8(recipient.channel()),
             comms_type: comms_type_to_u8(comms_type),
-            recipient: recipient.to_owned(),
+            recipient: recipient.as_str().to_owned(),
             subject: subject.map(str::to_owned),
             body: body.to_owned(),
             metadata: metadata.map(|v| serde_json::to_vec(&v).unwrap_or_default()),
@@ -184,9 +182,9 @@ impl InfraOps {
         if let Some(uid) = user_id {
             let history_value = NotificationHistoryValue {
                 id,
-                channel: channel_to_u8(channel),
+                channel: channel_to_u8(recipient.channel()),
                 comms_type: comms_type_to_u8(comms_type),
-                recipient: recipient.to_owned(),
+                recipient: recipient.as_str().to_owned(),
                 subject: subject.map(str::to_owned),
                 body: body.to_owned(),
                 status: status_to_u8(CommsStatus::Pending),

@@ -498,14 +498,7 @@ async fn test_apply_writes_create_then_delete_same_rkey() {
 }
 
 async fn repo_id_for_did(did: &str) -> uuid::Uuid {
-    let repos = get_test_repos().await;
-    let parsed = Did::new(did).expect("valid did");
-    repos
-        .user
-        .get_id_by_did(&parsed)
-        .await
-        .expect("lookup user_id")
-        .expect("user exists")
+    user_id_of(get_test_repos().await, &Did::new(did).expect("valid DID")).await
 }
 
 async fn follow_uris_pointing_to(repo_id: uuid::Uuid, target_did: &str) -> Vec<String> {

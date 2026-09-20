@@ -3,7 +3,7 @@ use reqwest::Client;
 use serde_json::json;
 use std::time::Duration;
 
-use super::types::{CommsChannel, QueuedComms};
+use tranquil_db_traits::{CommsChannel, QueuedComms};
 
 const HTTP_TIMEOUT_SECS: u64 = 30;
 const MAX_RETRIES: u32 = 3;
@@ -12,7 +12,11 @@ const INITIAL_RETRY_DELAY_MS: u64 = 500;
 #[async_trait]
 pub trait CommsSender: Send + Sync {
     fn channel(&self) -> CommsChannel;
-    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError>;
+    async fn send(
+        &self,
+        notification: &QueuedComms,
+        recipient: &tranquil_types::Recipient,
+    ) -> Result<(), SendError>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -138,10 +142,6 @@ pub fn is_valid_phone_number(number: &str) -> bool {
     }
     let remaining: String = chars.collect();
     !remaining.is_empty() && remaining.chars().all(|c| c.is_ascii_digit())
-}
-
-pub fn is_valid_signal_username(username: &str) -> bool {
-    tranquil_signal::SignalUsername::parse(username).is_ok()
 }
 
 const DISCORD_API_BASE: &str = "https://discord.com/api/v10";
@@ -355,8 +355,17 @@ impl CommsSender for DiscordSender {
         CommsChannel::Discord
     }
 
-    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
-        let channel_id = self.open_dm_channel(&notification.recipient).await?;
+    async fn send(
+        &self,
+        notification: &QueuedComms,
+        recipient: &tranquil_types::Recipient,
+    ) -> Result<(), SendError> {
+        let tranquil_types::Recipient::Discord(user_id) = recipient else {
+            return Err(SendError::InvalidRecipient(
+                "Recipient isn't a Discord user ID".into(),
+            ));
+        };
+        let channel_id = self.open_dm_channel(user_id.as_str()).await?;
 
         let subject = notification.subject.as_deref().unwrap_or("Notification");
         let content = format!("**{}**\n\n{}", subject, notification.body);
@@ -453,14 +462,22 @@ impl CommsSender for TelegramSender {
         CommsChannel::Telegram
     }
 
-    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
-        let chat_id = &notification.recipient;
+    async fn send(
+        &self,
+        notification: &QueuedComms,
+        recipient: &tranquil_types::Recipient,
+    ) -> Result<(), SendError> {
+        let tranquil_types::Recipient::Telegram(chat_id) = recipient else {
+            return Err(SendError::InvalidRecipient(
+                "Recipient isn't a Telegram chat ID".into(),
+            ));
+        };
         let subject = escape_html(notification.subject.as_deref().unwrap_or("Notification"));
         let body = escape_html(&notification.body);
         let text = format!("<b>{}</b>\n\n{}", subject, body);
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
         let payload = json!({
-            "chat_id": chat_id,
+            "chat_id": chat_id.as_str(),
             "text": text,
             "parse_mode": "HTML"
         });
@@ -488,9 +505,16 @@ impl CommsSender for SignalSender {
         CommsChannel::Signal
     }
 
-    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
-        let username = tranquil_signal::SignalUsername::parse(&notification.recipient)
-            .map_err(|e| SendError::InvalidRecipient(e.to_string()))?;
+    async fn send(
+        &self,
+        notification: &QueuedComms,
+        recipient: &tranquil_types::Recipient,
+    ) -> Result<(), SendError> {
+        let tranquil_types::Recipient::Signal(username) = recipient else {
+            return Err(SendError::InvalidRecipient(
+                "Recipient isn't a Signal username".into(),
+            ));
+        };
 
         let client = self
             .slot
@@ -505,7 +529,7 @@ impl CommsSender for SignalSender {
 
         let mut last_error = None;
         for attempt in 0..MAX_RETRIES {
-            match client.send(&username, message.clone()).await {
+            match client.send(username, message.clone()).await {
                 Ok(()) => return Ok(()),
                 Err(e) => {
                     let err_str = e.to_string();

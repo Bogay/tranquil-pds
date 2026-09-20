@@ -1,101 +1,10 @@
 use crate::types::Handle;
-use std::fmt;
 
-pub const MAX_EMAIL_LENGTH: usize = 254;
-pub const MAX_LOCAL_PART_LENGTH: usize = 64;
-pub const MAX_DOMAIN_LENGTH: usize = 253;
 pub const MAX_DOMAIN_LABEL_LENGTH: usize = 63;
-const EMAIL_LOCAL_SPECIAL_CHARS: &str = ".!#$%&'*+/=?^_`{|}~-";
 
 pub const MIN_HANDLE_LENGTH: usize = 3;
 pub const MAX_HANDLE_LENGTH: usize = 253;
 pub const MAX_SERVICE_HANDLE_LOCAL_PART: usize = 18;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EmailValidationError {
-    Empty,
-    TooLong,
-    MissingAtSign,
-    EmptyLocalPart,
-    LocalPartTooLong,
-    InvalidLocalPart,
-    EmptyDomain,
-    DomainTooLong,
-    MissingDomainDot,
-    InvalidDomainLabel,
-}
-
-impl fmt::Display for EmailValidationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => write!(f, "Email cannot be empty"),
-            Self::TooLong => write!(
-                f,
-                "Email exceeds maximum length of {} characters",
-                MAX_EMAIL_LENGTH
-            ),
-            Self::MissingAtSign => write!(f, "Email must contain @"),
-            Self::EmptyLocalPart => write!(f, "Email local part cannot be empty"),
-            Self::LocalPartTooLong => write!(f, "Email local part exceeds maximum length"),
-            Self::InvalidLocalPart => write!(f, "Email local part contains invalid characters"),
-            Self::EmptyDomain => write!(f, "Email domain cannot be empty"),
-            Self::DomainTooLong => write!(f, "Email domain exceeds maximum length"),
-            Self::MissingDomainDot => write!(f, "Email domain must contain a dot"),
-            Self::InvalidDomainLabel => write!(f, "Email domain contains invalid label"),
-        }
-    }
-}
-
-impl std::error::Error for EmailValidationError {}
-
-fn validate_email_detailed(email: &str) -> Result<(), EmailValidationError> {
-    if email.is_empty() {
-        return Err(EmailValidationError::Empty);
-    }
-    if email.len() > MAX_EMAIL_LENGTH {
-        return Err(EmailValidationError::TooLong);
-    }
-    let parts: Vec<&str> = email.rsplitn(2, '@').collect();
-    if parts.len() != 2 {
-        return Err(EmailValidationError::MissingAtSign);
-    }
-    let domain = parts[0];
-    let local = parts[1];
-    if local.is_empty() {
-        return Err(EmailValidationError::EmptyLocalPart);
-    }
-    if local.len() > MAX_LOCAL_PART_LENGTH {
-        return Err(EmailValidationError::LocalPartTooLong);
-    }
-    if local.starts_with('.') || local.ends_with('.') || local.contains("..") {
-        return Err(EmailValidationError::InvalidLocalPart);
-    }
-    if !local
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || EMAIL_LOCAL_SPECIAL_CHARS.contains(c))
-    {
-        return Err(EmailValidationError::InvalidLocalPart);
-    }
-    if domain.is_empty() {
-        return Err(EmailValidationError::EmptyDomain);
-    }
-    if domain.len() > MAX_DOMAIN_LENGTH {
-        return Err(EmailValidationError::DomainTooLong);
-    }
-    if !domain.contains('.') {
-        return Err(EmailValidationError::MissingDomainDot);
-    }
-    if !domain.split('.').all(|label| {
-        !label.is_empty()
-            && label.len() <= MAX_DOMAIN_LABEL_LENGTH
-            && !label.starts_with('-')
-            && !label.ends_with('-')
-            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-    }) {
-        return Err(EmailValidationError::InvalidDomainLabel);
-    }
-    Ok(())
-}
 
 #[derive(Debug, PartialEq)]
 pub enum HandleValidationError {
@@ -304,23 +213,6 @@ pub fn validate_service_handle(
     Ok(handle.to_lowercase())
 }
 
-pub fn is_valid_email(email: &str) -> bool {
-    validate_email_detailed(email.trim()).is_ok()
-}
-
-pub fn is_valid_telegram_username(username: &str) -> bool {
-    let clean = username.strip_prefix('@').unwrap_or(username);
-    (5..=32).contains(&clean.len()) && clean.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-pub fn is_valid_discord_username(username: &str) -> bool {
-    (2..=32).contains(&username.len())
-        && username
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.')
-        && !username.contains("..")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,63 +378,5 @@ mod tests {
             validate_service_handle("admin", ReservedHandlePolicy::Reject),
             Err(HandleValidationError::Reserved)
         );
-    }
-
-    #[test]
-    fn test_valid_emails() {
-        assert!(is_valid_email("user@example.com"));
-        assert!(is_valid_email("user.name@example.com"));
-        assert!(is_valid_email("user+tag@example.com"));
-        assert!(is_valid_email("user@sub.example.com"));
-        assert!(is_valid_email("USER@EXAMPLE.COM"));
-        assert!(is_valid_email("user123@example123.com"));
-        assert!(is_valid_email("a@b.co"));
-    }
-    #[test]
-    fn test_invalid_emails() {
-        assert!(!is_valid_email(""));
-        assert!(!is_valid_email("user"));
-        assert!(!is_valid_email("user@"));
-        assert!(!is_valid_email("@example.com"));
-        assert!(!is_valid_email("user@example"));
-        assert!(!is_valid_email("user@@example.com"));
-        assert!(!is_valid_email("user@.example.com"));
-        assert!(!is_valid_email("user@example..com"));
-        assert!(!is_valid_email(".user@example.com"));
-        assert!(!is_valid_email("user.@example.com"));
-        assert!(!is_valid_email("user..name@example.com"));
-        assert!(!is_valid_email("user@-example.com"));
-        assert!(!is_valid_email("user@example-.com"));
-    }
-    #[test]
-    fn test_trimmed_whitespace() {
-        assert!(is_valid_email("  user@example.com  "));
-    }
-
-    #[test]
-    fn test_valid_discord_usernames() {
-        assert!(is_valid_discord_username("ab"));
-        assert!(is_valid_discord_username("alice"));
-        assert!(is_valid_discord_username("user_name"));
-        assert!(is_valid_discord_username("user.name"));
-        assert!(is_valid_discord_username("user123"));
-        assert!(is_valid_discord_username("a_b.c_d"));
-        assert!(is_valid_discord_username(
-            "12345678901234567890123456789012"
-        ));
-    }
-
-    #[test]
-    fn test_invalid_discord_usernames() {
-        assert!(!is_valid_discord_username(""));
-        assert!(!is_valid_discord_username("a"));
-        assert!(!is_valid_discord_username("Alice"));
-        assert!(!is_valid_discord_username("ALICE"));
-        assert!(!is_valid_discord_username("user-name"));
-        assert!(!is_valid_discord_username("user..name"));
-        assert!(!is_valid_discord_username("user name"));
-        assert!(!is_valid_discord_username(
-            "123456789012345678901234567890123"
-        ));
     }
 }

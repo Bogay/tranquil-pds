@@ -14,71 +14,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::store::PgSignalStore;
-
-#[derive(Debug, Clone)]
-pub struct SignalUsername(String);
-
-#[derive(Debug, Clone)]
-pub struct InvalidSignalUsername(String);
-
-impl fmt::Display for InvalidSignalUsername {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid signal username: {}", self.0)
-    }
-}
-
-impl std::error::Error for InvalidSignalUsername {}
-
-impl SignalUsername {
-    pub fn parse(username: &str) -> Result<Self, InvalidSignalUsername> {
-        let reject = || Err(InvalidSignalUsername(username.to_string()));
-
-        let Some((base, discriminator)) = username.rsplit_once('.') else {
-            return reject();
-        };
-
-        if !matches!(base.len(), 3..=32) {
-            return reject();
-        }
-
-        if !base.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
-            return reject();
-        }
-
-        if !base.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return reject();
-        }
-
-        if !is_valid_discriminator(discriminator) {
-            return reject();
-        }
-
-        Ok(Self(username.to_string()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-fn is_valid_discriminator(s: &str) -> bool {
-    if !s.chars().all(|c| c.is_ascii_digit()) {
-        return false;
-    }
-    if !matches!(s.len(), 2..=20) {
-        return false;
-    }
-    if s.len() > 2 && s.starts_with('0') {
-        return false;
-    }
-    s.parse::<u64>().is_ok_and(|n| n != 0)
-}
-
-impl fmt::Display for SignalUsername {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+use tranquil_types::SignalUsername;
 
 #[derive(Debug, Clone)]
 pub struct DeviceName(String);

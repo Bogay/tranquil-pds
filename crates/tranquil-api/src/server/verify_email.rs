@@ -57,9 +57,9 @@ pub async fn resend_migration_verification(
     let channel = input
         .channel
         .unwrap_or(tranquil_db_traits::CommsChannel::Email);
-    let identifier = input.identifier.trim().to_lowercase();
+    let id = input.identifier.trim().to_lowercase();
 
-    let user = match state.repos.user.get_by_email(&identifier).await {
+    let user = match state.repos.user.get_by_email(&id).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return Ok(Json(ResendMigrationVerificationOutput { sent: true }));
@@ -73,15 +73,18 @@ pub async fn resend_migration_verification(
     if user.email_verified {
         return Ok(Json(ResendMigrationVerificationOutput { sent: true }));
     }
-
-    crate::identity::provision::enqueue_migration_verification(
-        &state,
-        user.id,
-        &user.did,
-        channel,
-        &identifier,
-    )
-    .await;
+    let target = tranquil_pds::comms::VerificationTarget::resolve(channel, &id, Some(&id)).ok();
+    if let Some(target) = target {
+        crate::identity::provision::enqueue_migration_verification(
+            &state, user.id, &user.did, channel, &target,
+        )
+        .await;
+    } else {
+        warn!(
+            channel = ?channel,
+            "We skipped migration verification because unfortunately the account doesn't have a valid recipient"
+        );
+    }
 
     info!(did = %user.did, channel = ?channel, "Resent migration verification");
 

@@ -368,8 +368,8 @@ pub async fn create_delegated_account(
         .as_ref()
         .map(|e| e.trim().to_string())
         .filter(|e| !e.is_empty());
-    if let Some(ref email) = email
-        && !tranquil_pds::api::validation::is_valid_email(email)
+    if let Some(email) = &email
+        && tranquil_types::EmailAddress::new(email).is_err()
     {
         return Err(ApiError::InvalidEmail);
     }

@@ -25,7 +25,7 @@ use self::types::{
     SmtpUsername, TlsMode,
 };
 use crate::sender::{CommsSender, SendError};
-use crate::types::{CommsChannel, QueuedComms};
+use crate::{CommsChannel, QueuedComms};
 
 pub struct EmailSender {
     from: Mailbox,
@@ -193,9 +193,22 @@ impl CommsSender for EmailSender {
         CommsChannel::Email
     }
 
-    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
-        let mut message =
-            message::build(&self.from, notification, wants_atmos_categories(&self.mode))?;
+    async fn send(
+        &self,
+        notification: &QueuedComms,
+        recipient: &tranquil_types::Recipient,
+    ) -> Result<(), SendError> {
+        let tranquil_types::Recipient::Email(address) = recipient else {
+            return Err(SendError::InvalidRecipient(
+                "Recipient isn't an email address".into(),
+            ));
+        };
+        let mut message = message::build(
+            &self.from,
+            notification,
+            address,
+            wants_atmos_categories(&self.mode),
+        )?;
         if let Some(signer) = &self.dkim {
             signer.sign(&mut message);
         }

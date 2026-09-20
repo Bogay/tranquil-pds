@@ -572,20 +572,31 @@ pub async fn authorize_post(
         {
             Ok(challenge) => {
                 let hostname = &tranquil_config::get().server.hostname;
-                if let Err(e) = enqueue_2fa_code(
+                match enqueue_notice(
                     state.repos.user.as_ref(),
                     state.repos.infra.as_ref(),
                     user.id,
-                    &challenge.code,
+                    Notice::TwoFactorCode {
+                        code: &challenge.code,
+                    },
                     hostname,
                 )
                 .await
                 {
-                    tracing::warn!(
-                        did = %user.did,
-                        error = %e,
-                        "Failed to enqueue 2FA notification"
-                    );
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        return show_login_error(
+                            "We couldn't deliver this verification code to your notification channels. Please contact the PDS owner.",
+                            json_response,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            did = %user.did,
+                            error = %e,
+                            "Failed to enqueue 2FA notification"
+                        );
+                    }
                 }
                 let channel_name = user.preferred_comms_channel.display_name();
                 if json_response {
@@ -907,20 +918,32 @@ pub async fn authorize_select(
         {
             Ok(challenge) => {
                 let hostname = &tranquil_config::get().server.hostname;
-                if let Err(e) = enqueue_2fa_code(
+                match enqueue_notice(
                     state.repos.user.as_ref(),
                     state.repos.infra.as_ref(),
                     user.id,
-                    &challenge.code,
+                    Notice::TwoFactorCode {
+                        code: &challenge.code,
+                    },
                     hostname,
                 )
                 .await
                 {
-                    tracing::warn!(
-                        did = %form.did,
-                        error = %e,
-                        "Failed to enqueue 2FA notification"
-                    );
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        return json_error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_request",
+                            "We couldn't deliver this verification code to your notification chanels. Please contact the PDS owner.",
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            did = %form.did,
+                            error = %e,
+                            "Failed to enqueue 2FA notification"
+                        );
+                    }
                 }
                 let channel_name = user.preferred_comms_channel.display_name();
                 return Json(serde_json::json!({

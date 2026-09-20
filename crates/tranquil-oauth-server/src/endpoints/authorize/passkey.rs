@@ -1273,16 +1273,31 @@ pub async fn authorize_passkey_finish(
                 .await
             {
                 Ok(challenge) => {
-                    if let Err(e) = enqueue_2fa_code(
+                    match enqueue_notice(
                         state.repos.user.as_ref(),
                         state.repos.infra.as_ref(),
                         user.id,
-                        &challenge.code,
+                        Notice::TwoFactorCode {
+                            code: &challenge.code,
+                        },
                         pds_hostname,
                     )
                     .await
                     {
-                        tracing::warn!(did = %did, error = %e, "Failed to enqueue 2FA notification");
+                        Ok(Some(_)) => {}
+                        Ok(None) => {
+                            return (
+                                StatusCode::BAD_REQUEST,
+                                Json(serde_json::json!({
+                                    "error": "invalid_request",
+                                    "error_description": "We couldn't deliver the verification code to your notification channels. Please contact the PDS owner! <3"
+                                })),
+                            )
+                                .into_response();
+                        }
+                        Err(e) => {
+                            tracing::warn!(did = %did, error = %e, "Failed to enqueue 2FA notification");
+                        }
                     }
                     let channel_name = user.preferred_comms_channel.display_name();
                     let redirect_url = format!(

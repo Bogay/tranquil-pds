@@ -13,16 +13,16 @@ use tranquil_db_traits::{
     ImportBlock, ImportRecord, ImportRepoError, InviteCodeError, InviteCodeInfo, InviteCodeRow,
     InviteCodeSortOrder, InviteCodeUse, MigrationReactivationError, MigrationReactivationInput,
     NotificationHistoryRow, NotificationPrefs, OAuthTokenWithUser, PasswordResetResult,
-    PlcTokenInfo, PruneCount, QueuedComms, ReactivatedAccountInfo, RecoverPasskeyAccountInput,
-    RecoverPasskeyAccountResult, RepoAccountInfo, RepoIdentity, RepoInfo, RepoListItem,
-    RepoWithoutRev, ReservedSigningKey, ReservedSigningKeyFull, ScheduledDeletionAccount,
-    ScopePreference, SequenceNumber, SequencedEvent, StoredBackupCode, StoredPasskey,
-    TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus, UserAuthInfo, UserCommsPrefs,
-    UserConfirmSignup, UserDidWebInfo, UserEmailInfo, UserForDeletion, UserForDidDoc,
-    UserForDidDocBuild, UserForPasskeyRecovery, UserForPasskeySetup, UserForRecovery,
-    UserForVerification, UserIdAndHandle, UserIdAndPasswordHash, UserIdHandleEmail,
-    UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref, UserLoginCheck,
-    UserLoginFull, UserLoginInfo, UserNeedingRecordBlobsBackfill, UserPasswordInfo,
+    PlcTokenInfo, PruneCount, QueuedComms, ReactivatedAccountInfo, Recipient,
+    RecoverPasskeyAccountInput, RecoverPasskeyAccountResult, RepoAccountInfo, RepoIdentity,
+    RepoInfo, RepoListItem, RepoWithoutRev, ReservedSigningKey, ReservedSigningKeyFull,
+    ScheduledDeletionAccount, ScopePreference, SequenceNumber, SequencedEvent, StoredBackupCode,
+    StoredPasskey, TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus, UserAuthInfo,
+    UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo, UserForDeletion,
+    UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery, UserForPasskeySetup,
+    UserForRecovery, UserForVerification, UserIdAndHandle, UserIdAndPasswordHash,
+    UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref,
+    UserLoginCheck, UserLoginFull, UserLoginInfo, UserNeedingRecordBlobsBackfill, UserPasswordInfo,
     UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus,
     UserVerificationInfo, UserWithKey, UserWithoutBlocks, ValidatedInviteCode,
     WebauthnChallengeType,
@@ -1793,9 +1793,8 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
     async fn enqueue_comms(
         &self,
         user_id: Option<Uuid>,
-        channel: CommsChannel,
+        recipient: &Recipient,
         comms_type: CommsType,
-        recipient: &str,
         subject: Option<&str>,
         body: &str,
         metadata: Option<serde_json::Value>,
@@ -1804,9 +1803,8 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::EnqueueComms {
                 user_id,
-                channel,
+                recipient: recipient.clone(),
                 comms_type,
-                recipient: recipient.to_owned(),
                 subject: subject.map(str::to_owned),
                 body: body.to_owned(),
                 metadata,
@@ -3736,12 +3734,16 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
         recv(rx).await
     }
 
-    async fn admin_update_email(&self, did: &Did, email: &str) -> Result<u64, DbError> {
+    async fn admin_update_email(
+        &self,
+        did: &Did,
+        email: &tranquil_types::EmailAddress,
+    ) -> Result<u64, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::AdminUpdateEmail {
                 did: did.clone(),
-                email: email.to_owned(),
+                email: email.clone(),
                 tx,
             }))?;
         recv(rx).await
@@ -3888,26 +3890,16 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
 
     async fn store_telegram_chat_id(
         &self,
-        telegram_username: &str,
+        telegram_username: &tranquil_types::TelegramUsername,
         chat_id: i64,
         handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::StoreTelegramChatId {
-                telegram_username: telegram_username.to_owned(),
+                telegram_username: telegram_username.clone(),
                 chat_id,
                 handle: handle.map(|h| h.to_string()),
-                tx,
-            }))?;
-        recv(rx).await
-    }
-
-    async fn get_telegram_chat_id(&self, user_id: Uuid) -> Result<Option<i64>, DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool
-            .send(MetastoreRequest::User(UserRequest::GetTelegramChatId {
-                user_id,
                 tx,
             }))?;
         recv(rx).await
@@ -3930,15 +3922,15 @@ impl<S: StorageIO + 'static> tranquil_db_traits::UserRepository for MetastoreCli
 
     async fn store_discord_user_id(
         &self,
-        discord_username: &str,
-        discord_id: &str,
+        discord_username: &tranquil_types::DiscordUsername,
+        discord_id: &tranquil_types::DiscordUserId,
         handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::User(UserRequest::StoreDiscordUserId {
-                discord_username: discord_username.to_owned(),
-                discord_id: discord_id.to_owned(),
+                discord_username: discord_username.clone(),
+                discord_id: discord_id.clone(),
                 handle: handle.map(|h| h.to_string()),
                 tx,
             }))?;

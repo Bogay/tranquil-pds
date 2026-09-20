@@ -9,6 +9,7 @@ fjall-store = ["dep:fjall"]
 
 [dependencies]
 presage = { workspace = true }
+tranquil-types = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 fjall = { version = "3", optional = true }

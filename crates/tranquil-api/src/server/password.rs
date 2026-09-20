@@ -90,11 +90,13 @@ pub async fn request_password_reset(
         return Err(ApiError::InternalError(None));
     }
     let hostname = &tranquil_config::get().server.hostname;
-    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_password_reset(
+    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_notice(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         user_id,
-        &display_code,
+        tranquil_pds::comms::Notice::PasswordReset {
+            code: &display_code,
+        },
         hostname,
     )
     .await
@@ -193,21 +195,14 @@ pub async fn reset_password(
         }
     }))
     .await;
-    if let Ok(Some(prefs)) = state.repos.user.get_comms_prefs(user_id).await {
-        let actual_channel =
-            tranquil_pds::comms::resolve_delivery_channel(&prefs, user.preferred_comms_channel);
-        if let Err(e) = state
-            .repos
-            .user
-            .set_channel_verified(&user.did, actual_channel)
-            .await
-        {
-            warn!(
-                "Failed to implicitly verify channel on password reset: {:?}",
-                e
-            );
-        }
-    }
+    crate::common::implicitly_verify_channel(
+        state.repos.user.as_ref(),
+        &user.did,
+        user_id,
+        user.preferred_comms_channel,
+        "password reset",
+    )
+    .await;
     info!("Password reset completed for user {}", user_id);
     Ok(Json(EmptyResponse {}))
 }

@@ -116,8 +116,8 @@ pub async fn create_passkey_account(
         .as_ref()
         .map(|e| e.trim().to_string())
         .filter(|e| !e.is_empty());
-    if let Some(ref email) = email
-        && !tranquil_pds::api::validation::is_valid_email(email)
+    if let Some(email) = &email
+        && tranquil_types::EmailAddress::new(email).is_err()
     {
         return Err(ApiError::InvalidEmail);
     }
@@ -703,11 +703,11 @@ pub async fn request_passkey_recovery(
         urlencoding::encode(&recovery_token)
     );
 
-    let _ = tranquil_pds::comms::comms_repo::enqueue_passkey_recovery(
+    let _ = tranquil_pds::comms::comms_repo::enqueue_notice(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         user.id,
-        &recovery_url,
+        tranquil_pds::comms::Notice::PasskeyRecovery { url: &recovery_url },
         hostname,
     )
     .await;
@@ -776,21 +776,14 @@ pub async fn recover_passkey_account(
     if result.passkeys_deleted > 0 {
         info!(did = %input.did, count = result.passkeys_deleted, "Deleted lost passkeys during account recovery");
     }
-    if let Ok(Some(prefs)) = state.repos.user.get_comms_prefs(user.id).await {
-        let actual_channel =
-            tranquil_pds::comms::resolve_delivery_channel(&prefs, user.preferred_comms_channel);
-        if let Err(e) = state
-            .repos
-            .user
-            .set_channel_verified(&input.did, actual_channel)
-            .await
-        {
-            warn!(
-                "Failed to implicitly verify channel on passkey recovery: {:?}",
-                e
-            );
-        }
-    }
+    crate::common::implicitly_verify_channel(
+        state.repos.user.as_ref(),
+        &input.did,
+        user.id,
+        user.preferred_comms_channel,
+        "passkey recovery",
+    )
+    .await;
     info!(did = %input.did, "Passkey-only account recovered with temporary password");
     Ok(Json(SuccessResponse { success: true }))
 }

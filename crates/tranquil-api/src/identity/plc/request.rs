@@ -35,16 +35,27 @@ pub async fn request_plc_operation_signature(
         .log_db_err("creating PLC token")?;
 
     let hostname = &tranquil_config::get().server.hostname;
-    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_plc_operation(
+    match tranquil_pds::comms::comms_repo::enqueue_notice(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         user_id,
-        &display_token,
+        tranquil_pds::comms::Notice::PlcOperation {
+            token: &display_token,
+        },
         hostname,
     )
     .await
     {
-        warn!("Failed to enqueue PLC operation notification: {:?}", e);
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return Err(ApiError::InvalidRequest(
+                "We couldn't deliver the PLC operation code to your notification channels. Please contact the PDS owner."
+                    .into(),
+            ));
+        }
+        Err(e) => {
+            warn!("Failed to enqueue PLC operation notification: {:?}", e);
+        }
     }
     info!("PLC operation signature requested for user {}", auth.did);
     Ok(Json(EmptyResponse {}))

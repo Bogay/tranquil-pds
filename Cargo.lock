@@ -7772,6 +7772,7 @@ dependencies = [
  "tranquil-config",
  "tranquil-db-traits",
  "tranquil-signal",
+ "tranquil-types",
  "uuid",
 ]
 
@@ -8129,6 +8130,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tranquil-types",
  "url",
  "uuid",
 ]

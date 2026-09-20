@@ -71,7 +71,7 @@ pub async fn request_email_update(
 
     let Some(_current_email) = user.email else {
         return Err(ApiError::InvalidRequest(
-            "account does not have an email address".into(),
+            "Account doesn't have an email address".into(),
         ));
     };
 
@@ -89,36 +89,43 @@ pub async fn request_email_update(
             ApiError::InternalError(Some("Failed to generate verification code".into()))
         })?;
 
-        if let Some(Json(ref inp)) = input
-            && let Some(ref new_email) = inp.new_email
+        if let Some(Json(inp)) = &input
+            && let Some(new_email) = inp.new_email.as_deref()
+            && let Ok(address) = tranquil_types::EmailAddress::new(new_email)
         {
-            let new_email = new_email.trim().to_lowercase();
-            if !new_email.is_empty() && tranquil_pds::api::validation::is_valid_email(&new_email) {
-                let pending = PendingEmailUpdate {
-                    new_email,
-                    token_hash: hash_token(&token),
-                    authorized: false,
-                };
-                if let Ok(json) = serde_json::to_string(&pending) {
-                    let cache_key = tranquil_pds::cache_keys::email_update_key(&auth.did);
-                    if let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await {
-                        warn!("Failed to cache pending email update: {:?}", e);
-                    }
-                }
+            let pending = PendingEmailUpdate {
+                new_email: address.as_str().to_string(),
+                token_hash: hash_token(&token),
+                authorized: false,
+            };
+            let cache_key = tranquil_pds::cache_keys::email_update_key(&auth.did);
+            if let Ok(json) = serde_json::to_string(&pending)
+                && let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await
+            {
+                warn!("Failed to cache pending email update: {:?}", e);
             }
         }
 
         let hostname = &tranquil_config::get().server.hostname;
-        if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_short_token_email(
+        match tranquil_pds::comms::comms_repo::enqueue_notice(
             state.repos.user.as_ref(),
             state.repos.infra.as_ref(),
             user.id,
-            &token,
+            tranquil_pds::comms::Notice::ShortTokenEmail { token: &token },
             hostname,
         )
         .await
         {
-            warn!("Failed to enqueue email update notification: {:?}", e);
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return Err(ApiError::InvalidRequest(
+                    "We couldn't deliver the confirmation code to your notification channels. Please contact the PDS owner."
+                        .into(),
+                ));
+            }
+            Err(e) => {
+                warn!("Failed to enqueue email update notification: {:?}", e);
+            }
         }
     }
 
@@ -150,13 +157,11 @@ pub async fn confirm_email(
         .log_db_err("getting email info")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let Some(ref email) = user.email else {
+    let Some(email) = &user.email else {
         return Err(ApiError::InvalidEmail);
     };
-    let current_email = email.to_lowercase();
-
-    let provided_email = input.email.trim().to_lowercase();
-    if provided_email != current_email {
+    let provided_email = tranquil_types::EmailAddress::new(input.email.trim())?;
+    if provided_email.as_str() != email.to_lowercase() {
         return Err(ApiError::InvalidEmail);
     }
 
@@ -170,7 +175,7 @@ pub async fn confirm_email(
     let verified = tranquil_pds::auth::verification_token::verify_signup_token(
         &confirmation_code,
         CommsChannel::Email,
-        &provided_email,
+        provided_email.as_str(),
     );
 
     match verified {
@@ -226,17 +231,14 @@ pub async fn update_email(
     let user_id = user.id;
     let current_email = user.email.clone();
     let email_verified = user.email_verified;
-    let new_email = input.email.trim().to_lowercase();
-
-    if !tranquil_pds::api::validation::is_valid_email(&new_email) {
-        return Err(ApiError::InvalidRequest(
+    let new_email = tranquil_types::EmailAddress::new(input.email.trim()).map_err(|_| {
+        ApiError::InvalidRequest(
             "This email address is not supported, please use a different email.".into(),
-        ));
-    }
-
+        )
+    })?;
     let email_unchanged = current_email
         .as_ref()
-        .map(|c| new_email == c.to_lowercase())
+        .map(|c| new_email.as_str() == c.to_lowercase())
         .unwrap_or(false);
 
     if email_unchanged {
@@ -283,7 +285,7 @@ pub async fn update_email(
         if let Some(pending_json) = state.cache.get(&cache_key).await
             && let Ok(pending) = serde_json::from_str::<PendingEmailUpdate>(&pending_json)
             && pending.authorized
-            && pending.new_email == new_email
+            && pending.new_email == new_email.as_str()
         {
             authorized_via_link = true;
             let _ = state.cache.delete(&cache_key).await;
@@ -350,24 +352,26 @@ pub async fn update_email(
     state
         .repos
         .user
-        .update_email(user_id, &new_email)
+        .update_email(user_id, new_email.as_str())
         .await
         .log_db_err("updating email")?;
 
     let verification_token = tranquil_pds::auth::verification_token::generate_signup_token(
         did,
         CommsChannel::Email,
-        &new_email,
+        new_email.as_str(),
     );
     let formatted_token =
         tranquil_pds::auth::verification_token::format_token_for_display(&verification_token);
     let hostname = &tranquil_config::get().server.hostname;
+    let target = tranquil_pds::comms::VerificationTarget::direct(
+        tranquil_db_traits::Recipient::Email(new_email.clone()),
+    );
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         user_id,
-        tranquil_db_traits::CommsChannel::Email,
-        &new_email,
+        &target,
         &formatted_token,
         hostname,
     )
@@ -565,15 +569,22 @@ pub async fn check_email_in_use(
     _rate_limit: RateLimited<VerificationCheckLimit>,
     Json(input): Json<CheckEmailInUseInput>,
 ) -> Result<Json<InUseOutput>, ApiError> {
-    let email = input.email.trim().to_lowercase();
-    if email.is_empty() {
-        return Err(ApiError::InvalidRequest("email is required".into()));
-    }
+    let raw = input.email.trim();
+    let email = tranquil_types::EmailAddress::new(raw).map_err(|_| {
+        ApiError::InvalidRequest(
+            if raw.is_empty() {
+                "Email is required"
+            } else {
+                "Invalid email address"
+            }
+            .into(),
+        )
+    })?;
 
     let count = state
         .repos
         .user
-        .count_accounts_by_email(&email)
+        .count_accounts_by_email(email.as_str())
         .await
         .map_err(|e| {
             error!("DB error checking email usage: {:?}", e);

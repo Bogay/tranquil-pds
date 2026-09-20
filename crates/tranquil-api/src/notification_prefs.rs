@@ -159,12 +159,16 @@ pub async fn request_channel_verification(
     user_id: uuid::Uuid,
     did: &Did,
     channel: CommsChannel,
-    identifier: &str,
+    id: &str,
     handle: Option<&Handle>,
 ) -> Result<String, ApiError> {
-    let token = tranquil_pds::auth::verification_token::generate_channel_update_token(
-        did, channel, identifier,
-    );
+    if channel.verifies_via_bot() {
+        return Err(ApiError::InvalidRequest(
+            "This channel verifies through a bot. Please message the bot first so that it's able to reply with useful info".into(),
+        ));
+    }
+    let token =
+        tranquil_pds::auth::verification_token::generate_channel_update_token(did, channel, id);
     let formatted_token = tranquil_pds::auth::verification_token::format_token_for_display(&token);
 
     match channel {
@@ -173,10 +177,11 @@ pub async fn request_channel_verification(
             let handle = handle.ok_or_else(|| {
                 ApiError::InternalError(Some("Email verification requires a handle".into()))
             })?;
+            let new_email = tranquil_types::EmailAddress::new(id)?;
             tranquil_pds::comms::comms_repo::enqueue_email_update(
                 state.repos.infra.as_ref(),
                 user_id,
-                identifier,
+                &new_email,
                 handle,
                 &formatted_token,
                 hostname,
@@ -187,10 +192,10 @@ pub async fn request_channel_verification(
         _ => {
             let hostname = &tranquil_config::get().server.hostname;
             let encoded_token = urlencoding::encode(&formatted_token);
-            let encoded_identifier = urlencoding::encode(identifier);
+            let encoded_id = urlencoding::encode(id);
             let verify_link = format!(
                 "https://{}/app/verify?token={}&identifier={}",
-                hostname, encoded_token, encoded_identifier
+                hostname, encoded_token, encoded_id
             );
             let prefs = state
                 .repos
@@ -212,26 +217,14 @@ pub async fn request_channel_verification(
                 strings.channel_verification_subject,
                 &[("hostname", hostname)],
             );
-            let recipient = match channel {
-                CommsChannel::Telegram => state
-                    .repos
-                    .user
-                    .get_telegram_chat_id(user_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| identifier.to_string()),
-                _ => identifier.to_string(),
-            };
+            let recipient = tranquil_db_traits::Recipient::new(channel, id)?;
             state
                 .repos
                 .infra
                 .enqueue_comms(
                     Some(user_id),
-                    channel,
-                    tranquil_db_traits::CommsType::ChannelVerification,
                     &recipient,
+                    tranquil_db_traits::CommsType::ChannelVerification,
                     Some(&subject),
                     &body,
                     Some(json!({"code": formatted_token})),
@@ -253,14 +246,7 @@ async fn process_messaging_channel_update(
     effective_channel: CommsChannel,
     verification_required: &mut Vec<CommsChannel>,
 ) -> Result<(), ApiError> {
-    let clean = match channel {
-        CommsChannel::Discord => raw_value.trim().to_lowercase(),
-        CommsChannel::Telegram => raw_value.trim_start_matches('@').to_string(),
-        CommsChannel::Signal => raw_value.trim().trim_start_matches('@').to_lowercase(),
-        CommsChannel::Email => raw_value.trim().to_lowercase(),
-    };
-
-    if clean.is_empty() {
+    if raw_value.trim().is_empty() {
         if effective_channel == channel {
             return Err(ApiError::InvalidRequest(format!(
                 "Cannot remove {:?} while it is the preferred notification channel",
@@ -292,26 +278,12 @@ async fn process_messaging_channel_update(
         return Ok(());
     }
 
-    let valid = match channel {
-        CommsChannel::Discord => tranquil_pds::api::validation::is_valid_discord_username(&clean),
-        CommsChannel::Telegram => tranquil_pds::api::validation::is_valid_telegram_username(&clean),
-        CommsChannel::Signal => tranquil_pds::comms::is_valid_signal_username(&clean),
-        CommsChannel::Email => tranquil_pds::api::validation::is_valid_email(&clean),
+    let clean = match channel {
+        CommsChannel::Discord => tranquil_types::DiscordUsername::new(raw_value)?.to_string(),
+        CommsChannel::Telegram => tranquil_types::TelegramUsername::new(raw_value)?.to_string(),
+        CommsChannel::Signal => tranquil_types::SignalUsername::new(raw_value)?.to_string(),
+        CommsChannel::Email => tranquil_types::EmailAddress::new(raw_value)?.to_string(),
     };
-    if !valid {
-        return Err(match channel {
-            CommsChannel::Discord => ApiError::InvalidRequest(
-                "Invalid Discord username. Must be 2-32 lowercase characters (letters, numbers, underscores, periods)".into(),
-            ),
-            CommsChannel::Telegram => ApiError::InvalidRequest(
-                "Invalid Telegram username. Must be 5-32 characters, alphanumeric or underscore".into(),
-            ),
-            CommsChannel::Signal => ApiError::InvalidRequest(
-                "Invalid Signal username. Must be a 3-32 character nickname, a dot, then a 2-20 digit discriminator".into(),
-            ),
-            CommsChannel::Email => ApiError::InvalidEmail,
-        });
-    }
 
     match channel {
         CommsChannel::Discord => state
@@ -394,23 +366,25 @@ pub async fn update_notification_prefs(
         info!(did = %auth.did, channel = ?effective_channel, "Updated preferred notification channel");
     }
 
-    if let Some(ref new_email) = input.email {
-        let email_clean = new_email.trim().to_lowercase();
-        if email_clean.is_empty() {
-            return Err(ApiError::InvalidRequest("Email cannot be empty".into()));
-        }
+    if let Some(new_email) = &input.email {
+        let email = tranquil_types::EmailAddress::new(new_email).map_err(|_| {
+            if new_email.trim().is_empty() {
+                ApiError::InvalidRequest("Email can't be empty".into())
+            } else {
+                ApiError::InvalidEmail
+            }
+        })?;
 
-        if !tranquil_pds::api::validation::is_valid_email(&email_clean) {
-            return Err(ApiError::InvalidEmail);
-        }
-
-        if current_email.as_ref().map(|e| e.to_lowercase()) != Some(email_clean.clone()) {
+        if !current_email
+            .as_deref()
+            .is_some_and(|e| e.eq_ignore_ascii_case(email.as_str()))
+        {
             request_channel_verification(
                 &state,
                 user_id,
                 &auth.did,
                 CommsChannel::Email,
-                &email_clean,
+                email.as_str(),
                 Some(&handle),
             )
             .await?;

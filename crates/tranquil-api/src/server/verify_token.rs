@@ -66,8 +66,7 @@ pub async fn verify_token_internal(
             handle_channel_update(state, &token_data.did, token_data.channel, &identifier).await
         }
         VerificationPurpose::Signup => {
-            handle_signup_verification(state, &token_data.did, token_data.channel, &identifier)
-                .await
+            handle_signup_verification(state, &token_data.did, token_data.channel).await
         }
     }
 }
@@ -167,7 +166,7 @@ async fn handle_channel_update(
 
     info!(did = %did, channel = ?channel, "Channel verified successfully");
 
-    notify_channel_verified(state, user_id, channel, identifier).await;
+    notify_channel_verified(state, user_id, channel).await;
 
     Ok(Json(VerifyTokenOutput {
         success: true,
@@ -177,43 +176,49 @@ async fn handle_channel_update(
     }))
 }
 
-async fn notify_channel_verified(
-    state: &AppState,
-    user_id: uuid::Uuid,
-    channel: CommsChannel,
-    identifier: &str,
-) {
-    let recipient = match channel {
-        CommsChannel::Telegram => state
-            .repos
-            .user
-            .get_telegram_chat_id(user_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| identifier.to_string()),
-        _ => identifier.to_string(),
+async fn notify_channel_verified(state: &AppState, user_id: uuid::Uuid, channel: CommsChannel) {
+    let prefs = match state.repos.user.get_comms_prefs(user_id).await {
+        Ok(Some(prefs)) => prefs,
+        Ok(None) => {
+            warn!(
+                user_id = %user_id,
+                channel = ?channel,
+                "We skipped channel-verified notice because the account doesn't have comms preferences"
+            );
+            return;
+        }
+        Err(e) => {
+            warn!(
+                user_id = %user_id,
+                channel = ?channel,
+                error = ?e,
+                "We skipped channel-verified notice because we couldn't load the account's comms preferences"
+            );
+            return;
+        }
     };
-    if let Err(e) = comms_repo::enqueue_channel_verified(
+    let Some(recipient) = tranquil_pds::comms::recipient_for(&prefs, channel) else {
+        warn!(
+            user_id = %user_id,
+            channel = ?channel,
+            "We skipped channel-verified notice because the account doesn't have a valid recipient"
+        );
+        return;
+    };
+    comms_repo::try_channel_verified_notice(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         user_id,
-        channel,
         &recipient,
         &tranquil_config::get().server.hostname,
     )
-    .await
-    {
-        warn!(error = %e, "Failed to enqueue channel verified notification");
-    }
+    .await;
 }
 
 async fn handle_signup_verification(
     state: &AppState,
     did: &Did,
     channel: CommsChannel,
-    identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let user = state
         .repos
@@ -238,7 +243,7 @@ async fn handle_signup_verification(
 
     info!(did = %did, channel = ?channel, "Signup verified successfully");
 
-    notify_channel_verified(state, user.id, channel, identifier).await;
+    notify_channel_verified(state, user.id, channel).await;
 
     Ok(Json(VerifyTokenOutput {
         success: true,

@@ -109,13 +109,7 @@ async fn assert_record_gone(did: &Did, rkey: &Rkey) {
 }
 
 async fn user_id_for(did: &Did) -> uuid::Uuid {
-    get_test_repos()
-        .await
-        .user
-        .get_id_by_did(did)
-        .await
-        .expect("DB error looking up the user id")
-        .expect("User not found")
+    user_id_of(get_test_repos().await, did).await
 }
 
 #[tokio::test]

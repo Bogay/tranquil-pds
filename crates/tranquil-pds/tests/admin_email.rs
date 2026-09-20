@@ -16,7 +16,7 @@ async fn test_send_email_success() {
         .bearer_auth(&access_jwt)
         .json(&json!({
             "recipientDid": did,
-            "senderDid": "did:plc:admin",
+            "senderDid": "did:plc:oystercafe",
             "content": "Hello, this is a test email from the admin.",
             "subject": "Test Admin Email"
         }))
@@ -26,12 +26,7 @@ async fn test_send_email_success() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["sent"], true);
-    let user_id = repos
-        .user
-        .get_id_by_did(&Did::new(did).unwrap())
-        .await
-        .expect("DB error")
-        .expect("User not found");
+    let user_id = common::user_id_of(repos, &Did::new(did).unwrap()).await;
     let comms = repos
         .infra
         .get_latest_comms_for_user(user_id, CommsType::AdminEmail, 1)
@@ -57,7 +52,7 @@ async fn test_send_email_default_subject() {
         .bearer_auth(&access_jwt)
         .json(&json!({
             "recipientDid": did,
-            "senderDid": "did:plc:admin",
+            "senderDid": "did:plc:oystercafe",
             "content": "Email without subject"
         }))
         .send()
@@ -66,12 +61,7 @@ async fn test_send_email_default_subject() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["sent"], true);
-    let user_id = repos
-        .user
-        .get_id_by_did(&Did::new(did).unwrap())
-        .await
-        .expect("DB error")
-        .expect("User not found");
+    let user_id = common::user_id_of(repos, &Did::new(did).unwrap()).await;
     let comms = repos
         .infra
         .get_latest_comms_for_user(user_id, CommsType::AdminEmail, 10)
@@ -101,7 +91,7 @@ async fn test_send_email_recipient_not_found() {
         .bearer_auth(&access_jwt)
         .json(&json!({
             "recipientDid": "did:plc:nonexistent",
-            "senderDid": "did:plc:admin",
+            "senderDid": "did:plc:oystercafe",
             "content": "Test content"
         }))
         .send()
@@ -122,7 +112,7 @@ async fn test_send_email_missing_content() {
         .bearer_auth(&access_jwt)
         .json(&json!({
             "recipientDid": did,
-            "senderDid": "did:plc:admin",
+            "senderDid": "did:plc:oystercafe",
             "content": ""
         }))
         .send()
@@ -143,7 +133,7 @@ async fn test_send_email_missing_recipient() {
         .bearer_auth(&access_jwt)
         .json(&json!({
             "recipientDid": "",
-            "senderDid": "did:plc:admin",
+            "senderDid": "did:plc:oystercafe",
             "content": "Test content"
         }))
         .send()
@@ -160,11 +150,47 @@ async fn test_send_email_requires_auth() {
         .post(format!("{}/xrpc/com.atproto.admin.sendEmail", base_url))
         .json(&json!({
             "recipientDid": "did:plc:test",
-            "senderDid": "did:plc:admin",
+            "senderDid": "did:plc:oystercafe",
             "content": "Test content"
         }))
         .send()
         .await
         .expect("Failed to send email");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_send_email_rejects_garbage_stored_email() {
+    let client = common::client();
+    let base_url = common::base_url().await;
+    let repos = common::get_test_repos().await;
+    let (access_jwt, did) = common::create_admin_account_and_login(&client).await;
+    let user_id = common::user_id_of(repos, &Did::new(did.clone()).unwrap()).await;
+    repos
+        .user
+        .update_email(user_id, "not-an-email")
+        .await
+        .expect("DB error");
+
+    let res = client
+        .post(format!("{}/xrpc/com.atproto.admin.sendEmail", base_url))
+        .bearer_auth(&access_jwt)
+        .json(&json!({
+            "recipientDid": did,
+            "content": "This email should never go out"
+        }))
+        .send()
+        .await
+        .expect("Failed to send email");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    let comms = repos
+        .infra
+        .get_latest_comms_for_user(user_id, CommsType::AdminEmail, 1)
+        .await
+        .expect("DB error");
+    assert!(
+        comms.is_empty(),
+        "A garbage stored email doesn't reach the queue"
+    );
 }

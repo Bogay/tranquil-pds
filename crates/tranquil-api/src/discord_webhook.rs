@@ -143,7 +143,20 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
         None => {
             return Json(json!({
                 "type": 4,
-                "data": {"content": "Could not identify user", "flags": 64}
+                "data": {"content": "Couldn't identify user", "flags": 64}
+            }))
+            .into_response();
+        }
+    };
+    let (discord_user_id, discord_username) = match (
+        tranquil_types::DiscordUserId::new(&discord_user_id),
+        tranquil_types::DiscordUsername::new(&discord_username),
+    ) {
+        (Ok(discord_user_id), Ok(discord_username)) => (discord_user_id, discord_username),
+        _ => {
+            return Json(json!({
+                "type": 4,
+                "data": {"content": "Couldn't verify your Discord account", "flags": 64}
             }))
             .into_response();
         }
@@ -184,18 +197,14 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
                 discord_user_id = %discord_user_id,
                 "Verified Discord user and stored user ID"
             );
-            if let Err(e) = comms_repo::enqueue_channel_verified(
+            comms_repo::try_channel_verified_notice(
                 state.repos.user.as_ref(),
                 state.repos.infra.as_ref(),
                 user_id,
-                tranquil_db_traits::CommsChannel::Discord,
-                &discord_user_id,
+                &tranquil_types::Recipient::Discord(discord_user_id),
                 &tranquil_config::get().server.hostname,
             )
-            .await
-            {
-                warn!(error = %e, "Failed to enqueue channel verified notification");
-            }
+            .await;
             Json(json!({
                 "type": 4,
                 "data": {"content": "Verified", "flags": 64}
@@ -299,11 +308,11 @@ mod tests {
     fn parse_handle_whitespace_trimmed() {
         let options = vec![InteractionOption {
             name: "handle".to_string(),
-            value: serde_json::json!("  alice.example.com  "),
+            value: serde_json::json!("  oystercafe.jola.dev  "),
         }];
         assert_eq!(
             parse_start_handle(Some(&options)),
-            Some("alice.example.com".to_string()),
+            Some("oystercafe.jola.dev".to_string()),
         );
     }
 }

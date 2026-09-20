@@ -775,6 +775,31 @@ impl From<jacquard_common::types::string::AtStrError> for ApiError {
     }
 }
 
+impl From<tranquil_types::InvalidEmailAddress> for ApiError {
+    fn from(_: tranquil_types::InvalidEmailAddress) -> Self {
+        Self::InvalidEmail
+    }
+}
+
+macro_rules! invalid_request_from {
+    ($($err:ty),* $(,)?) => {
+        $(
+            impl From<$err> for ApiError {
+                fn from(e: $err) -> Self {
+                    Self::InvalidRequest(e.to_string())
+                }
+            }
+        )*
+    };
+}
+
+invalid_request_from!(
+    tranquil_types::InvalidSignalUsername,
+    tranquil_types::InvalidTelegramUsername,
+    tranquil_types::InvalidDiscordUsername,
+    tranquil_types::InvalidRecipient,
+);
+
 impl From<crate::plc::PlcError> for ApiError {
     fn from(e: crate::plc::PlcError) -> Self {
         use crate::plc::PlcError;

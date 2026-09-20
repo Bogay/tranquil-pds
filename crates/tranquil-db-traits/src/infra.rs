@@ -44,60 +44,7 @@ impl InviteCodeState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "lowercase")]
-#[sqlx(type_name = "comms_channel", rename_all = "snake_case")]
-pub enum CommsChannel {
-    Email,
-    Discord,
-    Telegram,
-    Signal,
-}
-
-impl CommsChannel {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Email => "email",
-            Self::Discord => "discord",
-            Self::Telegram => "telegram",
-            Self::Signal => "signal",
-        }
-    }
-
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Email => "email",
-            Self::Discord => "Discord",
-            Self::Telegram => "Telegram",
-            Self::Signal => "Signal",
-        }
-    }
-}
-
-impl std::str::FromStr for CommsChannel {
-    type Err = InvalidCommsChannel;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "email" => Ok(Self::Email),
-            "discord" => Ok(Self::Discord),
-            "telegram" => Ok(Self::Telegram),
-            "signal" => Ok(Self::Signal),
-            _ => Err(InvalidCommsChannel),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct InvalidCommsChannel;
-
-impl std::fmt::Display for InvalidCommsChannel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("invalid comms channel")
-    }
-}
-
-impl std::error::Error for InvalidCommsChannel {}
+pub use tranquil_types::{CommsChannel, Recipient};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "comms_type", rename_all = "snake_case")]
@@ -226,9 +173,8 @@ pub trait InfraRepository: Send + Sync {
     async fn enqueue_comms(
         &self,
         user_id: Option<Uuid>,
-        channel: CommsChannel,
+        recipient: &Recipient,
         comms_type: CommsType,
-        recipient: &str,
         subject: Option<&str>,
         body: &str,
         metadata: Option<serde_json::Value>,

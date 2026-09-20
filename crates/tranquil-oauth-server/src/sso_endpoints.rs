@@ -916,55 +916,26 @@ pub async fn complete_registration(
     let verification_channel = input
         .verification_channel
         .unwrap_or(tranquil_db_traits::CommsChannel::Email);
-    let verification_recipient = match verification_channel {
-        tranquil_db_traits::CommsChannel::Email => {
-            let email = input
-                .email
+    let effective_email = input
+        .email
+        .clone()
+        .or_else(|| {
+            pending_preview
+                .provider_email
                 .clone()
-                .or_else(|| {
-                    pending_preview
-                        .provider_email
-                        .clone()
-                        .map(|e| e.into_inner())
-                })
-                .map(|e| e.trim().to_string())
-                .filter(|e| !e.is_empty());
-            match email {
-                Some(e) if !e.is_empty() => e,
-                _ => return Err(ApiError::MissingEmail),
-            }
-        }
-        tranquil_db_traits::CommsChannel::Discord => match &input.discord_username {
-            Some(username) if !username.trim().is_empty() => {
-                let clean = username.trim().to_lowercase();
-                if !tranquil_pds::api::validation::is_valid_discord_username(&clean) {
-                    return Err(ApiError::InvalidRequest(
-                        "Invalid Discord username. Must be 2-32 lowercase characters (letters, numbers, underscores, periods)".into(),
-                    ));
-                }
-                clean
-            }
-            _ => return Err(ApiError::MissingDiscordId),
+                .map(|e| e.into_inner())
+        })
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty());
+    let target = tranquil_api::common::extract_verification_recipient(
+        verification_channel,
+        &tranquil_api::common::ChannelInput {
+            email: effective_email.as_deref(),
+            discord_username: input.discord_username.as_deref(),
+            telegram_username: input.telegram_username.as_deref(),
+            signal_username: input.signal_username.as_deref(),
         },
-        tranquil_db_traits::CommsChannel::Telegram => match &input.telegram_username {
-            Some(username) if !username.trim().is_empty() => {
-                let clean = username.trim().trim_start_matches('@');
-                if !tranquil_pds::api::validation::is_valid_telegram_username(clean) {
-                    return Err(ApiError::InvalidRequest(
-                        "Invalid Telegram username. Must be 5-32 characters, alphanumeric or underscore".into(),
-                    ));
-                }
-                clean.to_string()
-            }
-            _ => return Err(ApiError::MissingTelegramUsername),
-        },
-        tranquil_db_traits::CommsChannel::Signal => match &input.signal_username {
-            Some(username) if !username.trim().is_empty() => {
-                username.trim().trim_start_matches('@').to_lowercase()
-            }
-            _ => return Err(ApiError::MissingSignalNumber),
-        },
-    };
+    )?;
 
     let email = input
         .email
@@ -978,18 +949,11 @@ pub async fn complete_registration(
         .map(|e| e.trim().to_string())
         .filter(|e| !e.is_empty());
 
-    let email = match &email {
-        Some(e) => {
-            if e.len() > 254 {
-                return Err(ApiError::InvalidEmail);
-            }
-            if !tranquil_pds::api::validation::is_valid_email(e) {
-                return Err(ApiError::InvalidEmail);
-            }
-            Some(e.clone())
-        }
-        None => None,
-    };
+    if let Some(e) = &email
+        && tranquil_types::EmailAddress::new(e).is_err()
+    {
+        return Err(ApiError::InvalidEmail);
+    }
 
     let invite_registration =
         check_registration_invite(&state, input.invite_code.as_deref()).await?;
@@ -1336,10 +1300,11 @@ pub async fn complete_registration(
             }
 
             let hostname = &tranquil_config::get().server.hostname;
-            if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_welcome(
+            if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_notice(
                 state.repos.user.as_ref(),
                 state.repos.infra.as_ref(),
                 user_id.unwrap_or(uuid::Uuid::nil()),
+                tranquil_pds::comms::Notice::Welcome,
                 hostname,
             )
             .await
@@ -1376,7 +1341,7 @@ pub async fn complete_registration(
         let verification_token = tranquil_pds::auth::verification_token::generate_signup_token(
             &did,
             verification_channel,
-            &verification_recipient,
+            &target.id,
         );
         let formatted_token =
             tranquil_pds::auth::verification_token::format_token_for_display(&verification_token);
@@ -1384,8 +1349,7 @@ pub async fn complete_registration(
             state.repos.user.as_ref(),
             state.repos.infra.as_ref(),
             uid,
-            verification_channel,
-            &verification_recipient,
+            &target,
             &formatted_token,
             hostname,
         )

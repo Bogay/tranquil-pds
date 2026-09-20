@@ -19,10 +19,10 @@ pub async fn update_account_email(
     Json(input): Json<UpdateAccountEmailInput>,
 ) -> Result<Json<EmptyResponse>, ApiError> {
     let account = input.account.trim();
-    let email = input.email.trim();
-    if account.is_empty() || email.is_empty() {
+    let email = tranquil_types::EmailAddress::new(&input.email)?;
+    if account.is_empty() {
         return Err(ApiError::InvalidRequest(
-            "account and email are required".into(),
+            "Account is required, silly!".into(),
         ));
     }
     let account_did: Did = account
@@ -32,7 +32,7 @@ pub async fn update_account_email(
     match state
         .repos
         .user
-        .admin_update_email(&account_did, email)
+        .admin_update_email(&account_did, &email)
         .await
     {
         Ok(0) => Err(ApiError::AccountNotFound),

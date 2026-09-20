@@ -76,6 +76,13 @@ pub async fn handle_telegram_webhook(
                     return StatusCode::OK;
                 }
             };
+            let username = match tranquil_types::TelegramUsername::new(username) {
+                Ok(username) => username,
+                Err(e) => {
+                    warn!(error = %e, "We ignored a /start with an invalid Telegram username");
+                    return StatusCode::OK;
+                }
+            };
 
             debug!(
                 telegram_username = %username,
@@ -95,17 +102,21 @@ pub async fn handle_telegram_webhook(
                         chat_id = from.id,
                         "Verified Telegram user and stored chat_id"
                     );
-                    if let Err(e) = comms_repo::enqueue_channel_verified(
-                        state.repos.user.as_ref(),
-                        state.repos.infra.as_ref(),
-                        user_id,
-                        tranquil_db_traits::CommsChannel::Telegram,
-                        &from.id.to_string(),
-                        &tranquil_config::get().server.hostname,
-                    )
-                    .await
-                    {
-                        warn!(error = %e, "Failed to enqueue channel verified notification");
+                    match tranquil_types::TelegramChatId::from_i64(from.id) {
+                        Some(chat_id) => {
+                            comms_repo::try_channel_verified_notice(
+                                state.repos.user.as_ref(),
+                                state.repos.infra.as_ref(),
+                                user_id,
+                                &tranquil_types::Recipient::Telegram(chat_id),
+                                &tranquil_config::get().server.hostname,
+                            )
+                            .await;
+                        }
+                        None => warn!(
+                            chat_id = from.id,
+                            "We skipped verified notice because the Telegram chat ID can't be 0"
+                        ),
                     }
                 }
                 Ok(None) => {
@@ -178,8 +189,8 @@ mod tests {
     #[test]
     fn payload_with_extra_whitespace_trimmed() {
         assert_eq!(
-            parse_start_handle(Some("/start  alice_example_com  ")),
-            Some("alice.example.com".to_string()),
+            parse_start_handle(Some("/start  oys_nel_pet  ")),
+            Some("oys.nel.pet".to_string()),
         );
     }
 }

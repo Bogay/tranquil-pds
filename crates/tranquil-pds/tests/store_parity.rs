@@ -4,7 +4,7 @@ mod helpers;
 use std::sync::Arc;
 use tranquil_db::PostgresRepositories;
 use tranquil_db_traits::{Backlink, BacklinkPath, CommsChannel, CommsType};
-use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey, Tid};
+use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Recipient, Rkey, Tid};
 use uuid::Uuid;
 
 async fn create_store_repos() -> Arc<PostgresRepositories> {
@@ -1199,9 +1199,8 @@ async fn parity_comms_queue() {
         f.pg.infra
             .enqueue_comms(
                 Some(pg_uid),
-                CommsChannel::Email,
+                &Recipient::new(CommsChannel::Email, "test@jola.dev").unwrap(),
                 CommsType::Welcome,
-                "test@example.com",
                 Some("Welcome"),
                 "Welcome body",
                 None,
@@ -1214,9 +1213,8 @@ async fn parity_comms_queue() {
         .infra
         .enqueue_comms(
             Some(store_uid),
-            CommsChannel::Email,
+            &Recipient::new(CommsChannel::Email, "test@jola.dev").unwrap(),
             CommsType::Welcome,
-            "test@example.com",
             Some("Welcome"),
             "Welcome body",
             None,

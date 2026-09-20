@@ -586,16 +586,27 @@ pub async fn request_account_delete(
         .await
         .log_db_err("creating deletion token")?;
     let hostname = &tranquil_config::get().server.hostname;
-    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_account_deletion(
+    match tranquil_pds::comms::comms_repo::enqueue_notice(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         user_id,
-        &confirmation_token,
+        tranquil_pds::comms::Notice::AccountDeletion {
+            code: &confirmation_token,
+        },
         hostname,
     )
     .await
     {
-        warn!("Failed to enqueue account deletion notification: {:?}", e);
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return Err(ApiError::InvalidRequest(
+                "We couldn't deliver the deletion code to your notification channels. Please contact the PDS owner."
+                    .into(),
+            ));
+        }
+        Err(e) => {
+            warn!("Failed to enqueue account deletion notification: {:?}", e);
+        }
     }
     info!("Account deletion requested for user {}", session_mfa.did());
     Ok(Json(EmptyResponse {}))

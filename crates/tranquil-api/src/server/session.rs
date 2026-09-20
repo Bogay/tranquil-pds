@@ -220,21 +220,34 @@ pub async fn create_session(
         }
         Ok(tranquil_pds::auth::legacy_2fa::Legacy2faOutcome::ChallengeSent(code)) => {
             let hostname = &tranquil_config::get().server.hostname;
-            if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_2fa_code(
+            match tranquil_pds::comms::comms_repo::enqueue_notice(
                 state.repos.user.as_ref(),
                 state.repos.infra.as_ref(),
                 row.id,
-                code.as_str(),
+                tranquil_pds::comms::Notice::TwoFactorCode {
+                    code: code.as_str(),
+                },
                 hostname,
             )
             .await
             {
-                error!("Failed to send 2FA code: {:?}", e);
-                tranquil_pds::auth::legacy_2fa::clear_challenge(state.cache.as_ref(), &row.did)
-                    .await;
-                return Err(ApiError::InternalError(Some(
-                    "Failed to send verification code. Please try again.".into(),
-                )));
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    tranquil_pds::auth::legacy_2fa::clear_challenge(state.cache.as_ref(), &row.did)
+                        .await;
+                    return Err(ApiError::InvalidRequest(
+                        "We couldn't deliver the verification code to your notification channels. Please contact the PDS owner."
+                            .into(),
+                    ));
+                }
+                Err(e) => {
+                    error!("Failed to send 2FA code: {:?}", e);
+                    tranquil_pds::auth::legacy_2fa::clear_challenge(state.cache.as_ref(), &row.did)
+                        .await;
+                    return Err(ApiError::InternalError(Some(
+                        "Failed to send verification code. Please try again.".into(),
+                    )));
+                }
             }
             return Err(ApiError::AuthFactorTokenRequired);
         }
@@ -336,13 +349,15 @@ pub async fn create_session(
                 "Legacy login on TOTP-enabled account - sending notification"
             );
             let hostname = &tranquil_config::get().server.hostname;
-            if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_legacy_login(
+            if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_notice(
                 state.repos.user.as_ref(),
                 state.repos.infra.as_ref(),
                 row.id,
+                tranquil_pds::comms::Notice::LegacyLoginAlert {
+                    channel: row.preferred_comms_channel,
+                    ip: client_ip,
+                },
                 hostname,
-                client_ip,
-                row.preferred_comms_channel,
             )
             .await
             {
@@ -868,15 +883,13 @@ pub async fn confirm_signup(
         }
     };
 
-    let identifier = match row.channel {
-        tranquil_db_traits::CommsChannel::Email => row.email.clone().unwrap_or_default(),
-        tranquil_db_traits::CommsChannel::Discord => {
-            row.discord_username.clone().unwrap_or_default()
-        }
-        tranquil_db_traits::CommsChannel::Telegram => {
-            row.telegram_username.clone().unwrap_or_default()
-        }
-        tranquil_db_traits::CommsChannel::Signal => row.signal_username.clone().unwrap_or_default(),
+    let Some(id) = row.channel_identifier() else {
+        warn!(
+            did = %input.did,
+            channel = ?row.channel,
+            "We can't confirm signup because the account doesn't have an identifier on file"
+        );
+        return Err(ApiError::InvalidRequest("Invalid verification code".into()));
     };
 
     let normalized_token =
@@ -884,7 +897,7 @@ pub async fn confirm_signup(
     match tranquil_pds::auth::verification_token::verify_signup_token(
         &normalized_token,
         row.channel,
-        &identifier,
+        id,
     ) {
         Ok(token_data) => {
             if token_data.did != input.did {
@@ -940,10 +953,11 @@ pub async fn confirm_signup(
     };
 
     let hostname = &tranquil_config::get().server.hostname;
-    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_welcome(
+    if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_notice(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         row.id,
+        tranquil_pds::comms::Notice::Welcome,
         hostname,
     )
     .await
@@ -960,6 +974,35 @@ pub async fn confirm_signup(
         preferred_channel: row.channel,
         preferred_channel_verified: true,
     }))
+}
+
+async fn resend_signup_verification(
+    state: &AppState,
+    row: &tranquil_db_traits::UserResendVerification,
+    did: &Did,
+    context: &'static str,
+) -> bool {
+    let Some(id) = row.channel_identifier() else {
+        warn!(did = %did, channel = ?row.channel, "We skipped {context} because the account doesn't have a recipient on file");
+        return false;
+    };
+    match tranquil_pds::comms::VerificationTarget::resolve(row.channel, id, row.email.as_deref()) {
+        Ok(target) => {
+            crate::identity::provision::enqueue_signup_verification(
+                state,
+                row.id,
+                did,
+                row.channel,
+                &target,
+            )
+            .await;
+            true
+        }
+        Err(_) => {
+            warn!(did = %did, channel = ?row.channel, "We skipped {context} because the account doesn't have a valid recipient");
+            false
+        }
+    }
 }
 
 const AUTO_VERIFY_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(120);
@@ -990,37 +1033,15 @@ pub async fn auto_resend_verification(state: &AppState, did: &Did) -> Option<Aut
         handle: row.handle.clone(),
         channel: row.channel,
     };
-    let is_bot_channel = matches!(
-        row.channel,
-        tranquil_db_traits::CommsChannel::Telegram | tranquil_db_traits::CommsChannel::Discord
-    );
-    if is_bot_channel || debounced {
+    if row.channel.verifies_via_bot() || debounced {
         return Some(result);
     }
-    let recipient = match row.channel {
-        tranquil_db_traits::CommsChannel::Email => row.email.clone().unwrap_or_default(),
-        tranquil_db_traits::CommsChannel::Signal => row.signal_username.clone().unwrap_or_default(),
-        _ => return Some(result),
-    };
-    if recipient.is_empty() {
-        warn!(
-            "No recipient configured for auto-resend verification: {}",
-            did
-        );
-        return Some(result);
+    if resend_signup_verification(state, &row, did, "auto-resend verification").await {
+        let _ = state
+            .cache
+            .set(&debounce_key, "1", AUTO_VERIFY_DEBOUNCE)
+            .await;
     }
-    crate::identity::provision::enqueue_signup_verification(
-        state,
-        row.id,
-        did,
-        row.channel,
-        &recipient,
-    )
-    .await;
-    let _ = state
-        .cache
-        .set(&debounce_key, "1", AUTO_VERIFY_DEBOUNCE)
-        .await;
     Some(result)
 }
 
@@ -1050,32 +1071,12 @@ pub async fn resend_verification(
             return Err(ApiError::InternalError(None));
         }
     };
-    let is_verified = row.channel_verification.has_any_verified();
-    if is_verified {
+    if row.channel_verification.has_any_verified() {
         return Err(ApiError::InvalidRequest(
             "Account is already verified".into(),
         ));
     }
-
-    let recipient = match row.channel {
-        tranquil_db_traits::CommsChannel::Email => row.email.clone().unwrap_or_default(),
-        tranquil_db_traits::CommsChannel::Discord => {
-            row.discord_username.clone().unwrap_or_default()
-        }
-        tranquil_db_traits::CommsChannel::Telegram => {
-            row.telegram_username.clone().unwrap_or_default()
-        }
-        tranquil_db_traits::CommsChannel::Signal => row.signal_username.clone().unwrap_or_default(),
-    };
-
-    crate::identity::provision::enqueue_signup_verification(
-        &state,
-        row.id,
-        &input.did,
-        row.channel,
-        &recipient,
-    )
-    .await;
+    resend_signup_verification(&state, &row, &input.did, "resend verification").await;
     Ok(Json(SuccessResponse { success: true }))
 }
 

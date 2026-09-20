@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tranquil_db_traits::{ScopePreference, WebauthnChallengeType};
 use tranquil_pds::auth::{BareLoginIdentifier, NormalizedLoginIdentifier};
-use tranquil_pds::comms::comms_repo::enqueue_2fa_code;
+use tranquil_pds::comms::Notice;
+use tranquil_pds::comms::comms_repo::enqueue_notice;
 use tranquil_pds::oauth::{
     AuthFlow, DeviceData, DeviceId, OAuthError, Prompt, SessionId, db::should_show_consent,
 };

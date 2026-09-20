@@ -15,7 +15,7 @@ use tranquil_db_traits::{
     InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder, InviteCodeUse,
     MigrationReactivationError, MigrationReactivationInput, NotificationHistoryRow,
     NotificationPrefs, OAuthTokenWithUser, PasswordResetResult, PlcTokenInfo, QueuedComms,
-    ReactivatedAccountInfo, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
+    ReactivatedAccountInfo, Recipient, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
     RefreshSessionResult, RepoIdentity, ReservedSigningKey, ReservedSigningKeyFull,
     ScheduledDeletionAccount, ScopePreference, SequenceNumber, SequencedEvent, SessionId,
     StoredBackupCode, StoredPasskey, TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus,
@@ -1148,7 +1148,7 @@ pub enum UserRequest {
     },
     AdminUpdateEmail {
         did: Did,
-        email: String,
+        email: tranquil_types::EmailAddress,
         tx: Tx<u64>,
     },
     AdminUpdateHandle {
@@ -1202,14 +1202,10 @@ pub enum UserRequest {
         tx: Tx<()>,
     },
     StoreTelegramChatId {
-        telegram_username: String,
+        telegram_username: tranquil_types::TelegramUsername,
         chat_id: i64,
         handle: Option<String>,
         tx: Tx<Option<Uuid>>,
-    },
-    GetTelegramChatId {
-        user_id: Uuid,
-        tx: Tx<Option<i64>>,
     },
     SetUnverifiedDiscord {
         user_id: Uuid,
@@ -1217,8 +1213,8 @@ pub enum UserRequest {
         tx: Tx<()>,
     },
     StoreDiscordUserId {
-        discord_username: String,
-        discord_id: String,
+        discord_username: tranquil_types::DiscordUsername,
+        discord_id: tranquil_types::DiscordUserId,
         handle: Option<String>,
         tx: Tx<Option<Uuid>>,
     },
@@ -1744,7 +1740,6 @@ impl UserRequest {
             | Self::ClearSignal { user_id, .. }
             | Self::SetUnverifiedSignal { user_id, .. }
             | Self::SetUnverifiedTelegram { user_id, .. }
-            | Self::GetTelegramChatId { user_id, .. }
             | Self::SetUnverifiedDiscord { user_id, .. }
             | Self::VerifyEmailChannel { user_id, .. }
             | Self::VerifyDiscordChannel { user_id, .. }
@@ -1810,9 +1805,8 @@ impl UserRequest {
 pub enum InfraRequest {
     EnqueueComms {
         user_id: Option<Uuid>,
-        channel: CommsChannel,
+        recipient: Recipient,
         comms_type: CommsType,
-        recipient: String,
         subject: Option<String>,
         body: String,
         metadata: Option<serde_json::Value>,
@@ -3870,9 +3864,8 @@ fn dispatch_infra<S: StorageIO>(state: &HandlerState<S>, req: InfraRequest) {
     match req {
         InfraRequest::EnqueueComms {
             user_id,
-            channel,
-            comms_type,
             recipient,
+            comms_type,
             subject,
             body,
             metadata,
@@ -3883,9 +3876,8 @@ fn dispatch_infra<S: StorageIO>(state: &HandlerState<S>, req: InfraRequest) {
                 .infra_ops()
                 .enqueue_comms(
                     user_id,
-                    channel,
-                    comms_type,
                     &recipient,
+                    comms_type,
                     subject.as_deref(),
                     &body,
                     metadata,
@@ -5299,9 +5291,6 @@ fn dispatch_user<S: StorageIO + 'static>(state: &HandlerState<S>, req: UserReque
                 user.store_telegram_chat_id(&telegram_username, chat_id, handle.as_deref())
                     .map_err(metastore_to_db),
             );
-        }
-        UserRequest::GetTelegramChatId { user_id, tx } => {
-            let _ = tx.send(user.get_telegram_chat_id(user_id).map_err(metastore_to_db));
         }
         UserRequest::SetUnverifiedDiscord {
             user_id,

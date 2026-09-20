@@ -10,11 +10,12 @@ mod tests;
 mod tests_fjall;
 
 pub use client::{
-    DeviceName, InvalidDeviceName, InvalidSignalUsername, LinkGeneration, LinkResult, MessageBody,
-    MessageTooLong, SignalClient, SignalError, SignalSlot, SignalUsername,
+    DeviceName, InvalidDeviceName, LinkGeneration, LinkResult, MessageBody, MessageTooLong,
+    SignalClient, SignalError, SignalSlot,
 };
 pub use presage;
 pub use store::PgSignalStore;
+pub use tranquil_types::{InvalidSignalUsername, SignalUsername};
 
 #[async_trait::async_trait]
 pub trait SignalStoreProvider: Send + Sync {

@@ -220,7 +220,11 @@ pub trait UserRepository: Send + Sync {
         channel: CommsChannel,
     ) -> Result<Option<bool>, DbError>;
 
-    async fn admin_update_email(&self, did: &Did, email: &str) -> Result<u64, DbError>;
+    async fn admin_update_email(
+        &self,
+        did: &Did,
+        email: &tranquil_types::EmailAddress,
+    ) -> Result<u64, DbError>;
 
     async fn admin_update_handle(&self, did: &Did, handle: &Handle) -> Result<u64, DbError>;
 
@@ -266,12 +270,10 @@ pub trait UserRepository: Send + Sync {
 
     async fn store_telegram_chat_id(
         &self,
-        telegram_username: &str,
+        telegram_username: &tranquil_types::TelegramUsername,
         chat_id: i64,
         handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError>;
-
-    async fn get_telegram_chat_id(&self, user_id: Uuid) -> Result<Option<i64>, DbError>;
 
     async fn set_unverified_discord(
         &self,
@@ -281,8 +283,8 @@ pub trait UserRepository: Send + Sync {
 
     async fn store_discord_user_id(
         &self,
-        discord_username: &str,
-        discord_id: &str,
+        discord_username: &tranquil_types::DiscordUsername,
+        discord_id: &tranquil_types::DiscordUserId,
         handle: Option<&Handle>,
     ) -> Result<Option<Uuid>, DbError>;
 
@@ -910,6 +912,25 @@ pub struct UserResendVerification {
     pub signal_username: Option<String>,
     pub channel_verification: ChannelVerificationStatus,
 }
+
+macro_rules! channel_identifier {
+    ($name:ty) => {
+        impl $name {
+            pub fn channel_identifier(&self) -> Option<&str> {
+                match self.channel {
+                    CommsChannel::Email => self.email.as_deref(),
+                    CommsChannel::Discord => self.discord_username.as_deref(),
+                    CommsChannel::Telegram => self.telegram_username.as_deref(),
+                    CommsChannel::Signal => self.signal_username.as_deref(),
+                }
+                .filter(|identifier| !identifier.is_empty())
+            }
+        }
+    };
+}
+
+channel_identifier!(UserConfirmSignup);
+channel_identifier!(UserResendVerification);
 
 #[derive(Debug, Clone)]
 pub struct UserResetCodeInfo {

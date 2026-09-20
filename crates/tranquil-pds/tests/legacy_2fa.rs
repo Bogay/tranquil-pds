@@ -1,9 +1,9 @@
 mod common;
 
-use common::{base_url, client, create_account_and_login, get_test_repos};
+use common::{base_url, client, create_account_and_login, get_test_repos, user_id_of};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use tranquil_db_traits::CommsType;
+use tranquil_db_traits::{CommsChannel, CommsType};
 use tranquil_types::Did;
 
 async fn enable_totp_for_user(did: &str) {
@@ -26,13 +26,7 @@ async fn set_allow_legacy_login(did: &str, allow: bool) {
 
 async fn get_2fa_code_from_queue(did: &str) -> Option<String> {
     let repos = get_test_repos().await;
-    let parsed_did = Did::new(did.to_string()).unwrap();
-    let user_id = repos
-        .user
-        .get_id_by_did(&parsed_did)
-        .await
-        .expect("DB error")
-        .expect("User not found");
+    let user_id = user_id_of(repos, &Did::new(did).unwrap()).await;
 
     let comms = repos
         .infra
@@ -56,13 +50,7 @@ async fn get_2fa_code_from_queue(did: &str) -> Option<String> {
 
 async fn clear_2fa_challenges_for_user(did: &str) {
     let repos = get_test_repos().await;
-    let parsed_did = Did::new(did.to_string()).unwrap();
-    let user_id = repos
-        .user
-        .get_id_by_did(&parsed_did)
-        .await
-        .expect("DB error")
-        .expect("User not found");
+    let user_id = user_id_of(repos, &Did::new(did).unwrap()).await;
 
     let _ = repos
         .infra
@@ -72,13 +60,7 @@ async fn clear_2fa_challenges_for_user(did: &str) {
 
 async fn set_email_auth_factor(did: &str, enabled: bool) {
     let repos = get_test_repos().await;
-    let parsed_did = Did::new(did.to_string()).unwrap();
-    let user_id = repos
-        .user
-        .get_id_by_did(&parsed_did)
-        .await
-        .expect("DB error")
-        .expect("User not found");
+    let user_id = user_id_of(repos, &Did::new(did).unwrap()).await;
 
     repos
         .infra
@@ -128,6 +110,55 @@ async fn test_legacy_2fa_auth_factor_required() {
             .as_str()
             .unwrap_or("")
             .contains("sign-in code")
+    );
+}
+
+#[tokio::test]
+async fn test_legacy_2fa_undeliverable_channel_fails_login() {
+    let client = client();
+    let base = base_url().await;
+    let repos = get_test_repos().await;
+    let (_token, did) = create_account_and_login(&client).await;
+
+    enable_totp_for_user(&did).await;
+    set_allow_legacy_login(&did, true).await;
+    let parsed_did = Did::new(did.clone()).unwrap();
+    repos
+        .user
+        .set_channel_verified(&parsed_did, CommsChannel::Discord)
+        .await
+        .expect("DB error");
+    let user_id = user_id_of(repos, &parsed_did).await;
+    repos
+        .user
+        .update_email(user_id, &format!("undeliverable-{}", uuid::Uuid::new_v4()))
+        .await
+        .expect("DB error");
+
+    let handle = get_handle(&did).await;
+    let resp = client
+        .post(format!("{}/xrpc/com.atproto.server.createSession", base))
+        .json(&json!({
+            "identifier": handle,
+            "password": "Testpass123!"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body: Value = resp.json().await.unwrap();
+    assert_eq!(body["error"], "InvalidRequest");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("couldn't deliver the verification code"),
+        "the response should say the code couldn't be delivered: {body}"
+    );
+    assert!(
+        get_2fa_code_from_queue(&did).await.is_none(),
+        "the comms queue should stay empty for this user"
     );
 }
 
