@@ -267,8 +267,14 @@ impl StorageIO for RealIO {
         self.lookup(id)?.write_at(buf, offset)
     }
 
+    #[cfg(not(feature = "skip-fsync"))]
     fn sync(&self, id: FileId) -> io::Result<()> {
         self.lookup(id)?.sync_data()
+    }
+
+    #[cfg(feature = "skip-fsync")]
+    fn sync(&self, id: FileId) -> io::Result<()> {
+        self.lookup(id).map(|_| ())
     }
 
     fn file_size(&self, id: FileId) -> io::Result<u64> {
@@ -291,8 +297,14 @@ impl StorageIO for RealIO {
         fs::create_dir_all(path)
     }
 
+    #[cfg(not(feature = "skip-fsync"))]
     fn sync_dir(&self, path: &Path) -> io::Result<()> {
         fs::File::open(path)?.sync_all()
+    }
+
+    #[cfg(feature = "skip-fsync")]
+    fn sync_dir(&self, path: &Path) -> io::Result<()> {
+        fs::File::open(path).map(|_| ())
     }
 
     fn list_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {

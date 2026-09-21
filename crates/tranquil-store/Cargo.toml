@@ -46,6 +46,7 @@ test-harness = ["dep:tempfile"]
 jemalloc = ["dep:tikv-jemallocator"]
 gauntlet-cli = ["test-harness", "dep:clap", "dep:toml", "dep:tracing-subscriber", "jemalloc"]
 gauntlet-jemalloc-prof = []
+skip-fsync = []
 
 [[bin]]
 name = "tranquil-gauntlet"

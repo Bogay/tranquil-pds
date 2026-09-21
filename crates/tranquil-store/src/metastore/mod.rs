@@ -42,6 +42,11 @@ use self::user_hash::UserHashMap;
 
 const CURRENT_FORMAT_VERSION: u64 = 3;
 
+#[cfg(feature = "skip-fsync")]
+const METASTORE_PERSIST_MODE: fjall::PersistMode = fjall::PersistMode::Buffer;
+#[cfg(not(feature = "skip-fsync"))]
+const METASTORE_PERSIST_MODE: fjall::PersistMode = fjall::PersistMode::SyncData;
+
 #[derive(Debug, Clone)]
 pub struct MetastoreConfig {
     pub cache_size_bytes: u64,
@@ -243,14 +248,14 @@ impl Metastore {
                         repo_data.remove(records::record_by_cid_built_key().as_slice())?;
                         Self::migrate_blob_ownership(db, repo_data)?;
                         repo_data.insert(version_key, version_bytes)?;
-                        db.persist(fjall::PersistMode::SyncData)?;
+                        db.persist(METASTORE_PERSIST_MODE)?;
                         Ok(())
                     }
                 }
             }
             None => {
                 repo_data.insert(version_key, version_bytes)?;
-                db.persist(fjall::PersistMode::SyncData)?;
+                db.persist(METASTORE_PERSIST_MODE)?;
                 Ok(())
             }
         }
@@ -427,7 +432,7 @@ impl Metastore {
 
     pub fn persist(&self) -> Result<(), MetastoreError> {
         self.db
-            .persist(fjall::PersistMode::SyncData)
+            .persist(METASTORE_PERSIST_MODE)
             .map_err(MetastoreError::Fjall)
     }
 
