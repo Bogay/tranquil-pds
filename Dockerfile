@@ -1,4 +1,4 @@
-ARG DISTROLESS_IMAGE=gcr.io/distroless/cc-debian13:latest@sha256:1e3c6d9c255be500eb680cdea0ad07554f52ae92dfcbdf07043a2a435b4c1fe3
+ARG DISTROLESS_IMAGE=gcr.io/distroless/cc-debian13:latest@sha256:a017e74bd2a12d98342dbecd33d121d2b160415ed777573dc1808969e989d94d
 
 FROM node:24-trixie-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@latest --activate
