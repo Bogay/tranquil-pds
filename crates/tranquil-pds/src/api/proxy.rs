@@ -293,10 +293,11 @@ async fn proxy_handler(
                     return ApiError::InvalidRequest(format!("Invalid XRPC method: {}", method))
                         .into_response();
                 };
+                let scope_aud = format!("{}#{}", resolved.did, service_id);
                 if let Err(e) = crate::auth::scope_check::check_rpc_scope(
                     &auth_user.auth_source,
                     auth_user.scope.as_deref(),
-                    &resolved.did,
+                    &scope_aud,
                     &method_nsid,
                 ) {
                     return e.into_response();

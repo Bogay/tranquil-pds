@@ -126,7 +126,9 @@ mod s3 {
                 .clone()
                 .expect("storage.s3_bucket (S3_BUCKET) must be set");
             let client = create_s3_client().await;
-            let path = cfg.storage.s3_path
+            let path = cfg
+                .storage
+                .s3_path
                 .trim_start_matches("/")
                 .trim_end_matches("/")
                 .to_string();
@@ -139,7 +141,7 @@ mod s3 {
 
         fn resolve_path(&self, key: &str) -> String {
             if self.path.is_empty() {
-                return key.to_string()
+                return key.to_string();
             }
 
             format!("{}/{}", self.path, key)

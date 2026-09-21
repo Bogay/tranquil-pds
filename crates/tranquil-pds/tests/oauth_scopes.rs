@@ -1114,3 +1114,90 @@ async fn test_remembered_scope_later_unregistered_never_reaches_a_token() {
         refreshed["scope"]
     );
 }
+
+const PROXY_LXM: &str = "io.atcr.getManifest";
+const PROXY_SERVICE_ID: &str = "test_service";
+
+async fn setup_mock_proxy_service() -> (MockServer, String) {
+    let server = MockServer::start().await;
+    let uri = server.uri();
+    let host = uri
+        .strip_prefix("http://")
+        .expect("mock uri should be http");
+    let did = format!("did:web:{host}");
+
+    Mock::given(method("GET"))
+        .and(path("/.well-known/did.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": did,
+            "service": [{
+                "id": format!("#{PROXY_SERVICE_ID}"),
+                "type": "TestService",
+                "serviceEndpoint": uri,
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!("/xrpc/{PROXY_LXM}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "manifest": [] })))
+        .mount(&server)
+        .await;
+
+    (server, did)
+}
+
+async fn proxied_call(access_token: &str, service_did: &str) -> reqwest::Response {
+    client()
+        .get(format!("{}/xrpc/{}", base_url().await, PROXY_LXM))
+        .bearer_auth(access_token)
+        .header("atproto-proxy", format!("{service_did}#{PROXY_SERVICE_ID}"))
+        .send()
+        .await
+        .expect("Proxied request failed")
+}
+
+#[tokio::test]
+async fn test_rpc_scope_with_service_fragment_allows_proxied_call() {
+    let (_service, service_did) = setup_mock_proxy_service().await;
+    let scope = format!("atproto rpc:{PROXY_LXM}?aud={service_did}#{PROXY_SERVICE_ID}");
+    let (session, _mock) = create_user_and_oauth_session_with_scope(
+        "rpcfrag",
+        "https://example.com/rpc-fragment-callback",
+        &scope,
+    )
+    .await;
+
+    let res = proxied_call(&session.access_token, &service_did).await;
+    let status = res.status();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a scope audienced to did#serviceId must cover a call proxied to that service, got {} {:?}",
+        status,
+        res.text().await
+    );
+}
+
+#[tokio::test]
+async fn test_rpc_scope_with_bare_did_is_refused_for_proxied_call() {
+    let (_service, service_did) = setup_mock_proxy_service().await;
+    let scope = format!("atproto rpc:{PROXY_LXM}?aud={service_did}");
+    let (session, _mock) = create_user_and_oauth_session_with_scope(
+        "rpcbare",
+        "https://example.com/rpc-bare-callback",
+        &scope,
+    )
+    .await;
+
+    let res = proxied_call(&session.access_token, &service_did).await;
+    let status = res.status();
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a bare DID audience must not cover a call proxied to a service on that DID, got {} {:?}",
+        status,
+        res.text().await
+    );
+}
