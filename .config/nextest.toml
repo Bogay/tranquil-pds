@@ -53,23 +53,11 @@ heavy-load-tests = { max-threads = 4 }
 io-heavy-sim = { max-threads = 2 }
 
 [[profile.default.overrides]]
-filter = "test(/import_with_verification/) | test(/plc_migration/)"
-test-group = "serial-env-tests"
-
-[[profile.default.overrides]]
-filter = "binary(handle_domains)"
-test-group = "serial-env-tests"
-
-[[profile.default.overrides]]
 filter = "binary(ripple_cluster)"
 test-group = "serial-env-tests"
 
 [[profile.default.overrides]]
-filter = "package(tranquil-signal)"
-test-group = "serial-env-tests"
-
-[[profile.default.overrides]]
-filter = "package(tranquil-config)"
+filter = "package(tranquil-signal) and test(/^tests::/)"
 test-group = "serial-env-tests"
 
 [[profile.default.overrides]]
@@ -117,23 +105,11 @@ slow-timeout = { period = "300s", terminate-after = 4 }
 test-group = "io-heavy-sim"
 
 [[profile.ci.overrides]]
-filter = "test(/import_with_verification/) | test(/plc_migration/)"
-test-group = "serial-env-tests"
-
-[[profile.ci.overrides]]
-filter = "binary(handle_domains)"
-test-group = "serial-env-tests"
-
-[[profile.ci.overrides]]
 filter = "binary(ripple_cluster)"
 test-group = "serial-env-tests"
 
 [[profile.ci.overrides]]
-filter = "package(tranquil-signal)"
-test-group = "serial-env-tests"
-
-[[profile.ci.overrides]]
-filter = "package(tranquil-config)"
+filter = "package(tranquil-signal) and test(/^tests::/)"
 test-group = "serial-env-tests"
 
 [[profile.ci.overrides]]
