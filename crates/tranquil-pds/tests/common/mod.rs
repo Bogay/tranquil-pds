@@ -83,28 +83,41 @@ fn has_external_infra() -> bool {
         || (std::env::var("DATABASE_URL").is_ok()
             && (std::env::var("S3_ENDPOINT").is_ok() || std::env::var("BLOB_STORAGE_PATH").is_ok()))
 }
+
+#[cfg(not(feature = "external-infra"))]
+fn started_container_ids() -> Vec<String> {
+    let db = DB_CONTAINER.get().map(|c| c.id().to_string());
+    #[cfg(feature = "s3")]
+    let s3 = S3_CONTAINER.get().map(|c| c.id().to_string());
+    #[cfg(not(feature = "s3"))]
+    let s3: Option<String> = None;
+    db.into_iter().chain(s3).collect()
+}
+
+#[cfg(feature = "external-infra")]
+fn started_container_ids() -> Vec<String> {
+    Vec::new()
+}
+
 #[cfg(test)]
 #[ctor::dtor]
 fn cleanup() {
     if let Some(temp_dir) = TEST_TEMP_DIR.get() {
         let _ = std::fs::remove_dir_all(temp_dir);
     }
-    if has_external_infra() {
+    let ids = started_container_ids();
+    if ids.is_empty() {
         return;
     }
     if std::env::var("XDG_RUNTIME_DIR").is_ok() {
         let _ = std::process::Command::new("podman")
-            .args(["rm", "-f", "--filter", "label=tranquil_pds_test=true"])
+            .args(["rm", "-f"])
+            .args(&ids)
             .output();
     }
     let _ = std::process::Command::new("docker")
-        .args([
-            "container",
-            "prune",
-            "-f",
-            "--filter",
-            "label=tranquil_pds_test=true",
-        ])
+        .args(["rm", "-f"])
+        .args(&ids)
         .output();
 }
 

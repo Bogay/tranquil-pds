@@ -90,7 +90,7 @@ tranquil-infra = { workspace = true, features = ["testing"] }
 tempfile = "3"
 ciborium = { workspace = true }
 ctor = { workspace = true }
-testcontainers = { workspace = true }
+testcontainers = { workspace = true, features = ["watchdog"] }
 testcontainers-modules = { workspace = true }
 tranquil-ripple = { workspace = true }
 tranquil-sync = { workspace = true }
