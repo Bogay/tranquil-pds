@@ -128,19 +128,16 @@ test-misc:
     {{store_test}} --test actor --test commit_signing --test image_processing --test lifecycle_social --test notifications --test server --test signing_key --test verify_live_commit
 
 test *args:
-    @just test-unit
     {{store_test}} {{args}}
 
 test-one name:
     {{store_test}} --test {{name}}
 
 test-full *args:
-    @just test-unit
     @just services-up
     eval "$(tranquil-dev-services env)" && SQLX_OFFLINE=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-pds/s3 {{args}}
 
 test-pg *args:
-    @just test-unit
     ./scripts/run-tests.sh {{args}}
 
 services-up:
