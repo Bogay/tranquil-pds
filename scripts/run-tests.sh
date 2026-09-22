@@ -13,9 +13,6 @@ source "${TMPDIR:-/tmp}/tranquil_pds_test_infra.env"
 echo ""
 ulimit -n 65536
 
-echo "Building test binaries..."
-cargo test --no-run 2>&1 | tail -1
-
 echo "Running tests..."
 echo ""
 cargo nextest run --workspace --exclude tranquil-store "$@"

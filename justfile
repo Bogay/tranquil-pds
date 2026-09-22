@@ -138,7 +138,7 @@ test-full *args:
     eval "$(tranquil-dev-services env)" && SQLX_OFFLINE=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-pds/s3 {{args}}
 
 test-pg *args:
-    ./scripts/run-tests.sh {{args}}
+    SQLX_OFFLINE=true ./scripts/run-tests.sh {{args}}
 
 services-up:
     tranquil-dev-services up
