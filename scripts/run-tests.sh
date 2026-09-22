@@ -18,7 +18,7 @@ cargo test --no-run 2>&1 | tail -1
 
 echo "Running tests..."
 echo ""
-cargo nextest run -E 'not package(tranquil-store)' "$@"
+cargo nextest run "$@"
 
 echo ""
 echo "All tests passed."

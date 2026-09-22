@@ -98,7 +98,7 @@ test-store-asan:
 test-unit:
     SQLX_OFFLINE=true cargo test --test dpop_unit --test validation_edge_cases --test scope_edge_cases
 
-store_test := "SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run --features tranquil-store/skip-fsync -E 'not package(tranquil-store) and not binary(store_parity)'"
+store_test := "SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-store/skip-fsync -E 'not binary(store_parity)'"
 
 test-auth:
     {{store_test}} --test oauth --test oauth_lifecycle --test oauth_scopes --test oauth_security --test jwt_security --test session_management --test change_password --test password_reset
@@ -137,7 +137,7 @@ test-one name:
 test-full *args:
     @just test-unit
     @just services-up
-    eval "$(tranquil-dev-services env)" && SQLX_OFFLINE=true cargo nextest run --features tranquil-pds/s3 -E 'not package(tranquil-store)' {{args}}
+    eval "$(tranquil-dev-services env)" && SQLX_OFFLINE=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-pds/s3 {{args}}
 
 test-pg *args:
     @just test-unit
