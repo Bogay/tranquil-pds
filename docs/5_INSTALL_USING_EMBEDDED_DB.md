@@ -29,7 +29,7 @@ repo_backend = "tranquil-store"
 
 ## Installing: a patch on the existing guides
 
-The procedure is the one in [2_INSTALL_CONTAINERS.md](2_INSTALL_CONTAINERS.md) or [2_INSTALL_NIX.md](2_INSTALL_NIX.md). Follow your chosen guide top to bottom and apply the deltas below, otherwise exactly the same!
+The procedure is the one in [2_INSTALL_CONTAINERS.md](2_INSTALL_CONTAINERS.md), [2_INSTALL_NIX.md](2_INSTALL_NIX.md), or [2_INSTALL_ALPINE.md](2_INSTALL_ALPINE.md). Follow your chosen guide top to bottom and apply the deltas below, otherwise exactly the same!
 
 ### Containers
 

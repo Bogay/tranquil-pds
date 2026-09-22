@@ -67,6 +67,7 @@ podman-compose -f docker-compose.prod.yaml up -d
 ### Installation Guides
 
 - [Nix](docs/2_INSTALL_NIX.md)
+- [Alpine](docs/2_INSTALL_ALPINE.md)
 - [Containers](docs/2_INSTALL_CONTAINERS.md)
 
 ## Community
