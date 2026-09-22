@@ -775,7 +775,7 @@ pub struct StorageConfig {
     pub s3_path: String,
 
     /// Repository backend: `postgres` by default, or `tranquil-store`, our embedded db.
-    /// tranquil-store is EXPERIMENTAL!!!! RISK OF TOTAL DATA LOSS.
+    /// `tranquil-store` is our own solution, not a tried-and-tested out-of-box database. If you're not feeling brave, don't choose this.
     #[config(env = "REPO_BACKEND", default = "postgres")]
     pub repo_backend: String,
 }

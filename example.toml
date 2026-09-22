@@ -272,7 +272,7 @@
 #s3_path = ""
 
 # Repository backend: `postgres` by default, or `tranquil-store`, our embedded db.
-# tranquil-store is EXPERIMENTAL!!!! RISK OF TOTAL DATA LOSS.
+# `tranquil-store` is our own solution, not a tried-and-tested out-of-box database. If you're not feeling brave, don't choose this.
 #
 # Can also be specified via environment variable `REPO_BACKEND`.
 #
