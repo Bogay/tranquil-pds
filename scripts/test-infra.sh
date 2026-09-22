@@ -42,7 +42,10 @@ start_infra() {
         -P \
         --label tranquil_pds_test=true \
         postgres:18-alpine \
-        -c max_connections=500 >/dev/null
+        -c max_connections=500 \
+        -c fsync=off \
+        -c synchronous_commit=off \
+        -c full_page_writes=off >/dev/null
     echo "Waiting for services to be ready..."
     for i in {1..30}; do
         if $CONTAINER_CMD exec "${CONTAINER_PREFIX}-postgres" pg_isready -U postgres >/dev/null 2>&1; then
