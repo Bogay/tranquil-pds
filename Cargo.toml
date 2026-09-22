@@ -170,3 +170,9 @@ lto = "fat"
 codegen-units = 1
 debug = 1
 strip = false
+
+[profile.dev.package.bcrypt]
+opt-level = 3
+
+[profile.dev.package.blowfish]
+opt-level = 3
