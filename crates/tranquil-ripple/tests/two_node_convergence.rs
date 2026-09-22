@@ -36,8 +36,22 @@ async fn spawn_pair(
         .await
         .expect("node B failed to start");
 
-    tokio::time::sleep(Duration::from_millis(2000)).await;
-
+    cache_a
+        .set("__ready_a", "1", Duration::from_secs(60))
+        .await
+        .expect("readiness probe on A failed");
+    cache_b
+        .set("__ready_b", "1", Duration::from_secs(60))
+        .await
+        .expect("readiness probe on B failed");
+    poll_until(10_000, 50, || {
+        let cache_a = cache_a.clone();
+        let cache_b = cache_b.clone();
+        async move {
+            cache_b.get("__ready_a").await.is_some() && cache_a.get("__ready_b").await.is_some()
+        }
+    })
+    .await;
     ((cache_a, rl_a), (cache_b, rl_b))
 }
 
@@ -779,8 +793,6 @@ async fn two_node_stress_concurrent_load() {
     results.into_iter().enumerate().for_each(|(i, r)| {
         r.unwrap_or_else(|e| panic!("task {i} panicked: {e}"));
     });
-
-    tokio::time::sleep(Duration::from_secs(12)).await;
 
     shutdown.cancel();
 }

@@ -747,7 +747,40 @@ pub async fn spawn_cluster(pool: Option<sqlx::PgPool>, node_count: usize) -> Vec
     let first = &instances[0];
     APP_PORT.set(first.port).ok();
 
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+    let caches: Vec<Arc<dyn Cache>> = instances
+        .iter()
+        .map(|instance| instance.cache.clone().expect("cluster node has no cache"))
+        .collect();
+    futures::future::join_all(caches.iter().enumerate().map(|(i, cache)| async move {
+        cache
+            .set(
+                &format!("__cluster_ready_{i}"),
+                "1",
+                Duration::from_secs(60),
+            )
+            .await
+            .expect("cluster readiness probe failed");
+    }))
+    .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let ready = futures::future::join_all(caches.iter().flat_map(|cache| {
+            (0..caches.len()).map(move |i| async move {
+                cache.get(&format!("__cluster_ready_{i}")).await.is_some()
+            })
+        }))
+        .await
+        .into_iter()
+        .all(|seen| seen);
+        if ready {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "cluster nodes did not converge within 10s"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 
     instances
 }
