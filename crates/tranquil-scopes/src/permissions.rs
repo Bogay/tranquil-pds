@@ -49,10 +49,7 @@ impl ScopePermissions {
 pub fn superseded_by_transition_generic(scope: &ParsedScope) -> bool {
     match scope {
         ParsedScope::Repo(_) | ParsedScope::Blob(_) => true,
-        ParsedScope::Rpc(rpc) => !rpc
-            .lxm
-            .as_deref()
-            .is_some_and(|lxm| lxm == "*" || lxm.starts_with("chat.bsky.")),
+        ParsedScope::Rpc(rpc) => !(rpc.lxm == "*" || rpc.lxm.starts_with("chat.bsky.")),
         ParsedScope::Account(_)
         | ParsedScope::Identity(_)
         | ParsedScope::TransitionEmail
@@ -193,9 +190,9 @@ impl ScopePermissions {
 
         let has_permission = self.find_rpc_scopes().any(|rpc_scope| {
             let lxm_matches = match &rpc_scope.lxm {
-                None => true,
-                Some(scope_lxm) if scope_lxm == lxm => true,
-                Some(scope_lxm) if scope_lxm.ends_with(".*") => {
+                scope_lxm if scope_lxm == "*" => true,
+                scope_lxm if scope_lxm == lxm => true,
+                scope_lxm if scope_lxm.ends_with(".*") => {
                     let prefix = scope_lxm.strip_suffix(".*").unwrap();
                     lxm.starts_with(prefix) && lxm.chars().nth(prefix.len()) == Some('.')
                 }
@@ -203,7 +200,7 @@ impl ScopePermissions {
             };
 
             let aud_matches = match &rpc_scope.aud {
-                None => true,
+                None => false,
                 Some(scope_aud) if scope_aud == "*" => true,
                 Some(scope_aud) => scope_aud == aud,
             };
@@ -472,6 +469,24 @@ mod tests {
         assert!(perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getTimeline")));
         assert!(perms.allows_rpc("did:web:any.service", &c("app.bsky.feed.getTimeline")));
         assert!(!perms.allows_rpc("did:web:api.bsky.app", &c("app.bsky.feed.getAuthorFeed")));
+    }
+
+    #[test]
+    fn test_rpc_wildcard_lxm() {
+        let perms = ScopePermissions::from_scope_string(Some(
+            "rpc:*?aud=did:web:api.bsky.app#bsky_appview",
+        ));
+        let aud = "did:web:api.bsky.app#bsky_appview";
+        let other = "did:web:other.app#bsky_appview";
+        assert!(perms.allows_rpc(aud, &c("app.bsky.feed.getTimeline")));
+        assert!(!perms.allows_rpc(other, &c("app.bsky.feed.getTimeline")));
+    }
+
+    #[test]
+    fn test_rpc_wildcard_lxm_without_aud() {
+        let perms = ScopePermissions::from_scope_string(Some("rpc:*"));
+        let aud = "did:web:api.bsky.app#bsky_appview";
+        assert!(!perms.allows_rpc(aud, &c("app.bsky.feed.getTimeline")));
     }
 
     #[test]

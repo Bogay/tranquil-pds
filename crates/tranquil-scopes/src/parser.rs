@@ -93,7 +93,7 @@ impl BlobScope {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RpcScope {
-    pub lxm: Option<String>,
+    pub lxm: String,
     pub aud: Option<String>,
 }
 
@@ -245,9 +245,10 @@ pub fn parse_scope(scope: &str) -> ParsedScope {
         let lxm = lxm_positional.or_else(|| params.get("lxm").and_then(|v| v.first().cloned()));
         let aud = params.get("aud").and_then(|v| v.first().cloned());
 
-        let is_lxm_wildcard = lxm.as_deref() == Some("*") || lxm.is_none();
-        let is_aud_wildcard = aud.as_deref() == Some("*");
-        if is_lxm_wildcard && is_aud_wildcard {
+        let Some(lxm) = lxm else {
+            return ParsedScope::Unknown(scope.to_string());
+        };
+        if lxm == "*" && aud.as_deref() == Some("*") {
             return ParsedScope::Unknown(scope.to_string());
         }
 
@@ -400,7 +401,7 @@ mod tests {
         let scope = parse_scope("rpc:app.bsky.feed.getTimeline?aud=did:web:api.bsky.app");
         match scope {
             ParsedScope::Rpc(r) => {
-                assert_eq!(r.lxm, Some("app.bsky.feed.getTimeline".to_string()));
+                assert_eq!(r.lxm, "app.bsky.feed.getTimeline");
                 assert_eq!(r.aud, Some("did:web:api.bsky.app".to_string()));
             }
             _ => panic!("Expected Rpc scope"),
@@ -511,6 +512,12 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_lxm_required() {
+        let bare = parse_scope("rpc");
+        assert!(matches!(bare, ParsedScope::Unknown(_)));
+    }
+
+    #[test]
     fn test_url_encoded_aud_with_fragment() {
         let scope =
             parse_scope("include:app.bsky.authFullApp?aud=did:web:api.bsky.app%23bsky_appview");
@@ -527,10 +534,7 @@ mod tests {
         );
         match scope2 {
             ParsedScope::Rpc(r) => {
-                assert_eq!(
-                    r.lxm,
-                    Some("com.atproto.moderation.createReport".to_string())
-                );
+                assert_eq!(r.lxm, "com.atproto.moderation.createReport");
                 assert_eq!(r.aud, Some("did:web:api.bsky.app#bsky_appview".to_string()));
             }
             _ => panic!("Expected Rpc scope"),

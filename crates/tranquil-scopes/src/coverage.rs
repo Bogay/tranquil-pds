@@ -92,11 +92,7 @@ fn blob_covers(g: &BlobScope, r: &BlobScope) -> bool {
 }
 
 fn rpc_covers(g: &RpcScope, r: &RpcScope) -> bool {
-    let lxm_ok = match &g.lxm {
-        None => true,
-        Some(gl) if gl == "*" => true,
-        Some(gl) => r.lxm.as_deref() == Some(gl.as_str()),
-    };
+    let lxm_ok = g.lxm == "*" || g.lxm == r.lxm;
     let aud_ok = match &g.aud {
         None => true,
         Some(ga) if ga == "*" => true,
