@@ -27,13 +27,13 @@ fmt-check:
 lint: fmt-check clippy lint-no-bsky
 
 test-store:
-    SQLX_OFFLINE=true cargo nextest run -p tranquil-store --features tranquil-store/test-harness
+    SQLX_OFFLINE=true cargo nextest run -p tranquil-store --features tranquil-store/test-harness,tranquil-store/skip-fsync
 
 test-store-sim-nightly:
-    SQLX_OFFLINE=true TRANQUIL_SIM_SEEDS=10000 cargo nextest run -p tranquil-store --features tranquil-store/test-harness --profile sim-nightly
+    SQLX_OFFLINE=true TRANQUIL_SIM_SEEDS=10000 cargo nextest run -p tranquil-store --features tranquil-store/test-harness,tranquil-store/skip-fsync --profile sim-nightly
 
 gauntlet-pr:
-    SQLX_OFFLINE=true cargo nextest run -p tranquil-store --features tranquil-store/test-harness --profile gauntlet-pr --test gauntlet_smoke
+    SQLX_OFFLINE=true cargo nextest run -p tranquil-store --features tranquil-store/test-harness,tranquil-store/skip-fsync --profile gauntlet-pr --test gauntlet_smoke
 
 gauntlet-nightly HOURS="6":
     SQLX_OFFLINE=true GAUNTLET_DURATION_HOURS={{HOURS}} cargo nextest run -p tranquil-store --features tranquil-store/test-harness --profile gauntlet-nightly --test gauntlet_smoke --run-ignored all
@@ -93,7 +93,7 @@ test-store-asan:
         ASAN_OPTIONS="halt_on_error=1:abort_on_error=1:detect_leaks=1" \
         RUSTFLAGS="-Zsanitizer=address" \
         RUSTDOCFLAGS="-Zsanitizer=address" \
-        cargo +nightly nextest run -p tranquil-store --features tranquil-store/test-harness --target x86_64-unknown-linux-gnu
+        cargo +nightly nextest run -p tranquil-store --features tranquil-store/test-harness,tranquil-store/skip-fsync --target x86_64-unknown-linux-gnu
 
 test-unit:
     SQLX_OFFLINE=true cargo test --test it -- dpop_unit:: validation_edge_cases:: scope_edge_cases::
