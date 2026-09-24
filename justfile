@@ -96,42 +96,43 @@ test-store-asan:
         cargo +nightly nextest run -p tranquil-store --features tranquil-store/test-harness --target x86_64-unknown-linux-gnu
 
 test-unit:
-    SQLX_OFFLINE=true cargo test --test dpop_unit --test validation_edge_cases --test scope_edge_cases
+    SQLX_OFFLINE=true cargo test --test it -- dpop_unit:: validation_edge_cases:: scope_edge_cases::
 
-store_test := "SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-store/skip-fsync -E 'not binary(store_parity) and not (package(tranquil-signal) and test(/^tests::/))'"
+store_run := "SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-store/skip-fsync"
+store_test := store_run + " -E 'not (binary(it) and test(/^store_parity::/)) and not (package(tranquil-signal) and test(/^tests::/))'"
 
 test-auth:
-    {{store_test}} --test oauth --test oauth_lifecycle --test oauth_scopes --test oauth_security --test jwt_security --test session_management --test change_password --test password_reset
+    {{store_run}} --test it -E 'test(/^(oauth|oauth_lifecycle|oauth_scopes|oauth_security|jwt_security|session_management|change_password|password_reset)::/)'
 
 test-admin:
-    {{store_test}} --test admin_email --test admin_invite --test admin_moderation --test admin_search --test admin_stats
+    {{store_run}} --test it -E 'test(/^(admin_email|admin_invite|admin_moderation|admin_search|admin_stats)::/)'
 
 test-sync:
-    {{store_test}} --test sync_repo --test sync_blob --test sync_conformance --test sync_deprecated --test firehose_validation
+    {{store_run}} --test it -E 'test(/^(sync_repo|sync_blob|sync_conformance|sync_deprecated|firehose_validation)::/)'
 
 test-repo:
-    {{store_test}} --test repo_batch --test repo_blob --test record_validation --test lifecycle_record
+    {{store_run}} --test it -E 'test(/^(repo_batch|repo_blob|record_validation|lifecycle_record)::/)'
 
 test-identity:
-    {{store_test}} --test identity --test did_web --test plc_migration --test plc_operations --test plc_validation
+    {{store_run}} --test it --test plc_migration -E 'binary(plc_migration) | test(/^(identity|did_web|plc_operations|plc_validation)::/)'
 
 test-account:
-    {{store_test}} --test lifecycle_session --test delete_account --test invite --test email_update --test account_notifications
+    {{store_run}} --test it -E 'test(/^(lifecycle_session|delete_account|invite|email_update|account_notifications)::/)'
 
 test-security:
-    {{store_test}} --test security_fixes --test banned_words --test rate_limit --test moderation
+    {{store_run}} --test it -E 'test(/^(security_fixes|banned_words|rate_limit|moderation)::/)'
 
 test-import:
-    {{store_test}} --test import_verification --test import_with_verification
+    {{store_run}} --test it --test import_with_verification -E 'binary(import_with_verification) | test(/^import_verification::/)'
 
 test-misc:
-    {{store_test}} --test actor --test commit_signing --test image_processing --test lifecycle_social --test notifications --test server --test signing_key --test verify_live_commit
+    {{store_run}} --test it -E 'test(/^(actor|commit_signing|image_processing|lifecycle_social|notifications|server|signing_key|verify_live_commit)::/)'
 
 test *args:
     {{store_test}} {{args}}
 
 test-one name:
-    {{store_test}} --test {{name}}
+    {{store_run}} --test it -E 'test(/^{{name}}::/)'
 
 test-full *args:
     @just services-up

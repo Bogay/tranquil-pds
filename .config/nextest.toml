@@ -53,7 +53,7 @@ heavy-load-tests = { max-threads = 4 }
 io-heavy-sim = { max-threads = 2 }
 
 [[profile.default.overrides]]
-filter = "binary(ripple_cluster)"
+filter = "binary(it) and test(/^ripple_cluster::/)"
 test-group = "serial-env-tests"
 
 [[profile.default.overrides]]
@@ -61,7 +61,7 @@ filter = "package(tranquil-signal) and test(/^tests::/)"
 test-group = "serial-env-tests"
 
 [[profile.default.overrides]]
-filter = "binary(whole_story)"
+filter = "binary(it) and test(/^whole_story::/)"
 test-group = "heavy-load-tests"
 
 [[profile.default.overrides]]
@@ -69,7 +69,7 @@ filter = "test(/two_node_stress_concurrent_load/)"
 test-group = "heavy-load-tests"
 
 [[profile.default.overrides]]
-filter = "binary(repo_lifecycle)"
+filter = "binary(it) and test(/^repo_lifecycle::/)"
 test-group = "heavy-load-tests"
 
 [[profile.default.overrides]]
@@ -91,7 +91,7 @@ filter = "binary(gauntlet_smoke)"
 slow-timeout = { period = "300s", terminate-after = 8 }
 
 [[profile.default.overrides]]
-filter = "binary(compaction_restart) | binary(mst_refcount_integrity) | binary(gc_compaction_restart)"
+filter = "binary(compaction_restart) | binary(mst_refcount_integrity) | binary(it) and test(/^gc_compaction_restart::/)"
 slow-timeout = { period = "120s", terminate-after = 4 }
 
 [[profile.default.overrides]]
@@ -105,7 +105,7 @@ slow-timeout = { period = "300s", terminate-after = 4 }
 test-group = "io-heavy-sim"
 
 [[profile.ci.overrides]]
-filter = "binary(ripple_cluster)"
+filter = "binary(it) and test(/^ripple_cluster::/)"
 test-group = "serial-env-tests"
 
 [[profile.ci.overrides]]
@@ -113,7 +113,7 @@ filter = "package(tranquil-signal) and test(/^tests::/)"
 test-group = "serial-env-tests"
 
 [[profile.ci.overrides]]
-filter = "binary(whole_story)"
+filter = "binary(it) and test(/^whole_story::/)"
 test-group = "heavy-load-tests"
 
 [[profile.ci.overrides]]
@@ -121,7 +121,7 @@ filter = "test(/two_node_stress_concurrent_load/)"
 test-group = "heavy-load-tests"
 
 [[profile.ci.overrides]]
-filter = "binary(repo_lifecycle)"
+filter = "binary(it) and test(/^repo_lifecycle::/)"
 test-group = "heavy-load-tests"
 
 [[profile.ci.overrides]]
