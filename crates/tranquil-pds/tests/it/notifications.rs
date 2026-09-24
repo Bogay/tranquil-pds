@@ -6,7 +6,7 @@ async fn test_enqueue_comms() {
     let repos = crate::common::get_test_repos().await;
     let (_, did) = crate::common::create_account_and_login(&crate::common::client()).await;
     let user_id = crate::common::user_id_of(repos, &Did::new(did).unwrap()).await;
-    repos
+    let comms_id = repos
         .infra
         .enqueue_comms(
             Some(user_id),
@@ -20,10 +20,13 @@ async fn test_enqueue_comms() {
         .expect("Failed to enqueue comms");
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user_id, CommsType::Welcome, 1)
+        .get_latest_comms_for_user(user_id, CommsType::Welcome, 2)
         .await
         .expect("DB error");
-    let row = comms.first().expect("Comms not found");
+    let row = comms
+        .iter()
+        .find(|c| c.id == comms_id)
+        .expect("Comms not found");
     assert_eq!(row.user_id, Some(user_id));
     assert_eq!(row.recipient, "test@nel.pet");
     assert_eq!(row.subject.as_deref(), Some("Test Subject"));
