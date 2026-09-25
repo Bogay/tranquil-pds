@@ -1,0 +1,32 @@
+when:
+  - event: ["push"]
+    branch: ["main"]
+
+engine: nixery
+
+environment:
+  KANIKO_IMAGE: ghcr.io/osscontainertools/kaniko:v1.28.3@sha256:779f463aaa3219151ceff518249aa043a60bcb09a17fab58b915f63c678ecde6
+
+dependencies:
+  nixpkgs:
+    - go-containerregistry
+    - gnutar
+
+steps:
+  - name: build and push
+    command: |
+      set -euo pipefail
+      crane export --platform linux/amd64 "$KANIKO_IMAGE" - | tar -xf - -C /tmp kaniko/executor
+      export DOCKER_CONFIG=/tmp/docker-config
+      mkdir -p "$DOCKER_CONFIG"
+      echo "{\"auths\":{\"https://atcr.io/v1\":{\"auth\":\"$ATCR_CREDENTIALS\"}}}" > "$DOCKER_CONFIG/config.json"
+      /tmp/kaniko/executor \
+        --context "$(pwd)" \
+        --dockerfile "$(pwd)/Dockerfile" \
+        --ignore-path "$(pwd)" \
+        --ignore-path /tangled \
+        --ignore-path /nix \
+        --ignore-path /tmp/docker-config \
+        --destination "atcr.io/tranquil.farm/tranquil-pds:$TANGLED_COMMIT_SHA" \
+        --push-retry=3 \
+        --build-arg CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16

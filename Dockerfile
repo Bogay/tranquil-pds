@@ -33,6 +33,7 @@ RUN mkdir -p /stage/var/lib/tranquil-pds/blobs /stage/var/lib/tranquil-pds/store
 ENV RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=mold"
 WORKDIR /app
 ARG SLIM="false"
+ARG CARGO_PROFILE_RELEASE_CODEGEN_UNITS
 COPY Cargo.toml Cargo.lock ./
 COPY .sqlx ./.sqlx
 COPY crates/tranquil-types ./crates/tranquil-types
