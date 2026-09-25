@@ -1,4 +1,4 @@
-use bcrypt::{DEFAULT_COST, hash};
+use bcrypt::hash;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use tracing::{error, warn};
@@ -7,6 +7,12 @@ use tranquil_pds::api::error::ApiError;
 use tranquil_pds::api::error::DbResultExt;
 use tranquil_pds::types::{AtIdentifier, Did, Handle, PasswordHash};
 use tranquil_types::{DiscordUsername, SignalUsername, TelegramUsername};
+
+#[cfg(not(feature = "low-bcrypt-cost"))]
+const PASSWORD_HASH_COST: u32 = bcrypt::DEFAULT_COST;
+// Use a lower bcrypt cost in tests.
+#[cfg(feature = "low-bcrypt-cost")]
+const PASSWORD_HASH_COST: u32 = 4;
 
 pub struct ResolvedRepo {
     pub user_id: uuid::Uuid,
@@ -278,7 +284,7 @@ pub async fn verify_credential(
 }
 
 pub fn hash_or_internal_error(value: &str) -> Result<PasswordHash, ApiError> {
-    bcrypt::hash(value, DEFAULT_COST)
+    bcrypt::hash(value, PASSWORD_HASH_COST)
         .map(PasswordHash::new)
         .map_err(|e| {
             error!("Bcrypt hash error: {:?}", e);
@@ -288,7 +294,7 @@ pub fn hash_or_internal_error(value: &str) -> Result<PasswordHash, ApiError> {
 
 pub async fn hash_password_async(password: &str) -> Result<PasswordHash, ApiError> {
     let password = password.to_string();
-    tokio::task::spawn_blocking(move || hash(password, DEFAULT_COST))
+    tokio::task::spawn_blocking(move || hash(password, PASSWORD_HASH_COST))
         .await
         .map_err(|e| {
             error!("Failed to spawn blocking task: {:?}", e);

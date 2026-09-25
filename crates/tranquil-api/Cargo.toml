@@ -51,3 +51,4 @@ webauthn-rs = { workspace = true }
 [features]
 bsky = ["bsky-support"]
 bsky-support = []
+low-bcrypt-cost = []

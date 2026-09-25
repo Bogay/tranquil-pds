@@ -98,7 +98,7 @@ test-store-asan:
 test-unit:
     SQLX_OFFLINE=true cargo test --test it -- dpop_unit:: validation_edge_cases:: scope_edge_cases::
 
-store_run := "SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-store/skip-fsync"
+store_run := "SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-store/skip-fsync,tranquil-api/low-bcrypt-cost"
 store_test := store_run + " -E 'not (binary(it) and test(/^store_parity::/)) and not (package(tranquil-signal) and test(/^tests::/))'"
 
 test-auth:
@@ -136,10 +136,10 @@ test-one name:
 
 test-full *args:
     @just services-up
-    eval "$(tranquil-dev-services env)" && SQLX_OFFLINE=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-pds/s3 {{args}}
+    eval "$(tranquil-dev-services env)" && SQLX_OFFLINE=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-pds/s3,tranquil-api/low-bcrypt-cost {{args}}
 
 test-pg *args:
-    SQLX_OFFLINE=true ./scripts/run-tests.sh {{args}}
+    SQLX_OFFLINE=true ./scripts/run-tests.sh --features tranquil-api/low-bcrypt-cost {{args}}
 
 services-up:
     tranquil-dev-services up
