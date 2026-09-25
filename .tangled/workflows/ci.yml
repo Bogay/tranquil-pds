@@ -1,0 +1,25 @@
+when:
+  - event: ["push", "pull_request"]
+    branch: ["main"]
+
+engine: microvm
+image: nixos
+
+dependencies:
+  - rustup
+  - gcc
+  - pkg-config
+  - openssl
+  - protobuf
+  - just
+  - cargo-nextest
+
+steps:
+  - name: fmt
+    command: cargo fmt -- --check
+  - name: check
+    command: cargo check --all-targets
+  - name: clippy
+    command: just clippy
+  - name: test
+    command: just test
