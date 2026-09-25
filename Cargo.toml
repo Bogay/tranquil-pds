@@ -177,3 +177,7 @@ opt-level = 3
 
 [profile.dev.package.blowfish]
 opt-level = 3
+
+# Set the default to optimized so fortify works in CI.
+[profile.dev.package.tikv-jemalloc-sys]
+opt-level = 1
