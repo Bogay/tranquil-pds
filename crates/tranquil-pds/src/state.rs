@@ -251,7 +251,9 @@ impl AppState {
 
         let mut state = match cfg.storage.repo_backend() {
             tranquil_config::RepoBackend::TranquilStore => {
-                tracing::info!("tranquil-store repo backend active. Thank you so much for believing in us!");
+                tracing::info!(
+                    "tranquil-store repo backend active. Thank you so much for believing in us!"
+                );
                 Self::from_store(shutdown).await
             }
             tranquil_config::RepoBackend::Postgres => {

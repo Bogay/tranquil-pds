@@ -4,10 +4,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
-use cid::Cid;
 use crate::common::*;
 use crate::firehose::{FirehoseConsumer, ParsedCommitFrame};
+use bytes::Bytes;
+use cid::Cid;
 use iroh_car::CarReader;
 use jacquard_common::smol_str::SmolStr;
 use jacquard_repo::commit::Commit;

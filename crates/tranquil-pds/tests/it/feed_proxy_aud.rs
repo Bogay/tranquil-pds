@@ -1,6 +1,6 @@
+use crate::common::*;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use crate::common::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};

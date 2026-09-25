@@ -1,7 +1,7 @@
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::Utc;
 use crate::common::{base_url, client, create_account_and_login, pds_endpoint};
 use crate::helpers::verify_new_account;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use chrono::Utc;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

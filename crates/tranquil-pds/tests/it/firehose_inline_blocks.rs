@@ -1,7 +1,7 @@
-use cid::Cid;
 use crate::common::*;
 use crate::firehose::FirehoseConsumer;
 use crate::helpers::build_car_with_signature;
+use cid::Cid;
 use iroh_car::CarReader;
 use k256::ecdsa::SigningKey;
 use multihash::Multihash;

@@ -1,6 +1,6 @@
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use crate::common::{base_url, client, get_test_repos};
 use crate::helpers::verify_new_account;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::{StatusCode, redirect};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
