@@ -151,8 +151,15 @@ mod s3 {
     async fn create_s3_client() -> Client {
         let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
 
+        let http_client = aws_smithy_http_client::Builder::new()
+            .tls_provider(aws_smithy_http_client::tls::Provider::Rustls(
+                aws_smithy_http_client::tls::rustls_provider::CryptoMode::Ring,
+            ))
+            .build_https();
+
         let config = aws_config::defaults(BehaviorVersion::latest())
             .region(region_provider)
+            .http_client(http_client)
             .load()
             .await;
 

@@ -270,6 +270,13 @@ async fn setup_with_testcontainers() -> String {
     }
     let sdk_config = aws_config::defaults(BehaviorVersion::latest())
         .region("us-east-1")
+        .http_client(
+            aws_smithy_http_client::Builder::new()
+                .tls_provider(aws_smithy_http_client::tls::Provider::Rustls(
+                    aws_smithy_http_client::tls::rustls_provider::CryptoMode::Ring,
+                ))
+                .build_https(),
+        )
         .endpoint_url(&s3_endpoint)
         .credentials_provider(Credentials::new(
             "minioadmin",
