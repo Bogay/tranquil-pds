@@ -1327,7 +1327,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn timed_out_write_resets_stream_instead_of_truncating() {
+    async fn jail_timed_out_write_resets_stream_instead_of_truncating() {
         let shutdown = CancellationToken::new();
         let (sender, _rx_sender) =
             Transport::bind("127.0.0.1:0".parse().unwrap(), None, shutdown.clone())
@@ -1368,7 +1368,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn write_timeout_keeps_connection() {
+    async fn jail_write_timeout_keeps_connection() {
         use futures::StreamExt;
 
         let shutdown = CancellationToken::new();

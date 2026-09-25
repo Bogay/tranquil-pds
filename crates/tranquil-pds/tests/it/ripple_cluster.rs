@@ -687,7 +687,7 @@ fn create_account_on_node<'a>(
 }
 
 #[tokio::test]
-async fn cross_node_rate_limit_via_login() {
+async fn jail_cross_node_rate_limit_via_login() {
     let nodes = crate::common::cluster().await;
     let client = crate::common::client();
 

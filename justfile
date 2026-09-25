@@ -99,7 +99,7 @@ test-unit:
     SQLX_OFFLINE=true cargo test --test it -- dpop_unit:: validation_edge_cases:: scope_edge_cases::
 
 store_run := "SQLX_OFFLINE=true TRANQUIL_TEST_BACKEND=store TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 DISABLE_RATE_LIMITING=1 TRANQUIL_LEXICON_OFFLINE=1 SKIP_IMPORT_VERIFICATION=true cargo nextest run --workspace --exclude tranquil-store --features tranquil-store/skip-fsync,tranquil-api/low-bcrypt-cost"
-store_test := store_run + " -E 'not (binary(it) and test(/^store_parity::/)) and not (package(tranquil-signal) and test(/^tests::/))'"
+store_test := store_run + " -E 'not (binary(it) and test(/^store_parity::/)) and not (package(tranquil-signal) and test(/^tests::/)) and not test(~jail_)'"
 
 test-auth:
     {{store_run}} --test it -E 'test(/^(oauth|oauth_lifecycle|oauth_scopes|oauth_security|jwt_security|session_management|change_password|password_reset)::/)'
@@ -130,6 +130,10 @@ test-misc:
 
 test *args:
     {{store_test}} {{args}}
+
+# these tests stay in jail until lewis makes them behave
+test-jail *args:
+    {{store_run}} -E 'test(~jail_)' {{args}}
 
 test-one name:
     {{store_run}} --test it -E 'test(/^{{name}}::/)'

@@ -395,7 +395,7 @@ async fn test_fetch_schema_error_status_gives_meaningful_error() {
 }
 
 #[tokio::test]
-async fn test_plc_server_timeout() {
+async fn jail_test_plc_server_timeout() {
     let plc_server = MockServer::start().await;
     let did = "did:plc:timeout123";
 

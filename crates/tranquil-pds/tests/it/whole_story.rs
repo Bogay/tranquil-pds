@@ -1168,7 +1168,7 @@ async fn test_backup_restore_workflow() {
 }
 
 #[tokio::test]
-async fn test_scale_1000_posts_with_pagination() {
+async fn jail_test_scale_1000_posts_with_pagination() {
     let client = client();
     let base = base_url().await;
     let (did, jwt) = setup_new_user("scale-posts").await;
@@ -1279,7 +1279,7 @@ async fn test_scale_1000_posts_with_pagination() {
 }
 
 #[tokio::test]
-async fn test_scale_many_users_social_graph() {
+async fn jail_test_scale_many_users_social_graph() {
     let client = client();
     let base = base_url().await;
 
@@ -1690,7 +1690,7 @@ async fn test_scale_batch_operations() {
 }
 
 #[tokio::test]
-async fn test_scale_reply_thread_depth() {
+async fn jail_test_scale_reply_thread_depth() {
     let client = client();
     let base = base_url().await;
     let (did, jwt) = setup_new_user("deep-thread").await;
