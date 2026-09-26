@@ -116,6 +116,8 @@ regex = "1"
 rsa = "0.9"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pemfile = "2"
+s3s = "0.17"
+s3s-fs = "0.17"
 secrecy = { version = "0.10", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots", "http2", "charset", "macos-system-configuration"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -172,10 +174,17 @@ codegen-units = 1
 debug = 1
 strip = false
 
+# Optimize all the hashing so it runs faster in tests.
 [profile.dev.package.bcrypt]
 opt-level = 3
 
 [profile.dev.package.blowfish]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.md-5]
 opt-level = 3
 
 # Set the default to optimized so fortify works in CI.

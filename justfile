@@ -128,6 +128,9 @@ test-import:
 test-misc:
     {{store_run}} --test it -E 'test(/^(actor|commit_signing|image_processing|lifecycle_social|notifications|server|signing_key|verify_live_commit)::/)'
 
+test-s3:
+    {{store_run}} --test s3
+
 test *args:
     {{store_test}} {{args}}
 

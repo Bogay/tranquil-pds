@@ -103,8 +103,8 @@ fn map_io_not_found(key: &str) -> impl FnOnce(std::io::Error) -> StorageError + 
 mod s3 {
     use super::*;
     use aws_config::BehaviorVersion;
-    use aws_config::meta::region::RegionProviderChain;
     use aws_sdk_s3::Client;
+    use aws_sdk_s3::config::Region;
     use aws_sdk_s3::primitives::ByteStream;
     use aws_sdk_s3::types::CompletedMultipartUpload;
     use aws_sdk_s3::types::CompletedPart;
@@ -118,24 +118,14 @@ mod s3 {
     }
 
     impl S3BlobStorage {
-        pub async fn new() -> Self {
-            let cfg = tranquil_config::get();
-            let bucket = cfg
-                .storage
-                .s3_bucket
-                .clone()
-                .expect("storage.s3_bucket (S3_BUCKET) must be set");
-            let client = create_s3_client().await;
-            let path = cfg
-                .storage
-                .s3_path
-                .trim_start_matches("/")
-                .trim_end_matches("/")
-                .to_string();
+        pub async fn new(bucket: &str, endpoint: Option<&str>, path: &str) -> Self {
             Self {
-                client,
-                bucket,
-                path,
+                client: create_s3_client(endpoint).await,
+                bucket: bucket.to_string(),
+                path: path
+                    .trim_start_matches("/")
+                    .trim_end_matches("/")
+                    .to_string(),
             }
         }
 
@@ -148,9 +138,7 @@ mod s3 {
         }
     }
 
-    async fn create_s3_client() -> Client {
-        let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
-
+    async fn create_s3_client(endpoint: Option<&str>) -> Client {
         let http_client = aws_smithy_http_client::Builder::new()
             .tls_provider(aws_smithy_http_client::tls::Provider::Rustls(
                 aws_smithy_http_client::tls::rustls_provider::CryptoMode::Ring,
@@ -158,25 +146,20 @@ mod s3 {
             .build_https();
 
         let config = aws_config::defaults(BehaviorVersion::latest())
-            .region(region_provider)
             .http_client(http_client)
             .load()
             .await;
 
-        tranquil_config::get()
-            .storage
-            .s3_endpoint
-            .as_deref()
-            .map_or_else(
-                || Client::new(&config),
-                |endpoint| {
-                    let s3_config = aws_sdk_s3::config::Builder::from(&config)
-                        .endpoint_url(endpoint)
-                        .force_path_style(true)
-                        .build();
-                    Client::from_conf(s3_config)
-                },
-            )
+        let region = config
+            .region()
+            .cloned()
+            .unwrap_or_else(|| Region::from_static("us-east-1"));
+        let builder = aws_sdk_s3::config::Builder::from(&config).region(region);
+        let builder = match endpoint {
+            Some(endpoint) => builder.endpoint_url(endpoint).force_path_style(true),
+            None => builder,
+        };
+        Client::from_conf(builder.build())
     }
 
     #[async_trait]
@@ -604,7 +587,14 @@ pub async fn create_blob_storage() -> Arc<dyn BlobStorage> {
         #[cfg(feature = "s3")]
         "s3" => {
             tracing::info!("Initializing S3 blob storage");
-            Arc::new(S3BlobStorage::new().await)
+            let storage = &cfg.storage;
+            let bucket = storage
+                .s3_bucket
+                .as_deref()
+                .expect("storage.s3_bucket (S3_BUCKET) must be set");
+            Arc::new(
+                S3BlobStorage::new(bucket, storage.s3_endpoint.as_deref(), &storage.s3_path).await,
+            )
         }
         #[cfg(not(feature = "s3"))]
         "s3" => {
