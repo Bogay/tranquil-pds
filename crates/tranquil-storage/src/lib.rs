@@ -240,7 +240,7 @@ mod s3 {
         async fn put_stream(
             &self,
             key: &str,
-            stream: Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>,
+            mut stream: Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>,
         ) -> Result<StreamUploadResult, StorageError> {
             use futures::StreamExt;
 
@@ -332,9 +332,7 @@ mod s3 {
             let result: Result<UploadState, StorageError> = {
                 let mut state = initial_state;
 
-                let chunk_results: Vec<Result<Bytes, std::io::Error>> = stream.collect().await;
-
-                for chunk_result in chunk_results {
+                while let Some(chunk_result) = stream.next().await {
                     match chunk_result {
                         Ok(chunk) => {
                             state.hasher.update(&chunk);
