@@ -755,6 +755,7 @@ impl fmt::Display for RepoBackend {
 #[config(layer_attr(serde(deny_unknown_fields)))]
 pub struct StorageConfig {
     /// Storage backend: `filesystem` or `s3`.
+    /// If you set `s3` you must also provide `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
     #[config(env = "BLOB_STORAGE_BACKEND", default = "filesystem")]
     pub backend: String,
 

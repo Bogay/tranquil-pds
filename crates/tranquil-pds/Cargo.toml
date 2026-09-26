@@ -100,7 +100,5 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock = { workspace = true }
 hex = { workspace = true }
 tokio-tungstenite = { workspace = true }
-aws-config = { workspace = true }
-aws-sdk-s3 = { workspace = true }
-aws-smithy-http-client = { workspace = true }
+s3 = { workspace = true }
 redis = { workspace = true }

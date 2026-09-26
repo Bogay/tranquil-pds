@@ -241,6 +241,7 @@
 
 [storage]
 # Storage backend: `filesystem` or `s3`.
+# If you set `s3` you must also provide `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
 #
 # Can also be specified via environment variable `BLOB_STORAGE_BACKEND`.
 #

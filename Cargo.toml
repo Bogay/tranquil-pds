@@ -63,9 +63,6 @@ backon = "1"
 bincode = { version = "2", features = ["serde"] }
 anyhow = "1.0"
 async-trait = "0.1"
-aws-config = { version = "1.8", default-features = false, features = ["rt-tokio", "credentials-process", "sso"] }
-aws-sdk-s3 = { version = "1.118", default-features = false, features = ["sigv4a", "rt-tokio"] }
-aws-smithy-http-client = { version = "1.1", features = ["rustls-ring"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
 base32 = "0.5"
 base64 = "0.22"
@@ -116,6 +113,7 @@ regex = "1"
 rsa = "0.9"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pemfile = "2"
+s3 = { version = "0.1.36", features = ["multipart"] }
 s3s = "0.17"
 s3s-fs = "0.17"
 secrecy = { version = "0.10", features = ["serde"] }

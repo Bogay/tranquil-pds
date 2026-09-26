@@ -1,9 +1,3 @@
-#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
-use aws_config::BehaviorVersion;
-#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
-use aws_sdk_s3::Client as S3Client;
-#[cfg(all(not(feature = "external-infra"), feature = "s3"))]
-use aws_sdk_s3::config::Credentials;
 use chrono::Utc;
 use reqwest::{Client, StatusCode, header};
 use serde_json::{Value, json};
@@ -59,7 +53,7 @@ pub struct ServerInstance {
 #[cfg(all(not(feature = "external-infra"), feature = "s3"))]
 use testcontainers::GenericImage;
 #[cfg(all(not(feature = "external-infra"), feature = "s3"))]
-use testcontainers::core::ContainerPort;
+use testcontainers::core::{ContainerPort, WaitFor};
 #[cfg(not(feature = "external-infra"))]
 use testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 #[cfg(not(feature = "external-infra"))]
@@ -243,6 +237,7 @@ async fn setup_with_testcontainers() -> String {
 #[cfg(all(not(feature = "external-infra"), feature = "s3"))]
 async fn setup_with_testcontainers() -> String {
     let s3_container = GenericImage::new("cgr.dev/chainguard/minio", "latest")
+        .with_wait_for(WaitFor::message_on_stderr("API: http"))
         .with_exposed_port(ContainerPort::Tcp(9000))
         .with_env_var("MINIO_ROOT_USER", "minioadmin")
         .with_env_var("MINIO_ROOT_PASSWORD", "minioadmin")
@@ -268,35 +263,25 @@ async fn setup_with_testcontainers() -> String {
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
         std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
     }
-    let sdk_config = aws_config::defaults(BehaviorVersion::latest())
+    let s3_client = s3::Client::builder(&s3_endpoint)
+        .unwrap()
         .region("us-east-1")
-        .http_client(
-            aws_smithy_http_client::Builder::new()
-                .tls_provider(aws_smithy_http_client::tls::Provider::Rustls(
-                    aws_smithy_http_client::tls::rustls_provider::CryptoMode::Ring,
-                ))
-                .build_https(),
-        )
-        .endpoint_url(&s3_endpoint)
-        .credentials_provider(Credentials::new(
-            "minioadmin",
-            "minioadmin",
-            None,
-            None,
-            "test",
-        ))
-        .load()
-        .await;
-    let s3_config = aws_sdk_s3::config::Builder::from(&sdk_config)
-        .force_path_style(true)
-        .build();
-    let s3_client = S3Client::from_conf(s3_config);
-    let _ = s3_client.create_bucket().bucket("test-bucket").send().await;
-    let _ = s3_client
-        .create_bucket()
-        .bucket("test-backups")
+        .addressing_style(s3::AddressingStyle::Path)
+        .auth(s3::Auth::from_env().unwrap())
+        .build()
+        .unwrap();
+    s3_client
+        .buckets()
+        .create("test-bucket")
         .send()
-        .await;
+        .await
+        .unwrap();
+    s3_client
+        .buckets()
+        .create("test-backups")
+        .send()
+        .await
+        .unwrap();
     register_mock_appview().await;
     S3_CONTAINER.set(s3_container).ok();
     let container = Postgres::default()
