@@ -329,7 +329,7 @@ mod s3 {
                     .await;
             };
 
-            let result: Result<UploadState, StorageError> = {
+            let result: Result<StreamUploadResult, StorageError> = async {
                 let mut state = initial_state;
 
                 while let Some(chunk_result) = stream.next().await {
@@ -357,58 +357,56 @@ mod s3 {
                                 state.part_number += 1;
                             }
                         }
-                        Err(e) => {
-                            abort_upload().await;
-                            return Err(StorageError::Io(e));
-                        }
+                        Err(e) => return Err(StorageError::Io(e)),
                     }
                 }
 
-                Ok(state)
-            };
+                if !state.buffer.is_empty() {
+                    let part = upload_part(
+                        &self.client,
+                        &self.bucket,
+                        key,
+                        &upload_id,
+                        state.part_number,
+                        std::mem::take(&mut state.buffer),
+                    )
+                    .await?;
+                    state.completed_parts.push(part);
+                }
 
-            let mut state = result?;
+                if state.completed_parts.is_empty() {
+                    return Err(StorageError::Other("Empty upload".to_string()));
+                }
 
-            if !state.buffer.is_empty() {
-                let part = upload_part(
-                    &self.client,
-                    &self.bucket,
-                    key,
-                    &upload_id,
-                    state.part_number,
-                    std::mem::take(&mut state.buffer),
-                )
-                .await?;
-                state.completed_parts.push(part);
+                let completed_upload = CompletedMultipartUpload::builder()
+                    .set_parts(Some(state.completed_parts))
+                    .build();
+
+                let path = self.resolve_path(key);
+                self.client
+                    .complete_multipart_upload()
+                    .bucket(&self.bucket)
+                    .key(&path)
+                    .upload_id(&upload_id)
+                    .multipart_upload(completed_upload)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        StorageError::Backend(format!("Failed to complete multipart upload: {}", e))
+                    })?;
+
+                let hash: [u8; 32] = state.hasher.finalize().into();
+                Ok(StreamUploadResult {
+                    sha256_hash: hash,
+                    size: state.total_size,
+                })
             }
+            .await;
 
-            if state.completed_parts.is_empty() {
+            if result.is_err() {
                 abort_upload().await;
-                return Err(StorageError::Other("Empty upload".to_string()));
             }
-
-            let completed_upload = CompletedMultipartUpload::builder()
-                .set_parts(Some(state.completed_parts))
-                .build();
-
-            let path = self.resolve_path(key);
-            self.client
-                .complete_multipart_upload()
-                .bucket(&self.bucket)
-                .key(&path)
-                .upload_id(&upload_id)
-                .multipart_upload(completed_upload)
-                .send()
-                .await
-                .map_err(|e| {
-                    StorageError::Backend(format!("Failed to complete multipart upload: {}", e))
-                })?;
-
-            let hash: [u8; 32] = state.hasher.finalize().into();
-            Ok(StreamUploadResult {
-                sha256_hash: hash,
-                size: state.total_size,
-            })
+            result
         }
 
         async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {

@@ -3,7 +3,12 @@ use bytes::Bytes;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as ConnBuilder;
 use s3s::auth::SimpleAuth;
+use s3s::dto::{
+    AbortMultipartUploadInput, AbortMultipartUploadOutput, CreateMultipartUploadInput,
+    CreateMultipartUploadOutput,
+};
 use s3s::service::S3ServiceBuilder;
+use s3s::{S3, S3Request, S3Response, S3Result};
 use s3s_fs::FileSystem;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -14,10 +19,14 @@ const BUCKET: &str = "bucket";
 const PREFIX: &str = "prefix";
 
 async fn start_s3() -> (TempDir, S3BlobStorage) {
+    start_s3_with(|fs| fs).await
+}
+
+async fn start_s3_with<T: S3>(wrap: impl FnOnce(FileSystem) -> T) -> (TempDir, S3BlobStorage) {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join(BUCKET)).unwrap();
 
-    let mut builder = S3ServiceBuilder::new(FileSystem::new(root.path()).unwrap());
+    let mut builder = S3ServiceBuilder::new(wrap(FileSystem::new(root.path()).unwrap()));
     builder.set_auth(SimpleAuth::from_single("test", "test"));
     let service = builder.build();
 
@@ -126,4 +135,36 @@ async fn put_stream_multipart() {
     assert_eq!(result.size, expected.len() as u64);
     assert_eq!(result.sha256_hash[..], Sha256::digest(&expected)[..]);
     assert_eq!(storage.get_bytes("key").await.unwrap(), expected);
+}
+
+struct FailingUploadPart(FileSystem);
+
+#[async_trait::async_trait]
+impl S3 for FailingUploadPart {
+    async fn create_multipart_upload(
+        &self,
+        req: S3Request<CreateMultipartUploadInput>,
+    ) -> S3Result<S3Response<CreateMultipartUploadOutput>> {
+        self.0.create_multipart_upload(req).await
+    }
+
+    async fn abort_multipart_upload(
+        &self,
+        req: S3Request<AbortMultipartUploadInput>,
+    ) -> S3Result<S3Response<AbortMultipartUploadOutput>> {
+        self.0.abort_multipart_upload(req).await
+    }
+}
+
+#[tokio::test]
+async fn put_stream_part_failure_aborts_upload() {
+    let (root, storage) = start_s3_with(FailingUploadPart).await;
+    let chunks = [Ok(Bytes::from("hello"))];
+
+    let result = storage
+        .put_stream("key", Box::pin(futures::stream::iter(chunks)))
+        .await;
+
+    assert!(result.is_err());
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
 }
