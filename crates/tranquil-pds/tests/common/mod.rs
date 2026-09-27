@@ -1,3 +1,5 @@
+pub mod mock_oidc;
+
 use chrono::Utc;
 use reqwest::{Client, StatusCode, header};
 use serde_json::{Value, json};
@@ -19,6 +21,8 @@ static SERVER_URL: OnceLock<String> = OnceLock::new();
 static APP_PORT: OnceLock<u16> = OnceLock::new();
 static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
 static MOCK_PLC: OnceLock<MockServer> = OnceLock::new();
+static MOCK_OIDC: tokio::sync::OnceCell<mock_oidc::MockOidcProvider> =
+    tokio::sync::OnceCell::const_new();
 static TEST_DB_POOL: OnceLock<sqlx::PgPool> = OnceLock::new();
 static TEST_TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 static CLUSTER: OnceLock<Vec<ServerInstance>> = OnceLock::new();
@@ -193,6 +197,7 @@ pub async fn base_url() -> &'static str {
 async fn setup_with_external_infra() -> String {
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set when using external infra");
+    let _ = setup_mock_oidc().await;
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         configure_external_storage_env();
@@ -208,6 +213,7 @@ async fn setup_with_testcontainers() -> String {
     let blob_path = temp_dir.join("blobs");
     std::fs::create_dir_all(&blob_path).expect("Failed to create blob temp directory");
     TEST_TEMP_DIR.set(temp_dir).ok();
+    let _ = setup_mock_oidc().await;
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
@@ -251,6 +257,7 @@ async fn setup_with_testcontainers() -> String {
         .await
         .expect("Failed to get S3 port");
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    let _ = setup_mock_oidc().await;
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "s3");
@@ -562,6 +569,22 @@ async fn setup_mock_plc_directory() -> String {
     plc_url
 }
 
+pub async fn setup_mock_oidc() -> &'static mock_oidc::MockOidcProvider {
+    MOCK_OIDC
+        .get_or_init(|| async {
+            let provider = mock_oidc::MockOidcProvider::start().await;
+            unsafe {
+                std::env::set_var("SSO_OIDC_ENABLED", "true");
+                std::env::set_var("SSO_OIDC_CLIENT_ID", &provider.client_id);
+                std::env::set_var("SSO_OIDC_CLIENT_SECRET", &provider.client_secret);
+                std::env::set_var("SSO_OIDC_ISSUER", provider.issuer());
+                std::env::set_var("SSO_OIDC_DISPLAY_NAME", "MockOIDC");
+            }
+            provider
+        })
+        .await
+}
+
 async fn spawn_server(config: ServerConfig) -> ServerInstance {
     use tranquil_pds::rate_limit::RateLimiters;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -630,6 +653,7 @@ async fn setup_store_backend() -> String {
     std::fs::create_dir_all(&blob_path).expect("failed to create blob temp directory");
     std::fs::create_dir_all(&store_path).expect("failed to create store temp directory");
     TEST_TEMP_DIR.set(temp_dir).ok();
+    let _ = setup_mock_oidc().await;
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
@@ -829,6 +853,7 @@ async fn setup_cluster_store_backend() -> Option<sqlx::PgPool> {
     std::fs::create_dir_all(&blob_path).expect("failed to create blob temp directory");
     std::fs::create_dir_all(&store_path).expect("failed to create store temp directory");
     TEST_TEMP_DIR.set(temp_dir).ok();
+    let _ = setup_mock_oidc().await;
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
@@ -847,6 +872,7 @@ async fn setup_cluster_store_backend() -> Option<sqlx::PgPool> {
 async fn setup_cluster_external_infra() -> Option<sqlx::PgPool> {
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set when using external infra");
+    let _ = setup_mock_oidc().await;
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         configure_external_storage_env();
@@ -880,6 +906,7 @@ async fn setup_cluster_testcontainers() -> Option<sqlx::PgPool> {
     let blob_path = temp_dir.join("blobs");
     std::fs::create_dir_all(&blob_path).expect("Failed to create blob temp directory");
     TEST_TEMP_DIR.set(temp_dir).ok();
+    let _ = setup_mock_oidc().await;
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");

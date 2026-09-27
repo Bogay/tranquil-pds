@@ -104,3 +104,5 @@ tokio-tungstenite = { workspace = true }
 s3 = { workspace = true }
 redis = { workspace = true }
 webauthn-authenticator-rs = { workspace = true }
+totp-rs = { workspace = true }
+url = { workspace = true }

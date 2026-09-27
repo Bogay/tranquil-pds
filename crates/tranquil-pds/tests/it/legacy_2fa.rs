@@ -6,9 +6,10 @@ use tranquil_types::Did;
 
 async fn enable_totp_for_user(did: &str) {
     let repos = get_test_repos().await;
+    let encrypted = tranquil_pds::auth::encrypt_totp_secret(&[0u8; 20]).unwrap();
     repos
         .user
-        .enable_totp_verified(&Did::new(did.to_string()).unwrap(), &[0u8; 20])
+        .enable_totp_verified(&Did::new(did.to_string()).unwrap(), &encrypted)
         .await
         .unwrap();
 }
