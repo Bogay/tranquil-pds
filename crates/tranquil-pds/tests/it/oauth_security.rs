@@ -2478,6 +2478,12 @@ async fn test_delegated_login_flow() {
         "the token must not be for the controller"
     );
 
+    let (pending_uri, _) = new_request(&app).await;
+    let body = delegation_auth(&pending_uri, &revoked_did, &controller_did, "Testpass123!").await;
+    assert_eq!(
+        body["success"], true,
+        "the login must complete before the grant is revoked: {body}"
+    );
     let controller = Did::new(controller_did.clone()).unwrap();
     let revoked = get_test_repos()
         .await
@@ -2490,6 +2496,7 @@ async fn test_delegated_login_flow() {
         .await
         .unwrap();
     assert!(revoked, "the grant must be revoked");
+    assert_login_rejected(&pending_uri).await;
     let (request_uri, _) = new_request(&app).await;
     let body = delegation_auth(&request_uri, &revoked_did, &controller_did, "Testpass123!").await;
     assert_eq!(
