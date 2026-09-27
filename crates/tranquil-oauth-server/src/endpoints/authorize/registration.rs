@@ -105,23 +105,14 @@ pub async fn register_complete(
             .into_response();
     }
 
-    if let Some(existing_did) = &request_data.did
-        && existing_did != &did
-    {
+    if request_data.auth_stage != AuthStage::Registered || request_data.did.as_ref() != Some(&did) {
         tracing::warn!(
             request_uri = %form.request_uri,
-            existing_did = %existing_did,
+            bound_did = ?request_data.did,
             attempted_did = %did,
-            "register_complete attempted with different DID than already bound"
+            "register_complete attempted for an account not created in this request"
         );
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "invalid_request",
-                "error_description": "Authorization request is already bound to a different account."
-            })),
-        )
-            .into_response();
+        return registration_not_bound();
     }
 
     let password_hashes = match state
@@ -215,26 +206,35 @@ pub async fn register_complete(
             .into_response();
     }
 
-    if let Err(e) = state
+    match state
         .repos
         .oauth
-        .set_authorization_did(&request_id, &did, None, AuthStage::Complete)
+        .advance_auth_stage(
+            &request_id,
+            &did,
+            AuthStage::Registered,
+            AuthStage::Complete,
+        )
         .await
     {
-        tracing::error!(
-            request_uri = %form.request_uri,
-            did = %did,
-            error = ?e,
-            "register_complete: failed to set authorization DID"
-        );
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "server_error",
-                "error_description": "An error occurred."
-            })),
-        )
-            .into_response();
+        Ok(true) => {}
+        Ok(false) => return registration_not_bound(),
+        Err(e) => {
+            tracing::error!(
+                request_uri = %form.request_uri,
+                did = %did,
+                error = ?e,
+                "register_complete: failed to complete authorization"
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
     }
 
     let requested_scope_str = request_data
@@ -369,4 +369,15 @@ pub async fn establish_session(
         }))
         .into_response(),
     }
+}
+
+fn registration_not_bound() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "error": "login_required",
+            "error_description": "Authorization request was not created for this account. Please sign in."
+        })),
+    )
+        .into_response()
 }

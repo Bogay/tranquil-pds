@@ -429,6 +429,7 @@ export const api = {
         discordUsername: params.discordUsername,
         telegramUsername: params.telegramUsername,
         signalUsername: params.signalUsername,
+        requestUri: params.requestUri,
       }),
     });
     const data = await response.json();
@@ -1170,6 +1171,7 @@ export const api = {
     discordUsername?: string;
     telegramUsername?: string;
     signalUsername?: string;
+    requestUri?: string;
   }, byodToken?: string): Promise<PasskeyAccountCreateResponse> {
     const url = `${API_BASE}/_account.createPasskeyAccount`;
     const headers: Record<string, string> = {

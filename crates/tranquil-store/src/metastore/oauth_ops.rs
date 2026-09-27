@@ -25,7 +25,10 @@ use tranquil_db_traits::{
     DeviceAccountRow, DeviceTrustInfo, OAuthSessionListItem, ScopePreference, TokenFamilyId,
     TrustedDeviceRow, TwoFactorChallenge,
 };
-use tranquil_oauth::{AuthStage, AuthorizedClientData, DeviceData, RequestData, TokenData};
+use tranquil_oauth::{
+    AuthStage, AuthorizationRequestParameters, AuthorizedClientData, DeviceData, Prompt,
+    RequestData, TokenData,
+};
 use tranquil_types::{
     AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId,
     TokenId,
@@ -853,6 +856,45 @@ impl OAuthOps {
             return Ok(false);
         }
         value.auth_stage = to.as_str().to_string();
+
+        self.auth
+            .insert(key.as_slice(), value.serialize_with_ttl())
+            .map_err(MetastoreError::Fjall)?;
+        Ok(true)
+    }
+
+    pub fn bind_registration(
+        &self,
+        request_id: &RequestId,
+        did: &Did,
+        expires_at: DateTime<Utc>,
+    ) -> Result<bool, MetastoreError> {
+        let key = oauth_auth_request_key(request_id.as_str());
+        let Some(mut value): Option<OAuthRequestValue> = point_lookup(
+            &self.auth,
+            key.as_slice(),
+            OAuthRequestValue::deserialize,
+            "corrupt oauth auth request",
+        )?
+        else {
+            return Ok(false);
+        };
+        let parameters: AuthorizationRequestParameters =
+            serde_json::from_str(&value.parameters_json)
+                .map_err(|_| MetastoreError::CorruptData("corrupt oauth request parameters"))?;
+
+        if value.auth_stage != AuthStage::None.as_str()
+            || value.code.is_some()
+            || value.expires_at_ms <= Utc::now().timestamp_millis()
+            || parameters.prompt != Some(Prompt::Create)
+        {
+            return Ok(false);
+        }
+        value.did = Some(did.to_string());
+        value.device_id = None;
+        value.controller_did = None;
+        value.auth_stage = AuthStage::Registered.as_str().to_string();
+        value.expires_at_ms = expires_at.timestamp_millis();
 
         self.auth
             .insert(key.as_slice(), value.serialize_with_ttl())

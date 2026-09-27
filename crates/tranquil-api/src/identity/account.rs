@@ -30,6 +30,7 @@ pub struct CreateAccountInput {
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
     pub signal_username: Option<String>,
+    pub request_uri: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -510,6 +511,9 @@ pub async fn create_account(
         }
     };
     let user_id = create_result.user_id;
+    if let Some(request_uri) = input.request_uri.as_deref() {
+        super::provision::bind_oauth_registration(&state, request_uri, &did).await;
+    }
     if !is_migration && !is_did_web_byod {
         super::provision::sequence_new_account(&state, &did, &handle, &repo_for_seq, &input.handle)
             .await;

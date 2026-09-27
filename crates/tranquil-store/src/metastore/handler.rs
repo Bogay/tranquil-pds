@@ -2208,6 +2208,12 @@ pub enum OAuthRequest {
         to: AuthStage,
         tx: Tx<bool>,
     },
+    BindRegistration {
+        request_id: RequestId,
+        did: Did,
+        expires_at: DateTime<Utc>,
+        tx: Tx<bool>,
+    },
     UpdateRequestScope {
         request_id: RequestId,
         scope: String,
@@ -2404,6 +2410,7 @@ impl OAuthRequest {
             | Self::UpdateAuthorizationRequest { request_id, .. }
             | Self::ExtendAuthorizationRequestExpiry { request_id, .. }
             | Self::AdvanceAuthStage { request_id, .. }
+            | Self::BindRegistration { request_id, .. }
             | Self::UpdateRequestScope { request_id, .. }
             | Self::SetDelegation { request_id, .. }
             | Self::DeleteAuthorizationRequest { request_id, .. } => key_to_routing(request_id),
@@ -4650,6 +4657,19 @@ fn dispatch_oauth<S: StorageIO>(state: &HandlerState<S>, req: OAuthRequest) {
                 .metastore
                 .oauth_ops()
                 .advance_auth_stage(&request_id, &verified_did, from, to)
+                .map_err(metastore_to_db);
+            let _ = tx.send(result);
+        }
+        OAuthRequest::BindRegistration {
+            request_id,
+            did,
+            expires_at,
+            tx,
+        } => {
+            let result = state
+                .metastore
+                .oauth_ops()
+                .bind_registration(&request_id, &did, expires_at)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }

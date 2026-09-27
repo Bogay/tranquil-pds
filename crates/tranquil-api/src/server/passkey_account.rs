@@ -44,6 +44,7 @@ pub struct CreatePasskeyAccountInput {
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
     pub signal_username: Option<String>,
+    pub request_uri: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -338,6 +339,9 @@ pub async fn create_passkey_account(
         }
     };
     let user_id = create_result.user_id;
+    if let Some(request_uri) = input.request_uri.as_deref() {
+        crate::identity::provision::bind_oauth_registration(&state, request_uri, &did).await;
+    }
 
     if !is_byod_did_web {
         crate::identity::provision::sequence_new_account(

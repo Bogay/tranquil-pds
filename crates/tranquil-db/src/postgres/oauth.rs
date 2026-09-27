@@ -8,7 +8,7 @@ use tranquil_db_traits::{
 };
 use tranquil_oauth::{
     AuthStage, AuthorizationRequestParameters, AuthorizedClientData, ClientAuth, DeviceData,
-    RequestData, SessionId as OAuthSessionId, TokenData,
+    REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS, RequestData, SessionId as OAuthSessionId, TokenData,
 };
 use tranquil_types::{
     AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, RefreshToken, RequestId, TokenId,
@@ -18,8 +18,6 @@ use uuid::Uuid;
 use super::col;
 use super::column;
 use super::user::map_sqlx_error;
-
-const REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS: i64 = 600;
 
 fn to_json<T: serde::Serialize>(value: &T) -> Result<serde_json::Value, DbError> {
     serde_json::to_value(value).map_err(|e| {
@@ -662,6 +660,33 @@ impl OAuthRepository for PostgresOAuthRepository {
             verified_did.as_str(),
             from.as_str(),
             to.as_str()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn bind_registration(
+        &self,
+        request_id: &RequestId,
+        did: &Did,
+        expires_at: DateTime<Utc>,
+    ) -> Result<bool, DbError> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE oauth_authorization_request
+            SET did = $2, device_id = NULL, controller_did = NULL,
+                auth_stage = 'registered', expires_at = $3
+            WHERE id = $1
+              AND auth_stage = 'none'
+              AND code IS NULL
+              AND expires_at > NOW()
+              AND parameters->>'prompt' = 'create'
+            "#,
+            request_id.as_str(),
+            did.as_str(),
+            expires_at
         )
         .execute(&self.pool)
         .await

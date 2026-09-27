@@ -163,6 +163,7 @@ export interface CreateAccountParams {
   discordUsername?: string;
   telegramUsername?: string;
   signalUsername?: string;
+  requestUri?: string;
 }
 
 export interface CreateAccountResult {

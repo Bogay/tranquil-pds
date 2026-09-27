@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_authorization_request\n            SET did = $2, device_id = NULL, controller_did = NULL,\n                auth_stage = 'registered', expires_at = $3\n            WHERE id = $1\n              AND auth_stage = 'none'\n              AND code IS NULL\n              AND expires_at > NOW()\n              AND parameters->>'prompt' = 'create'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d51d6bdb30185e77dbf80db353f4e8f52564035d78736c8af20d3d68c393131b"
+}

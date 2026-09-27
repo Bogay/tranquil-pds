@@ -15,6 +15,7 @@ pub use types::{
     AuthorizationServerMetadata, AuthorizedClientData, ClientAuth, CodeChallengeMethod, DeviceData,
     DeviceId, FlowAuthenticated, FlowAuthorized, FlowExpired, FlowNotAuthenticated,
     FlowNotAuthorized, FlowPending, JwkPublicKey, Jwks, OAuthClientMetadata, ParResponse, Prompt,
-    ProtectedResourceMetadata, RefreshToken, RefreshTokenState, RequestData, RequestId,
-    ResponseMode, ResponseType, SessionId, TokenData, TokenId, TokenRequest, TokenResponse,
+    ProtectedResourceMetadata, REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS, RefreshToken,
+    RefreshTokenState, RequestData, RequestId, ResponseMode, ResponseType, SessionId, TokenData,
+    TokenId, TokenRequest, TokenResponse,
 };

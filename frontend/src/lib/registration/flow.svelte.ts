@@ -1,6 +1,7 @@
 import { api, ApiError } from "../api.ts";
 import { createEmailVerificationPoller } from "../flows/email-verification.ts";
 import { setSession } from "../auth.svelte.ts";
+import { getRequestUriFromUrl } from "../oauth.ts";
 import {
   createServiceJwt,
   generateDidDocument,
@@ -232,6 +233,7 @@ export function createRegistrationFlow(
       discordUsername: state.info.discordUsername?.trim() || undefined,
       telegramUsername: state.info.telegramUsername?.trim() || undefined,
       signalUsername: state.info.signalUsername?.trim() || undefined,
+      requestUri: getRequestUriFromUrl() ?? undefined,
     };
   }
 

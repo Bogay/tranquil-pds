@@ -4,6 +4,7 @@ use k256::ecdsa::SigningKey;
 use std::sync::Arc;
 use tranquil_db_traits::CommsChannel;
 use tranquil_pds::api::error::ApiError;
+use tranquil_pds::oauth::{REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS, RequestId};
 use tranquil_pds::repo_ops::create_signed_commit;
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{CidLink, Did, Handle, Tid};
@@ -357,5 +358,25 @@ pub async fn enqueue_migration_verification(
     .await
     {
         tracing::warn!("Failed to enqueue migration verification: {:?}", e);
+    }
+}
+
+pub async fn bind_oauth_registration(state: &AppState, request_uri: &str, did: &Did) {
+    let request_id = RequestId::from(request_uri.to_string());
+    let expires_at =
+        chrono::Utc::now() + chrono::Duration::seconds(REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS);
+    match state
+        .repos
+        .oauth
+        .bind_registration(&request_id, did, expires_at)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::warn!(did = %did, request_uri, "OAuth registration request is not bindable");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, did = %did, request_uri, "Failed to bind OAuth registration request");
+        }
     }
 }

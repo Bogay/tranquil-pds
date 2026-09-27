@@ -15,10 +15,11 @@ pub use tranquil_oauth::{
     ClientMetadataCache, CodeChallengeMethod, DPoPJwk, DPoPProofHeader, DPoPProofPayload,
     DPoPVerifier, DPoPVerifyResult, DeviceData, DeviceId, FlowAuthenticated, FlowAuthorized,
     FlowExpired, FlowNotAuthenticated, FlowNotAuthorized, FlowPending, JwkPublicKey, Jwks,
-    OAuthClientMetadata, OAuthError, ParResponse, Prompt, ProtectedResourceMetadata, RefreshToken,
-    RefreshTokenState, RequestData, RequestId, ResponseMode, ResponseType, SessionId, TokenData,
-    TokenId, TokenRequest, TokenResponse, compute_access_token_hash, compute_jwk_thumbprint,
-    compute_pkce_challenge, verify_client_auth,
+    OAuthClientMetadata, OAuthError, ParResponse, Prompt, ProtectedResourceMetadata,
+    REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS, RefreshToken, RefreshTokenState, RequestData,
+    RequestId, ResponseMode, ResponseType, SessionId, TokenData, TokenId, TokenRequest,
+    TokenResponse, compute_access_token_hash, compute_jwk_thumbprint, compute_pkce_challenge,
+    verify_client_auth,
 };
 
 pub use permission_set_resolver::expand_scopes;

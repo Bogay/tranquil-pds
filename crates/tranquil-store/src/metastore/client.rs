@@ -2833,6 +2833,23 @@ impl<S: StorageIO + 'static> tranquil_db_traits::OAuthRepository for MetastoreCl
         recv(rx).await
     }
 
+    async fn bind_registration(
+        &self,
+        request_id: &RequestId,
+        did: &Did,
+        expires_at: DateTime<Utc>,
+    ) -> Result<bool, DbError> {
+        let (tx, rx) = oneshot::channel();
+        self.pool
+            .send(MetastoreRequest::OAuth(OAuthRequest::BindRegistration {
+                request_id: request_id.clone(),
+                did: did.clone(),
+                expires_at,
+                tx,
+            }))?;
+        recv(rx).await
+    }
+
     async fn update_request_scope(
         &self,
         request_id: &RequestId,

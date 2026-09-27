@@ -244,6 +244,10 @@
       const data = await response.json()
 
       if (!response.ok) {
+        if (data.error === 'login_required') {
+          goToLogin()
+          return
+        }
         flow.setError(data.error_description || data.error || $_('common.error'))
         return
       }

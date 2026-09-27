@@ -136,10 +136,13 @@ pub struct RequestData {
     pub auth_stage: AuthStage,
 }
 
+pub const REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS: i64 = 600;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthStage {
     None,
     FirstFactor,
+    Registered,
     Complete,
 }
 
@@ -148,6 +151,7 @@ impl AuthStage {
         match self {
             AuthStage::None => "none",
             AuthStage::FirstFactor => "first_factor",
+            AuthStage::Registered => "registered",
             AuthStage::Complete => "complete",
         }
     }
@@ -171,6 +175,7 @@ impl std::str::FromStr for AuthStage {
         match s {
             "none" => Ok(AuthStage::None),
             "first_factor" => Ok(AuthStage::FirstFactor),
+            "registered" => Ok(AuthStage::Registered),
             "complete" => Ok(AuthStage::Complete),
             _ => Err(InvalidAuthStage),
         }

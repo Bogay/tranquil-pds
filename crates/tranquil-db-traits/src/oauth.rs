@@ -206,6 +206,12 @@ pub trait OAuthRepository: Send + Sync {
         from: AuthStage,
         to: AuthStage,
     ) -> Result<bool, DbError>;
+    async fn bind_registration(
+        &self,
+        request_id: &RequestId,
+        did: &Did,
+        expires_at: DateTime<Utc>,
+    ) -> Result<bool, DbError>;
     async fn update_request_scope(
         &self,
         request_id: &RequestId,
