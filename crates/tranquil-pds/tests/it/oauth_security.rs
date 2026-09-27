@@ -2076,7 +2076,7 @@ async fn test_password_login_flow() {
         "the lockout must explain why the request was refused"
     );
 
-    let (request_uri, _) = new_request(&app).await;
+    let (request_uri, verifier) = new_request(&app).await;
     let body = identify(&request_uri, &handle, "Testpass123!").await;
     assert_eq!(
         body["needs_2fa"], true,
@@ -2084,6 +2084,17 @@ async fn test_password_login_flow() {
     );
     assert_login_rejected(&request_uri).await;
     assert_wrong_code_rejected(&request_uri).await;
+    let code = get_email_2fa_code(&request_uri).await;
+    let location = redirect_after_code(submit_2fa(&request_uri, &code, false).await).await;
+    assert!(
+        location.contains("/oauth/consent"),
+        "a new client must still require consent after the email code, got: {location}"
+    );
+    let token = consent_and_exchange(&request_uri, &app.id, &app.redirect_uri, &verifier).await;
+    assert_eq!(
+        token["sub"], did,
+        "email 2FA login must issue a token for the account"
+    );
 
     enable_totp_for_user(&did).await;
     let (request_uri, verifier) = new_request(&app).await;
@@ -2290,7 +2301,7 @@ async fn test_passkey_login_flow() {
     );
 
     enable_email_2fa(&alice.did).await;
-    let (request_uri, _) = new_request(&app).await;
+    let (request_uri, verifier) = new_request(&app).await;
     identify(&request_uri, &alice_handle, "").await;
     let location = passkey_login(&request_uri, &mut alice, &alice_handle, None).await;
     assert!(
@@ -2299,6 +2310,17 @@ async fn test_passkey_login_flow() {
     );
     assert_login_rejected(&request_uri).await;
     assert_wrong_code_rejected(&request_uri).await;
+    let code = get_email_2fa_code(&request_uri).await;
+    let location = redirect_after_code(submit_2fa(&request_uri, &code, false).await).await;
+    assert!(
+        location.contains("/oauth/consent"),
+        "email 2FA must lead to consent, got: {location}"
+    );
+    let token = consent_and_exchange(&request_uri, &app.id, &app.redirect_uri, &verifier).await;
+    assert_eq!(
+        token["sub"], alice.did,
+        "email 2FA passkey login must issue a token for the account"
+    );
 
     enable_totp_for_user(&alice.did).await;
     let (request_uri, _) = new_request(&app).await;
@@ -2370,7 +2392,7 @@ async fn test_passkey_page_login_flow() {
     );
 
     enable_email_2fa(&alice.did).await;
-    let (request_uri, _) = new_request(&app).await;
+    let (request_uri, verifier) = new_request(&app).await;
     identify(&request_uri, &alice.handle, "").await;
     let finish = passkey_page_login(&request_uri, &mut alice).await;
     assert_eq!(
@@ -2379,6 +2401,17 @@ async fn test_passkey_page_login_flow() {
     );
     assert_login_rejected(&request_uri).await;
     assert_wrong_code_rejected(&request_uri).await;
+    let code = get_email_2fa_code(&request_uri).await;
+    let location = redirect_after_code(submit_2fa(&request_uri, &code, false).await).await;
+    assert!(
+        location.contains("/oauth/consent"),
+        "the correct code must lead to consent for a client not yet approved, got: {location}"
+    );
+    let token = consent_and_exchange(&request_uri, &app.id, &app.redirect_uri, &verifier).await;
+    assert_eq!(
+        token["sub"], alice.did,
+        "email 2FA page login must issue a token for the account"
+    );
 
     enable_totp_for_user(&alice.did).await;
     let (request_uri, verifier) = new_request(&app).await;
@@ -2424,7 +2457,7 @@ async fn test_sso_login_flow() {
     );
 
     enable_email_2fa(&did).await;
-    let (request_uri, _) = new_request(&app).await;
+    let (request_uri, verifier) = new_request(&app).await;
     let location = sso_callback_location(&request_uri, &subject).await;
     assert!(
         location.contains("/app/oauth/2fa"),
@@ -2432,6 +2465,17 @@ async fn test_sso_login_flow() {
     );
     assert_login_rejected(&request_uri).await;
     assert_wrong_code_rejected(&request_uri).await;
+    let code = get_email_2fa_code(&request_uri).await;
+    let location = redirect_after_code(submit_2fa(&request_uri, &code, false).await).await;
+    assert!(
+        location.contains("/oauth/consent"),
+        "the correct code must lead to consent for a client not yet approved, got: {location}"
+    );
+    let token = consent_and_exchange(&request_uri, &app.id, &app.redirect_uri, &verifier).await;
+    assert_eq!(
+        token["sub"], did,
+        "email 2FA SSO login must issue a token for the account"
+    );
 
     enable_totp_for_user(&did).await;
     let (request_uri, verifier) = new_request(&app).await;
@@ -2546,7 +2590,7 @@ async fn test_delegated_login_flow() {
     );
 
     enable_email_2fa(&controller_did).await;
-    let (request_uri, _) = new_request(&app).await;
+    let (request_uri, verifier) = new_request(&app).await;
     let body = delegation_auth(
         &request_uri,
         &delegated_did,
@@ -2565,6 +2609,96 @@ async fn test_delegated_login_flow() {
     );
     assert_login_rejected(&request_uri).await;
     assert_wrong_code_rejected(&request_uri).await;
+    let code = get_email_2fa_code(&request_uri).await;
+    let location = redirect_after_code(submit_2fa(&request_uri, &code, false).await).await;
+    assert!(
+        location.contains("/oauth/consent"),
+        "the correct code must lead to consent for a client not yet approved, got: {location}"
+    );
+    let token = consent_and_exchange(&request_uri, &app.id, &app.redirect_uri, &verifier).await;
+    assert_eq!(
+        token["sub"], delegated_did,
+        "email 2FA delegation must issue a token for the delegated account"
+    );
+
+    let controller_handle = handle_of(&controller_jwt).await;
+    let controller_remembered = oauth_app("delegated-flow-controller-remembered").await;
+    let (request_uri, _) = new_request(&controller_remembered).await;
+    identify(&request_uri, &controller_handle, "Testpass123!").await;
+    let code = get_email_2fa_code(&request_uri).await;
+    let location = redirect_after_code(submit_2fa(&request_uri, &code, false).await).await;
+    assert!(
+        location.contains("/oauth/consent"),
+        "the correct code must lead to consent for a client not yet approved, got: {location}"
+    );
+    approve_consent(&request_uri, true).await;
+    let (request_uri, verifier) = new_request(&controller_remembered).await;
+    let body = delegation_auth(
+        &request_uri,
+        &delegated_did,
+        &controller_did,
+        "Testpass123!",
+    )
+    .await;
+    assert_eq!(
+        body["needs_2fa"], true,
+        "the delegated login must ask for the controller's code"
+    );
+    let code = get_email_2fa_code(&request_uri).await;
+    let location = redirect_after_code(submit_2fa(&request_uri, &code, false).await).await;
+    assert!(
+        location.contains("/oauth/consent"),
+        "the controller's own remembered consent must not skip the delegated account's consent, got: {location}"
+    );
+    let token = consent_and_exchange(
+        &request_uri,
+        &controller_remembered.id,
+        &controller_remembered.redirect_uri,
+        &verifier,
+    )
+    .await;
+    assert_eq!(
+        token["sub"], delegated_did,
+        "the code must be issued for the delegated account"
+    );
+
+    let delegated_remembered = oauth_app("delegated-flow-delegated-remembered").await;
+    get_test_repos()
+        .await
+        .oauth
+        .upsert_scope_preferences(
+            &Did::new(delegated_did.clone()).unwrap(),
+            &tranquil_types::ClientId::new(delegated_remembered.id.clone()),
+            &[tranquil_pds::oauth::db::ScopePreference {
+                scope: "atproto".to_string(),
+                granted: true,
+            }],
+        )
+        .await
+        .unwrap();
+    let (request_uri, verifier) = new_request(&delegated_remembered).await;
+    let body = delegation_auth(
+        &request_uri,
+        &delegated_did,
+        &controller_did,
+        "Testpass123!",
+    )
+    .await;
+    assert_eq!(
+        body["needs_2fa"], true,
+        "the delegated login must ask for the controller's code"
+    );
+    let code = get_email_2fa_code(&request_uri).await;
+    let location = redirect_after_code(submit_2fa(&request_uri, &code, false).await).await;
+    assert!(
+        location.contains("code="),
+        "the delegated account's remembered consent must go straight to a code, got: {location}"
+    );
+    let token = exchange_code(&delegated_remembered, &location, &verifier).await;
+    assert_eq!(
+        token["sub"], delegated_did,
+        "the code must be issued for the delegated account"
+    );
 
     enable_totp_for_user(&controller_did).await;
     let (request_uri, verifier) = new_request(&app).await;
@@ -2657,7 +2791,7 @@ async fn test_delegated_passkey_login_flow() {
     );
 
     enable_email_2fa(&bob.did).await;
-    let (request_uri, _) = new_request(&app).await;
+    let (request_uri, verifier) = new_request(&app).await;
     identify(&request_uri, &bob_handle, "").await;
     let location = passkey_login(&request_uri, &mut bob, &bob_handle, Some(&delegated_did)).await;
     assert!(
@@ -2671,6 +2805,17 @@ async fn test_delegated_passkey_login_flow() {
     );
     assert_login_rejected(&request_uri).await;
     assert_wrong_code_rejected(&request_uri).await;
+    let code = get_email_2fa_code(&request_uri).await;
+    let location = redirect_after_code(submit_2fa(&request_uri, &code, false).await).await;
+    assert!(
+        location.contains("/oauth/consent"),
+        "the correct code must lead to consent for a client not yet approved, got: {location}"
+    );
+    let token = consent_and_exchange(&request_uri, &app.id, &app.redirect_uri, &verifier).await;
+    assert_eq!(
+        token["sub"], delegated_did,
+        "email 2FA must issue a token for the delegated account"
+    );
 
     enable_totp_for_user(&bob.did).await;
     let (request_uri, _) = new_request(&app).await;
