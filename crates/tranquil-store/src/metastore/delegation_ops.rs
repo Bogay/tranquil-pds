@@ -534,4 +534,18 @@ mod tests {
         let upgraded = ops.get_delegation(&owner, &ctrl).unwrap().unwrap();
         assert_eq!(upgraded.granted_scopes.as_str(), OWNER_FULL);
     }
+
+    #[test]
+    fn revoked_delegation_is_not_returned() {
+        let (_dir, ms) = fresh();
+        let ops = ms.delegation_ops();
+        let owner = did("did:plc:barnacle");
+        let ctrl = did("did:plc:periwinkle");
+
+        ops.create_delegation(&owner, &ctrl, &DbScope::new("atproto").unwrap(), &owner)
+            .unwrap();
+        assert!(ops.revoke_delegation(&owner, &ctrl, &owner).unwrap());
+
+        assert!(ops.get_delegation(&owner, &ctrl).unwrap().is_none());
+    }
 }

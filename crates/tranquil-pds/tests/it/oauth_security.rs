@@ -184,6 +184,29 @@ async fn create_passkey_user(prefix: &str) -> PasskeyUser {
     }
 }
 
+async fn create_delegated_account(controller_jwt: &str, prefix: &str) -> (String, String) {
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let res = client()
+        .post(format!(
+            "{}/xrpc/_delegation.createDelegatedAccount",
+            base_url().await
+        ))
+        .bearer_auth(controller_jwt)
+        .json(&json!({
+            "handle": format!("{}{}", prefix, suffix),
+            "controllerScopes": "atproto"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.unwrap();
+    (
+        body["did"].as_str().unwrap().to_string(),
+        body["handle"].as_str().unwrap().to_string(),
+    )
+}
+
 async fn par_request(client_id: &str, redirect_uri: &str) -> (String, String) {
     let (code_verifier, code_challenge) = generate_pkce();
     let par_body: Value = client()
@@ -1551,4 +1574,46 @@ async fn test_passkey_login_page_updates_counter() {
         .await
         .unwrap();
     assert!(passkeys.iter().all(|passkey| passkey.sign_count > 0));
+}
+
+#[tokio::test]
+async fn test_revoked_controller_cannot_log_in() {
+    let (controller_jwt, controller_did) = create_account_and_login(&client()).await;
+    let (delegated_did, _) = create_delegated_account(&controller_jwt, "dlgrevoked").await;
+    let controller = Did::new(controller_did.clone()).unwrap();
+    let revoked = get_test_repos()
+        .await
+        .delegation
+        .revoke_delegation(
+            &Did::new(delegated_did.clone()).unwrap(),
+            &controller,
+            &controller,
+        )
+        .await
+        .unwrap();
+    assert!(revoked);
+    let redirect_uri = "https://example.com/revoked-controller-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let (request_uri, _) = par_request(&mock_client.uri(), redirect_uri).await;
+
+    let body: Value = client()
+        .post(format!("{}/oauth/delegation/auth", base_url().await))
+        .json(&json!({
+            "request_uri": request_uri,
+            "delegated_did": delegated_did,
+            "controller_did": controller_did,
+            "password": "Testpass123!",
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["success"], false);
+    assert_eq!(
+        body["error"],
+        "No delegation grant found for this controller"
+    );
 }
