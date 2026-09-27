@@ -173,28 +173,22 @@ pub async fn authorize_2fa_post(
             return response;
         }
         let _ = state.repos.oauth.delete_2fa_challenge(challenge.id).await;
-        let code = match store_authorization_code(
-            &state,
-            &twofa_post_request_id,
-            &challenge.did,
-            None,
-            extract_device_cookie(&headers).as_ref(),
-        )
-        .await
-        {
-            Ok(code) => code,
-            Err(e) => return e.into_response(),
+        let Some(request_did) = request_data.did.clone() else {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "User not authenticated yet.",
+            );
         };
-        let redirect_url = build_intermediate_redirect_url(
-            &request_data.parameters.redirect_uri,
-            code.as_str(),
-            request_data.parameters.state.as_deref(),
-            request_data.parameters.response_mode.map(|m| m.as_str()),
-        );
-        return Json(serde_json::json!({
-            "redirect_uri": redirect_url
-        }))
-        .into_response();
+        return consent_or_code(
+            &state,
+            &form.request_uri,
+            &request_data,
+            &request_did,
+            extract_device_cookie(&headers),
+            None,
+        )
+        .await;
     }
     let did_str = match &request_data.did {
         Some(d) => d.clone(),
@@ -280,65 +274,67 @@ pub async fn authorize_2fa_post(
             tranquil_api::server::trust_device(state.repos.oauth.as_ref(), &trust_device_id, &did)
                 .await;
     }
-    let requested_scope_str = request_data
+    consent_or_code(
+        &state,
+        &form.request_uri,
+        &request_data,
+        &did,
+        device_id,
+        new_cookie,
+    )
+    .await
+}
+
+async fn consent_or_code(
+    state: &AppState,
+    request_uri: &str,
+    request_data: &tranquil_pds::oauth::RequestData,
+    did: &tranquil_types::Did,
+    device_id: Option<DeviceId>,
+    new_cookie: Option<String>,
+) -> Response {
+    let requested_scopes: Vec<String> = request_data
         .parameters
         .scope
         .as_deref()
-        .unwrap_or("atproto");
-    let requested_scopes: Vec<String> = requested_scope_str
+        .unwrap_or("atproto")
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
     let needs_consent = should_show_consent(
         state.repos.oauth.as_ref(),
-        &did,
+        did,
         &request_data.parameters.client_id,
         &requested_scopes,
     )
     .await
     .unwrap_or(true);
-    if needs_consent {
-        let consent_url = format!(
-            "/app/oauth/consent?request_uri={}",
-            url_encode(&form.request_uri)
-        );
-        if let Some(cookie) = new_cookie {
-            return (
-                StatusCode::OK,
-                [(SET_COOKIE, cookie)],
-                Json(serde_json::json!({"redirect_uri": consent_url})),
-            )
-                .into_response();
-        }
-        return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
-    }
-    let code = match store_authorization_code(
-        &state,
-        &twofa_post_request_id,
-        &did,
-        None,
-        device_id.as_ref(),
-    )
-    .await
-    {
-        Ok(code) => code,
-        Err(e) => return e.into_response(),
-    };
-    let redirect_url = build_intermediate_redirect_url(
-        &request_data.parameters.redirect_uri,
-        code.as_str(),
-        request_data.parameters.state.as_deref(),
-        request_data.parameters.response_mode.map(|m| m.as_str()),
-    );
-    if let Some(cookie) = new_cookie {
-        (
-            StatusCode::OK,
-            [(SET_COOKIE, cookie)],
-            Json(serde_json::json!({"redirect_uri": redirect_url})),
-        )
-            .into_response()
+    let redirect_url = if needs_consent {
+        format!("/app/oauth/consent?request_uri={}", url_encode(request_uri))
     } else {
-        Json(serde_json::json!({"redirect_uri": redirect_url})).into_response()
+        let code = match store_authorization_code(
+            state,
+            &RequestId::from(request_uri.to_string()),
+            did,
+            request_data.controller_did.as_ref(),
+            device_id.as_ref(),
+        )
+        .await
+        {
+            Ok(code) => code,
+            Err(e) => return e.into_response(),
+        };
+        build_intermediate_redirect_url(
+            &request_data.parameters.redirect_uri,
+            code.as_str(),
+            request_data.parameters.state.as_deref(),
+            request_data.parameters.response_mode.map(|m| m.as_str()),
+        )
+    };
+    let body = Json(serde_json::json!({"redirect_uri": redirect_url}));
+    match new_cookie {
+        Some(cookie) => (StatusCode::OK, [(SET_COOKIE, cookie)], body).into_response(),
+        None => body.into_response(),
     }
 }
 
