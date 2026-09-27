@@ -1643,6 +1643,14 @@ pub fn template() -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn example_config_matches_template() {
+        assert!(
+            template() == include_str!("../../../example.toml"),
+            "example.toml is out of date; run `just gen-config`"
+        );
+    }
+
     fn seed_required_env() {
         let required = [
             ("PDS_HOSTNAME", "test.local"),
