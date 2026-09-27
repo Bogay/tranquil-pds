@@ -237,7 +237,9 @@ impl DelegationOps {
             "corrupt delegation grant",
         )?;
 
-        val.map(|v| self.value_to_grant(&v)).transpose()
+        val.filter(|v| v.revoked_at_ms.is_none())
+            .map(|v| self.value_to_grant(&v))
+            .transpose()
     }
 
     pub fn get_delegations_for_account(
