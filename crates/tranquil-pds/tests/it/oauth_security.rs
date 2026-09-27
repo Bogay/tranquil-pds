@@ -1,5 +1,5 @@
 #![allow(unused_imports)]
-use crate::common::{base_url, client, create_account_and_login};
+use crate::common::{base_url, client, create_account_and_login, get_test_repos, pds_hostname};
 use crate::helpers::verify_new_account;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
@@ -7,6 +7,11 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tranquil_pds::oauth::{DPoPJwk, DPoPVerifier, compute_jwk_thumbprint};
+use tranquil_types::Did;
+use webauthn_authenticator_rs::prelude::{
+    CreationChallengeResponse, RequestChallengeResponse, Url, WebauthnAuthenticator,
+};
+use webauthn_authenticator_rs::softpasskey::SoftPasskey;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -109,6 +114,141 @@ async fn get_oauth_tokens(http_client: &reqwest::Client, url: &str) -> (String, 
         token_body["refresh_token"].as_str().unwrap().to_string(),
         client_id,
     )
+}
+
+struct PasskeyUser {
+    did: String,
+    handle: String,
+    authenticator: WebauthnAuthenticator<SoftPasskey>,
+}
+
+async fn create_passkey_user(prefix: &str) -> PasskeyUser {
+    let http = client();
+    let url = base_url().await;
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("{}{}.test", prefix, suffix);
+    let email = format!("{}{}@test.com", prefix, suffix);
+
+    let create_res = http
+        .post(format!("{}/xrpc/_account.createPasskeyAccount", url))
+        .json(&json!({ "handle": handle, "email": email }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let body: Value = create_res.json().await.unwrap();
+    let did = body["did"].as_str().unwrap().to_string();
+    let setup_token = body["setupToken"].as_str().unwrap().to_string();
+
+    verify_new_account(&http, &did).await;
+
+    let origin = Url::parse(&format!("https://{}", pds_hostname())).unwrap();
+
+    let reg_start_res = http
+        .post(format!(
+            "{}/xrpc/_account.startPasskeyRegistrationForSetup",
+            url
+        ))
+        .json(&json!({ "did": did, "setupToken": setup_token }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reg_start_res.status(), StatusCode::OK);
+    let reg_body: Value = reg_start_res.json().await.unwrap();
+    let mut ccr: CreationChallengeResponse =
+        serde_json::from_value(reg_body["options"].clone()).unwrap();
+    if let Some(sel) = ccr.public_key.authenticator_selection.as_mut() {
+        sel.require_resident_key = false;
+        sel.resident_key = None;
+    }
+
+    let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
+    let reg_credential = authenticator.do_registration(origin, ccr).unwrap();
+
+    let complete_res = http
+        .post(format!("{}/xrpc/_account.completePasskeySetup", url))
+        .json(&json!({
+            "did": did,
+            "setupToken": setup_token,
+            "passkeyCredential": serde_json::to_value(&reg_credential).unwrap(),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(complete_res.status(), StatusCode::OK);
+
+    PasskeyUser {
+        did,
+        handle,
+        authenticator,
+    }
+}
+
+async fn par_request(client_id: &str, redirect_uri: &str) -> (String, String) {
+    let (code_verifier, code_challenge) = generate_pkce();
+    let par_body: Value = client()
+        .post(format!("{}/oauth/par", base_url().await))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    (
+        par_body["request_uri"].as_str().unwrap().to_string(),
+        code_verifier,
+    )
+}
+
+async fn identify(request_uri: &str, username: &str, password: &str) -> Value {
+    let res = client()
+        .post(format!("{}/oauth/authorize", base_url().await))
+        .header("Accept", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "username": username,
+            "password": password,
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    res.json().await.unwrap()
+}
+
+async fn passkey_page_login(request_uri: &str, user: &mut PasskeyUser) -> Value {
+    let origin = Url::parse(&format!("https://{}", pds_hostname())).unwrap();
+    let start: Value = client()
+        .get(format!("{}/oauth/authorize/passkey", base_url().await))
+        .query(&[("request_uri", request_uri)])
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let rcr: RequestChallengeResponse = serde_json::from_value(start["options"].clone()).unwrap();
+    let credential = user.authenticator.do_authentication(origin, rcr).unwrap();
+    client()
+        .post(format!("{}/oauth/authorize/passkey", base_url().await))
+        .header("Accept", "application/json")
+        .json(&json!({ "requestUri": request_uri, "credential": credential }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -1391,4 +1531,24 @@ async fn test_delegation_oauth_token_sub_is_delegated_account() {
         sub, controller_did,
         "Token sub claim should NOT be the controller's DID"
     );
+}
+
+#[tokio::test]
+async fn test_passkey_login_page_updates_counter() {
+    let mut alice = create_passkey_user("alice").await;
+    let redirect_uri = "https://example.com/passkey-counter-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let (request_uri, _) = par_request(&mock_client.uri(), redirect_uri).await;
+
+    identify(&request_uri, &alice.handle, "").await;
+    let finish = passkey_page_login(&request_uri, &mut alice).await;
+    assert_eq!(finish["next"], "consent");
+
+    let passkeys = get_test_repos()
+        .await
+        .user
+        .get_passkeys_for_user(&Did::new(alice.did.clone()).unwrap())
+        .await
+        .unwrap();
+    assert!(passkeys.iter().all(|passkey| passkey.sign_count > 0));
 }
