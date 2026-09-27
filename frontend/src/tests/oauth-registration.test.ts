@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/svelte";
 import {
   clearMocks,
@@ -9,6 +9,7 @@ import {
   setupIndexedDBMock,
 } from "./mocks.ts";
 import { _testSetState } from "../lib/auth.svelte.ts";
+import type { RegistrationMode } from "../lib/registration/types.ts";
 
 describe("OAuth Registration Flow", () => {
   beforeEach(() => {
@@ -501,6 +502,66 @@ describe("OAuth Registration Flow", () => {
       await waitFor(() => {
         expect(screen.getByLabelText(/handle/i)).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("registration flow in OAuth context", () => {
+    beforeEach(() => {
+      Object.defineProperty(globalThis.location, "search", {
+        value: "?request_uri=urn:mock:test-request-uri",
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(globalThis.location, "search", {
+        value: "",
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    async function captureCreateBody(
+      mode: RegistrationMode,
+      endpoint: string,
+      response: Record<string, unknown>,
+    ) {
+      let capturedBody: string | null = null;
+      mockEndpoint(endpoint, (_url, options) => {
+        capturedBody = options?.body as string;
+        return jsonResponse(response);
+      });
+      const { createRegistrationFlow } = await import(
+        "../lib/registration/flow.svelte.ts"
+      );
+      const flow = createRegistrationFlow(mode, "localhost");
+      flow.info.handle = "newuser";
+      flow.info.email = "newuser@example.com";
+      flow.info.password = "Testpass123!";
+      await (mode === "password"
+        ? flow.createPasswordAccount()
+        : flow.createPasskeyAccount());
+      expect(capturedBody).not.toBeNull();
+      return JSON.parse(capturedBody!);
+    }
+
+    it("sends request_uri when creating a password account", async () => {
+      const body = await captureCreateBody(
+        "password",
+        "com.atproto.server.createAccount",
+        { did: "did:plc:new", handle: "newuser.localhost" },
+      );
+      expect(body.requestUri).toBe("urn:mock:test-request-uri");
+    });
+
+    it("sends request_uri when creating a passkey account", async () => {
+      const body = await captureCreateBody(
+        "passkey",
+        "_account.createPasskeyAccount",
+        { did: "did:plc:new", handle: "newuser.localhost", setupToken: "t" },
+      );
+      expect(body.requestUri).toBe("urn:mock:test-request-uri");
     });
   });
 });

@@ -1571,6 +1571,43 @@ async fn consent_and_exchange(
     exchange_code_for(client_id, redirect_uri, &location, code_verifier).await
 }
 
+async fn register_complete(request_uri: &str, did: &str, password: &str) -> reqwest::Response {
+    client()
+        .post(format!("{}/oauth/register/complete", base_url().await))
+        .json(&json!({
+            "request_uri": request_uri,
+            "did": did,
+            "app_password": password
+        }))
+        .send()
+        .await
+        .unwrap()
+}
+
+async fn create_account_for_request(prefix: &str, request_uri: &str) -> String {
+    let http = client();
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let res = http
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
+        .json(&json!({
+            "handle": format!("{}{}", prefix, suffix),
+            "email": format!("{}{}@example.com", prefix, suffix),
+            "password": "Testpass123!",
+            "requestUri": request_uri
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.unwrap();
+    let did = body["did"].as_str().unwrap().to_string();
+    verify_new_account(&http, &did).await;
+    did
+}
+
 async fn seed_sso_identity(did: &str, subject: &str, email: &str) {
     let repos = get_test_repos().await;
     let mock = setup_mock_oidc().await;
@@ -2680,5 +2717,141 @@ async fn test_delegated_passkey_login_flow() {
     assert_eq!(
         token["sub"], delegated_did,
         "TOTP must issue a token for the delegated account"
+    );
+}
+
+#[tokio::test]
+async fn test_registration_flow() {
+    let app = oauth_app("registration-flow").await;
+
+    let res = register_complete(
+        "urn:ietf:params:oauth:request_uri:nonexistent",
+        "did:plc:test123",
+        "test-password",
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "an unknown request must be rejected"
+    );
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(
+        body["error"], "invalid_request",
+        "the refusal must be an invalid request"
+    );
+
+    let (_, code_challenge) = generate_pkce();
+    let par = client()
+        .post(format!("{}/oauth/par", base_url().await))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", app.id.as_str()),
+            ("redirect_uri", app.redirect_uri.as_str()),
+            ("code_challenge", code_challenge.as_str()),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto"),
+            ("prompt", "create"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        par.status(),
+        StatusCode::CREATED,
+        "PAR with prompt=create must succeed"
+    );
+    let par: Value = par.json().await.unwrap();
+    let request_uri = par["request_uri"].as_str().unwrap().to_string();
+    let (_, existing_did) = create_account_and_login(&client()).await;
+    let res = register_complete(&request_uri, &existing_did, "Testpass123!").await;
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "an existing account must not complete a registration request"
+    );
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(
+        body["error"], "login_required",
+        "the refusal must ask for a login"
+    );
+    assert_login_rejected(&request_uri).await;
+
+    let state = format!("state-{}", uuid::Uuid::new_v4().simple());
+    let (request_uri, verifier) = par_request_with(
+        &app.id,
+        &app.redirect_uri,
+        &[("prompt", "create"), ("state", &state)],
+    )
+    .await;
+    let first = create_account_for_request("regfirst", &request_uri).await;
+    let second = create_account_for_request("regsecond", &request_uri).await;
+    let res = register_complete(&request_uri, &second, "Testpass123!").await;
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "a registration request must not be rebound to another new account"
+    );
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(
+        body["error"], "login_required",
+        "the rebind must be refused as a login problem"
+    );
+    let res = register_complete(&request_uri, &first, "wrong-password").await;
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "wrong credentials must be rejected"
+    );
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(
+        body["error"], "access_denied",
+        "the refusal must be an access denial"
+    );
+    let res = register_complete(&request_uri, &first, "Testpass123!").await;
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "the account created for the request must complete it"
+    );
+    let body: Value = res.json().await.unwrap();
+    let location = body["redirect_uri"].as_str().unwrap();
+    assert!(
+        location.contains("/oauth/consent"),
+        "a new account must be asked for consent, got: {location}"
+    );
+    let location = approve_consent(&request_uri, false).await;
+    assert!(
+        location.contains(&format!("state={state}"))
+            || location.contains(&format!("state%3D{state}")),
+        "the client's state must be returned: {location}"
+    );
+    let token = exchange_code(&app, &location, &verifier).await;
+    assert_eq!(
+        token["sub"], first,
+        "the token must be for the registered account"
+    );
+    assert!(
+        token["refresh_token"].is_string(),
+        "a refresh token must be issued"
+    );
+    assert_eq!(
+        token["token_type"], "Bearer",
+        "tokens must be bearer tokens"
+    );
+
+    let (request_uri, verifier) =
+        par_request_with(&app.id, &app.redirect_uri, &[("prompt", "create")]).await;
+    let user = create_passkey_user_for("preg", Some(&request_uri)).await;
+    let res = register_complete(&request_uri, &user.did, &user.app_password).await;
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "a passkey account created for the request must complete it"
+    );
+    let token = consent_and_exchange(&request_uri, &app.id, &app.redirect_uri, &verifier).await;
+    assert_eq!(
+        token["sub"], user.did,
+        "the token must be for the passkey-registered account"
     );
 }
