@@ -1,4 +1,7 @@
 use super::*;
+use tranquil_pds::comms::Notice;
+use tranquil_pds::comms::comms_repo::enqueue_notice;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct Authorize2faQuery {
@@ -123,6 +126,9 @@ pub async fn authorize_2fa_post(
             "Authorization request has expired.",
         );
     }
+    if request_data.auth_stage != AuthStage::FirstFactor {
+        return first_factor_required();
+    }
     let challenge = state
         .repos
         .oauth
@@ -161,28 +167,24 @@ pub async fn authorize_2fa_post(
                 "Invalid verification code. Please try again.",
             );
         }
-        let _ = state.repos.oauth.delete_2fa_challenge(challenge.id).await;
-        let code = AuthorizationCode::generate();
-        let device_id = extract_device_cookie(&headers);
-        let twofa_totp_device_id = device_id.clone();
-        if state
-            .repos
-            .oauth
-            .update_authorization_request(
-                &twofa_post_request_id,
-                &challenge.did,
-                twofa_totp_device_id.as_ref(),
-                &code,
-            )
-            .await
-            .is_err()
+        if let Err(response) =
+            complete_second_factor(&state, &twofa_post_request_id, &challenge.did).await
         {
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "server_error",
-                "An error occurred. Please try again.",
-            );
+            return response;
         }
+        let _ = state.repos.oauth.delete_2fa_challenge(challenge.id).await;
+        let code = match store_authorization_code(
+            &state,
+            &twofa_post_request_id,
+            &challenge.did,
+            None,
+            extract_device_cookie(&headers).as_ref(),
+        )
+        .await
+        {
+            Ok(code) => code,
+            Err(e) => return e.into_response(),
+        };
         let redirect_url = build_intermediate_redirect_url(
             &request_data.parameters.redirect_uri,
             code.as_str(),
@@ -239,6 +241,9 @@ pub async fn authorize_2fa_post(
             "invalid_code",
             "Invalid verification code. Please try again.",
         );
+    }
+    if let Err(response) = complete_second_factor(&state, &twofa_post_request_id, &did).await {
+        return response;
     }
     let mut device_id = extract_device_cookie(&headers);
     let mut new_cookie: Option<String> = None;
@@ -307,26 +312,18 @@ pub async fn authorize_2fa_post(
         }
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
     }
-    let code = AuthorizationCode::generate();
-    let twofa_final_device_id = device_id.clone();
-    if state
-        .repos
-        .oauth
-        .update_authorization_request(
-            &twofa_post_request_id,
-            &did,
-            twofa_final_device_id.as_ref(),
-            &code,
-        )
-        .await
-        .is_err()
+    let code = match store_authorization_code(
+        &state,
+        &twofa_post_request_id,
+        &did,
+        None,
+        device_id.as_ref(),
+    )
+    .await
     {
-        return json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "server_error",
-            "An error occurred. Please try again.",
-        );
-    }
+        Ok(code) => code,
+        Err(e) => return e.into_response(),
+    };
     let redirect_url = build_intermediate_redirect_url(
         &request_data.parameters.redirect_uri,
         code.as_str(),
@@ -342,5 +339,178 @@ pub async fn authorize_2fa_post(
             .into_response()
     } else {
         Json(serde_json::json!({"redirect_uri": redirect_url})).into_response()
+    }
+}
+
+fn first_factor_required() -> Response {
+    json_error(
+        StatusCode::FORBIDDEN,
+        "access_denied",
+        "First factor not completed for this request.",
+    )
+}
+
+#[derive(Debug)]
+pub(crate) enum SecondFactorRequirement {
+    None,
+    Totp,
+    Code {
+        channel: &'static str,
+        notice: CodeNotice,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) struct CodeNotice {
+    user_id: Uuid,
+    code: String,
+}
+
+impl CodeNotice {
+    pub(crate) async fn dispatch(
+        self,
+        state: &AppState,
+        hostname: &str,
+        did: &Did,
+    ) -> Result<(), NoticeDeliveryError> {
+        match enqueue_notice(
+            state.repos.user.as_ref(),
+            state.repos.infra.as_ref(),
+            self.user_id,
+            Notice::TwoFactorCode { code: &self.code },
+            hostname,
+        )
+        .await
+        {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => Err(NoticeDeliveryError),
+            Err(e) => {
+                tracing::warn!(
+                    did = %did,
+                    error = %e,
+                    "Failed to enqueue 2FA notification"
+                );
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct BeginSecondFactorError {
+    step: &'static str,
+    cause: String,
+}
+
+impl BeginSecondFactorError {
+    fn new(step: &'static str, cause: impl std::fmt::Display) -> Self {
+        Self {
+            step,
+            cause: cause.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for BeginSecondFactorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.step, self.cause)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct NoticeDeliveryError;
+
+pub(crate) const UNDELIVERABLE_CODE: &str = "We couldn't deliver the verification code to your notification channels. Please contact the PDS owner! <3";
+
+pub(crate) async fn begin_second_factor(
+    state: &AppState,
+    did: &Did,
+    request_id: &RequestId,
+    device_cookie: Option<&DeviceId>,
+) -> Result<SecondFactorRequirement, BeginSecondFactorError> {
+    let has_totp = state
+        .repos
+        .user
+        .has_totp_enabled(did)
+        .await
+        .map_err(|e| BeginSecondFactorError::new("has_totp_enabled", e))?;
+
+    let twofa_status = state
+        .repos
+        .user
+        .get_2fa_status_by_did(did)
+        .await
+        .map_err(|e| BeginSecondFactorError::new("get_2fa_status_by_did", e))?
+        .ok_or_else(|| BeginSecondFactorError::new("get_2fa_status_by_did", "no user row"))?;
+
+    if has_totp {
+        let trusted = match device_cookie {
+            Some(dev_id) => {
+                tranquil_api::server::is_device_trusted(state.repos.oauth.as_ref(), dev_id, did)
+                    .await
+            }
+            None => false,
+        };
+        let _ = state
+            .repos
+            .oauth
+            .delete_2fa_challenge_by_request_uri(request_id)
+            .await;
+        if trusted {
+            if let Some(dev_id) = device_cookie {
+                let _ = tranquil_api::server::extend_device_trust(
+                    state.repos.oauth.as_ref(),
+                    dev_id,
+                    did,
+                )
+                .await;
+            }
+            return Ok(SecondFactorRequirement::None);
+        }
+        return Ok(SecondFactorRequirement::Totp);
+    }
+
+    if twofa_status.two_factor_enabled {
+        let _ = state
+            .repos
+            .oauth
+            .delete_2fa_challenge_by_request_uri(request_id)
+            .await;
+        let challenge = state
+            .repos
+            .oauth
+            .create_2fa_challenge(did, request_id)
+            .await
+            .map_err(|e| BeginSecondFactorError::new("create_2fa_challenge", e))?;
+        return Ok(SecondFactorRequirement::Code {
+            channel: twofa_status.preferred_comms_channel.display_name(),
+            notice: CodeNotice {
+                user_id: twofa_status.id,
+                code: challenge.code,
+            },
+        });
+    }
+
+    Ok(SecondFactorRequirement::None)
+}
+
+async fn complete_second_factor(
+    state: &AppState,
+    request_id: &RequestId,
+    did: &tranquil_types::Did,
+) -> Result<(), Response> {
+    match state
+        .repos
+        .oauth
+        .advance_auth_stage(request_id, did, AuthStage::FirstFactor, AuthStage::Complete)
+        .await
+    {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(first_factor_required()),
+        Err(_) => Err(json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server_error",
+            "An error occurred. Please try again.",
+        )),
     }
 }

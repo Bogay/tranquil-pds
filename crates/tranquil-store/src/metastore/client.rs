@@ -27,7 +27,7 @@ use tranquil_db_traits::{
     UserVerificationInfo, UserWithKey, UserWithoutBlocks, ValidatedInviteCode,
     WebauthnChallengeType,
 };
-use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
+use tranquil_oauth::{AuthStage, AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
     AtIdentifier, AtUri, AuthorizationCode, CidLink, ClientId, DPoPProofId, DeviceId, Did, Handle,
     InviteCode, Jti, Nsid, PasswordHash, RefreshToken, RequestId, Rkey, Tid, TokenId,
@@ -2729,6 +2729,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::OAuthRepository for MetastoreCl
         request_id: &RequestId,
         did: &Did,
         device_id: Option<&DeviceId>,
+        stage: AuthStage,
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
@@ -2736,6 +2737,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::OAuthRepository for MetastoreCl
                 request_id: request_id.clone(),
                 did: did.clone(),
                 device_id: device_id.cloned(),
+                stage,
                 tx,
             }))?;
         recv(rx).await
@@ -2745,14 +2747,16 @@ impl<S: StorageIO + 'static> tranquil_db_traits::OAuthRepository for MetastoreCl
         &self,
         request_id: &RequestId,
         did: &Did,
+        controller_did: Option<&Did>,
         device_id: Option<&DeviceId>,
         code: &AuthorizationCode,
-    ) -> Result<(), DbError> {
+    ) -> Result<bool, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::OAuth(
             OAuthRequest::UpdateAuthorizationRequest {
                 request_id: request_id.clone(),
                 did: did.clone(),
+                controller_did: controller_did.cloned(),
                 device_id: device_id.cloned(),
                 code: code.clone(),
                 tx,
@@ -2810,21 +2814,22 @@ impl<S: StorageIO + 'static> tranquil_db_traits::OAuthRepository for MetastoreCl
         recv(rx).await
     }
 
-    async fn mark_request_authenticated(
+    async fn advance_auth_stage(
         &self,
         request_id: &RequestId,
-        did: &Did,
-        device_id: Option<&DeviceId>,
-    ) -> Result<(), DbError> {
+        verified_did: &Did,
+        from: AuthStage,
+        to: AuthStage,
+    ) -> Result<bool, DbError> {
         let (tx, rx) = oneshot::channel();
-        self.pool.send(MetastoreRequest::OAuth(
-            OAuthRequest::MarkRequestAuthenticated {
+        self.pool
+            .send(MetastoreRequest::OAuth(OAuthRequest::AdvanceAuthStage {
                 request_id: request_id.clone(),
-                did: did.clone(),
-                device_id: device_id.cloned(),
+                verified_did: verified_did.clone(),
+                from,
+                to,
                 tx,
-            },
-        ))?;
+            }))?;
         recv(rx).await
     }
 
@@ -2843,27 +2848,20 @@ impl<S: StorageIO + 'static> tranquil_db_traits::OAuthRepository for MetastoreCl
         recv(rx).await
     }
 
-    async fn set_controller_did(
+    async fn set_delegation(
         &self,
         request_id: &RequestId,
+        did: &Did,
         controller_did: &Did,
+        stage: AuthStage,
     ) -> Result<(), DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
-            .send(MetastoreRequest::OAuth(OAuthRequest::SetControllerDid {
-                request_id: request_id.clone(),
-                controller_did: controller_did.clone(),
-                tx,
-            }))?;
-        recv(rx).await
-    }
-
-    async fn set_request_did(&self, request_id: &RequestId, did: &Did) -> Result<(), DbError> {
-        let (tx, rx) = oneshot::channel();
-        self.pool
-            .send(MetastoreRequest::OAuth(OAuthRequest::SetRequestDid {
+            .send(MetastoreRequest::OAuth(OAuthRequest::SetDelegation {
                 request_id: request_id.clone(),
                 did: did.clone(),
+                controller_did: controller_did.clone(),
+                stage,
                 tx,
             }))?;
         recv(rx).await

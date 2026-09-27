@@ -25,7 +25,7 @@ use tranquil_db_traits::{
     DeviceAccountRow, DeviceTrustInfo, OAuthSessionListItem, ScopePreference, TokenFamilyId,
     TrustedDeviceRow, TwoFactorChallenge,
 };
-use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
+use tranquil_oauth::{AuthStage, AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
     AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId,
     TokenId,
@@ -215,6 +215,10 @@ impl OAuthOps {
                 .map_err(|_| {
                     MetastoreError::CorruptData("invalid controller_did in oauth request")
                 })?,
+            auth_stage: v
+                .auth_stage
+                .parse()
+                .map_err(|_| MetastoreError::CorruptData("invalid auth_stage in oauth request"))?,
         })
     }
 
@@ -231,6 +235,7 @@ impl OAuthOps {
             device_id: data.device_id.as_ref().map(|d| d.to_string()),
             code: data.code.as_ref().map(|c| c.to_string()),
             controller_did: data.controller_did.as_ref().map(|d| d.to_string()),
+            auth_stage: data.auth_stage.as_str().to_string(),
         }
     }
 
@@ -645,6 +650,7 @@ impl OAuthOps {
         request_id: &RequestId,
         did: &Did,
         device_id: Option<&DeviceId>,
+        stage: AuthStage,
     ) -> Result<(), MetastoreError> {
         let key = oauth_auth_request_key(request_id.as_str());
         let mut value: OAuthRequestValue = point_lookup(
@@ -657,6 +663,8 @@ impl OAuthOps {
 
         value.did = Some(did.to_string());
         value.device_id = device_id.map(|d| d.as_str().to_owned());
+        value.controller_did = None;
+        value.auth_stage = stage.as_str().to_string();
 
         self.auth
             .insert(key.as_slice(), value.serialize_with_ttl())
@@ -667,19 +675,27 @@ impl OAuthOps {
         &self,
         request_id: &RequestId,
         did: &Did,
+        controller_did: Option<&Did>,
         device_id: Option<&DeviceId>,
         code: &AuthorizationCode,
-    ) -> Result<(), MetastoreError> {
+    ) -> Result<bool, MetastoreError> {
         let key = oauth_auth_request_key(request_id.as_str());
-        let mut value: OAuthRequestValue = point_lookup(
+        let Some(mut value): Option<OAuthRequestValue> = point_lookup(
             &self.auth,
             key.as_slice(),
             OAuthRequestValue::deserialize,
             "corrupt oauth auth request",
         )?
-        .ok_or(MetastoreError::InvalidInput("auth request not found"))?;
+        else {
+            return Ok(false);
+        };
 
-        value.did = Some(did.to_string());
+        if value.did.as_deref() != Some(did.as_str())
+            || value.controller_did.as_deref() != controller_did.map(|d| d.as_str())
+            || value.auth_stage != AuthStage::Complete.as_str()
+        {
+            return Ok(false);
+        }
         value.device_id = device_id.map(|d| d.as_str().to_owned());
         value.code = Some(code.as_str().to_owned());
 
@@ -692,7 +708,8 @@ impl OAuthOps {
             code_index_key.as_slice(),
             request_id.as_str().as_bytes(),
         );
-        batch.commit().map_err(MetastoreError::Fjall)
+        batch.commit().map_err(MetastoreError::Fjall)?;
+        Ok(true)
     }
 
     pub fn consume_authorization_request_by_code(
@@ -811,13 +828,36 @@ impl OAuthOps {
         }
     }
 
-    pub fn mark_request_authenticated(
+    pub fn advance_auth_stage(
         &self,
         request_id: &RequestId,
-        did: &Did,
-        device_id: Option<&DeviceId>,
-    ) -> Result<(), MetastoreError> {
-        self.set_authorization_did(request_id, did, device_id)
+        verified_did: &Did,
+        from: AuthStage,
+        to: AuthStage,
+    ) -> Result<bool, MetastoreError> {
+        let key = oauth_auth_request_key(request_id.as_str());
+        let Some(mut value): Option<OAuthRequestValue> = point_lookup(
+            &self.auth,
+            key.as_slice(),
+            OAuthRequestValue::deserialize,
+            "corrupt oauth auth request",
+        )?
+        else {
+            return Ok(false);
+        };
+
+        let expected = value.controller_did.as_ref().or(value.did.as_ref());
+        if value.auth_stage != from.as_str()
+            || expected.map(String::as_str) != Some(verified_did.as_str())
+        {
+            return Ok(false);
+        }
+        value.auth_stage = to.as_str().to_string();
+
+        self.auth
+            .insert(key.as_slice(), value.serialize_with_ttl())
+            .map_err(MetastoreError::Fjall)?;
+        Ok(true)
     }
 
     pub fn update_request_scope(
@@ -845,10 +885,12 @@ impl OAuthOps {
             .map_err(MetastoreError::Fjall)
     }
 
-    pub fn set_controller_did(
+    pub fn set_delegation(
         &self,
         request_id: &RequestId,
+        did: &Did,
         controller_did: &Did,
+        stage: AuthStage,
     ) -> Result<(), MetastoreError> {
         let key = oauth_auth_request_key(request_id.as_str());
         let mut value: OAuthRequestValue = point_lookup(
@@ -859,15 +901,13 @@ impl OAuthOps {
         )?
         .ok_or(MetastoreError::InvalidInput("auth request not found"))?;
 
+        value.did = Some(did.to_string());
         value.controller_did = Some(controller_did.to_string());
+        value.auth_stage = stage.as_str().to_string();
 
         self.auth
             .insert(key.as_slice(), value.serialize_with_ttl())
             .map_err(MetastoreError::Fjall)
-    }
-
-    pub fn set_request_did(&self, request_id: &RequestId, did: &Did) -> Result<(), MetastoreError> {
-        self.set_authorization_did(request_id, did, None)
     }
 
     pub fn create_device(
@@ -1618,5 +1658,64 @@ fn default_parameters(client_id: &str) -> tranquil_oauth::AuthorizationRequestPa
         dpop_jkt: None,
         prompt: None,
         extra: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metastore::{Metastore, MetastoreConfig};
+
+    fn did(s: &str) -> Did {
+        Did::new(s.to_owned()).expect("valid did")
+    }
+
+    #[test]
+    fn code_write_requires_expected_completed_identity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ms = Metastore::open(dir.path(), MetastoreConfig::default()).expect("open metastore");
+        let ops = ms.oauth_ops();
+        let request_id = RequestId::new("urn:ietf:params:oauth:request_uri:guard".to_owned());
+        let owner = did("did:plc:owner");
+        let other = did("did:plc:other");
+        let controller = did("did:plc:controller");
+        let code = AuthorizationCode::generate();
+        ops.create_authorization_request(
+            &request_id,
+            &RequestData {
+                client_id: tranquil_types::ClientId::new("https://client.example"),
+                client_auth: None,
+                parameters: default_parameters("https://client.example"),
+                expires_at: Utc::now() + Duration::minutes(5),
+                did: None,
+                device_id: None,
+                code: None,
+                controller_did: None,
+                auth_stage: AuthStage::None,
+            },
+        )
+        .unwrap();
+
+        ops.set_authorization_did(&request_id, &owner, None, AuthStage::FirstFactor)
+            .unwrap();
+        assert!(
+            !ops.update_authorization_request(&request_id, &owner, None, None, &code)
+                .unwrap()
+        );
+
+        ops.set_authorization_did(&request_id, &owner, None, AuthStage::Complete)
+            .unwrap();
+        assert!(
+            !ops.update_authorization_request(&request_id, &other, None, None, &code)
+                .unwrap()
+        );
+        assert!(
+            !ops.update_authorization_request(&request_id, &owner, Some(&controller), None, &code)
+                .unwrap()
+        );
+        assert!(
+            ops.update_authorization_request(&request_id, &owner, None, None, &code)
+                .unwrap()
+        );
     }
 }

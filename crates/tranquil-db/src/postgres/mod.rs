@@ -39,6 +39,8 @@ pub(crate) mod col {
         ColumnRef::new("delegation_audit_log", "delegated_did");
     pub const INVITE_CODES_FOR_ACCOUNT: ColumnRef = ColumnRef::new("invite_codes", "for_account");
     pub const OAUTH_2FA_CHALLENGE_DID: ColumnRef = ColumnRef::new("oauth_2fa_challenge", "did");
+    pub const OAUTH_AUTHORIZATION_REQUEST_AUTH_STAGE: ColumnRef =
+        ColumnRef::new("oauth_authorization_request", "auth_stage");
     pub const OAUTH_AUTHORIZATION_REQUEST_CONTROLLER_DID: ColumnRef =
         ColumnRef::new("oauth_authorization_request", "controller_did");
     pub const OAUTH_AUTHORIZATION_REQUEST_DID: ColumnRef =

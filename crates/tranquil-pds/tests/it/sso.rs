@@ -638,6 +638,7 @@ fn test_request_data() -> RequestData {
         device_id: None,
         code: None,
         controller_did: None,
+        auth_stage: tranquil_oauth::AuthStage::None,
     }
 }
 

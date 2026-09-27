@@ -12,10 +12,9 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tranquil_db_traits::{ScopePreference, WebauthnChallengeType};
 use tranquil_pds::auth::{BareLoginIdentifier, NormalizedLoginIdentifier};
-use tranquil_pds::comms::Notice;
-use tranquil_pds::comms::comms_repo::enqueue_notice;
 use tranquil_pds::oauth::{
-    AuthFlow, DeviceData, DeviceId, OAuthError, Prompt, SessionId, db::should_show_consent,
+    AuthFlow, AuthStage, DeviceData, DeviceId, OAuthError, Prompt, SessionId,
+    db::should_show_consent,
 };
 use tranquil_pds::rate_limit::{
     OAuthAuthorizeLimit, OAuthRateLimited, OAuthRegisterCompleteLimit, TotpVerifyLimit,
@@ -65,6 +64,59 @@ fn json_error(status: StatusCode, error: &str, description: &str) -> Response {
         .into_response()
 }
 
+enum StoreCodeError {
+    RequestChanged,
+    Failed,
+}
+
+impl StoreCodeError {
+    fn description(&self) -> &'static str {
+        match self {
+            StoreCodeError::RequestChanged => "Authorization request changed. Please start over.",
+            StoreCodeError::Failed => "An error occurred. Please try again.",
+        }
+    }
+
+    fn into_response(self) -> Response {
+        match self {
+            StoreCodeError::RequestChanged => {
+                json_error(StatusCode::CONFLICT, "invalid_request", self.description())
+            }
+            StoreCodeError::Failed => json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                self.description(),
+            ),
+        }
+    }
+}
+
+async fn store_authorization_code(
+    state: &AppState,
+    request_id: &RequestId,
+    did: &Did,
+    controller_did: Option<&Did>,
+    device_id: Option<&DeviceId>,
+) -> Result<AuthorizationCode, StoreCodeError> {
+    let code = AuthorizationCode::generate();
+    match state
+        .repos
+        .oauth
+        .update_authorization_request(request_id, did, controller_did, device_id, &code)
+        .await
+    {
+        Ok(true) => Ok(code),
+        Ok(false) => {
+            tracing::warn!(request_id = %request_id.as_str(), did = %did, "Authorization request changed before code was issued");
+            Err(StoreCodeError::RequestChanged)
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, request_id = %request_id.as_str(), "Failed to store authorization code");
+            Err(StoreCodeError::Failed)
+        }
+    }
+}
+
 fn is_granular_scope(s: &str) -> bool {
     s.starts_with("repo:")
         || s.starts_with("repo?")
@@ -78,7 +130,7 @@ fn is_granular_scope(s: &str) -> bool {
         || s.starts_with("identity:")
 }
 
-fn extract_device_cookie(headers: &HeaderMap) -> Option<tranquil_types::DeviceId> {
+pub(crate) fn extract_device_cookie(headers: &HeaderMap) -> Option<tranquil_types::DeviceId> {
     headers
         .get("cookie")
         .and_then(|v| v.to_str().ok())

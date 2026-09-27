@@ -3,7 +3,7 @@ use axum::{Json, extract::State, http::HeaderMap};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tranquil_pds::oauth::{
-    AuthorizationRequestParameters, ClientAuth, CodeChallengeMethod, OAuthError, Prompt,
+    AuthStage, AuthorizationRequestParameters, ClientAuth, CodeChallengeMethod, OAuthError, Prompt,
     RequestData, RequestId, ResponseMode, ResponseType,
 };
 use tranquil_pds::rate_limit::{OAuthParLimit, OAuthRateLimited};
@@ -111,6 +111,7 @@ pub async fn pushed_authorization_request(
         device_id: None,
         code: None,
         controller_did: None,
+        auth_stage: AuthStage::None,
     };
     state
         .repos

@@ -13,12 +13,17 @@ use tranquil_pds::api::error::ApiError;
 use tranquil_pds::api::invite::check_registration_invite;
 use tranquil_pds::auth::extractor::extract_auth_token_from_header;
 use tranquil_pds::auth::{generate_app_password, validate_bearer_token_cached};
+use tranquil_pds::oauth::AuthStage;
 use tranquil_pds::rate_limit::{
     AccountCreationLimit, RateLimited, SsoCallbackLimit, SsoInitiateLimit, SsoUnlinkLimit,
     check_user_rate_limit_with_message,
 };
 use tranquil_pds::sso::SsoConfig;
 use tranquil_pds::state::AppState;
+
+use crate::endpoints::authorize::{
+    SecondFactorRequirement, UNDELIVERABLE_CODE, begin_second_factor,
+};
 
 fn generate_nonce() -> String {
     use rand::RngCore;
@@ -197,12 +202,17 @@ fn redirect_to_login_with_error(request_uri: &str, message: &str) -> Response {
 pub async fn sso_callback(
     State(state): State<AppState>,
     _rate_limit: RateLimited<SsoCallbackLimit>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<SsoCallbackQuery>,
 ) -> Response {
-    sso_callback_internal(&state, query).await
+    sso_callback_internal(&state, &headers, query).await
 }
 
-async fn sso_callback_internal(state: &AppState, query: SsoCallbackQuery) -> Response {
+async fn sso_callback_internal(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+    query: SsoCallbackQuery,
+) -> Response {
     tracing::debug!(
         has_code = query.code.is_some(),
         has_state = query.state.is_some(),
@@ -304,6 +314,7 @@ async fn sso_callback_internal(state: &AppState, query: SsoCallbackQuery) -> Res
         SsoAction::Login => {
             handle_sso_login(
                 state,
+                headers,
                 &auth_state.request_uri,
                 auth_state.provider,
                 &user_info,
@@ -332,6 +343,7 @@ async fn sso_callback_internal(state: &AppState, query: SsoCallbackQuery) -> Res
 pub async fn sso_callback_post(
     State(state): State<AppState>,
     _rate_limit: RateLimited<SsoCallbackLimit>,
+    headers: axum::http::HeaderMap,
     Form(form): Form<SsoCallbackForm>,
 ) -> Response {
     tracing::debug!(
@@ -349,7 +361,7 @@ pub async fn sso_callback_post(
         error_description: form.error_description,
     };
 
-    sso_callback_internal(&state, query).await
+    sso_callback_internal(&state, &headers, query).await
 }
 
 fn generate_registration_token() -> String {
@@ -361,6 +373,7 @@ fn generate_registration_token() -> String {
 
 async fn handle_sso_login(
     state: &AppState,
+    headers: &axum::http::HeaderMap,
     request_uri: &str,
     provider: SsoProviderType,
     user_info: &tranquil_pds::sso::providers::SsoUserInfo,
@@ -448,41 +461,78 @@ async fn handle_sso_login(
     }
 
     let request_id = RequestId::new(request_uri.to_string());
+    let device_cookie = crate::endpoints::authorize::extract_device_cookie(headers);
+    let hostname = &tranquil_config::get().server.hostname;
+
+    let requirement = match begin_second_factor(
+        state,
+        &identity.did,
+        &request_id,
+        device_cookie.as_ref(),
+    )
+    .await
+    {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::error!(did = %identity.did, error = %e, "begin_second_factor failed in handle_sso_login");
+            return redirect_to_error("Failed to authenticate");
+        }
+    };
+
+    let (stage, redirect_path, notice) = match requirement {
+        SecondFactorRequirement::None => (
+            AuthStage::Complete,
+            format!(
+                "/app/oauth/consent?request_uri={}",
+                urlencoding::encode(request_uri)
+            ),
+            None,
+        ),
+        SecondFactorRequirement::Totp => (
+            AuthStage::FirstFactor,
+            format!(
+                "/app/oauth/totp?request_uri={}",
+                urlencoding::encode(request_uri)
+            ),
+            None,
+        ),
+        SecondFactorRequirement::Code { channel, notice } => (
+            AuthStage::FirstFactor,
+            format!(
+                "/app/oauth/2fa?request_uri={}&channel={}",
+                urlencoding::encode(request_uri),
+                urlencoding::encode(channel)
+            ),
+            Some(notice),
+        ),
+    };
+
     if let Err(e) = state
         .repos
         .oauth
-        .set_authorization_did(&request_id, &identity.did, None)
+        .set_authorization_did(&request_id, &identity.did, None, stage)
         .await
     {
         tracing::error!("Failed to set authorization DID: {:?}", e);
         return redirect_to_error("Failed to authenticate");
     }
 
+    if let Some(notice) = notice
+        && let Err(e) = notice.dispatch(state, hostname, &identity.did).await
+    {
+        tracing::error!("Failed to dispatch 2FA notice: {:?}", e);
+        return redirect_to_error(UNDELIVERABLE_CODE);
+    }
+
     tracing::info!(
         did = %identity.did,
         provider = %provider.as_str(),
         provider_user_id = %user_info.provider_user_id,
+        stage = ?stage,
         "SSO login successful"
     );
 
-    let has_totp = matches!(
-        state.repos.user.get_totp_record_state(&identity.did).await,
-        Ok(Some(tranquil_db_traits::TotpRecordState::Verified(_)))
-    );
-
-    if has_totp {
-        return Redirect::to(&format!(
-            "/app/oauth/totp?request_uri={}",
-            urlencoding::encode(request_uri)
-        ))
-        .into_response();
-    }
-
-    Redirect::to(&format!(
-        "/app/oauth/consent?request_uri={}",
-        urlencoding::encode(request_uri)
-    ))
-    .into_response()
+    Redirect::to(&redirect_path).into_response()
 }
 
 async fn handle_sso_link(
@@ -1222,7 +1272,7 @@ pub async fn complete_registration(
         if let Err(e) = state
             .repos
             .oauth
-            .set_authorization_did(&request_id, &did, None)
+            .set_authorization_did(&request_id, &did, None, AuthStage::Complete)
             .await
         {
             tracing::error!("Failed to set authorization DID: {:?}", e);

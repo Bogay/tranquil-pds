@@ -127,7 +127,7 @@ pub async fn authorize_get(
                     if let Err(e) = state
                         .repos
                         .oauth
-                        .set_request_did(&request_id, &user.did)
+                        .set_authorization_did(&request_id, &user.did, None, AuthStage::None)
                         .await
                     {
                         tracing::error!(error = %e, "Failed to set delegated DID on authorization request");
@@ -425,7 +425,7 @@ pub async fn authorize_post(
         if state
             .repos
             .oauth
-            .set_authorization_did(&form_request_id, &user.did, None)
+            .set_authorization_did(&form_request_id, &user.did, None, AuthStage::None)
             .await
             .is_err()
         {
@@ -454,7 +454,7 @@ pub async fn authorize_post(
         if state
             .repos
             .oauth
-            .set_authorization_did(&form_request_id, &user.did, None)
+            .set_authorization_did(&form_request_id, &user.did, None, AuthStage::None)
             .await
             .is_err()
         {
@@ -512,107 +512,62 @@ pub async fn authorize_post(
             url_encode("account_not_verified")
         ));
     }
-    let has_totp = tranquil_api::server::has_totp_enabled(&state, &user.did).await;
-    if has_totp {
-        let device_cookie = extract_device_cookie(&headers);
-        let device_is_trusted = if let Some(ref dev_id) = device_cookie {
-            tranquil_api::server::is_device_trusted(state.repos.oauth.as_ref(), dev_id, &user.did)
-                .await
-        } else {
-            false
-        };
-
-        if device_is_trusted {
-            if let Some(ref dev_id) = device_cookie {
-                let _ = tranquil_api::server::extend_device_trust(
-                    state.repos.oauth.as_ref(),
-                    dev_id,
-                    &user.did,
-                )
-                .await;
-            }
-        } else {
-            if state
-                .repos
-                .oauth
-                .set_authorization_did(&form_request_id, &user.did, None)
-                .await
-                .is_err()
-            {
-                return show_login_error("An error occurred. Please try again.", json_response);
-            }
+    let device_cookie = extract_device_cookie(&headers);
+    let hostname = &tranquil_config::get().server.hostname;
+    let requirement = match begin_second_factor(
+        &state,
+        &user.did,
+        &form_request_id,
+        device_cookie.as_ref(),
+    )
+    .await
+    {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::error!(did = %user.did, error = %e, "begin_second_factor failed in authorize_post");
+            return show_login_error("An error occurred. Please try again.", json_response);
+        }
+    };
+    if !matches!(requirement, SecondFactorRequirement::None)
+        && state
+            .repos
+            .oauth
+            .set_authorization_did(&form_request_id, &user.did, None, AuthStage::FirstFactor)
+            .await
+            .is_err()
+    {
+        return show_login_error("An error occurred. Please try again.", json_response);
+    }
+    match requirement {
+        SecondFactorRequirement::None => {}
+        SecondFactorRequirement::Totp => {
             if json_response {
-                return Json(serde_json::json!({
-                    "needs_totp": true
-                }))
-                .into_response();
+                return Json(serde_json::json!({ "needs_totp": true })).into_response();
             }
             return redirect_see_other(&format!(
                 "/app/oauth/totp?request_uri={}",
                 url_encode(&form.request_uri)
             ));
         }
-    }
-    if user.two_factor_enabled {
-        let _ = state
-            .repos
-            .oauth
-            .delete_2fa_challenge_by_request_uri(&form_request_id)
-            .await;
-        match state
-            .repos
-            .oauth
-            .create_2fa_challenge(&user.did, &form_request_id)
-            .await
-        {
-            Ok(challenge) => {
-                let hostname = &tranquil_config::get().server.hostname;
-                match enqueue_notice(
-                    state.repos.user.as_ref(),
-                    state.repos.infra.as_ref(),
-                    user.id,
-                    Notice::TwoFactorCode {
-                        code: &challenge.code,
-                    },
-                    hostname,
-                )
-                .await
-                {
-                    Ok(Some(_)) => {}
-                    Ok(None) => {
-                        return show_login_error(
-                            "We couldn't deliver this verification code to your notification channels. Please contact the PDS owner.",
-                            json_response,
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            did = %user.did,
-                            error = %e,
-                            "Failed to enqueue 2FA notification"
-                        );
-                    }
-                }
-                let channel_name = user.preferred_comms_channel.display_name();
-                if json_response {
-                    return Json(serde_json::json!({
-                        "needs_2fa": true,
-                        "channel": channel_name
-                    }))
-                    .into_response();
-                }
-                return redirect_see_other(&format!(
-                    "/app/oauth/2fa?request_uri={}&channel={}",
-                    url_encode(&form.request_uri),
-                    url_encode(channel_name)
-                ));
+        SecondFactorRequirement::Code { channel, notice } => {
+            if notice.dispatch(&state, hostname, &user.did).await.is_err() {
+                return show_login_error(UNDELIVERABLE_CODE, json_response);
             }
-            Err(_) => {
-                return show_login_error("An error occurred. Please try again.", json_response);
+            if json_response {
+                return Json(serde_json::json!({
+                    "needs_2fa": true,
+                    "channel": channel
+                }))
+                .into_response();
             }
+            return redirect_see_other(&format!(
+                "/app/oauth/2fa?request_uri={}&channel={}",
+                url_encode(&form.request_uri),
+                url_encode(channel)
+            ));
         }
     }
-    let mut device_id: Option<DeviceId> = extract_device_cookie(&headers);
+    let mut device_id: Option<DeviceId> = device_cookie;
     let mut new_cookie: Option<String> = None;
     if form.remember_device {
         let final_device_id = if let Some(existing_id) = &device_id {
@@ -647,7 +602,12 @@ pub async fn authorize_post(
     if state
         .repos
         .oauth
-        .set_authorization_did(&form_request_id, &user.did, set_auth_device_id.as_ref())
+        .set_authorization_did(
+            &form_request_id,
+            &user.did,
+            set_auth_device_id.as_ref(),
+            AuthStage::Complete,
+        )
         .await
         .is_err()
     {
@@ -695,22 +655,18 @@ pub async fn authorize_post(
         }
         return redirect_see_other(&consent_url);
     }
-    let code = AuthorizationCode::generate();
-    let auth_post_device_id = device_id.clone();
-    if state
-        .repos
-        .oauth
-        .update_authorization_request(
-            &form_request_id,
-            &user.did,
-            auth_post_device_id.as_ref(),
-            &code,
-        )
-        .await
-        .is_err()
+    let code = match store_authorization_code(
+        &state,
+        &form_request_id,
+        &user.did,
+        None,
+        device_id.as_ref(),
+    )
+    .await
     {
-        return show_login_error("An error occurred. Please try again.", json_response);
-    }
+        Ok(code) => code,
+        Err(e) => return show_login_error(e.description(), json_response),
+    };
     if json_response {
         let redirect_url = build_intermediate_redirect_url(
             &request_data.parameters.redirect_uri,
@@ -871,89 +827,57 @@ pub async fn authorize_select(
         )
             .into_response();
     }
-    let has_totp = tranquil_api::server::has_totp_enabled(&state, &did).await;
-    if has_totp {
-        let device_is_trusted =
-            tranquil_api::server::is_device_trusted(state.repos.oauth.as_ref(), &device_id, &did)
-                .await;
-        if !device_is_trusted {
-            if state
-                .repos
-                .oauth
-                .set_authorization_did(&select_request_id, &did, Some(&device_id))
-                .await
-                .is_err()
-            {
+    let hostname = &tranquil_config::get().server.hostname;
+    let requirement = match begin_second_factor(&state, &did, &select_request_id, Some(&device_id))
+        .await
+    {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::error!(did = %did, error = %e, "begin_second_factor failed in authorize_select");
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "An error occurred. Please try again.",
+            );
+        }
+    };
+    if !matches!(requirement, SecondFactorRequirement::None)
+        && state
+            .repos
+            .oauth
+            .set_authorization_did(
+                &select_request_id,
+                &did,
+                Some(&device_id),
+                AuthStage::FirstFactor,
+            )
+            .await
+            .is_err()
+    {
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server_error",
+            "An error occurred. Please try again.",
+        );
+    }
+    match requirement {
+        SecondFactorRequirement::None => {}
+        SecondFactorRequirement::Totp => {
+            return Json(serde_json::json!({ "needs_totp": true })).into_response();
+        }
+        SecondFactorRequirement::Code { channel, notice } => {
+            if notice.dispatch(&state, hostname, &did).await.is_err() {
                 return json_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "server_error",
-                    "An error occurred. Please try again.",
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    UNDELIVERABLE_CODE,
                 );
             }
             return Json(serde_json::json!({
-                "needs_totp": true
+                "needs_2fa": true,
+                "channel": channel
             }))
             .into_response();
-        }
-        let _ =
-            tranquil_api::server::extend_device_trust(state.repos.oauth.as_ref(), &device_id, &did)
-                .await;
-    }
-    if user.two_factor_enabled {
-        let _ = state
-            .repos
-            .oauth
-            .delete_2fa_challenge_by_request_uri(&select_request_id)
-            .await;
-        match state
-            .repos
-            .oauth
-            .create_2fa_challenge(&did, &select_request_id)
-            .await
-        {
-            Ok(challenge) => {
-                let hostname = &tranquil_config::get().server.hostname;
-                match enqueue_notice(
-                    state.repos.user.as_ref(),
-                    state.repos.infra.as_ref(),
-                    user.id,
-                    Notice::TwoFactorCode {
-                        code: &challenge.code,
-                    },
-                    hostname,
-                )
-                .await
-                {
-                    Ok(Some(_)) => {}
-                    Ok(None) => {
-                        return json_error(
-                            StatusCode::BAD_REQUEST,
-                            "invalid_request",
-                            "We couldn't deliver this verification code to your notification chanels. Please contact the PDS owner.",
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            did = %form.did,
-                            error = %e,
-                            "Failed to enqueue 2FA notification"
-                        );
-                    }
-                }
-                let channel_name = user.preferred_comms_channel.display_name();
-                return Json(serde_json::json!({
-                    "needs_2fa": true,
-                    "channel": channel_name
-                }))
-                .into_response();
-            }
-            Err(_) => {
-                return json_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "server_error",
-                    "An error occurred. Please try again.",
-                );
-            }
         }
     }
     let _ = state
@@ -965,7 +889,12 @@ pub async fn authorize_select(
     if state
         .repos
         .oauth
-        .set_authorization_did(&select_request_id, &did, Some(&device_id))
+        .set_authorization_did(
+            &select_request_id,
+            &did,
+            Some(&device_id),
+            AuthStage::Complete,
+        )
         .await
         .is_err()
     {

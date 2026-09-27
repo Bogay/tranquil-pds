@@ -10,7 +10,7 @@ pub fn db_err_to_oauth(err: tranquil_db_traits::DbError) -> OAuthError {
 }
 
 pub use tranquil_oauth::{
-    AuthFlow, AuthFlowWithUser, AuthorizationCode, AuthorizationRequestParameters,
+    AuthFlow, AuthFlowWithUser, AuthStage, AuthorizationCode, AuthorizationRequestParameters,
     AuthorizationServerMetadata, AuthorizedClientData, ClientAuth, ClientMetadata,
     ClientMetadataCache, CodeChallengeMethod, DPoPJwk, DPoPProofHeader, DPoPProofPayload,
     DPoPVerifier, DPoPVerifyResult, DeviceData, DeviceId, FlowAuthenticated, FlowAuthorized,

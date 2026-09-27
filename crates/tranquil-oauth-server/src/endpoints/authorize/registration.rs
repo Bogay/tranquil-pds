@@ -218,7 +218,7 @@ pub async fn register_complete(
     if let Err(e) = state
         .repos
         .oauth
-        .set_authorization_did(&request_id, &did, None)
+        .set_authorization_did(&request_id, &did, None, AuthStage::Complete)
         .await
     {
         tracing::error!(
@@ -268,28 +268,10 @@ pub async fn register_complete(
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
     }
 
-    let code = AuthorizationCode::generate();
-    if let Err(e) = state
-        .repos
-        .oauth
-        .update_authorization_request(&request_id, &did, None, &code)
-        .await
-    {
-        tracing::error!(
-            request_uri = %form.request_uri,
-            did = %did,
-            error = ?e,
-            "register_complete: failed to update authorization request with code"
-        );
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "server_error",
-                "error_description": "An error occurred."
-            })),
-        )
-            .into_response();
-    }
+    let code = match store_authorization_code(&state, &request_id, &did, None, None).await {
+        Ok(code) => code,
+        Err(e) => return e.into_response(),
+    };
 
     tracing::info!(
         did = %did,

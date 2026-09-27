@@ -133,6 +133,48 @@ pub struct RequestData {
     pub device_id: Option<DeviceId>,
     pub code: Option<AuthorizationCode>,
     pub controller_did: Option<Did>,
+    pub auth_stage: AuthStage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthStage {
+    None,
+    FirstFactor,
+    Complete,
+}
+
+impl AuthStage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AuthStage::None => "none",
+            AuthStage::FirstFactor => "first_factor",
+            AuthStage::Complete => "complete",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct InvalidAuthStage;
+
+impl std::fmt::Display for InvalidAuthStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("invalid auth stage")
+    }
+}
+
+impl std::error::Error for InvalidAuthStage {}
+
+impl std::str::FromStr for AuthStage {
+    type Err = InvalidAuthStage;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "none" => Ok(AuthStage::None),
+            "first_factor" => Ok(AuthStage::FirstFactor),
+            "complete" => Ok(AuthStage::Complete),
+            _ => Err(InvalidAuthStage),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -318,7 +360,8 @@ impl AuthFlow {
         if data.expires_at < chrono::Utc::now() {
             return Err(FlowExpired);
         }
-        match (data.did, data.code) {
+        let authenticated_did = data.did.filter(|_| data.auth_stage == AuthStage::Complete);
+        match (authenticated_did, data.code) {
             (None, _) => Ok(AuthFlow::Pending(FlowPending {
                 parameters: data.parameters,
                 client_id: data.client_id,
@@ -485,6 +528,11 @@ mod tests {
                 extra: None,
             },
             expires_at: Utc::now() + expires_in,
+            auth_stage: if did.is_some() {
+                AuthStage::Complete
+            } else {
+                AuthStage::None
+            },
             did,
             device_id: None,
             code,
@@ -532,6 +580,40 @@ mod tests {
         let authorized = flow.require_authorized().expect("should be authorized");
         assert_eq!(authorized.did, did);
         assert_eq!(authorized.code, code);
+    }
+
+    #[test]
+    fn test_auth_flow_identified_but_not_complete_is_pending() {
+        let mut data =
+            make_request_data(Some(test_did("did:plc:test")), None, Duration::minutes(5));
+        data.auth_stage = AuthStage::FirstFactor;
+        let flow = AuthFlow::from_request_data(data).expect("should not be expired");
+        assert!(matches!(flow, AuthFlow::Pending(_)));
+        assert!(flow.require_user().is_err());
+    }
+
+    #[test]
+    fn test_auth_flow_carries_controller_when_complete() {
+        let did = test_did("did:plc:delegated");
+        let controller = test_did("did:plc:controller");
+        let mut data = make_request_data(Some(did.clone()), None, Duration::minutes(5));
+        data.controller_did = Some(controller.clone());
+        let with_user = AuthFlow::from_request_data(data)
+            .expect("should not be expired")
+            .require_user()
+            .expect("should have user");
+        assert_eq!(with_user.did(), &did);
+        assert_eq!(with_user.controller_did(), Some(&controller));
+
+        let self_user = AuthFlow::from_request_data(make_request_data(
+            Some(did.clone()),
+            None,
+            Duration::minutes(5),
+        ))
+        .expect("should not be expired")
+        .require_user()
+        .expect("should have user");
+        assert_eq!(self_user.controller_did(), None);
     }
 
     #[test]

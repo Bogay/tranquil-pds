@@ -5,7 +5,7 @@ use super::encoding::KeyBuilder;
 use super::keys::{KeyTag, UserHash};
 
 const TOKEN_SCHEMA_VERSION: u8 = 1;
-const REQUEST_SCHEMA_VERSION: u8 = 1;
+const REQUEST_SCHEMA_VERSION: u8 = 2;
 const DEVICE_SCHEMA_VERSION: u8 = 1;
 const ACCOUNT_DEVICE_SCHEMA_VERSION: u8 = 1;
 const DPOP_JTI_SCHEMA_VERSION: u8 = 1;
@@ -65,6 +65,35 @@ pub struct OAuthRequestValue {
     pub device_id: Option<String>,
     pub code: Option<String>,
     pub controller_did: Option<String>,
+    pub auth_stage: String,
+}
+
+#[derive(Deserialize)]
+struct OAuthRequestValueV1 {
+    client_id: String,
+    client_auth_json: Option<String>,
+    parameters_json: String,
+    expires_at_ms: i64,
+    did: Option<String>,
+    device_id: Option<String>,
+    code: Option<String>,
+    controller_did: Option<String>,
+}
+
+impl From<OAuthRequestValueV1> for OAuthRequestValue {
+    fn from(v: OAuthRequestValueV1) -> Self {
+        Self {
+            client_id: v.client_id,
+            client_auth_json: v.client_auth_json,
+            parameters_json: v.parameters_json,
+            expires_at_ms: v.expires_at_ms,
+            did: v.did,
+            device_id: v.device_id,
+            code: v.code,
+            controller_did: v.controller_did,
+            auth_stage: "none".to_string(),
+        }
+    }
 }
 
 impl OAuthRequestValue {
@@ -87,6 +116,9 @@ impl OAuthRequestValue {
         let (&version, payload) = rest.split_first()?;
         match version {
             REQUEST_SCHEMA_VERSION => postcard::from_bytes(payload).ok(),
+            1 => postcard::from_bytes::<OAuthRequestValueV1>(payload)
+                .ok()
+                .map(Self::from),
             _ => None,
         }
     }
@@ -552,5 +584,63 @@ impl TokenIndexValue {
             TOKEN_SCHEMA_VERSION => postcard::from_bytes(payload).ok(),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request_value() -> OAuthRequestValue {
+        OAuthRequestValue {
+            client_id: "https://client.example/metadata.json".to_owned(),
+            client_auth_json: None,
+            parameters_json: "{}".to_owned(),
+            expires_at_ms: 1700000000000,
+            did: Some("did:plc:test".to_owned()),
+            device_id: None,
+            code: Some("code".to_owned()),
+            controller_did: None,
+            auth_stage: "complete".to_owned(),
+        }
+    }
+
+    #[test]
+    fn request_value_roundtrip() {
+        let val = request_value();
+        let decoded = OAuthRequestValue::deserialize(&val.serialize_with_ttl()).unwrap();
+        assert_eq!(val, decoded);
+    }
+
+    #[test]
+    fn request_value_v1_decodes_unauthenticated() {
+        let val = request_value();
+        let v1 = (
+            &val.client_id,
+            &val.client_auth_json,
+            &val.parameters_json,
+            val.expires_at_ms,
+            &val.did,
+            &val.device_id,
+            &val.code,
+            &val.controller_did,
+        );
+        let bytes = [
+            u64::try_from(val.expires_at_ms)
+                .unwrap()
+                .to_be_bytes()
+                .as_slice(),
+            &[1],
+            &postcard::to_allocvec(&v1).unwrap(),
+        ]
+        .concat();
+        let decoded = OAuthRequestValue::deserialize(&bytes).unwrap();
+        assert_eq!(
+            decoded,
+            OAuthRequestValue {
+                auth_stage: "none".to_owned(),
+                ..val
+            }
+        );
     }
 }

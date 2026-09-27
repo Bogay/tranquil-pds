@@ -343,6 +343,18 @@ async fn passkey_start_named(
             .into_response();
     }
 
+    let passkey_target = match resolve_passkey_target(
+        &state,
+        delegated_did.as_deref(),
+        request_data.did.as_ref(),
+        &user.did,
+    )
+    .await
+    {
+        Ok(target) => target,
+        Err(response) => return response,
+    };
+
     let (rcr, auth_state) = match state.webauthn_config.start_authentication(passkeys) {
         Ok(result) => result,
         Err(e) => {
@@ -394,93 +406,95 @@ async fn passkey_start_named(
             .into_response();
     }
 
-    let delegation_from_param = match &delegated_did {
-        Some(delegated_did_str) => match delegated_did_str.parse::<tranquil_types::Did>() {
-            Ok(delegated_did) if delegated_did != user.did => {
-                match state
-                    .repos
-                    .delegation
-                    .get_delegation(&delegated_did, &user.did)
-                    .await
-                {
-                    Ok(Some(_)) => Some(delegated_did),
-                    Ok(None) => None,
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            delegated_did = %delegated_did,
-                            controller_did = %user.did,
-                            "Failed to verify delegation relationship"
-                        );
-                        None
-                    }
-                }
-            }
-            _ => None,
-        },
-        None => None,
+    let bind_result = match passkey_target {
+        PasskeyTarget::Delegated(delegated_did) => {
+            tracing::info!(
+                delegated_did = %delegated_did,
+                controller_did = %user.did,
+                "Passkey auth in delegation flow"
+            );
+            state
+                .repos
+                .oauth
+                .set_delegation(
+                    &passkey_start_request_id,
+                    &delegated_did,
+                    &user.did,
+                    AuthStage::None,
+                )
+                .await
+        }
+        PasskeyTarget::Own => {
+            state
+                .repos
+                .oauth
+                .set_authorization_did(&passkey_start_request_id, &user.did, None, AuthStage::None)
+                .await
+        }
     };
-
-    let is_delegation_flow = delegation_from_param.is_some()
-        || request_data.did.as_ref().is_some_and(|existing_did| {
-            existing_did
-                .parse::<tranquil_types::Did>()
-                .ok()
-                .is_some_and(|parsed| parsed != user.did)
-        });
-
-    if let Some(delegated_did) = delegation_from_param {
-        tracing::info!(
-            delegated_did = %delegated_did,
-            controller_did = %user.did,
-            "Passkey auth with delegated_did param - setting delegation flow"
-        );
-        if state
-            .repos
-            .oauth
-            .set_authorization_did(&passkey_start_request_id, &delegated_did, None)
-            .await
-            .is_err()
-        {
-            return OAuthError::ServerError("An error occurred.".into()).into_response();
-        }
-        if state
-            .repos
-            .oauth
-            .set_controller_did(&passkey_start_request_id, &user.did)
-            .await
-            .is_err()
-        {
-            return OAuthError::ServerError("An error occurred.".into()).into_response();
-        }
-    } else if is_delegation_flow {
-        tracing::info!(
-            delegated_did = ?request_data.did,
-            controller_did = %user.did,
-            "Passkey auth in delegation flow - preserving delegated DID"
-        );
-        if state
-            .repos
-            .oauth
-            .set_controller_did(&passkey_start_request_id, &user.did)
-            .await
-            .is_err()
-        {
-            return OAuthError::ServerError("An error occurred.".into()).into_response();
-        }
-    } else if state
-        .repos
-        .oauth
-        .set_authorization_did(&passkey_start_request_id, &user.did, None)
-        .await
-        .is_err()
-    {
+    if bind_result.is_err() {
         return OAuthError::ServerError("An error occurred.".into()).into_response();
     }
 
     let options = serde_json::to_value(&rcr).unwrap_or(serde_json::json!({}));
 
     Json(PasskeyStartResponse { options }).into_response()
+}
+
+enum PasskeyTarget {
+    Own,
+    Delegated(tranquil_types::Did),
+}
+
+async fn has_delegation_grant(
+    state: &AppState,
+    delegated_did: &tranquil_types::Did,
+    controller_did: &tranquil_types::Did,
+) -> Result<bool, Response> {
+    state
+        .repos
+        .delegation
+        .get_delegation(delegated_did, controller_did)
+        .await
+        .map(|grant| grant.is_some())
+        .map_err(|e| {
+            tracing::error!(
+                error = %e,
+                delegated_did = %delegated_did,
+                controller_did = %controller_did,
+                "Failed to verify delegation relationship"
+            );
+            OAuthError::ServerError("An error occurred.".into()).into_response()
+        })
+}
+
+async fn resolve_passkey_target(
+    state: &AppState,
+    delegated_did_param: Option<&str>,
+    request_did: Option<&tranquil_types::Did>,
+    controller_did: &tranquil_types::Did,
+) -> Result<PasskeyTarget, Response> {
+    if let Some(delegated_did) = delegated_did_param
+        .and_then(|s| s.parse::<tranquil_types::Did>().ok())
+        .filter(|d| d != controller_did)
+    {
+        return if has_delegation_grant(state, &delegated_did, controller_did).await? {
+            Ok(PasskeyTarget::Delegated(delegated_did))
+        } else {
+            Err(OAuthError::AccessDenied(
+                "No delegation relationship exists between these accounts.".into(),
+            )
+            .into_response())
+        };
+    }
+
+    if let Some(delegated_did) = request_did.filter(|d| *d != controller_did)
+        && has_delegation_grant(state, delegated_did, controller_did).await?
+    {
+        return Ok(PasskeyTarget::Delegated(delegated_did.clone()));
+    }
+
+    Ok(PasskeyTarget::Own)
 }
 
 #[derive(Debug, Deserialize)]
@@ -556,29 +570,23 @@ pub async fn passkey_finish(
             }
         };
 
-    let (did, auth_result) = match request_data.did.clone() {
-        Some(did) => match passkey_finish_named(&state, did, &request_data, &credential).await {
-            Ok(result) => result,
-            Err(response) => return response,
-        },
-        None => {
-            let result =
-                match passkey_finish_discoverable(&state, &credential, &passkey_finish_request_id)
-                    .await
-                {
-                    Ok(result) => result,
-                    Err(response) => return response,
-                };
-            if state
-                .repos
-                .oauth
-                .set_authorization_did(&passkey_finish_request_id, &result.0, None)
-                .await
-                .is_err()
-            {
-                return OAuthError::ServerError("An error occurred.".into()).into_response();
+    let (did, passkey_owner_did, auth_result) = match request_data.did.clone() {
+        Some(did) => {
+            let passkey_owner_did = request_data
+                .controller_did
+                .clone()
+                .unwrap_or_else(|| did.clone());
+            match passkey_finish_named(&state, &passkey_owner_did, &credential).await {
+                Ok(auth_result) => (did, passkey_owner_did, auth_result),
+                Err(response) => return response,
             }
-            result
+        }
+        None => {
+            match passkey_finish_discoverable(&state, &credential, &passkey_finish_request_id).await
+            {
+                Ok((did, auth_result)) => (did.clone(), did, auth_result),
+                Err(response) => return response,
+            }
         }
     };
 
@@ -611,9 +619,92 @@ pub async fn passkey_finish(
         }
     }
 
-    tracing::info!(did = %did, "Passkey authentication successful");
-
     let device_id = extract_device_cookie(&headers);
+    let hostname = &tranquil_config::get().server.hostname;
+    let requirement = match begin_second_factor(
+        &state,
+        &passkey_owner_did,
+        &passkey_finish_request_id,
+        device_id.as_ref(),
+    )
+    .await
+    {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::error!(did = %passkey_owner_did, error = %e, "begin_second_factor failed in passkey_finish");
+            return OAuthError::ServerError("An error occurred.".into()).into_response();
+        }
+    };
+    let (passkey_stage, next_redirect, notice) = match requirement {
+        SecondFactorRequirement::None => (AuthStage::Complete, None, None),
+        SecondFactorRequirement::Totp => (
+            AuthStage::FirstFactor,
+            Some(if request_data.controller_did.is_some() {
+                format!(
+                    "/app/oauth/delegation-totp?request_uri={}",
+                    url_encode(&form.request_uri)
+                )
+            } else {
+                format!(
+                    "/app/oauth/totp?request_uri={}",
+                    url_encode(&form.request_uri)
+                )
+            }),
+            None,
+        ),
+        SecondFactorRequirement::Code { channel, notice } => (
+            AuthStage::FirstFactor,
+            Some(format!(
+                "/app/oauth/2fa?request_uri={}&channel={}",
+                url_encode(&form.request_uri),
+                url_encode(channel)
+            )),
+            Some(notice),
+        ),
+    };
+
+    let completed = match request_data.did {
+        Some(_) => {
+            advance_passkey_stage(
+                &state,
+                &passkey_finish_request_id,
+                &passkey_owner_did,
+                passkey_stage,
+            )
+            .await
+        }
+        None => state
+            .repos
+            .oauth
+            .set_authorization_did(&passkey_finish_request_id, &did, None, passkey_stage)
+            .await
+            .map_err(|_| OAuthError::ServerError("An error occurred.".into()).into_response()),
+    };
+    if let Err(response) = completed {
+        return response;
+    }
+
+    if let Some(notice) = notice
+        && notice
+            .dispatch(&state, hostname, &passkey_owner_did)
+            .await
+            .is_err()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": UNDELIVERABLE_CODE
+            })),
+        )
+            .into_response();
+    }
+
+    if let Some(redirect_uri) = next_redirect {
+        return Json(serde_json::json!({ "redirect_uri": redirect_uri })).into_response();
+    }
+
+    tracing::info!(did = %did, "Passkey authentication successful");
     let requested_scope_str = request_data
         .parameters
         .scope
@@ -641,29 +732,18 @@ pub async fn passkey_finish(
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
     }
 
-    let code = AuthorizationCode::generate();
-    let passkey_final_device_id = device_id.clone();
-    if state
-        .repos
-        .oauth
-        .update_authorization_request(
-            &passkey_finish_request_id,
-            &did,
-            passkey_final_device_id.as_ref(),
-            &code,
-        )
-        .await
-        .is_err()
+    let code = match store_authorization_code(
+        &state,
+        &passkey_finish_request_id,
+        &did,
+        request_data.controller_did.as_ref(),
+        device_id.as_ref(),
+    )
+    .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "server_error",
-                "error_description": "An error occurred."
-            })),
-        )
-            .into_response();
-    }
+        Ok(code) => code,
+        Err(e) => return e.into_response(),
+    };
 
     let redirect_url = build_intermediate_redirect_url(
         &request_data.parameters.redirect_uri,
@@ -678,20 +758,32 @@ pub async fn passkey_finish(
     .into_response()
 }
 
+async fn advance_passkey_stage(
+    state: &AppState,
+    request_id: &RequestId,
+    passkey_owner_did: &tranquil_types::Did,
+    to: AuthStage,
+) -> Result<(), Response> {
+    match state
+        .repos
+        .oauth
+        .advance_auth_stage(request_id, passkey_owner_did, AuthStage::None, to)
+        .await
+    {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(OAuthError::AccessDenied(
+            "Passkey authentication state is not valid.".into(),
+        )
+        .into_response()),
+        Err(_) => Err(OAuthError::ServerError("An error occurred.".into()).into_response()),
+    }
+}
+
 async fn passkey_finish_named(
     state: &AppState,
-    did: tranquil_types::Did,
-    request_data: &tranquil_pds::oauth::RequestData,
+    passkey_owner_did: &tranquil_types::Did,
     credential: &webauthn_rs::prelude::PublicKeyCredential,
-) -> Result<
-    (
-        tranquil_types::Did,
-        webauthn_rs::prelude::AuthenticationResult,
-    ),
-    Response,
-> {
-    let passkey_owner_did = request_data.controller_did.as_ref().unwrap_or(&did);
-
+) -> Result<webauthn_rs::prelude::AuthenticationResult, Response> {
     let auth_state_json = state
         .repos
         .user
@@ -727,7 +819,7 @@ async fn passkey_finish_named(
         .webauthn_config
         .finish_authentication(credential, &auth_state)
         .map_err(|e| {
-            tracing::warn!(error = %e, did = %did, "Failed to verify passkey authentication");
+            tracing::warn!(error = %e, did = %passkey_owner_did, "Failed to verify passkey authentication");
             (
                 StatusCode::FORBIDDEN,
                 Json(serde_json::json!({
@@ -744,7 +836,7 @@ async fn passkey_finish_named(
         .delete_webauthn_challenge(passkey_owner_did, WebauthnChallengeType::Authentication)
         .await;
 
-    Ok((did, auth_result))
+    Ok(auth_result)
 }
 
 async fn passkey_finish_discoverable(
@@ -1226,103 +1318,92 @@ pub async fn authorize_passkey_finish(
         Ok(true) => {}
     }
 
-    let has_totp = state
-        .repos
-        .user
-        .has_totp_enabled(&did)
-        .await
-        .unwrap_or(false);
-    if has_totp {
-        let device_cookie = extract_device_cookie(&headers);
-        let device_is_trusted = if let Some(ref dev_id) = device_cookie {
-            tranquil_api::server::is_device_trusted(state.repos.oauth.as_ref(), dev_id, &did).await
-        } else {
-            false
-        };
-
-        if device_is_trusted {
-            if let Some(ref dev_id) = device_cookie {
-                let _ = tranquil_api::server::extend_device_trust(
-                    state.repos.oauth.as_ref(),
-                    dev_id,
-                    &did,
-                )
-                .await;
-            }
-        } else {
-            let user = match state.repos.user.get_2fa_status_by_did(&did).await {
-                Ok(Some(u)) => u,
-                _ => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
-                    )
-                        .into_response();
-                }
-            };
-
-            let _ = state
-                .repos
-                .oauth
-                .delete_2fa_challenge_by_request_uri(&passkey_finish_request_id)
-                .await;
-            match state
-                .repos
-                .oauth
-                .create_2fa_challenge(&did, &passkey_finish_request_id)
-                .await
-            {
-                Ok(challenge) => {
-                    match enqueue_notice(
-                        state.repos.user.as_ref(),
-                        state.repos.infra.as_ref(),
-                        user.id,
-                        Notice::TwoFactorCode {
-                            code: &challenge.code,
-                        },
-                        pds_hostname,
-                    )
-                    .await
-                    {
-                        Ok(Some(_)) => {}
-                        Ok(None) => {
-                            return (
-                                StatusCode::BAD_REQUEST,
-                                Json(serde_json::json!({
-                                    "error": "invalid_request",
-                                    "error_description": "We couldn't deliver the verification code to your notification channels. Please contact the PDS owner! <3"
-                                })),
-                            )
-                                .into_response();
-                        }
-                        Err(e) => {
-                            tracing::warn!(did = %did, error = %e, "Failed to enqueue 2FA notification");
-                        }
-                    }
-                    let channel_name = user.preferred_comms_channel.display_name();
-                    let redirect_url = format!(
-                        "/app/oauth/2fa?request_uri={}&channel={}",
-                        url_encode(&form.request_uri),
-                        url_encode(channel_name)
-                    );
-                    return (
-                        StatusCode::OK,
-                        Json(serde_json::json!({
-                            "next": "2fa",
-                            "redirect": redirect_url
-                        })),
-                    )
-                        .into_response();
-                }
-                Err(_) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
-                    )
-                        .into_response();
-                }
-            }
+    let device_cookie = extract_device_cookie(&headers);
+    let requirement = match begin_second_factor(
+        &state,
+        &did,
+        &passkey_finish_request_id,
+        device_cookie.as_ref(),
+    )
+    .await
+    {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::error!(did = %did, error = %e, "begin_second_factor failed in authorize_passkey_finish");
+            return OAuthError::ServerError("An error occurred.".into()).into_response();
         }
+    };
+
+    if let SecondFactorRequirement::Code { channel, notice } = requirement {
+        if let Err(response) = advance_passkey_stage(
+            &state,
+            &passkey_finish_request_id,
+            &did,
+            AuthStage::FirstFactor,
+        )
+        .await
+        {
+            return response;
+        }
+        if notice.dispatch(&state, pds_hostname, &did).await.is_err() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": UNDELIVERABLE_CODE
+                })),
+            )
+                .into_response();
+        }
+        let redirect_url = format!(
+            "/app/oauth/2fa?request_uri={}&channel={}",
+            url_encode(&form.request_uri),
+            url_encode(channel)
+        );
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "next": "2fa",
+                "redirect": redirect_url
+            })),
+        )
+            .into_response();
+    }
+
+    if matches!(requirement, SecondFactorRequirement::Totp) {
+        if let Err(response) = advance_passkey_stage(
+            &state,
+            &passkey_finish_request_id,
+            &did,
+            AuthStage::FirstFactor,
+        )
+        .await
+        {
+            return response;
+        }
+        let redirect_url = format!(
+            "/app/oauth/totp?request_uri={}",
+            url_encode(&form.request_uri)
+        );
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "next": "totp",
+                "redirect": redirect_url
+            })),
+        )
+            .into_response();
+    }
+
+    if let Err(response) = advance_passkey_stage(
+        &state,
+        &passkey_finish_request_id,
+        &did,
+        AuthStage::Complete,
+    )
+    .await
+    {
+        return response;
     }
 
     let redirect_url = format!(

@@ -539,25 +539,18 @@ pub async fn consent_post(
     {
         tracing::warn!("Failed to update request scope: {:?}", e);
     }
-    let code = AuthorizationCode::generate();
-    if state
-        .repos
-        .oauth
-        .update_authorization_request(
-            &consent_post_request_id,
-            &did,
-            request_data.device_id.as_ref(),
-            &code,
-        )
-        .await
-        .is_err()
+    let code = match store_authorization_code(
+        &state,
+        &consent_post_request_id,
+        &did,
+        controller_did_parsed.as_ref(),
+        request_data.device_id.as_ref(),
+    )
+    .await
     {
-        return json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "server_error",
-            "Failed to complete authorization",
-        );
-    }
+        Ok(code) => code,
+        Err(e) => return e.into_response(),
+    };
     let redirect_uri = &request_data.parameters.redirect_uri;
     let intermediate_url = build_intermediate_redirect_url(
         redirect_uri,
@@ -607,7 +600,7 @@ pub async fn authorize_renew(
         }
     };
 
-    if request_data.did.is_none() {
+    if request_data.auth_stage != AuthStage::Complete {
         return json_error(
             StatusCode::BAD_REQUEST,
             "invalid_request",

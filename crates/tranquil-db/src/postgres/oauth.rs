@@ -7,8 +7,8 @@ use tranquil_db_traits::{
     ScopePreference, TokenFamilyId, TrustedDeviceRow, TwoFactorChallenge,
 };
 use tranquil_oauth::{
-    AuthorizationRequestParameters, AuthorizedClientData, ClientAuth, DeviceData, RequestData,
-    SessionId as OAuthSessionId, TokenData,
+    AuthStage, AuthorizationRequestParameters, AuthorizedClientData, ClientAuth, DeviceData,
+    RequestData, SessionId as OAuthSessionId, TokenData,
 };
 use tranquil_types::{
     AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, RefreshToken, RequestId, TokenId,
@@ -456,7 +456,8 @@ impl OAuthRepository for PostgresOAuthRepository {
     ) -> Result<Option<RequestData>, DbError> {
         let row = sqlx::query!(
             r#"
-            SELECT did, device_id, client_id, client_auth, parameters, expires_at, code, controller_did
+            SELECT did, device_id, client_id, client_auth, parameters, expires_at, code, controller_did,
+                auth_stage
             FROM oauth_authorization_request
             WHERE id = $1
             "#,
@@ -485,6 +486,9 @@ impl OAuthRepository for PostgresOAuthRepository {
                     controller_did: r.controller_did.map(|s| s.parse()).transpose().map_err(
                         |_| DbError::InvalidColumn(col::OAUTH_AUTHORIZATION_REQUEST_CONTROLLER_DID),
                     )?,
+                    auth_stage: r.auth_stage.parse().map_err(|_| {
+                        DbError::InvalidColumn(col::OAUTH_AUTHORIZATION_REQUEST_AUTH_STAGE)
+                    })?,
                 }))
             }
             None => Ok(None),
@@ -496,19 +500,22 @@ impl OAuthRepository for PostgresOAuthRepository {
         request_id: &RequestId,
         did: &Did,
         device_id: Option<&DeviceId>,
+        stage: AuthStage,
     ) -> Result<(), DbError> {
         let extended_expiry =
             chrono::Utc::now() + chrono::Duration::seconds(REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS);
         sqlx::query!(
             r#"
             UPDATE oauth_authorization_request
-            SET did = $2, device_id = $3, expires_at = $4
+            SET did = $2, device_id = $3, expires_at = $4,
+                controller_did = NULL, auth_stage = $5
             WHERE id = $1
             "#,
             request_id.as_str(),
             did.as_str(),
             device_id.map(|d| d.as_str()),
-            extended_expiry
+            extended_expiry,
+            stage.as_str()
         )
         .execute(&self.pool)
         .await
@@ -520,24 +527,29 @@ impl OAuthRepository for PostgresOAuthRepository {
         &self,
         request_id: &RequestId,
         did: &Did,
+        controller_did: Option<&Did>,
         device_id: Option<&DeviceId>,
         code: &AuthorizationCode,
-    ) -> Result<(), DbError> {
-        sqlx::query!(
+    ) -> Result<bool, DbError> {
+        let result = sqlx::query!(
             r#"
             UPDATE oauth_authorization_request
-            SET did = $2, device_id = $3, code = $4
+            SET device_id = $4, code = $5
             WHERE id = $1
+              AND did = $2
+              AND controller_did IS NOT DISTINCT FROM $3::TEXT
+              AND auth_stage = 'complete'
             "#,
             request_id.as_str(),
             did.as_str(),
+            controller_did.map(|d| d.as_str()),
             device_id.map(|d| d.as_str()),
             code.as_str()
         )
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
     async fn consume_authorization_request_by_code(
@@ -548,7 +560,8 @@ impl OAuthRepository for PostgresOAuthRepository {
             r#"
             DELETE FROM oauth_authorization_request
             WHERE code = $1
-            RETURNING did, device_id, client_id, client_auth, parameters, expires_at, code, controller_did
+            RETURNING did, device_id, client_id, client_auth, parameters, expires_at, code, controller_did,
+                auth_stage
             "#,
             code.as_str()
         )
@@ -575,6 +588,9 @@ impl OAuthRepository for PostgresOAuthRepository {
                     controller_did: r.controller_did.map(|s| s.parse()).transpose().map_err(
                         |_| DbError::InvalidColumn(col::OAUTH_AUTHORIZATION_REQUEST_CONTROLLER_DID),
                     )?,
+                    auth_stage: r.auth_stage.parse().map_err(|_| {
+                        DbError::InvalidColumn(col::OAUTH_AUTHORIZATION_REQUEST_AUTH_STAGE)
+                    })?,
                 }))
             }
             None => Ok(None),
@@ -627,26 +643,30 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(result.rows_affected() > 0)
     }
 
-    async fn mark_request_authenticated(
+    async fn advance_auth_stage(
         &self,
         request_id: &RequestId,
-        did: &Did,
-        device_id: Option<&DeviceId>,
-    ) -> Result<(), DbError> {
-        sqlx::query!(
+        verified_did: &Did,
+        from: AuthStage,
+        to: AuthStage,
+    ) -> Result<bool, DbError> {
+        let result = sqlx::query!(
             r#"
             UPDATE oauth_authorization_request
-            SET did = $2, device_id = $3
+            SET auth_stage = $4
             WHERE id = $1
+              AND auth_stage = $3
+              AND COALESCE(controller_did, did) = $2
             "#,
             request_id.as_str(),
-            did.as_str(),
-            device_id.map(|d| d.as_str())
+            verified_did.as_str(),
+            from.as_str(),
+            to.as_str()
         )
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
     async fn update_request_scope(
@@ -669,35 +689,23 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(())
     }
 
-    async fn set_controller_did(
+    async fn set_delegation(
         &self,
         request_id: &RequestId,
+        did: &Did,
         controller_did: &Did,
+        stage: AuthStage,
     ) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             UPDATE oauth_authorization_request
-            SET controller_did = $2
+            SET did = $2, controller_did = $3, auth_stage = $4
             WHERE id = $1
             "#,
             request_id.as_str(),
-            controller_did.as_str()
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(())
-    }
-
-    async fn set_request_did(&self, request_id: &RequestId, did: &Did) -> Result<(), DbError> {
-        sqlx::query!(
-            r#"
-            UPDATE oauth_authorization_request
-            SET did = $2
-            WHERE id = $1
-            "#,
-            request_id.as_str(),
-            did.as_str()
+            did.as_str(),
+            controller_did.as_str(),
+            stage.as_str()
         )
         .execute(&self.pool)
         .await

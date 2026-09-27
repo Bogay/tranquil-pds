@@ -7,8 +7,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tranquil_pds::auth::{Active, Auth};
 use tranquil_pds::delegation::DelegationActionType;
-use tranquil_pds::oauth::RequestData;
 use tranquil_pds::oauth::client::{build_client_metadata, delegation_oauth_urls};
+use tranquil_pds::oauth::{AuthStage, RequestData};
 use tranquil_pds::rate_limit::{LoginLimit, OAuthRateLimited, TotpVerifyLimit};
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::PlainPassword;
@@ -16,6 +16,10 @@ use tranquil_pds::util::ClientIp;
 use tranquil_types::did_doc::{PdsEndpointError, extract_handle, extract_pds_endpoint};
 use tranquil_types::url_kind;
 use tranquil_types::{Did, RequestId};
+
+use crate::endpoints::authorize::{
+    SecondFactorRequirement, UNDELIVERABLE_CODE, begin_second_factor,
+};
 
 #[allow(clippy::result_large_err)]
 fn parse_did(s: &str, label: &str) -> Result<Did, Response> {
@@ -83,26 +87,20 @@ async fn finalize_delegation_auth(
     consent_redirect(request_uri)
 }
 
-async fn bind_delegation_to_request(
+async fn bind_delegation(
     state: &AppState,
     request_uri: &str,
     delegated_did: &Did,
     controller_did: &Did,
+    stage: AuthStage,
 ) -> Result<(), Response> {
     let request_id = RequestId::from(request_uri.to_string());
     state
         .repos
         .oauth
-        .set_request_did(&request_id, delegated_did)
+        .set_delegation(&request_id, delegated_did, controller_did, stage)
         .await
-        .map_err(|_| DelegationAuthResponse::err("Failed to update authorization request"))?;
-    state
-        .repos
-        .oauth
-        .set_controller_did(&request_id, controller_did)
-        .await
-        .map_err(|_| DelegationAuthResponse::err("Failed to update authorization request"))?;
-    Ok(())
+        .map_err(|_| DelegationAuthResponse::err("Failed to update authorization request"))
 }
 
 fn consent_url(request_uri: &str) -> String {
@@ -130,6 +128,10 @@ pub struct DelegationAuthSubmit {
 enum DelegationAuthResponse {
     Redirect(String),
     NeedsTotp(String),
+    Needs2fa {
+        channel: String,
+        redirect_uri: String,
+    },
     Error(String),
     TotpError(String),
 }
@@ -147,6 +149,14 @@ impl DelegationAuthResponse {
         Self::NeedsTotp(uri.into()).into_response()
     }
 
+    fn needs_2fa(channel: impl Into<String>, redirect_uri: impl Into<String>) -> Response {
+        Self::Needs2fa {
+            channel: channel.into(),
+            redirect_uri: redirect_uri.into(),
+        }
+        .into_response()
+    }
+
     fn totp_error(msg: impl Into<String>) -> Response {
         Self::TotpError(msg.into()).into_response()
     }
@@ -154,11 +164,22 @@ impl DelegationAuthResponse {
 
 impl IntoResponse for DelegationAuthResponse {
     fn into_response(self) -> Response {
-        let (success, needs_totp, redirect_uri, error) = match self {
-            Self::Redirect(uri) => (true, None, Some(uri), None),
-            Self::NeedsTotp(uri) => (true, Some(true), Some(uri), None),
-            Self::Error(msg) => (false, None, None, Some(msg)),
-            Self::TotpError(msg) => (false, Some(true), None, Some(msg)),
+        let (success, needs_totp, needs_2fa, redirect_uri, channel, error) = match self {
+            Self::Redirect(uri) => (true, None, None, Some(uri), None, None),
+            Self::NeedsTotp(uri) => (true, Some(true), None, Some(uri), None, None),
+            Self::Needs2fa {
+                channel,
+                redirect_uri,
+            } => (
+                true,
+                None,
+                Some(true),
+                Some(redirect_uri),
+                Some(channel),
+                None,
+            ),
+            Self::Error(msg) => (false, None, None, None, None, Some(msg)),
+            Self::TotpError(msg) => (false, Some(true), None, None, None, Some(msg)),
         };
 
         #[derive(Serialize)]
@@ -167,7 +188,11 @@ impl IntoResponse for DelegationAuthResponse {
             #[serde(skip_serializing_if = "Option::is_none")]
             needs_totp: Option<bool>,
             #[serde(skip_serializing_if = "Option::is_none")]
+            needs_2fa: Option<bool>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             redirect_uri: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            channel: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
             error: Option<String>,
         }
@@ -175,7 +200,9 @@ impl IntoResponse for DelegationAuthResponse {
         Json(Body {
             success,
             needs_totp,
+            needs_2fa,
             redirect_uri,
+            channel,
             error,
         })
         .into_response()
@@ -308,18 +335,55 @@ pub async fn delegation_auth(
         return DelegationAuthResponse::err("Invalid password");
     }
 
-    if let Err(resp) =
-        bind_delegation_to_request(&state, &form.request_uri, &delegated_did, &controller_did).await
+    let request_id = RequestId::from(form.request_uri.clone());
+    let hostname = &tranquil_config::get().server.hostname;
+    let requirement = match begin_second_factor(&state, &controller_did, &request_id, None).await {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::error!(did = %controller_did, error = %e, "begin_second_factor failed in delegation_auth");
+            return DelegationAuthResponse::err("Server error");
+        }
+    };
+    let stage = match requirement {
+        SecondFactorRequirement::None => AuthStage::Complete,
+        _ => AuthStage::FirstFactor,
+    };
+    if let Err(resp) = bind_delegation(
+        &state,
+        &form.request_uri,
+        &delegated_did,
+        &controller_did,
+        stage,
+    )
+    .await
     {
         return resp;
     }
-
-    let has_totp = tranquil_api::server::has_totp_enabled(&state, &controller_did).await;
-    if has_totp {
-        return DelegationAuthResponse::needs_totp(format!(
-            "/app/oauth/delegation-totp?request_uri={}",
-            urlencoding::encode(&form.request_uri)
-        ));
+    match requirement {
+        SecondFactorRequirement::Totp => {
+            return DelegationAuthResponse::needs_totp(format!(
+                "/app/oauth/delegation-totp?request_uri={}",
+                urlencoding::encode(&form.request_uri)
+            ));
+        }
+        SecondFactorRequirement::Code { channel, notice } => {
+            if notice
+                .dispatch(&state, hostname, &controller_did)
+                .await
+                .is_err()
+            {
+                return DelegationAuthResponse::err(UNDELIVERABLE_CODE);
+            }
+            return DelegationAuthResponse::needs_2fa(
+                channel,
+                format!(
+                    "/app/oauth/2fa?request_uri={}&channel={}",
+                    urlencoding::encode(&form.request_uri),
+                    urlencoding::encode(channel)
+                ),
+            );
+        }
+        SecondFactorRequirement::None => {}
     }
 
     let user_agent = tranquil_pds::util::extract_user_agent(&headers);
@@ -358,8 +422,8 @@ pub async fn delegation_totp_verify(
     };
 
     let controller_did = match request.controller_did {
-        Some(did) => did,
-        None => return DelegationAuthResponse::err("Controller not authenticated"),
+        Some(did) if request.auth_stage == AuthStage::FirstFactor => did,
+        _ => return DelegationAuthResponse::err("Controller not authenticated"),
     };
 
     let delegated_did = match request.did {
@@ -377,6 +441,21 @@ pub async fn delegation_totp_verify(
             .await;
     if !totp_valid {
         return DelegationAuthResponse::totp_error("Invalid TOTP code");
+    }
+    match state
+        .repos
+        .oauth
+        .advance_auth_stage(
+            &RequestId::from(form.request_uri.clone()),
+            &controller_did,
+            AuthStage::FirstFactor,
+            AuthStage::Complete,
+        )
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return DelegationAuthResponse::err("Controller not authenticated"),
+        Err(_) => return DelegationAuthResponse::err("Failed to update authorization request"),
     }
 
     let user_agent = tranquil_pds::util::extract_user_agent(&headers);
@@ -426,8 +505,14 @@ pub async fn delegation_auth_token(
         Err(resp) => return resp,
     };
 
-    if let Err(resp) =
-        bind_delegation_to_request(&state, &form.request_uri, &delegated_did, controller_did).await
+    if let Err(resp) = bind_delegation(
+        &state,
+        &form.request_uri,
+        &delegated_did,
+        controller_did,
+        AuthStage::Complete,
+    )
+    .await
     {
         return resp;
     }
@@ -560,11 +645,12 @@ pub async fn delegation_callback(
             .into_response();
     }
 
-    if let Err(resp) = bind_delegation_to_request(
+    if let Err(resp) = bind_delegation(
         &state,
         &auth_state.original_request_uri,
         delegated_did,
         controller_did,
+        AuthStage::Complete,
     )
     .await
     {

@@ -11,7 +11,7 @@ pub use dpop::{
 };
 pub use error::OAuthError;
 pub use types::{
-    AuthFlow, AuthFlowWithUser, AuthorizationCode, AuthorizationRequestParameters,
+    AuthFlow, AuthFlowWithUser, AuthStage, AuthorizationCode, AuthorizationRequestParameters,
     AuthorizationServerMetadata, AuthorizedClientData, ClientAuth, CodeChallengeMethod, DeviceData,
     DeviceId, FlowAuthenticated, FlowAuthorized, FlowExpired, FlowNotAuthenticated,
     FlowNotAuthorized, FlowPending, JwkPublicKey, Jwks, OAuthClientMetadata, ParResponse, Prompt,

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
+use tranquil_oauth::{AuthStage, AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
     AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId,
     TokenId,
@@ -178,14 +178,16 @@ pub trait OAuthRepository: Send + Sync {
         request_id: &RequestId,
         did: &Did,
         device_id: Option<&DeviceId>,
+        stage: AuthStage,
     ) -> Result<(), DbError>;
     async fn update_authorization_request(
         &self,
         request_id: &RequestId,
         did: &Did,
+        controller_did: Option<&Did>,
         device_id: Option<&DeviceId>,
         code: &AuthorizationCode,
-    ) -> Result<(), DbError>;
+    ) -> Result<bool, DbError>;
     async fn consume_authorization_request_by_code(
         &self,
         code: &AuthorizationCode,
@@ -197,23 +199,25 @@ pub trait OAuthRepository: Send + Sync {
         request_id: &RequestId,
         new_expires_at: DateTime<Utc>,
     ) -> Result<bool, DbError>;
-    async fn mark_request_authenticated(
+    async fn advance_auth_stage(
         &self,
         request_id: &RequestId,
-        did: &Did,
-        device_id: Option<&DeviceId>,
-    ) -> Result<(), DbError>;
+        verified_did: &Did,
+        from: AuthStage,
+        to: AuthStage,
+    ) -> Result<bool, DbError>;
     async fn update_request_scope(
         &self,
         request_id: &RequestId,
         scope: &str,
     ) -> Result<(), DbError>;
-    async fn set_controller_did(
+    async fn set_delegation(
         &self,
         request_id: &RequestId,
+        did: &Did,
         controller_did: &Did,
+        stage: AuthStage,
     ) -> Result<(), DbError>;
-    async fn set_request_did(&self, request_id: &RequestId, did: &Did) -> Result<(), DbError>;
 
     async fn create_device(&self, device_id: &DeviceId, data: &DeviceData) -> Result<(), DbError>;
     async fn get_device(&self, device_id: &DeviceId) -> Result<Option<DeviceData>, DbError>;

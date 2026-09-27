@@ -28,7 +28,7 @@ use tranquil_db_traits::{
     UserRow, UserSessionInfo, UserStatus, UserVerificationInfo, UserWithKey, UserWithoutBlocks,
     ValidatedInviteCode, WebauthnChallengeType,
 };
-use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
+use tranquil_oauth::{AuthStage, AuthorizedClientData, DeviceData, RequestData, TokenData};
 use tranquil_types::{
     AtUri, AuthorizationCode, CidLink, ClientId, DPoPProofId, DeviceId, Did, Handle, InviteCode,
     Nsid, RefreshToken, RequestId, Rkey, Tid, TokenId,
@@ -2174,14 +2174,16 @@ pub enum OAuthRequest {
         request_id: RequestId,
         did: Did,
         device_id: Option<DeviceId>,
+        stage: AuthStage,
         tx: Tx<()>,
     },
     UpdateAuthorizationRequest {
         request_id: RequestId,
         did: Did,
+        controller_did: Option<Did>,
         device_id: Option<DeviceId>,
         code: AuthorizationCode,
-        tx: Tx<()>,
+        tx: Tx<bool>,
     },
     ConsumeAuthorizationRequestByCode {
         code: AuthorizationCode,
@@ -2199,25 +2201,23 @@ pub enum OAuthRequest {
         new_expires_at: DateTime<Utc>,
         tx: Tx<bool>,
     },
-    MarkRequestAuthenticated {
+    AdvanceAuthStage {
         request_id: RequestId,
-        did: Did,
-        device_id: Option<DeviceId>,
-        tx: Tx<()>,
+        verified_did: Did,
+        from: AuthStage,
+        to: AuthStage,
+        tx: Tx<bool>,
     },
     UpdateRequestScope {
         request_id: RequestId,
         scope: String,
         tx: Tx<()>,
     },
-    SetControllerDid {
-        request_id: RequestId,
-        controller_did: Did,
-        tx: Tx<()>,
-    },
-    SetRequestDid {
+    SetDelegation {
         request_id: RequestId,
         did: Did,
+        controller_did: Did,
+        stage: AuthStage,
         tx: Tx<()>,
     },
     CreateDevice {
@@ -2403,10 +2403,9 @@ impl OAuthRequest {
             Self::SetAuthorizationDid { request_id, .. }
             | Self::UpdateAuthorizationRequest { request_id, .. }
             | Self::ExtendAuthorizationRequestExpiry { request_id, .. }
-            | Self::MarkRequestAuthenticated { request_id, .. }
+            | Self::AdvanceAuthStage { request_id, .. }
             | Self::UpdateRequestScope { request_id, .. }
-            | Self::SetControllerDid { request_id, .. }
-            | Self::SetRequestDid { request_id, .. }
+            | Self::SetDelegation { request_id, .. }
             | Self::DeleteAuthorizationRequest { request_id, .. } => key_to_routing(request_id),
             Self::ConsumeAuthorizationRequestByCode { code, .. } => key_to_routing(code),
             Self::CreateToken { .. }
@@ -4573,18 +4572,20 @@ fn dispatch_oauth<S: StorageIO>(state: &HandlerState<S>, req: OAuthRequest) {
             request_id,
             did,
             device_id,
+            stage,
             tx,
         } => {
             let result = state
                 .metastore
                 .oauth_ops()
-                .set_authorization_did(&request_id, &did, device_id.as_ref())
+                .set_authorization_did(&request_id, &did, device_id.as_ref(), stage)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
         OAuthRequest::UpdateAuthorizationRequest {
             request_id,
             did,
+            controller_did,
             device_id,
             code,
             tx,
@@ -4592,7 +4593,13 @@ fn dispatch_oauth<S: StorageIO>(state: &HandlerState<S>, req: OAuthRequest) {
             let result = state
                 .metastore
                 .oauth_ops()
-                .update_authorization_request(&request_id, &did, device_id.as_ref(), &code)
+                .update_authorization_request(
+                    &request_id,
+                    &did,
+                    controller_did.as_ref(),
+                    device_id.as_ref(),
+                    &code,
+                )
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
@@ -4632,16 +4639,17 @@ fn dispatch_oauth<S: StorageIO>(state: &HandlerState<S>, req: OAuthRequest) {
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
-        OAuthRequest::MarkRequestAuthenticated {
+        OAuthRequest::AdvanceAuthStage {
             request_id,
-            did,
-            device_id,
+            verified_did,
+            from,
+            to,
             tx,
         } => {
             let result = state
                 .metastore
                 .oauth_ops()
-                .mark_request_authenticated(&request_id, &did, device_id.as_ref())
+                .advance_auth_stage(&request_id, &verified_did, from, to)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
@@ -4657,27 +4665,17 @@ fn dispatch_oauth<S: StorageIO>(state: &HandlerState<S>, req: OAuthRequest) {
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }
-        OAuthRequest::SetControllerDid {
-            request_id,
-            controller_did,
-            tx,
-        } => {
-            let result = state
-                .metastore
-                .oauth_ops()
-                .set_controller_did(&request_id, &controller_did)
-                .map_err(metastore_to_db);
-            let _ = tx.send(result);
-        }
-        OAuthRequest::SetRequestDid {
+        OAuthRequest::SetDelegation {
             request_id,
             did,
+            controller_did,
+            stage,
             tx,
         } => {
             let result = state
                 .metastore
                 .oauth_ops()
-                .set_request_did(&request_id, &did)
+                .set_delegation(&request_id, &did, &controller_did, stage)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }

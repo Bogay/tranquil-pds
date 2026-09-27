@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_authorization_request\n            SET device_id = $4, code = $5\n            WHERE id = $1\n              AND did = $2\n              AND controller_did IS NOT DISTINCT FROM $3::TEXT\n              AND auth_stage = 'complete'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "27f6b2e801de9ebfca3182f49b30bde24486ea4e30edcbaf657f386ca60001d8"
+}
