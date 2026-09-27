@@ -144,21 +144,12 @@ pub async fn consent_get(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("atproto");
 
-    let controller_did_parsed: Option<Did> = request_data
-        .controller_did
-        .as_ref()
-        .and_then(|s| s.parse().ok());
-    let delegation_grant = if let Some(ref ctrl_did) = controller_did_parsed {
-        state
-            .repos
-            .delegation
-            .get_delegation(&did, ctrl_did)
-            .await
-            .ok()
-            .flatten()
-    } else {
-        None
-    };
+    let controller_did: Option<Did> = flow_with_user.controller_did().cloned();
+    let delegation_grant =
+        match controller_delegation_grant(&state, &did, controller_did.as_ref()).await {
+            Ok(grant) => grant,
+            Err(response) => return response,
+        };
 
     let authority = match delegation_grant.as_ref() {
         Some(grant) => scope_resolution::Authority::Delegated(&grant.granted_scopes),
@@ -323,7 +314,7 @@ pub async fn consent_get(
         .map(|h| h.to_string());
 
     let (is_delegation, controller_did_resp, controller_handle, delegation_level) =
-        if let Some(ref ctrl_did) = controller_did_parsed {
+        if let Some(ref ctrl_did) = controller_did {
             let ctrl_handle = state
                 .repos
                 .user
@@ -439,21 +430,11 @@ pub async fn consent_post(
         .as_deref()
         .unwrap_or("atproto");
 
-    let controller_did_parsed: Option<Did> = request_data
-        .controller_did
-        .as_ref()
-        .and_then(|s| s.parse().ok());
-
-    let delegation_grant = match controller_did_parsed.as_ref() {
-        Some(ctrl_did) => state
-            .repos
-            .delegation
-            .get_delegation(&did, ctrl_did)
-            .await
-            .ok()
-            .flatten(),
-        None => None,
-    };
+    let delegation_grant =
+        match controller_delegation_grant(&state, &did, flow_with_user.controller_did()).await {
+            Ok(grant) => grant,
+            Err(response) => return response,
+        };
 
     let authority = match delegation_grant.as_ref() {
         Some(grant) => scope_resolution::Authority::Delegated(&grant.granted_scopes),
@@ -543,7 +524,7 @@ pub async fn consent_post(
         &state,
         &consent_post_request_id,
         &did,
-        controller_did_parsed.as_ref(),
+        flow_with_user.controller_did(),
         request_data.device_id.as_ref(),
     )
     .await
@@ -653,5 +634,36 @@ pub async fn authorize_renew(
             "server_error",
             "Database error",
         ),
+    }
+}
+
+async fn controller_delegation_grant(
+    state: &AppState,
+    did: &Did,
+    controller_did: Option<&Did>,
+) -> Result<Option<tranquil_db_traits::DelegationGrant>, Response> {
+    let Some(controller_did) = controller_did else {
+        return Ok(None);
+    };
+    match state
+        .repos
+        .delegation
+        .get_delegation(did, controller_did)
+        .await
+    {
+        Ok(Some(grant)) => Ok(Some(grant)),
+        Ok(None) => Err(json_error(
+            StatusCode::FORBIDDEN,
+            "access_denied",
+            "No delegation grant for this controller",
+        )),
+        Err(e) => {
+            tracing::error!(error = ?e, "Failed to look up delegation grant");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "An error occurred.",
+            ))
+        }
     }
 }
