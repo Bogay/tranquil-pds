@@ -1204,7 +1204,7 @@ pub async fn authorize_passkey_finish(
         .repos
         .user
         .update_passkey_counter(
-            credential.id.as_ref(),
+            auth_result.cred_id().as_slice(),
             i32::try_from(auth_result.counter()).unwrap_or(i32::MAX),
         )
         .await
