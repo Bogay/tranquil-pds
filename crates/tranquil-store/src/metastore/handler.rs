@@ -142,11 +142,11 @@ fn did_to_routing(did: &str) -> Routing {
     Routing::Sharded(UserHash::from_did(did).raw())
 }
 
-fn cid_to_routing(cid: &CidLink) -> Routing {
+fn key_to_routing(key: &str) -> Routing {
     use siphasher::sip::SipHasher24;
     use std::hash::{Hash, Hasher};
     let mut hasher = SipHasher24::new();
-    cid.as_str().hash(&mut hasher);
+    key.hash(&mut hasher);
     Routing::Sharded(hasher.finish())
 }
 
@@ -639,7 +639,7 @@ impl BlobRequest {
         match self {
             Self::InsertBlob { cid, .. }
             | Self::EnsureBlobOwnership { cid, .. }
-            | Self::UpdateBlobTakedown { cid, .. } => cid_to_routing(cid),
+            | Self::UpdateBlobTakedown { cid, .. } => key_to_routing(cid),
 
             Self::DeleteBlobsByUser { user_id, .. } => uuid_to_routing(user_hashes, user_id),
 
@@ -2400,10 +2400,15 @@ impl OAuthRequest {
             | Self::DeleteSessionsByDidExcept { did, .. }
             | Self::DeleteSessionById { did, .. } => did_to_routing(did),
             Self::RevokeTokensForController { delegated_did, .. } => did_to_routing(delegated_did),
-            Self::SetAuthorizationDid { did, .. }
-            | Self::UpdateAuthorizationRequest { did, .. }
-            | Self::MarkRequestAuthenticated { did, .. }
-            | Self::SetRequestDid { did, .. } => did_to_routing(did),
+            Self::SetAuthorizationDid { request_id, .. }
+            | Self::UpdateAuthorizationRequest { request_id, .. }
+            | Self::ExtendAuthorizationRequestExpiry { request_id, .. }
+            | Self::MarkRequestAuthenticated { request_id, .. }
+            | Self::UpdateRequestScope { request_id, .. }
+            | Self::SetControllerDid { request_id, .. }
+            | Self::SetRequestDid { request_id, .. }
+            | Self::DeleteAuthorizationRequest { request_id, .. } => key_to_routing(request_id),
+            Self::ConsumeAuthorizationRequestByCode { code, .. } => key_to_routing(code),
             Self::CreateToken { .. }
             | Self::GetTokenById { .. }
             | Self::GetTokenByRefreshToken { .. }
@@ -2414,12 +2419,7 @@ impl OAuthRequest {
             | Self::DeleteTokenFamily { .. }
             | Self::CreateAuthorizationRequest { .. }
             | Self::GetAuthorizationRequest { .. }
-            | Self::ConsumeAuthorizationRequestByCode { .. }
-            | Self::DeleteAuthorizationRequest { .. }
             | Self::DeleteExpiredAuthorizationRequests { .. }
-            | Self::ExtendAuthorizationRequestExpiry { .. }
-            | Self::UpdateRequestScope { .. }
-            | Self::SetControllerDid { .. }
             | Self::CreateDevice { .. }
             | Self::GetDevice { .. }
             | Self::UpdateDeviceLastSeen { .. }
