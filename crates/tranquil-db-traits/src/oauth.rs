@@ -66,6 +66,8 @@ pub struct TwoFactorChallenge {
     pub expires_at: DateTime<Utc>,
 }
 
+pub const TWO_FACTOR_CHALLENGE_TTL_SECS: u64 = 600;
+
 #[derive(Debug, Clone)]
 pub struct TrustedDeviceRow {
     pub id: DeviceId,

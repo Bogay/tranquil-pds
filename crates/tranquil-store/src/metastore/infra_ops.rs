@@ -24,7 +24,7 @@ use super::users::UserValue;
 use tranquil_db_traits::{
     AdminAccountInfo, CommsMessageType, CommsStatus, DeletionRequest, DeletionRequestWithToken,
     InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder, InviteCodeState,
-    InviteCodeUse, NotificationHistoryRow, PlcTokenInfo, QueuedComms, Recipient,
+    InviteCodeUse, NotificationHistoryRow, OutboundMessage, PlcTokenInfo, QueuedComms,
     ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
 use tranquil_types::{Did, Handle, InviteCode};
@@ -90,17 +90,17 @@ impl InfraOps {
             u8_to_status(v.status).ok_or(MetastoreError::CorruptData("invalid comms status"))?;
         Ok(QueuedComms {
             id: v.id,
-            user_id: v.user_id,
+            // Going forward, this can't ever occur, but there may be older-versioned queued up msgs out in the wild which could possibly have no user set.
+            user_id: v
+                .user_id
+                .ok_or(MetastoreError::CorruptData("queued msg without a user"))?,
             channel,
             comms_type,
             status,
             recipient: v.recipient.clone(),
             subject: v.subject.clone(),
             body: v.body.clone(),
-            metadata: v
-                .metadata
-                .as_ref()
-                .and_then(|b| serde_json::from_slice(b).ok()),
+            html_body: v.html_body.clone(),
             attempts: v.attempts,
             max_attempts: v.max_attempts,
             last_error: v.error_message.clone(),
@@ -145,27 +145,22 @@ impl InfraOps {
         })
     }
 
-    pub fn enqueue_comms(
-        &self,
-        user_id: Option<Uuid>,
-        recipient: &Recipient,
-        comms_type: CommsMessageType,
-        subject: Option<&str>,
-        body: &str,
-        metadata: Option<serde_json::Value>,
-    ) -> Result<Uuid, MetastoreError> {
+    pub fn enqueue_comms(&self, message: OutboundMessage) -> Result<Uuid, MetastoreError> {
         let id = Uuid::new_v4();
         let now_ms = Utc::now().timestamp_millis();
+        let recipient = message.recipient.as_str();
+        let channel = channel_to_u8(message.recipient.channel());
+        let comms_type = comms_type_to_u8(message.kind);
 
         let value = QueuedCommsValue {
             id,
-            user_id,
-            channel: channel_to_u8(recipient.channel()),
-            comms_type: comms_type_to_u8(comms_type),
-            recipient: recipient.as_str().to_owned(),
-            subject: subject.map(str::to_owned),
-            body: body.to_owned(),
-            metadata: metadata.map(|v| serde_json::to_vec(&v).unwrap_or_default()),
+            user_id: Some(message.user_id),
+            channel,
+            comms_type,
+            recipient: recipient.to_owned(),
+            subject: message.subject.clone(),
+            body: message.body.clone(),
+            html_body: message.html_body.clone(),
             status: status_to_u8(CommsStatus::Pending),
             error_message: None,
             attempts: 0,
@@ -179,27 +174,25 @@ impl InfraOps {
         let mut batch = self.db.batch();
         batch.insert(&self.infra, queue_key.as_slice(), value.serialize());
 
-        if let Some(uid) = user_id {
-            let history_value = NotificationHistoryValue {
-                id,
-                channel: channel_to_u8(recipient.channel()),
-                comms_type: comms_type_to_u8(comms_type),
-                recipient: recipient.as_str().to_owned(),
-                subject: subject.map(str::to_owned),
-                body: body.to_owned(),
-                status: status_to_u8(CommsStatus::Pending),
-                created_at_ms: now_ms,
-            };
-            let seq = self
-                .comms_seq
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let history_key = comms_history_key(uid, now_ms, seq, id);
-            batch.insert(
-                &self.infra,
-                history_key.as_slice(),
-                history_value.serialize(),
-            );
-        }
+        let history_value = NotificationHistoryValue {
+            id,
+            channel,
+            comms_type,
+            recipient: recipient.to_owned(),
+            subject: message.subject,
+            body: message.body,
+            status: status_to_u8(CommsStatus::Pending),
+            created_at_ms: now_ms,
+        };
+        let seq = self
+            .comms_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let history_key = comms_history_key(message.user_id, now_ms, seq, id);
+        batch.insert(
+            &self.infra,
+            history_key.as_slice(),
+            history_value.serialize(),
+        );
 
         batch.commit().map_err(MetastoreError::Fjall)?;
         Ok(id)

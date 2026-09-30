@@ -4,8 +4,8 @@ use sqlx::PgPool;
 use tranquil_db_traits::{
     AdminAccountInfo, CommsChannel, CommsMessageType, CommsStatus, DbError, DeletionRequest,
     DeletionRequestWithToken, InfraRepository, InviteCodeError, InviteCodeInfo, InviteCodeRow,
-    InviteCodeSortOrder, InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo,
-    QueuedComms, Recipient, ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
+    InviteCodeSortOrder, InviteCodeState, InviteCodeUse, NotificationHistoryRow, OutboundMessage,
+    PlcTokenInfo, QueuedComms, ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
 };
 use tranquil_types::{Did, InviteCode};
 use uuid::Uuid;
@@ -26,27 +26,19 @@ impl PostgresInfraRepository {
 
 #[async_trait]
 impl InfraRepository for PostgresInfraRepository {
-    async fn enqueue_comms(
-        &self,
-        user_id: Option<Uuid>,
-        recipient: &Recipient,
-        comms_type: CommsMessageType,
-        subject: Option<&str>,
-        body: &str,
-        metadata: Option<serde_json::Value>,
-    ) -> Result<Uuid, DbError> {
+    async fn enqueue_comms(&self, message: OutboundMessage) -> Result<Uuid, DbError> {
         let id = sqlx::query_scalar!(
             r#"INSERT INTO comms_queue
-               (user_id, channel, comms_type, recipient, subject, body, metadata)
+               (user_id, channel, comms_type, recipient, subject, body, html_body)
                VALUES ($1, $2, $3, $4, $5, $6, $7)
                RETURNING id"#,
-            user_id,
-            recipient.channel() as CommsChannel,
-            comms_type as CommsMessageType,
-            recipient.as_str(),
-            subject,
-            body,
-            metadata
+            message.user_id,
+            message.recipient.channel() as CommsChannel,
+            message.kind as CommsMessageType,
+            message.recipient.as_str(),
+            message.subject,
+            message.body,
+            message.html_body,
         )
         .fetch_one(&self.pool)
         .await
@@ -82,7 +74,7 @@ impl InfraRepository for PostgresInfraRepository {
                    channel as "channel: CommsChannel",
                    comms_type as "comms_type: CommsMessageType",
                    status as "status: CommsStatus",
-                   recipient, subject, body, metadata,
+                   recipient, subject, body, html_body,
                    attempts, max_attempts, last_error,
                    created_at, updated_at, scheduled_for, processed_at"#,
             now,
@@ -1132,7 +1124,7 @@ impl InfraRepository for PostgresInfraRepository {
                 channel as "channel: CommsChannel",
                 comms_type as "comms_type: CommsMessageType",
                 status as "status: CommsStatus",
-                recipient, subject, body, metadata,
+                recipient, subject, body, html_body,
                 attempts, max_attempts, last_error,
                 created_at, updated_at, scheduled_for, processed_at
             FROM comms_queue

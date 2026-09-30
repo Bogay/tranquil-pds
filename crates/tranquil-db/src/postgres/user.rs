@@ -368,7 +368,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_comms_prefs(&self, user_id: Uuid) -> Result<Option<UserCommsPrefs>, DbError> {
         let row = sqlx::query!(
-            r#"SELECT email, handle, preferred_comms_channel as "preferred_channel!: CommsChannel", preferred_locale, telegram_chat_id, discord_id, signal_username
+            r#"SELECT email, email_verified, handle, preferred_comms_channel as "preferred_channel!: CommsChannel", preferred_locale, telegram_chat_id, discord_id, signal_username, signal_verified
                FROM users WHERE id = $1"#,
             user_id
         )
@@ -378,12 +378,17 @@ impl UserRepository for PostgresUserRepository {
         row.map(|r| {
             Ok(UserCommsPrefs {
                 email: r.email,
+                email_verified: r.email_verified,
                 handle: column(r.handle, col::USERS_HANDLE)?,
                 preferred_channel: r.preferred_channel,
-                preferred_locale: r.preferred_locale,
+                preferred_locale: r
+                    .preferred_locale
+                    .and_then(|locale| locale.parse().ok())
+                    .unwrap_or_default(),
                 telegram_chat_id: r.telegram_chat_id,
                 discord_id: r.discord_id,
                 signal_username: r.signal_username,
+                signal_verified: r.signal_verified,
             })
         })
         .transpose()

@@ -22,7 +22,8 @@ use tranquil_comms::{
     TemplateError, TemplateId, render_html,
 };
 use tranquil_db_traits::{
-    DbError, InfraRepository, QueuedComms, Recipient, UserCommsPrefs, UserRepository,
+    DbError, InfraRepository, OutboundMessage, QueuedComms, Recipient, UserCommsPrefs,
+    UserRepository,
 };
 use tranquil_types::{DiscordUserId, EmailAddress, Locale, SignalUsername, TelegramChatId};
 use uuid::Uuid;
@@ -128,7 +129,7 @@ impl CommsService {
         let comms_id = item.id;
 
         // Re-checking because there's been a trip into the DB and back, can't trust type -> string -> *maybe* type
-        let recipient = match tranquil_db_traits::Recipient::new(item.channel, &item.recipient) {
+        let recipient = match item.recipient() {
             Ok(recipient) => recipient,
             Err(e) => {
                 warn!(
@@ -519,26 +520,21 @@ pub mod repo {
         let locale = locale_of(&prefs);
         let rendered = notice.rendered(get_strings(locale), locale, &prefs.handle, hostname)?;
         infra_repo
-            .enqueue_comms(
-                Some(user_id),
-                &recipient,
-                notice.comms_type(),
-                Some(&rendered.subject),
-                &rendered.body,
-                rendered.metadata(),
-            )
+            .enqueue_comms(OutboundMessage {
+                user_id,
+                recipient,
+                kind: notice.comms_type(),
+                subject: Some(rendered.subject),
+                body: rendered.body,
+                html_body: rendered.html_body,
+            })
             .await
             .map_err(NotificationError::DbError)
             .map(Some)
     }
 
     fn locale_of(prefs: &UserCommsPrefs) -> Locale {
-        prefs
-            .preferred_locale
-            .as_deref()
-            .unwrap_or("en")
-            .parse()
-            .unwrap_or_default()
+        prefs.preferred_locale
     }
 
     pub async fn get_comms_prefs(
@@ -594,14 +590,14 @@ pub mod repo {
             html_body: render_html(TemplateId::EmailUpdate, locale, &vars).map_err(render_err)?,
         };
         infra_repo
-            .enqueue_comms(
-                Some(user_id),
-                &Recipient::Email(new_email.clone()),
-                CommsMessageType::EmailUpdate,
-                Some(&rendered.subject),
-                &rendered.body,
-                rendered.metadata(),
-            )
+            .enqueue_comms(OutboundMessage {
+                user_id,
+                recipient: Recipient::Email(new_email.clone()),
+                kind: CommsMessageType::EmailUpdate,
+                subject: Some(rendered.subject),
+                body: rendered.body,
+                html_body: rendered.html_body,
+            })
             .await
             .map_err(NotificationError::DbError)
     }
@@ -646,14 +642,14 @@ pub mod repo {
                 .map_err(render_err)?,
         };
         infra_repo
-            .enqueue_comms(
-                Some(user_id),
-                &target.recipient,
-                CommsMessageType::MigrationVerification,
-                Some(&rendered.subject),
-                &rendered.body,
-                rendered.metadata(),
-            )
+            .enqueue_comms(OutboundMessage {
+                user_id,
+                recipient: target.recipient.clone(),
+                kind: CommsMessageType::MigrationVerification,
+                subject: Some(rendered.subject),
+                body: rendered.body,
+                html_body: rendered.html_body,
+            })
             .await
             .map_err(NotificationError::DbError)
     }
@@ -704,14 +700,14 @@ pub mod repo {
                 .map_err(render_err)?,
         };
         infra_repo
-            .enqueue_comms(
-                Some(user_id),
-                &target.recipient,
-                CommsMessageType::EmailVerification,
-                Some(&rendered.subject),
-                &rendered.body,
-                rendered.metadata(),
-            )
+            .enqueue_comms(OutboundMessage {
+                user_id,
+                recipient: target.recipient.clone(),
+                kind: CommsMessageType::EmailVerification,
+                subject: Some(rendered.subject),
+                body: rendered.body,
+                html_body: rendered.html_body,
+            })
             .await
             .map_err(NotificationError::DbError)
     }
@@ -760,14 +756,14 @@ pub mod repo {
                 .map_err(render_err)?,
         };
         infra_repo
-            .enqueue_comms(
-                Some(user_id),
-                &target.recipient,
-                CommsMessageType::ChannelVerification,
-                Some(&rendered.subject),
-                &rendered.body,
-                rendered.metadata(),
-            )
+            .enqueue_comms(OutboundMessage {
+                user_id,
+                recipient: target.recipient.clone(),
+                kind: CommsMessageType::ChannelVerification,
+                subject: Some(rendered.subject),
+                body: rendered.body,
+                html_body: rendered.html_body,
+            })
             .await
             .map_err(NotificationError::DbError)
     }
@@ -799,14 +795,14 @@ pub mod repo {
                 .map_err(render_err)?,
         };
         infra_repo
-            .enqueue_comms(
-                Some(user_id),
-                recipient,
-                CommsMessageType::ChannelVerified,
-                Some(&rendered.subject),
-                &rendered.body,
-                rendered.metadata(),
-            )
+            .enqueue_comms(OutboundMessage {
+                user_id,
+                recipient: recipient.clone(),
+                kind: CommsMessageType::ChannelVerified,
+                subject: Some(rendered.subject),
+                body: rendered.body,
+                html_body: rendered.html_body,
+            })
             .await
             .map_err(NotificationError::DbError)
     }
@@ -1015,12 +1011,14 @@ mod recipient_for_tests {
     fn undeliverable_prefs() -> UserCommsPrefs {
         UserCommsPrefs {
             email: None,
+            email_verified: false,
             handle: "oys.nel.pet".parse().unwrap(),
             preferred_channel: CommsChannel::Telegram,
-            preferred_locale: None,
+            preferred_locale: Locale::default(),
             telegram_chat_id: None,
             discord_id: None,
             signal_username: None,
+            signal_verified: false,
         }
     }
 

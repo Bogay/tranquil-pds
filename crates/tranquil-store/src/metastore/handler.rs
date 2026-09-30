@@ -14,8 +14,8 @@ use tranquil_db_traits::{
     DeletionRequestWithToken, DidWebOverrides, ImportBlock, ImportRecord, ImportRepoError,
     InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder, InviteCodeUse,
     MigrationReactivationError, MigrationReactivationInput, NotificationHistoryRow,
-    NotificationPrefs, OAuthTokenWithUser, PasswordResetResult, PlcTokenInfo, QueuedComms,
-    ReactivatedAccountInfo, Recipient, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
+    NotificationPrefs, OAuthTokenWithUser, OutboundMessage, PasswordResetResult, PlcTokenInfo,
+    QueuedComms, ReactivatedAccountInfo, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
     RefreshSessionResult, RepoIdentity, ReservedSigningKey, ReservedSigningKeyFull,
     ScheduledDeletionAccount, ScopePreference, SequenceNumber, SequencedEvent, SessionId,
     StoredBackupCode, StoredPasskey, TokenFamilyId, TotpRecord, TotpRecordState, User2faStatus,
@@ -1804,12 +1804,7 @@ impl UserRequest {
 
 pub enum InfraRequest {
     EnqueueComms {
-        user_id: Option<Uuid>,
-        recipient: Recipient,
-        comms_type: CommsMessageType,
-        subject: Option<String>,
-        body: String,
-        metadata: Option<serde_json::Value>,
+        message: OutboundMessage,
         tx: Tx<Uuid>,
     },
     FetchPendingComms {
@@ -2086,9 +2081,7 @@ impl InfraRequest {
             Self::CreateInviteCodesBatch {
                 created_by_user, ..
             } => uuid_to_routing(user_hashes, created_by_user),
-            Self::EnqueueComms {
-                user_id: Some(uid), ..
-            } => uuid_to_routing(user_hashes, uid),
+            Self::EnqueueComms { message, .. } => uuid_to_routing(user_hashes, &message.user_id),
             Self::GetInviteCodesForAccount { for_account, .. } => {
                 did_to_routing(for_account.as_str())
             }
@@ -3868,26 +3861,11 @@ fn dispatch_session<S: StorageIO>(state: &HandlerState<S>, req: SessionRequest) 
 
 fn dispatch_infra<S: StorageIO>(state: &HandlerState<S>, req: InfraRequest) {
     match req {
-        InfraRequest::EnqueueComms {
-            user_id,
-            recipient,
-            comms_type,
-            subject,
-            body,
-            metadata,
-            tx,
-        } => {
+        InfraRequest::EnqueueComms { message, tx } => {
             let result = state
                 .metastore
                 .infra_ops()
-                .enqueue_comms(
-                    user_id,
-                    &recipient,
-                    comms_type,
-                    subject.as_deref(),
-                    &body,
-                    metadata,
-                )
+                .enqueue_comms(message)
                 .map_err(metastore_to_db);
             let _ = tx.send(result);
         }

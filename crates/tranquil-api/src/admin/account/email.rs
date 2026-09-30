@@ -49,14 +49,14 @@ pub async fn send_email(
     let result = state
         .repos
         .infra
-        .enqueue_comms(
-            Some(user_id),
-            &tranquil_types::Recipient::Email(email),
-            tranquil_db_traits::CommsMessageType::AdminEmail,
-            Some(&subject),
-            content,
-            None,
-        )
+        .enqueue_comms(tranquil_db_traits::OutboundMessage {
+            user_id,
+            recipient: tranquil_types::Recipient::Email(email),
+            kind: tranquil_db_traits::CommsMessageType::AdminEmail,
+            subject: Some(subject),
+            body: content.to_string(),
+            html_body: None,
+        })
         .await;
     match result {
         Ok(_) => {

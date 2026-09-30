@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tranquil_types::{
-    AtIdentifier, CidLink, Did, Handle, InviteCode, Jti, PasswordHash, Tid, TokenId,
+    AtIdentifier, CidLink, Did, Handle, InviteCode, Jti, Locale, PasswordHash, Tid, TokenId,
 };
 use uuid::Uuid;
 
@@ -658,12 +658,14 @@ pub struct DidWebOverrides {
 #[derive(Debug, Clone)]
 pub struct UserCommsPrefs {
     pub email: Option<String>,
+    pub email_verified: bool,
     pub handle: Handle,
     pub preferred_channel: CommsChannel,
-    pub preferred_locale: Option<String>,
+    pub preferred_locale: Locale,
     pub telegram_chat_id: Option<i64>,
     pub discord_id: Option<String>,
     pub signal_username: Option<String>,
+    pub signal_verified: bool,
 }
 
 #[derive(Debug, Clone)]

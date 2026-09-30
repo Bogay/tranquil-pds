@@ -13,7 +13,7 @@ use tranquil_types::Locale;
 
 pub use error::TemplateError;
 pub use ids::{REQUIRED_TEMPLATE_IDS, TemplateId};
-pub use rendered::{RenderedTemplate, html_body_from_metadata};
+pub use rendered::RenderedTemplate;
 pub use store::TemplateStore;
 
 static RUNTIME_TEMPLATE_STORE: OnceLock<TemplateStore> = OnceLock::new();

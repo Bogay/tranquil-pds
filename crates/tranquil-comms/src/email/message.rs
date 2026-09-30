@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 use super::types::EmailDomain;
 use crate::sender::SendError;
-use crate::templates::html_body_from_metadata;
 use crate::{CommsMessageType, QueuedComms};
 
 pub(super) fn build(
@@ -39,7 +38,7 @@ pub(super) fn build(
         None => builder,
     };
 
-    match html_body_from_metadata(&qc.metadata) {
+    match qc.html_body.as_deref() {
         Some(html) => builder
             .multipart(
                 MultiPart::alternative()
@@ -115,7 +114,6 @@ mod tests {
     use super::*;
     use crate::{CommsChannel, CommsStatus};
     use chrono::Utc;
-    use serde_json::json;
     use uuid::Uuid;
 
     fn from_mailbox() -> Mailbox {
@@ -130,18 +128,18 @@ mod tests {
         recipient: &str,
         subject: Option<&str>,
         body: &str,
-        metadata: Option<serde_json::Value>,
+        html_body: Option<&str>,
     ) -> QueuedComms {
         QueuedComms {
             id: Uuid::new_v4(),
-            user_id: None,
+            user_id: Uuid::new_v4(),
             channel: CommsChannel::Email,
             comms_type: CommsMessageType::Welcome,
             status: CommsStatus::Pending,
             recipient: recipient.to_string(),
             subject: subject.map(String::from),
             body: body.to_string(),
-            metadata,
+            html_body: html_body.map(String::from),
             attempts: 0,
             max_attempts: 3,
             last_error: None,
@@ -172,14 +170,14 @@ mod tests {
     }
 
     #[test]
-    fn build_multipart_when_html_metadata_present() {
+    fn build_multipart_when_html_present() {
         let msg = build(
             &from_mailbox(),
             &fixture(
                 "user@nel.pet",
                 Some("Welcome"),
                 "Hello plain.",
-                Some(json!({"html_body": "<p>Hello <b>html</b>.</p>"})),
+                Some("<p>Hello <b>html</b>.</p>"),
             ),
             &to("user@jola.dev"),
             false,

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tranquil_db::PostgresRepositories;
-use tranquil_db_traits::{Backlink, BacklinkPath, CommsChannel, CommsMessageType};
+use tranquil_db_traits::{Backlink, BacklinkPath, CommsChannel, CommsMessageType, OutboundMessage};
 use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Recipient, Rkey, Tid};
 use uuid::Uuid;
 
@@ -1194,28 +1194,28 @@ async fn parity_comms_queue() {
 
     let pg_id =
         f.pg.infra
-            .enqueue_comms(
-                Some(pg_uid),
-                &Recipient::new(CommsChannel::Email, "test@jola.dev").unwrap(),
-                CommsMessageType::Welcome,
-                Some("Welcome"),
-                "Welcome body",
-                None,
-            )
+            .enqueue_comms(OutboundMessage {
+                user_id: pg_uid,
+                recipient: Recipient::new(CommsChannel::Email, "test@jola.dev").unwrap(),
+                kind: CommsMessageType::Welcome,
+                subject: Some("Welcome".into()),
+                body: "Welcome body".into(),
+                html_body: None,
+            })
             .await
             .unwrap();
 
     let store_id = f
         .store
         .infra
-        .enqueue_comms(
-            Some(store_uid),
-            &Recipient::new(CommsChannel::Email, "test@jola.dev").unwrap(),
-            CommsMessageType::Welcome,
-            Some("Welcome"),
-            "Welcome body",
-            None,
-        )
+        .enqueue_comms(OutboundMessage {
+            user_id: store_uid,
+            recipient: Recipient::new(CommsChannel::Email, "test@jola.dev").unwrap(),
+            kind: CommsMessageType::Welcome,
+            subject: Some("Welcome".into()),
+            body: "Welcome body".into(),
+            html_body: None,
+        })
         .await
         .unwrap();
 

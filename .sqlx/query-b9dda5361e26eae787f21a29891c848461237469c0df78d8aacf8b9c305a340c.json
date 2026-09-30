@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO comms_queue\n               (user_id, channel, comms_type, recipient, subject, body, metadata)\n               VALUES ($1, $2, $3, $4, $5, $6, $7)\n               RETURNING id",
+  "query": "INSERT INTO comms_queue\n               (user_id, channel, comms_type, recipient, subject, body, html_body)\n               VALUES ($1, $2, $3, $4, $5, $6, $7)\n               RETURNING id",
   "describe": {
     "columns": [
       {
@@ -50,12 +50,12 @@
         "Text",
         "Text",
         "Text",
-        "Jsonb"
+        "Text"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "d54660032ca184c20d9cf4563d9a34934ff717796d4f564f1384c1c31fd76594"
+  "hash": "b9dda5361e26eae787f21a29891c848461237469c0df78d8aacf8b9c305a340c"
 }

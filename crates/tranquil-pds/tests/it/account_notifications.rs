@@ -1,6 +1,6 @@
 use crate::common::{base_url, client, create_account_and_login, get_test_repos, user_id_of};
 use serde_json::{Value, json};
-use tranquil_db_traits::{CommsChannel, CommsMessageType};
+use tranquil_db_traits::{CommsChannel, CommsMessageType, OutboundMessage};
 use tranquil_types::{Did, Recipient};
 
 type Repos = tranquil_db::PostgresRepositories;
@@ -61,18 +61,17 @@ async fn test_get_notification_history() {
     for i in 0..3 {
         repos
             .infra
-            .enqueue_comms(
-                Some(user_id),
-                &Recipient::new(CommsChannel::Email, "test@nel.pet").unwrap(),
-                CommsMessageType::Welcome,
-                Some(&format!("Subject {}", i)),
-                &format!("Body {}", i),
-                None,
-            )
+            .enqueue_comms(OutboundMessage {
+                user_id,
+                recipient: Recipient::new(CommsChannel::Email, "test@nel.pet").unwrap(),
+                kind: CommsMessageType::Welcome,
+                subject: Some(format!("Subject {}", i)),
+                body: format!("Body {}", i),
+                html_body: None,
+            })
             .await
             .expect("Failed to enqueue");
     }
-
     let resp = client
         .get(format!("{}/xrpc/_account.getNotificationHistory", base))
         .header("Authorization", format!("Bearer {}", token))

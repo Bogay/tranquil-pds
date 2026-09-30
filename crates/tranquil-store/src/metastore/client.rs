@@ -12,8 +12,8 @@ use tranquil_db_traits::{
     CreateSsoAccountInput, DbError, DeletionRequest, DeletionRequestWithToken, DidWebOverrides,
     ImportBlock, ImportRecord, ImportRepoError, InviteCodeError, InviteCodeInfo, InviteCodeRow,
     InviteCodeSortOrder, InviteCodeUse, MigrationReactivationError, MigrationReactivationInput,
-    NotificationHistoryRow, NotificationPrefs, OAuthTokenWithUser, PasswordResetResult,
-    PlcTokenInfo, PruneCount, QueuedComms, ReactivatedAccountInfo, Recipient,
+    NotificationHistoryRow, NotificationPrefs, OAuthTokenWithUser, OutboundMessage,
+    PasswordResetResult, PlcTokenInfo, PruneCount, QueuedComms, ReactivatedAccountInfo,
     RecoverPasskeyAccountInput, RecoverPasskeyAccountResult, RepoAccountInfo, RepoIdentity,
     RepoInfo, RepoListItem, RepoWithoutRev, ReservedSigningKey, ReservedSigningKeyFull,
     ScheduledDeletionAccount, ScopePreference, SequenceNumber, SequencedEvent, StoredBackupCode,
@@ -1790,24 +1790,11 @@ impl<S: StorageIO + 'static> tranquil_db_traits::SessionRepository for Metastore
 
 #[async_trait]
 impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreClient<S> {
-    async fn enqueue_comms(
-        &self,
-        user_id: Option<Uuid>,
-        recipient: &Recipient,
-        comms_type: CommsMessageType,
-        subject: Option<&str>,
-        body: &str,
-        metadata: Option<serde_json::Value>,
-    ) -> Result<Uuid, DbError> {
+    async fn enqueue_comms(&self, message: OutboundMessage) -> Result<Uuid, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
             .send(MetastoreRequest::Infra(InfraRequest::EnqueueComms {
-                user_id,
-                recipient: recipient.clone(),
-                comms_type,
-                subject: subject.map(str::to_owned),
-                body: body.to_owned(),
-                metadata,
+                message,
                 tx,
             }))?;
         recv(rx).await

@@ -44,7 +44,16 @@ impl InviteCodeState {
     }
 }
 
-pub use tranquil_types::{CommsChannel, CommsMessageType, Recipient};
+pub use tranquil_types::{CommsChannel, CommsMessageType, InvalidRecipient, Recipient};
+
+pub struct OutboundMessage {
+    pub user_id: Uuid,
+    pub recipient: Recipient,
+    pub kind: CommsMessageType,
+    pub subject: Option<String>,
+    pub body: String,
+    pub html_body: Option<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "comms_status", rename_all = "snake_case")]
@@ -58,14 +67,14 @@ pub enum CommsStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueuedComms {
     pub id: Uuid,
-    pub user_id: Option<Uuid>,
+    pub user_id: Uuid,
     pub channel: CommsChannel,
     pub comms_type: CommsMessageType,
     pub status: CommsStatus,
     pub recipient: String,
     pub subject: Option<String>,
     pub body: String,
-    pub metadata: Option<serde_json::Value>,
+    pub html_body: Option<String>,
     pub attempts: i32,
     pub max_attempts: i32,
     pub last_error: Option<String>,
@@ -73,6 +82,12 @@ pub struct QueuedComms {
     pub updated_at: DateTime<Utc>,
     pub scheduled_for: DateTime<Utc>,
     pub processed_at: Option<DateTime<Utc>>,
+}
+
+impl QueuedComms {
+    pub fn recipient(&self) -> Result<Recipient, InvalidRecipient> {
+        Recipient::new(self.channel, &self.recipient)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,16 +166,7 @@ pub struct PasswordResetInfo {
 
 #[async_trait]
 pub trait InfraRepository: Send + Sync {
-    #[allow(clippy::too_many_arguments)]
-    async fn enqueue_comms(
-        &self,
-        user_id: Option<Uuid>,
-        recipient: &Recipient,
-        comms_type: CommsMessageType,
-        subject: Option<&str>,
-        body: &str,
-        metadata: Option<serde_json::Value>,
-    ) -> Result<Uuid, DbError>;
+    async fn enqueue_comms(&self, message: OutboundMessage) -> Result<Uuid, DbError>;
 
     async fn fetch_pending_comms(
         &self,

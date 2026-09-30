@@ -4,7 +4,8 @@ use rand::Rng;
 use sqlx::PgPool;
 use tranquil_db_traits::{
     DbError, DeviceAccountRow, DeviceTrustInfo, OAuthRepository, OAuthSessionListItem,
-    ScopePreference, TokenFamilyId, TrustedDeviceRow, TwoFactorChallenge,
+    ScopePreference, TWO_FACTOR_CHALLENGE_TTL_SECS, TokenFamilyId, TrustedDeviceRow,
+    TwoFactorChallenge,
 };
 use tranquil_oauth::{
     AuthStage, AuthorizationRequestParameters, AuthorizedClientData, ClientAuth, DeviceData,
@@ -914,7 +915,7 @@ impl OAuthRepository for PostgresOAuthRepository {
             let code_num: u32 = rng.gen_range(0..1_000_000);
             format!("{:06}", code_num)
         };
-        let expires_at = Utc::now() + Duration::minutes(10);
+        let expires_at = Utc::now() + std::time::Duration::from_secs(TWO_FACTOR_CHALLENGE_TTL_SECS);
         let row = sqlx::query!(
             r#"
             INSERT INTO oauth_2fa_challenge (did, request_uri, code, expires_at)

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT email, handle, preferred_comms_channel as \"preferred_channel!: CommsChannel\", preferred_locale, telegram_chat_id, discord_id, signal_username\n               FROM users WHERE id = $1",
+  "query": "SELECT email, email_verified, handle, preferred_comms_channel as \"preferred_channel!: CommsChannel\", preferred_locale, telegram_chat_id, discord_id, signal_username, signal_verified\n               FROM users WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,16 @@
       },
       {
         "ordinal": 1,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
         "name": "handle",
         "type_info": "Text"
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "preferred_channel!: CommsChannel",
         "type_info": {
           "Custom": {
@@ -31,24 +36,29 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "preferred_locale",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "telegram_chat_id",
         "type_info": "Int8"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "discord_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "signal_username",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "signal_verified",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -60,11 +70,13 @@
       true,
       false,
       false,
+      false,
       true,
       true,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "b8829a4375f55ff7f357ceab94d1ea1087f284b66fc814e7c4742c0a54f78020"
+  "hash": "de922a02342b410f625d96c032802e97c7c551515fba29043b1d090c6a59ff21"
 }

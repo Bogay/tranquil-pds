@@ -1,4 +1,4 @@
-use tranquil_db_traits::{CommsChannel, CommsMessageType, CommsStatus};
+use tranquil_db_traits::{CommsChannel, CommsMessageType, CommsStatus, OutboundMessage};
 use tranquil_types::{Did, Recipient};
 
 #[tokio::test]
@@ -8,14 +8,14 @@ async fn test_enqueue_comms() {
     let user_id = crate::common::user_id_of(repos, &Did::new(did).unwrap()).await;
     let comms_id = repos
         .infra
-        .enqueue_comms(
-            Some(user_id),
-            &Recipient::new(CommsChannel::Email, "test@nel.pet").unwrap(),
-            CommsMessageType::Welcome,
-            Some("Test Subject"),
-            "Test body",
-            None,
-        )
+        .enqueue_comms(OutboundMessage {
+            user_id,
+            recipient: Recipient::new(CommsChannel::Email, "test@nel.pet").unwrap(),
+            kind: CommsMessageType::Welcome,
+            subject: Some("Test Subject".into()),
+            body: "Test body".into(),
+            html_body: None,
+        })
         .await
         .expect("Failed to enqueue comms");
     let comms = repos
@@ -27,7 +27,7 @@ async fn test_enqueue_comms() {
         .iter()
         .find(|c| c.id == comms_id)
         .expect("Comms not found");
-    assert_eq!(row.user_id, Some(user_id));
+    assert_eq!(row.user_id, user_id);
     assert_eq!(row.recipient, "test@nel.pet");
     assert_eq!(row.subject.as_deref(), Some("Test Subject"));
     assert_eq!(row.body, "Test body");
@@ -50,14 +50,14 @@ async fn test_comms_queue_status_index() {
         let recipient = format!("test{}@jola.dev", i);
         repos
             .infra
-            .enqueue_comms(
-                Some(user_id),
-                &Recipient::new(CommsChannel::Email, &recipient).unwrap(),
-                CommsMessageType::PasswordReset,
-                Some("Test"),
-                "Body",
-                None,
-            )
+            .enqueue_comms(OutboundMessage {
+                user_id,
+                recipient: Recipient::new(CommsChannel::Email, &recipient).unwrap(),
+                kind: CommsMessageType::PasswordReset,
+                subject: Some("Test".into()),
+                body: "Body".into(),
+                html_body: None,
+            })
             .await
             .expect("Failed to enqueue");
     }

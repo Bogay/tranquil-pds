@@ -4,7 +4,8 @@ use smallvec::SmallVec;
 use super::encoding::KeyBuilder;
 use super::keys::KeyTag;
 
-const COMMS_SCHEMA_VERSION: u8 = 1;
+const COMMS_SCHEMA_V1: u8 = 1;
+const COMMS_SCHEMA_V2: u8 = 2;
 const INVITE_CODE_SCHEMA_VERSION: u8 = 1;
 const INVITE_USE_SCHEMA_VERSION: u8 = 1;
 const SIGNING_KEY_SCHEMA_V1: u8 = 1;
@@ -22,7 +23,7 @@ pub struct QueuedCommsValue {
     pub recipient: String,
     pub subject: Option<String>,
     pub body: String,
-    pub metadata: Option<Vec<u8>>,
+    pub html_body: Option<String>,
     pub status: u8,
     pub error_message: Option<String>,
     pub attempts: i32,
@@ -32,12 +33,31 @@ pub struct QueuedCommsValue {
     pub sent_at_ms: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct QueuedCommsValueV1 {
+    id: uuid::Uuid,
+    user_id: Option<uuid::Uuid>,
+    channel: u8,
+    comms_type: u8,
+    recipient: String,
+    subject: Option<String>,
+    body: String,
+    metadata: Option<Vec<u8>>,
+    status: u8,
+    error_message: Option<String>,
+    attempts: i32,
+    max_attempts: i32,
+    created_at_ms: i64,
+    scheduled_for_ms: i64,
+    sent_at_ms: Option<i64>,
+}
+
 impl QueuedCommsValue {
     pub fn serialize(&self) -> Vec<u8> {
         let payload =
             postcard::to_allocvec(self).expect("QueuedCommsValue serialization cannot fail");
         let mut buf = Vec::with_capacity(1 + payload.len());
-        buf.push(COMMS_SCHEMA_VERSION);
+        buf.push(COMMS_SCHEMA_V2);
         buf.extend_from_slice(&payload);
         buf
     }
@@ -45,10 +65,38 @@ impl QueuedCommsValue {
     pub fn deserialize(bytes: &[u8]) -> Option<Self> {
         let (&version, payload) = bytes.split_first()?;
         match version {
-            COMMS_SCHEMA_VERSION => postcard::from_bytes(payload).ok(),
+            COMMS_SCHEMA_V2 => postcard::from_bytes(payload).ok(),
+            COMMS_SCHEMA_V1 => {
+                let legacy: QueuedCommsValueV1 = postcard::from_bytes(payload).ok()?;
+                Some(Self {
+                    id: legacy.id,
+                    user_id: legacy.user_id,
+                    channel: legacy.channel,
+                    comms_type: legacy.comms_type,
+                    recipient: legacy.recipient,
+                    subject: legacy.subject,
+                    body: legacy.body,
+                    html_body: legacy.metadata.as_deref().and_then(legacy_html_body),
+                    status: legacy.status,
+                    error_message: legacy.error_message,
+                    attempts: legacy.attempts,
+                    max_attempts: legacy.max_attempts,
+                    created_at_ms: legacy.created_at_ms,
+                    scheduled_for_ms: legacy.scheduled_for_ms,
+                    sent_at_ms: legacy.sent_at_ms,
+                })
+            }
             _ => None,
         }
     }
+}
+
+fn legacy_html_body(metadata: &[u8]) -> Option<String> {
+    serde_json::from_slice::<serde_json::Value>(metadata)
+        .ok()?
+        .get("html_body")
+        .and_then(serde_json::Value::as_str)
+        .map(String::from)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -492,10 +540,10 @@ mod tests {
             user_id: Some(uuid::Uuid::new_v4()),
             channel: 0,
             comms_type: 1,
-            recipient: "user@example.com".to_owned(),
+            recipient: "user@nel.pet".to_owned(),
             subject: Some("test".to_owned()),
             body: "body text".to_owned(),
-            metadata: None,
+            html_body: Some("<p>body text</p>".to_owned()),
             status: 0,
             error_message: None,
             attempts: 0,
@@ -505,9 +553,37 @@ mod tests {
             sent_at_ms: None,
         };
         let bytes = val.serialize();
-        assert_eq!(bytes[0], COMMS_SCHEMA_VERSION);
+        assert_eq!(bytes[0], COMMS_SCHEMA_V2);
         let decoded = QueuedCommsValue::deserialize(&bytes).unwrap();
         assert_eq!(val, decoded);
+    }
+
+    #[test]
+    fn queued_comms_value_still_reads_rows_written_with_metadata() {
+        let legacy = QueuedCommsValueV1 {
+            id: uuid::Uuid::new_v4(),
+            user_id: Some(uuid::Uuid::new_v4()),
+            channel: 0,
+            comms_type: 1,
+            recipient: "user@nel.pet".to_owned(),
+            subject: None,
+            body: "body text".to_owned(),
+            metadata: Some(br#"{"html_body":"<p>body text</p>"}"#.to_vec()),
+            status: 0,
+            error_message: None,
+            attempts: 1,
+            max_attempts: 3,
+            created_at_ms: 1700000000000,
+            scheduled_for_ms: 1700000000000,
+            sent_at_ms: None,
+        };
+        let mut bytes = vec![COMMS_SCHEMA_V1];
+        bytes.extend_from_slice(&postcard::to_allocvec(&legacy).unwrap());
+        let decoded = QueuedCommsValue::deserialize(&bytes).unwrap();
+        assert_eq!(decoded.id, legacy.id);
+        assert_eq!(decoded.attempts, legacy.attempts);
+        assert_eq!(decoded.body, legacy.body);
+        assert_eq!(decoded.html_body.as_deref(), Some("<p>body text</p>"));
     }
 
     #[test]
@@ -697,7 +773,7 @@ mod tests {
             recipient: String::new(),
             subject: None,
             body: String::new(),
-            metadata: None,
+            html_body: None,
             status: 0,
             error_message: None,
             attempts: 0,

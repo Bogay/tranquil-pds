@@ -16,14 +16,14 @@ use uuid::Uuid;
 fn fixture(recipient: &str, subject: &str, body: &str) -> QueuedComms {
     QueuedComms {
         id: Uuid::new_v4(),
-        user_id: None,
+        user_id: Uuid::new_v4(),
         channel: CommsChannel::Email,
         comms_type: CommsMessageType::Welcome,
         status: CommsStatus::Pending,
         recipient: recipient.to_string(),
         subject: Some(subject.to_string()),
         body: body.to_string(),
-        metadata: None,
+        html_body: None,
         attempts: 0,
         max_attempts: 3,
         last_error: None,

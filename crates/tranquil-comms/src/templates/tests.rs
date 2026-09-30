@@ -398,23 +398,3 @@ fn empty_store_flat_renders_builtin_without_templates_dir() {
             .is_none()
     );
 }
-
-#[test]
-fn metadata_includes_html_body() {
-    let rendered = RenderedTemplate {
-        subject: "s".into(),
-        body: "b".into(),
-        html_body: Some("<p>hi</p>".into()),
-    };
-    let meta = rendered.metadata().unwrap();
-    assert_eq!(meta["html_body"], "<p>hi</p>");
-    assert!(
-        RenderedTemplate {
-            subject: "s".into(),
-            body: "b".into(),
-            html_body: None,
-        }
-        .metadata()
-        .is_none()
-    );
-}

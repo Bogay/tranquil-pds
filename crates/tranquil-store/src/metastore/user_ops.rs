@@ -525,13 +525,19 @@ impl UserOps {
             .map(|v| {
                 Ok(UserCommsPrefs {
                     email: v.email.clone(),
+                    email_verified: v.email_verified,
                     handle: Handle::new(v.handle.clone())
                         .map_err(|_| MetastoreError::CorruptData("invalid user handle"))?,
                     preferred_channel: Self::comms_channel(&v),
-                    preferred_locale: v.preferred_locale.clone(),
+                    preferred_locale: v
+                        .preferred_locale
+                        .as_deref()
+                        .and_then(|locale| locale.parse().ok())
+                        .unwrap_or_default(),
                     telegram_chat_id: v.telegram_chat_id,
                     discord_id: v.discord_id.clone(),
                     signal_username: v.signal_username.clone(),
+                    signal_verified: v.signal_verified,
                 })
             })
             .transpose()

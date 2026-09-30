@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use fjall::{Database, Keyspace};
 use uuid::Uuid;
 
@@ -22,8 +22,8 @@ use super::scan::point_lookup;
 use super::users::UserValue;
 
 use tranquil_db_traits::{
-    DeviceAccountRow, DeviceTrustInfo, OAuthSessionListItem, ScopePreference, TokenFamilyId,
-    TrustedDeviceRow, TwoFactorChallenge,
+    DeviceAccountRow, DeviceTrustInfo, OAuthSessionListItem, ScopePreference,
+    TWO_FACTOR_CHALLENGE_TTL_SECS, TokenFamilyId, TrustedDeviceRow, TwoFactorChallenge,
 };
 use tranquil_oauth::{
     AuthStage, AuthorizationRequestParameters, AuthorizedClientData, DeviceData, Prompt,
@@ -1151,7 +1151,7 @@ impl OAuthOps {
     ) -> Result<TwoFactorChallenge, MetastoreError> {
         let id = Uuid::new_v4();
         let now = Utc::now();
-        let expires_at = now + Duration::minutes(10);
+        let expires_at = now + std::time::Duration::from_secs(TWO_FACTOR_CHALLENGE_TTL_SECS);
         let code: String = {
             let entropy = Uuid::new_v4();
             let bytes = entropy.as_bytes();
@@ -1728,7 +1728,7 @@ mod tests {
                 client_id: tranquil_types::ClientId::new("https://client.example"),
                 client_auth: None,
                 parameters: default_parameters("https://client.example"),
-                expires_at: Utc::now() + Duration::minutes(5),
+                expires_at: Utc::now() + chrono::Duration::minutes(5),
                 did: None,
                 device_id: None,
                 code: None,

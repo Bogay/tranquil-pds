@@ -10,7 +10,7 @@ pub use sender::{
 };
 pub use templates::{
     Part, REQUIRED_TEMPLATE_IDS, RenderedTemplate, TemplateError, TemplateId, TemplateStore,
-    html_body_from_metadata, render_html, render_part,
+    render_html, render_part,
 };
 pub use templates::{init as init_templates, validate as validate_templates};
 pub use tranquil_db_traits::{CommsChannel, CommsMessageType, CommsStatus, QueuedComms};
