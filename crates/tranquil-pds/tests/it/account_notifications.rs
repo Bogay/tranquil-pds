@@ -1,6 +1,6 @@
 use crate::common::{base_url, client, create_account_and_login, get_test_repos, user_id_of};
 use serde_json::{Value, json};
-use tranquil_db_traits::{CommsChannel, CommsType};
+use tranquil_db_traits::{CommsChannel, CommsMessageType};
 use tranquil_types::{Did, Recipient};
 
 type Repos = tranquil_db::PostgresRepositories;
@@ -44,7 +44,7 @@ async fn latest_notices(
 ) -> Vec<tranquil_db_traits::QueuedComms> {
     repos
         .infra
-        .get_latest_comms_for_user(user_id, CommsType::ChannelVerified, n)
+        .get_latest_comms_for_user(user_id, CommsMessageType::ChannelVerified, n)
         .await
         .expect("DB error")
 }
@@ -64,7 +64,7 @@ async fn test_get_notification_history() {
             .enqueue_comms(
                 Some(user_id),
                 &Recipient::new(CommsChannel::Email, "test@nel.pet").unwrap(),
-                CommsType::Welcome,
+                CommsMessageType::Welcome,
                 Some(&format!("Subject {}", i)),
                 &format!("Body {}", i),
                 None,
@@ -260,7 +260,7 @@ async fn test_update_email_via_notification_prefs() {
 
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user_id, CommsType::EmailUpdate, 1)
+        .get_latest_comms_for_user(user_id, CommsMessageType::EmailUpdate, 1)
         .await
         .expect("DB error");
     let body_text = comms

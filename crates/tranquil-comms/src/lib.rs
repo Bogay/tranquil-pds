@@ -10,4 +10,4 @@ pub use locale::{
 pub use sender::{
     CommsSender, DiscordSender, SendError, SignalSender, TelegramSender, is_valid_phone_number,
 };
-pub use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType, QueuedComms};
+pub use tranquil_db_traits::{CommsChannel, CommsMessageType, CommsStatus, QueuedComms};

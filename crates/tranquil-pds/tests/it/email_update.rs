@@ -1,6 +1,6 @@
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use tranquil_db_traits::CommsType;
+use tranquil_db_traits::CommsMessageType;
 use tranquil_types::Did;
 
 async fn get_email_update_token(did: &str) -> String {
@@ -14,7 +14,7 @@ async fn get_email_update_token(did: &str) -> String {
         .expect("user not found");
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user.id, CommsType::EmailUpdate, 1)
+        .get_latest_comms_for_user(user.id, CommsMessageType::EmailUpdate, 1)
         .await
         .expect("failed to get comms");
     let body_text = comms.first().expect("Verification not found").body.clone();
@@ -283,7 +283,7 @@ async fn test_confirm_email_confirms_existing_email() {
         .expect("user not found");
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user.id, CommsType::EmailVerification, 1)
+        .get_latest_comms_for_user(user.id, CommsMessageType::EmailVerification, 1)
         .await
         .expect("failed to get comms");
     let body_text = comms
@@ -358,7 +358,7 @@ async fn test_confirm_email_rejects_wrong_email() {
         .expect("user not found");
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user.id, CommsType::EmailVerification, 1)
+        .get_latest_comms_for_user(user.id, CommsMessageType::EmailVerification, 1)
         .await
         .expect("failed to get comms");
     let body_text = comms

@@ -1043,7 +1043,7 @@ fn extract_verification_code(body_text: &str) -> String {
 }
 
 async fn get_verification_body_for_did(did: &str) -> String {
-    use tranquil_db_traits::CommsType;
+    use tranquil_db_traits::CommsMessageType;
     use tranquil_types::Did;
 
     let repos = get_test_repos().await;
@@ -1055,7 +1055,7 @@ async fn get_verification_body_for_did(did: &str) -> String {
         .expect("user not found");
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user.id, CommsType::EmailVerification, 1)
+        .get_latest_comms_for_user(user.id, CommsMessageType::EmailVerification, 1)
         .await
         .expect("failed to get comms");
     comms

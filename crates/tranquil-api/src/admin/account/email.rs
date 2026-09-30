@@ -52,7 +52,7 @@ pub async fn send_email(
         .enqueue_comms(
             Some(user_id),
             &tranquil_types::Recipient::Email(email),
-            tranquil_db_traits::CommsType::AdminEmail,
+            tranquil_db_traits::CommsMessageType::AdminEmail,
             Some(&subject),
             content,
             None,

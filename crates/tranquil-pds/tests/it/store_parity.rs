@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tranquil_db::PostgresRepositories;
-use tranquil_db_traits::{Backlink, BacklinkPath, CommsChannel, CommsType};
+use tranquil_db_traits::{Backlink, BacklinkPath, CommsChannel, CommsMessageType};
 use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Recipient, Rkey, Tid};
 use uuid::Uuid;
 
@@ -1197,7 +1197,7 @@ async fn parity_comms_queue() {
             .enqueue_comms(
                 Some(pg_uid),
                 &Recipient::new(CommsChannel::Email, "test@jola.dev").unwrap(),
-                CommsType::Welcome,
+                CommsMessageType::Welcome,
                 Some("Welcome"),
                 "Welcome body",
                 None,
@@ -1211,7 +1211,7 @@ async fn parity_comms_queue() {
         .enqueue_comms(
             Some(store_uid),
             &Recipient::new(CommsChannel::Email, "test@jola.dev").unwrap(),
-            CommsType::Welcome,
+            CommsMessageType::Welcome,
             Some("Welcome"),
             "Welcome body",
             None,
@@ -1224,13 +1224,13 @@ async fn parity_comms_queue() {
 
     let pg_latest =
         f.pg.infra
-            .get_latest_comms_for_user(pg_uid, CommsType::Welcome, 10)
+            .get_latest_comms_for_user(pg_uid, CommsMessageType::Welcome, 10)
             .await
             .unwrap();
     let store_latest = f
         .store
         .infra
-        .get_latest_comms_for_user(store_uid, CommsType::Welcome, 10)
+        .get_latest_comms_for_user(store_uid, CommsMessageType::Welcome, 10)
         .await
         .unwrap();
 
@@ -1239,13 +1239,13 @@ async fn parity_comms_queue() {
 
     let pg_count =
         f.pg.infra
-            .count_comms_by_type(pg_uid, CommsType::Welcome)
+            .count_comms_by_type(pg_uid, CommsMessageType::Welcome)
             .await
             .unwrap();
     let store_count = f
         .store
         .infra
-        .count_comms_by_type(store_uid, CommsType::Welcome)
+        .count_comms_by_type(store_uid, CommsMessageType::Welcome)
         .await
         .unwrap();
     assert_eq!(pg_count, store_count);

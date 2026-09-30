@@ -8,7 +8,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tranquil_comms::email::transport::SendMode;
 use tranquil_comms::email::{EmailSender, types::HeloName};
-use tranquil_comms::{CommsChannel, CommsSender, CommsStatus, CommsType, QueuedComms, SendError};
+use tranquil_comms::{
+    CommsChannel, CommsMessageType, CommsSender, CommsStatus, QueuedComms, SendError,
+};
 use uuid::Uuid;
 
 fn fixture(recipient: &str, subject: &str, body: &str) -> QueuedComms {
@@ -16,7 +18,7 @@ fn fixture(recipient: &str, subject: &str, body: &str) -> QueuedComms {
         id: Uuid::new_v4(),
         user_id: None,
         channel: CommsChannel::Email,
-        comms_type: CommsType::Welcome,
+        comms_type: CommsMessageType::Welcome,
         status: CommsStatus::Pending,
         recipient: recipient.to_string(),
         subject: Some(subject.to_string()),

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                id, user_id,\n                channel as \"channel: CommsChannel\",\n                comms_type as \"comms_type: CommsType\",\n                status as \"status: CommsStatus\",\n                recipient, subject, body, metadata,\n                attempts, max_attempts, last_error,\n                created_at, updated_at, scheduled_for, processed_at\n            FROM comms_queue\n            WHERE user_id = $1 AND comms_type = $2\n            ORDER BY created_at DESC\n            LIMIT $3",
+  "query": "SELECT\n                id, user_id,\n                channel as \"channel: CommsChannel\",\n                comms_type as \"comms_type: CommsMessageType\",\n                status as \"status: CommsStatus\",\n                recipient, subject, body, metadata,\n                attempts, max_attempts, last_error,\n                created_at, updated_at, scheduled_for, processed_at\n            FROM comms_queue\n            WHERE user_id = $1 AND comms_type = $2\n            ORDER BY created_at DESC\n            LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -32,7 +32,7 @@
       },
       {
         "ordinal": 3,
-        "name": "comms_type: CommsType",
+        "name": "comms_type: CommsMessageType",
         "type_info": {
           "Custom": {
             "name": "comms_type",
@@ -176,5 +176,5 @@
       true
     ]
   },
-  "hash": "9f3f2b36f11e9446915d3ca29ef81e4ada0c6a6d72764116dac4f99a4e09785e"
+  "hash": "be2d31d5d6fcadcb05f914209117b96d61ad9619adb57dde5fba9183a50fcc49"
 }

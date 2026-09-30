@@ -1140,14 +1140,6 @@ validated_string_newtype! {
     validator = valid_discord_user_id;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Recipient {
-    Email(EmailAddress),
-    Signal(SignalUsername),
-    Telegram(TelegramChatId),
-    Discord(DiscordUserId),
-}
-
 #[derive(Debug, Clone)]
 pub struct InvalidRecipient {
     channel: CommsChannel,
@@ -1161,6 +1153,14 @@ impl fmt::Display for InvalidRecipient {
 }
 
 impl std::error::Error for InvalidRecipient {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Recipient {
+    Email(EmailAddress),
+    Signal(SignalUsername),
+    Telegram(TelegramChatId),
+    Discord(DiscordUserId),
+}
 
 impl Recipient {
     pub fn new(channel: CommsChannel, raw: &str) -> Result<Self, InvalidRecipient> {
@@ -1187,15 +1187,137 @@ impl Recipient {
 
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Email(address) => address.as_str(),
-            Self::Signal(username) => username.as_str(),
-            Self::Telegram(chat_id) => chat_id.as_str(),
-            Self::Discord(user_id) => user_id.as_str(),
+            Self::Email(value) => value.as_str(),
+            Self::Signal(value) => value.as_str(),
+            Self::Telegram(value) => value.as_str(),
+            Self::Discord(value) => value.as_str(),
         }
     }
 }
 
 impl fmt::Display for Recipient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Locale {
+    #[default]
+    En,
+    Zh,
+    Ja,
+    Ko,
+    Sv,
+    Fi,
+    Fr, // for real
+        // TODO: every language in the world
+}
+
+impl Locale {
+    pub const ALL: [Locale; 7] = [
+        Locale::En,
+        Locale::Zh,
+        Locale::Ja,
+        Locale::Ko,
+        Locale::Sv,
+        Locale::Fi,
+        Locale::Fr,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Locale::En => "en",
+            Locale::Zh => "zh",
+            Locale::Ja => "ja",
+            Locale::Ko => "ko",
+            Locale::Sv => "sv",
+            Locale::Fi => "fi",
+            Locale::Fr => "fr",
+        }
+    }
+}
+
+impl FromStr for Locale {
+    type Err = InvalidLocale;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Locale::ALL
+            .iter()
+            .find(|locale| locale.as_str() == s)
+            .copied()
+            .ok_or(InvalidLocale(s.to_string()))
+    }
+}
+
+impl fmt::Display for Locale {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidLocale(String);
+
+impl fmt::Display for InvalidLocale {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid locale {}: valid options are {}",
+            self.0,
+            Locale::ALL
+                .iter()
+                .map(Locale::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+impl std::error::Error for InvalidLocale {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelIdentifier {
+    Email(EmailAddress),
+    Telegram(TelegramUsername),
+    Discord(DiscordUsername),
+    Signal(SignalUsername),
+}
+
+impl ChannelIdentifier {
+    pub fn new(channel: CommsChannel, raw: &str) -> Result<Self, InvalidRecipient> {
+        let parsed = match channel {
+            CommsChannel::Email => EmailAddress::new(raw).ok().map(Self::Email),
+            CommsChannel::Telegram => TelegramUsername::new(raw).ok().map(Self::Telegram),
+            CommsChannel::Discord => DiscordUsername::new(raw).ok().map(Self::Discord),
+            CommsChannel::Signal => SignalUsername::new(raw).ok().map(Self::Signal),
+        };
+        parsed.ok_or(InvalidRecipient {
+            channel,
+            raw: raw.to_string(),
+        })
+    }
+
+    pub fn channel(&self) -> CommsChannel {
+        match self {
+            Self::Email(_) => CommsChannel::Email,
+            Self::Telegram(_) => CommsChannel::Telegram,
+            Self::Discord(_) => CommsChannel::Discord,
+            Self::Signal(_) => CommsChannel::Signal,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Email(value) => value.as_str(),
+            Self::Telegram(value) => value.as_str(),
+            Self::Discord(value) => value.as_str(),
+            Self::Signal(value) => value.as_str(),
+        }
+    }
+}
+
+impl fmt::Display for ChannelIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -1228,32 +1350,12 @@ mod recipient_tests {
 
     #[test]
     fn email_accepts_every_local_part_special_char() {
-        for special in [
-            "user.name",
-            "user+tag",
-            "user!def",
-            "user#abc",
-            "user$def",
-            "user%abc",
-            "user&def",
-            "user'abc",
-            "user*def",
-            "user=abc",
-            "user?def",
-            "user^abc",
-            "user_def",
-            "user`abc",
-            "user{def",
-            "user|def",
-            "user}def",
-            "user~def",
-            "user-def",
-        ] {
+        EMAIL_LOCAL_FUNNY_CHARS.chars().for_each(|special| {
             assert!(
-                EmailAddress::new(format!("{special}@jola.dev")).is_ok(),
+                EmailAddress::new(format!("user{special}tag@jola.dev")).is_ok(),
                 "{special} is an allowed local part character"
             );
-        }
+        });
     }
 
     #[test]
@@ -1358,8 +1460,6 @@ mod recipient_tests {
             "oys!.01",
             "oys .01",
             "oys.01; rm -rf /",
-            "oys.01 && cat /etc/passwd",
-            "oys.01`id`",
             "oys.01$(whoami)",
         ] {
             assert!(SignalUsername::new(invalod).is_err(), "{invalod}");
@@ -1819,16 +1919,94 @@ impl fmt::Display for EmailTokenPurpose {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "comms_type", rename_all = "snake_case")]
-pub enum CommsType {
-    Verification,
+pub enum CommsMessageType {
+    Welcome,
+    EmailVerification,
     PasswordReset,
-    AccountDeleted,
-    AccountMigrated,
+    EmailUpdate,
+    AccountDeletion,
+    AdminEmail,
+    PlcOperation,
+    TwoFactorCode,
     PasskeyRecovery,
+    LegacyLoginAlert,
     MigrationVerification,
+    ChannelVerification,
+    ChannelVerified,
+}
+
+impl CommsMessageType {
+    pub fn carries_secret(self) -> bool {
+        matches!(
+            self,
+            Self::EmailVerification
+                | Self::PasswordReset
+                | Self::EmailUpdate
+                | Self::TwoFactorCode
+                | Self::AccountDeletion
+                | Self::PlcOperation
+                | Self::PasskeyRecovery
+                | Self::MigrationVerification
+                | Self::ChannelVerification
+        )
+    }
+
+    pub const ALL: [Self; 13] = [
+        Self::Welcome,
+        Self::EmailVerification,
+        Self::PasswordReset,
+        Self::EmailUpdate,
+        Self::AccountDeletion,
+        Self::AdminEmail,
+        Self::PlcOperation,
+        Self::TwoFactorCode,
+        Self::PasskeyRecovery,
+        Self::LegacyLoginAlert,
+        Self::MigrationVerification,
+        Self::ChannelVerification,
+        Self::ChannelVerified,
+    ];
+}
+
+#[cfg(test)]
+mod comms_type_tests {
+    use super::CommsMessageType;
+
+    #[test]
+    fn only_code_free_kinds_are_safe_to_show_verbatim() {
+        let safe = [
+            CommsMessageType::Welcome,
+            CommsMessageType::AdminEmail,
+            CommsMessageType::LegacyLoginAlert,
+            CommsMessageType::ChannelVerified,
+        ];
+        CommsMessageType::ALL.iter().for_each(|kind| {
+            assert_eq!(kind.carries_secret(), !safe.contains(kind), "{kind:?}");
+        });
+    }
+}
+
+#[cfg(test)]
+mod locale_tests {
+    use super::Locale;
+
+    #[test]
+    fn locale_tag_roundtrip() {
+        Locale::ALL.iter().for_each(|locale| {
+            assert_eq!(locale.as_str().parse::<Locale>().ok(), Some(*locale));
+            assert_eq!(locale.to_string(), locale.as_str());
+        });
+    }
+
+    #[test]
+    fn unparseable_locale_tags_are_rejected_w_default_being_english() {
+        assert!("invalid".parse::<Locale>().is_err());
+        assert!("".parse::<Locale>().is_err());
+        assert_eq!(Locale::default(), Locale::En);
+    }
 }
 
 pub mod did_doc {

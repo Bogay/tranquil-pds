@@ -7,7 +7,7 @@ use chrono::Utc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use tranquil_comms::{
-    CommsChannel, CommsSender, CommsType, NotificationStrings, SendError, format_message,
+    CommsChannel, CommsMessageType, CommsSender, NotificationStrings, SendError, format_message,
     get_strings,
 };
 use tranquil_db_traits::{
@@ -286,16 +286,16 @@ pub mod repo {
     }
 
     impl Notice<'_> {
-        fn comms_type(&self) -> CommsType {
+        fn comms_type(&self) -> CommsMessageType {
             match self {
-                Self::Welcome => CommsType::Welcome,
-                Self::PasswordReset { .. } => CommsType::PasswordReset,
-                Self::TwoFactorCode { .. } => CommsType::TwoFactorCode,
-                Self::AccountDeletion { .. } => CommsType::AccountDeletion,
-                Self::PlcOperation { .. } => CommsType::PlcOperation,
-                Self::PasskeyRecovery { .. } => CommsType::PasskeyRecovery,
-                Self::ShortTokenEmail { .. } => CommsType::EmailUpdate,
-                Self::LegacyLoginAlert { .. } => CommsType::LegacyLoginAlert,
+                Self::Welcome => CommsMessageType::Welcome,
+                Self::PasswordReset { .. } => CommsMessageType::PasswordReset,
+                Self::TwoFactorCode { .. } => CommsMessageType::TwoFactorCode,
+                Self::AccountDeletion { .. } => CommsMessageType::AccountDeletion,
+                Self::PlcOperation { .. } => CommsMessageType::PlcOperation,
+                Self::PasskeyRecovery { .. } => CommsMessageType::PasskeyRecovery,
+                Self::ShortTokenEmail { .. } => CommsMessageType::EmailUpdate,
+                Self::LegacyLoginAlert { .. } => CommsMessageType::LegacyLoginAlert,
             }
         }
 
@@ -444,7 +444,7 @@ pub mod repo {
             .enqueue_comms(
                 Some(user_id),
                 &Recipient::Email(new_email.clone()),
-                CommsType::EmailUpdate,
+                CommsMessageType::EmailUpdate,
                 Some(&subject),
                 &body,
                 None,
@@ -489,7 +489,7 @@ pub mod repo {
             .enqueue_comms(
                 Some(user_id),
                 &target.recipient,
-                CommsType::MigrationVerification,
+                CommsMessageType::MigrationVerification,
                 Some(&subject),
                 &body,
                 None,
@@ -538,7 +538,7 @@ pub mod repo {
             .enqueue_comms(
                 Some(user_id),
                 &target.recipient,
-                CommsType::EmailVerification,
+                CommsMessageType::EmailVerification,
                 Some(&subject),
                 &body,
                 None,
@@ -571,7 +571,7 @@ pub mod repo {
             .enqueue_comms(
                 Some(user_id),
                 recipient,
-                CommsType::ChannelVerified,
+                CommsMessageType::ChannelVerified,
                 Some(&subject),
                 &body,
                 None,

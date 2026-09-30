@@ -265,39 +265,39 @@ pub fn u8_to_channel(v: u8) -> Option<tranquil_db_traits::CommsChannel> {
     }
 }
 
-pub fn comms_type_to_u8(ct: tranquil_db_traits::CommsType) -> u8 {
+pub fn comms_type_to_u8(ct: tranquil_db_traits::CommsMessageType) -> u8 {
     match ct {
-        tranquil_db_traits::CommsType::Welcome => 0,
-        tranquil_db_traits::CommsType::EmailVerification => 1,
-        tranquil_db_traits::CommsType::PasswordReset => 2,
-        tranquil_db_traits::CommsType::EmailUpdate => 3,
-        tranquil_db_traits::CommsType::AccountDeletion => 4,
-        tranquil_db_traits::CommsType::AdminEmail => 5,
-        tranquil_db_traits::CommsType::PlcOperation => 6,
-        tranquil_db_traits::CommsType::TwoFactorCode => 7,
-        tranquil_db_traits::CommsType::PasskeyRecovery => 8,
-        tranquil_db_traits::CommsType::LegacyLoginAlert => 9,
-        tranquil_db_traits::CommsType::MigrationVerification => 10,
-        tranquil_db_traits::CommsType::ChannelVerification => 11,
-        tranquil_db_traits::CommsType::ChannelVerified => 12,
+        tranquil_db_traits::CommsMessageType::Welcome => 0,
+        tranquil_db_traits::CommsMessageType::EmailVerification => 1,
+        tranquil_db_traits::CommsMessageType::PasswordReset => 2,
+        tranquil_db_traits::CommsMessageType::EmailUpdate => 3,
+        tranquil_db_traits::CommsMessageType::AccountDeletion => 4,
+        tranquil_db_traits::CommsMessageType::AdminEmail => 5,
+        tranquil_db_traits::CommsMessageType::PlcOperation => 6,
+        tranquil_db_traits::CommsMessageType::TwoFactorCode => 7,
+        tranquil_db_traits::CommsMessageType::PasskeyRecovery => 8,
+        tranquil_db_traits::CommsMessageType::LegacyLoginAlert => 9,
+        tranquil_db_traits::CommsMessageType::MigrationVerification => 10,
+        tranquil_db_traits::CommsMessageType::ChannelVerification => 11,
+        tranquil_db_traits::CommsMessageType::ChannelVerified => 12,
     }
 }
 
-pub fn u8_to_comms_type(v: u8) -> Option<tranquil_db_traits::CommsType> {
+pub fn u8_to_comms_type(v: u8) -> Option<tranquil_db_traits::CommsMessageType> {
     match v {
-        0 => Some(tranquil_db_traits::CommsType::Welcome),
-        1 => Some(tranquil_db_traits::CommsType::EmailVerification),
-        2 => Some(tranquil_db_traits::CommsType::PasswordReset),
-        3 => Some(tranquil_db_traits::CommsType::EmailUpdate),
-        4 => Some(tranquil_db_traits::CommsType::AccountDeletion),
-        5 => Some(tranquil_db_traits::CommsType::AdminEmail),
-        6 => Some(tranquil_db_traits::CommsType::PlcOperation),
-        7 => Some(tranquil_db_traits::CommsType::TwoFactorCode),
-        8 => Some(tranquil_db_traits::CommsType::PasskeyRecovery),
-        9 => Some(tranquil_db_traits::CommsType::LegacyLoginAlert),
-        10 => Some(tranquil_db_traits::CommsType::MigrationVerification),
-        11 => Some(tranquil_db_traits::CommsType::ChannelVerification),
-        12 => Some(tranquil_db_traits::CommsType::ChannelVerified),
+        0 => Some(tranquil_db_traits::CommsMessageType::Welcome),
+        1 => Some(tranquil_db_traits::CommsMessageType::EmailVerification),
+        2 => Some(tranquil_db_traits::CommsMessageType::PasswordReset),
+        3 => Some(tranquil_db_traits::CommsMessageType::EmailUpdate),
+        4 => Some(tranquil_db_traits::CommsMessageType::AccountDeletion),
+        5 => Some(tranquil_db_traits::CommsMessageType::AdminEmail),
+        6 => Some(tranquil_db_traits::CommsMessageType::PlcOperation),
+        7 => Some(tranquil_db_traits::CommsMessageType::TwoFactorCode),
+        8 => Some(tranquil_db_traits::CommsMessageType::PasskeyRecovery),
+        9 => Some(tranquil_db_traits::CommsMessageType::LegacyLoginAlert),
+        10 => Some(tranquil_db_traits::CommsMessageType::MigrationVerification),
+        11 => Some(tranquil_db_traits::CommsMessageType::ChannelVerification),
+        12 => Some(tranquil_db_traits::CommsMessageType::ChannelVerified),
         _ => None,
     }
 }
@@ -728,21 +728,21 @@ mod tests {
 
     #[test]
     fn comms_type_u8_roundtrip() {
-        use tranquil_db_traits::CommsType;
+        use tranquil_db_traits::CommsMessageType;
         [
-            CommsType::Welcome,
-            CommsType::EmailVerification,
-            CommsType::PasswordReset,
-            CommsType::EmailUpdate,
-            CommsType::AccountDeletion,
-            CommsType::AdminEmail,
-            CommsType::PlcOperation,
-            CommsType::TwoFactorCode,
-            CommsType::PasskeyRecovery,
-            CommsType::LegacyLoginAlert,
-            CommsType::MigrationVerification,
-            CommsType::ChannelVerification,
-            CommsType::ChannelVerified,
+            CommsMessageType::Welcome,
+            CommsMessageType::EmailVerification,
+            CommsMessageType::PasswordReset,
+            CommsMessageType::EmailUpdate,
+            CommsMessageType::AccountDeletion,
+            CommsMessageType::AdminEmail,
+            CommsMessageType::PlcOperation,
+            CommsMessageType::TwoFactorCode,
+            CommsMessageType::PasskeyRecovery,
+            CommsMessageType::LegacyLoginAlert,
+            CommsMessageType::MigrationVerification,
+            CommsMessageType::ChannelVerification,
+            CommsMessageType::ChannelVerified,
         ]
         .iter()
         .for_each(|&ct| {

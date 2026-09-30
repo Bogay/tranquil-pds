@@ -22,7 +22,7 @@ use super::user_hash::UserHashMap;
 use super::users::UserValue;
 
 use tranquil_db_traits::{
-    AdminAccountInfo, CommsStatus, CommsType, DeletionRequest, DeletionRequestWithToken,
+    AdminAccountInfo, CommsMessageType, CommsStatus, DeletionRequest, DeletionRequestWithToken,
     InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder, InviteCodeState,
     InviteCodeUse, NotificationHistoryRow, PlcTokenInfo, QueuedComms, Recipient,
     ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
@@ -149,7 +149,7 @@ impl InfraOps {
         &self,
         user_id: Option<Uuid>,
         recipient: &Recipient,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         subject: Option<&str>,
         body: &str,
         metadata: Option<serde_json::Value>,
@@ -1284,7 +1284,7 @@ impl InfraOps {
     pub fn get_latest_comms_for_user(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         limit: i64,
     ) -> Result<Vec<QueuedComms>, MetastoreError> {
         let target_type = comms_type_to_u8(comms_type);
@@ -1316,7 +1316,7 @@ impl InfraOps {
     pub fn count_comms_by_type(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
     ) -> Result<i64, MetastoreError> {
         let target_type = comms_type_to_u8(comms_type);
         let prefix = comms_queue_prefix();
@@ -1338,7 +1338,7 @@ impl InfraOps {
     pub fn delete_comms_by_type_for_user(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
     ) -> Result<u64, MetastoreError> {
         let target_type = comms_type_to_u8(comms_type);
         let prefix = comms_queue_prefix();

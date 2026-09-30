@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE comms_queue\n               SET status = 'processing', updated_at = NOW()\n               WHERE id IN (\n                   SELECT id FROM comms_queue\n                   WHERE attempts < max_attempts\n                     AND scheduled_for <= $1\n                     AND (\n                         status = 'pending'\n                         OR (status = 'processing'\n                             AND updated_at < $1 - INTERVAL '10 minutes')\n                     )\n                   ORDER BY scheduled_for ASC\n                   LIMIT $2\n                   FOR UPDATE SKIP LOCKED\n               )\n               RETURNING\n                   id, user_id,\n                   channel as \"channel: CommsChannel\",\n                   comms_type as \"comms_type: CommsType\",\n                   status as \"status: CommsStatus\",\n                   recipient, subject, body, metadata,\n                   attempts, max_attempts, last_error,\n                   created_at, updated_at, scheduled_for, processed_at",
+  "query": "UPDATE comms_queue\n               SET status = 'processing', updated_at = NOW()\n               WHERE id IN (\n                   SELECT id FROM comms_queue\n                   WHERE attempts < max_attempts\n                     AND scheduled_for <= $1\n                     AND (\n                         status = 'pending'\n                         OR (status = 'processing'\n                             AND updated_at < $1 - INTERVAL '10 minutes')\n                     )\n                   ORDER BY scheduled_for ASC\n                   LIMIT $2\n                   FOR UPDATE SKIP LOCKED\n               )\n               RETURNING\n                   id, user_id,\n                   channel as \"channel: CommsChannel\",\n                   comms_type as \"comms_type: CommsMessageType\",\n                   status as \"status: CommsStatus\",\n                   recipient, subject, body, metadata,\n                   attempts, max_attempts, last_error,\n                   created_at, updated_at, scheduled_for, processed_at",
   "describe": {
     "columns": [
       {
@@ -32,7 +32,7 @@
       },
       {
         "ordinal": 3,
-        "name": "comms_type: CommsType",
+        "name": "comms_type: CommsMessageType",
         "type_info": {
           "Custom": {
             "name": "comms_type",
@@ -154,5 +154,5 @@
       true
     ]
   },
-  "hash": "890aa92acdcb0fe2a3bf04d87e1f16a801d271da7cedc32fc42c2ef5b100faae"
+  "hash": "8cf0fc438c04715d48fa6644a43b05a7e8f41f74ec540219efa33dadf36734ad"
 }

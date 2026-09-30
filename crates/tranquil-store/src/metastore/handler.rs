@@ -7,7 +7,7 @@ use tokio::sync::oneshot;
 use tranquil_db_traits::DbScope;
 use tranquil_db_traits::{
     AccountSearchResult, AccountStatus, AdminAccountInfo, ApplyCommitError, ApplyCommitInput,
-    ApplyCommitResult, Backlink, CommitEventData, CommsChannel, CommsType,
+    ApplyCommitResult, Backlink, CommitEventData, CommsChannel, CommsMessageType,
     CompletePasskeySetupInput, CreateAccountError, CreateDelegatedAccountInput,
     CreatePasskeyAccountInput, CreatePasswordAccountInput, CreatePasswordAccountResult,
     CreateSsoAccountInput, DbError, DelegationActionType, DeletionRequest,
@@ -1806,7 +1806,7 @@ pub enum InfraRequest {
     EnqueueComms {
         user_id: Option<Uuid>,
         recipient: Recipient,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         subject: Option<String>,
         body: String,
         metadata: Option<serde_json::Value>,
@@ -2030,18 +2030,18 @@ pub enum InfraRequest {
     },
     GetLatestCommsForUser {
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         limit: i64,
         tx: Tx<Vec<QueuedComms>>,
     },
     CountCommsByType {
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         tx: Tx<i64>,
     },
     DeleteCommsByTypeForUser {
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         tx: Tx<u64>,
     },
     ExpireDeletionRequest {

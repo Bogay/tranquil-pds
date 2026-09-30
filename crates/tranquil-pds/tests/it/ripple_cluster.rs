@@ -104,7 +104,11 @@ async fn cluster_any_node_access() {
         .expect("user not found");
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user.id, tranquil_db_traits::CommsType::EmailVerification, 1)
+        .get_latest_comms_for_user(
+            user.id,
+            tranquil_db_traits::CommsMessageType::EmailVerification,
+            1,
+        )
         .await
         .expect("failed to get comms");
     let body_text = comms
@@ -639,7 +643,11 @@ fn create_account_on_node<'a>(
             .expect("user not found");
         let comms = repos
             .infra
-            .get_latest_comms_for_user(user.id, tranquil_db_traits::CommsType::EmailVerification, 1)
+            .get_latest_comms_for_user(
+                user.id,
+                tranquil_db_traits::CommsMessageType::EmailVerification,
+                1,
+            )
             .await
             .expect("failed to get comms");
         let body_text = comms

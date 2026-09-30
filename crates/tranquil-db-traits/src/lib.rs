@@ -22,7 +22,7 @@ pub use delegation::{
 };
 pub use error::{ColumnRef, DbError};
 pub use infra::{
-    AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DeletionRequest,
+    AdminAccountInfo, CommsChannel, CommsMessageType, CommsStatus, DeletionRequest,
     DeletionRequestWithToken, InfraRepository, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder,
     InviteCodeState, InviteCodeUse, NotificationHistoryRow, PasswordResetInfo, PlcTokenInfo,
     QueuedComms, Recipient, ReservedSigningKey, ReservedSigningKeyFull,

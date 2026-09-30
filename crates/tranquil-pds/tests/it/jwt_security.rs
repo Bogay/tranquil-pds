@@ -706,7 +706,11 @@ async fn test_refresh_token_replay_grace_and_forgery() {
         .unwrap();
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user.id, tranquil_db_traits::CommsType::EmailVerification, 1)
+        .get_latest_comms_for_user(
+            user.id,
+            tranquil_db_traits::CommsMessageType::EmailVerification,
+            1,
+        )
         .await
         .unwrap();
     let body_text = comms.first().unwrap().body.clone();

@@ -1,6 +1,6 @@
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use tranquil_db_traits::CommsType;
+use tranquil_db_traits::CommsMessageType;
 use tranquil_types::Did;
 
 #[tokio::test]
@@ -27,7 +27,7 @@ async fn test_send_email_success() {
     let user_id = crate::common::user_id_of(repos, &Did::new(did).unwrap()).await;
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user_id, CommsType::AdminEmail, 1)
+        .get_latest_comms_for_user(user_id, CommsMessageType::AdminEmail, 1)
         .await
         .expect("DB error");
     let notification = comms.first().expect("Notification not found");
@@ -62,7 +62,7 @@ async fn test_send_email_default_subject() {
     let user_id = crate::common::user_id_of(repos, &Did::new(did).unwrap()).await;
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user_id, CommsType::AdminEmail, 10)
+        .get_latest_comms_for_user(user_id, CommsMessageType::AdminEmail, 10)
         .await
         .expect("DB error");
     let notification = comms
@@ -184,7 +184,7 @@ async fn test_send_email_rejects_garbage_stored_email() {
 
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user_id, CommsType::AdminEmail, 1)
+        .get_latest_comms_for_user(user_id, CommsMessageType::AdminEmail, 1)
         .await
         .expect("DB error");
     assert!(

@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::oneshot;
 use tranquil_db_traits::{
     AccountSearchResult, AccountStatus, AdminAccountInfo, ApplyCommitError, ApplyCommitInput,
-    ApplyCommitResult, Backlink, CommitEventData, CommsChannel, CommsType,
+    ApplyCommitResult, Backlink, CommitEventData, CommsChannel, CommsMessageType,
     CompletePasskeySetupInput, CreateAccountError, CreateDelegatedAccountInput,
     CreatePasskeyAccountInput, CreatePasswordAccountInput, CreatePasswordAccountResult,
     CreateSsoAccountInput, DbError, DeletionRequest, DeletionRequestWithToken, DidWebOverrides,
@@ -1794,7 +1794,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
         &self,
         user_id: Option<Uuid>,
         recipient: &Recipient,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         subject: Option<&str>,
         body: &str,
         metadata: Option<serde_json::Value>,
@@ -2433,7 +2433,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
     async fn get_latest_comms_for_user(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         limit: i64,
     ) -> Result<Vec<QueuedComms>, DbError> {
         let (tx, rx) = oneshot::channel();
@@ -2451,7 +2451,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
     async fn count_comms_by_type(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
     ) -> Result<i64, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool
@@ -2466,7 +2466,7 @@ impl<S: StorageIO + 'static> tranquil_db_traits::InfraRepository for MetastoreCl
     async fn delete_comms_by_type_for_user(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
     ) -> Result<u64, DbError> {
         let (tx, rx) = oneshot::channel();
         self.pool.send(MetastoreRequest::Infra(

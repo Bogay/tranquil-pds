@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use tranquil_db_traits::{
-    AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DbError, DeletionRequest,
+    AdminAccountInfo, CommsChannel, CommsMessageType, CommsStatus, DbError, DeletionRequest,
     DeletionRequestWithToken, InfraRepository, InviteCodeError, InviteCodeInfo, InviteCodeRow,
     InviteCodeSortOrder, InviteCodeState, InviteCodeUse, NotificationHistoryRow, PlcTokenInfo,
     QueuedComms, Recipient, ReservedSigningKey, ReservedSigningKeyFull, ValidatedInviteCode,
@@ -30,7 +30,7 @@ impl InfraRepository for PostgresInfraRepository {
         &self,
         user_id: Option<Uuid>,
         recipient: &Recipient,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         subject: Option<&str>,
         body: &str,
         metadata: Option<serde_json::Value>,
@@ -42,7 +42,7 @@ impl InfraRepository for PostgresInfraRepository {
                RETURNING id"#,
             user_id,
             recipient.channel() as CommsChannel,
-            comms_type as CommsType,
+            comms_type as CommsMessageType,
             recipient.as_str(),
             subject,
             body,
@@ -80,7 +80,7 @@ impl InfraRepository for PostgresInfraRepository {
                RETURNING
                    id, user_id,
                    channel as "channel: CommsChannel",
-                   comms_type as "comms_type: CommsType",
+                   comms_type as "comms_type: CommsMessageType",
                    status as "status: CommsStatus",
                    recipient, subject, body, metadata,
                    attempts, max_attempts, last_error,
@@ -945,7 +945,7 @@ impl InfraRepository for PostgresInfraRepository {
             SELECT
                 created_at,
                 channel as "channel: CommsChannel",
-                comms_type as "comms_type: CommsType",
+                comms_type as "comms_type: CommsMessageType",
                 status as "status: CommsStatus",
                 subject,
                 body
@@ -1122,7 +1122,7 @@ impl InfraRepository for PostgresInfraRepository {
     async fn get_latest_comms_for_user(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         limit: i64,
     ) -> Result<Vec<QueuedComms>, DbError> {
         let results = sqlx::query_as!(
@@ -1130,7 +1130,7 @@ impl InfraRepository for PostgresInfraRepository {
             r#"SELECT
                 id, user_id,
                 channel as "channel: CommsChannel",
-                comms_type as "comms_type: CommsType",
+                comms_type as "comms_type: CommsMessageType",
                 status as "status: CommsStatus",
                 recipient, subject, body, metadata,
                 attempts, max_attempts, last_error,
@@ -1140,7 +1140,7 @@ impl InfraRepository for PostgresInfraRepository {
             ORDER BY created_at DESC
             LIMIT $3"#,
             user_id,
-            comms_type as CommsType,
+            comms_type as CommsMessageType,
             limit
         )
         .fetch_all(&self.pool)
@@ -1153,12 +1153,12 @@ impl InfraRepository for PostgresInfraRepository {
     async fn count_comms_by_type(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
     ) -> Result<i64, DbError> {
         let count = sqlx::query_scalar!(
             r#"SELECT COUNT(*) as "count!" FROM comms_queue WHERE user_id = $1 AND comms_type = $2"#,
             user_id,
-            comms_type as CommsType
+            comms_type as CommsMessageType
         )
         .fetch_one(&self.pool)
         .await
@@ -1170,12 +1170,12 @@ impl InfraRepository for PostgresInfraRepository {
     async fn delete_comms_by_type_for_user(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
     ) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "DELETE FROM comms_queue WHERE user_id = $1 AND comms_type = $2",
             user_id,
-            comms_type as CommsType
+            comms_type as CommsMessageType
         )
         .execute(&self.pool)
         .await

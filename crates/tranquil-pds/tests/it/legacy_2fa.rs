@@ -1,7 +1,7 @@
 use crate::common::{base_url, client, create_account_and_login, get_test_repos, user_id_of};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use tranquil_db_traits::{CommsChannel, CommsType};
+use tranquil_db_traits::{CommsChannel, CommsMessageType};
 use tranquil_types::Did;
 
 async fn enable_totp_for_user(did: &str) {
@@ -28,7 +28,7 @@ async fn get_2fa_code_from_queue(did: &str) -> Option<String> {
 
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user_id, CommsType::TwoFactorCode, 1)
+        .get_latest_comms_for_user(user_id, CommsMessageType::TwoFactorCode, 1)
         .await
         .ok()?;
 
@@ -52,7 +52,7 @@ async fn clear_2fa_challenges_for_user(did: &str) {
 
     let _ = repos
         .infra
-        .delete_comms_by_type_for_user(user_id, CommsType::TwoFactorCode)
+        .delete_comms_by_type_for_user(user_id, CommsMessageType::TwoFactorCode)
         .await;
 }
 

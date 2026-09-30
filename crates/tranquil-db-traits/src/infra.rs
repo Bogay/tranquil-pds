@@ -44,25 +44,7 @@ impl InviteCodeState {
     }
 }
 
-pub use tranquil_types::{CommsChannel, Recipient};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "comms_type", rename_all = "snake_case")]
-pub enum CommsType {
-    Welcome,
-    EmailVerification,
-    PasswordReset,
-    EmailUpdate,
-    AccountDeletion,
-    AdminEmail,
-    PlcOperation,
-    TwoFactorCode,
-    PasskeyRecovery,
-    LegacyLoginAlert,
-    MigrationVerification,
-    ChannelVerification,
-    ChannelVerified,
-}
+pub use tranquil_types::{CommsChannel, CommsMessageType, Recipient};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "comms_status", rename_all = "snake_case")]
@@ -78,7 +60,7 @@ pub struct QueuedComms {
     pub id: Uuid,
     pub user_id: Option<Uuid>,
     pub channel: CommsChannel,
-    pub comms_type: CommsType,
+    pub comms_type: CommsMessageType,
     pub status: CommsStatus,
     pub recipient: String,
     pub subject: Option<String>,
@@ -174,7 +156,7 @@ pub trait InfraRepository: Send + Sync {
         &self,
         user_id: Option<Uuid>,
         recipient: &Recipient,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         subject: Option<&str>,
         body: &str,
         metadata: Option<serde_json::Value>,
@@ -386,20 +368,20 @@ pub trait InfraRepository: Send + Sync {
     async fn get_latest_comms_for_user(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
         limit: i64,
     ) -> Result<Vec<QueuedComms>, DbError>;
 
     async fn count_comms_by_type(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
     ) -> Result<i64, DbError>;
 
     async fn delete_comms_by_type_for_user(
         &self,
         user_id: Uuid,
-        comms_type: CommsType,
+        comms_type: CommsMessageType,
     ) -> Result<u64, DbError>;
 
     async fn expire_deletion_request(&self, token: &str) -> Result<(), DbError>;
@@ -418,7 +400,7 @@ pub trait InfraRepository: Send + Sync {
 pub struct NotificationHistoryRow {
     pub created_at: DateTime<Utc>,
     pub channel: CommsChannel,
-    pub comms_type: CommsType,
+    pub comms_type: CommsMessageType,
     pub status: CommsStatus,
     pub subject: Option<String>,
     pub body: String,

@@ -2,7 +2,7 @@ use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
-use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType};
+use tranquil_db_traits::{CommsChannel, CommsMessageType, CommsStatus};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
 use tranquil_pds::auth::{Active, Auth};
 use tranquil_pds::state::AppState;
@@ -71,7 +71,7 @@ pub async fn get_notification_prefs(
 pub struct NotificationHistoryEntry {
     pub created_at: String,
     pub channel: CommsChannel,
-    pub comms_type: CommsType,
+    pub comms_type: CommsMessageType,
     pub status: CommsStatus,
     pub subject: Option<String>,
     pub body: String,
@@ -102,21 +102,10 @@ pub async fn get_notification_history(
         .await
         .log_db_err("get notification history")?;
 
-    let sensitive_types = [
-        CommsType::EmailVerification,
-        CommsType::PasswordReset,
-        CommsType::EmailUpdate,
-        CommsType::TwoFactorCode,
-        CommsType::PasskeyRecovery,
-        CommsType::MigrationVerification,
-        CommsType::PlcOperation,
-        CommsType::ChannelVerification,
-    ];
-
     let notifications = rows
         .iter()
         .map(|row| {
-            let body = if sensitive_types.contains(&row.comms_type) {
+            let body = if row.comms_type.carries_secret() {
                 "[Code redacted for security]".to_string()
             } else {
                 row.body.clone()
@@ -224,7 +213,7 @@ pub async fn request_channel_verification(
                 .enqueue_comms(
                     Some(user_id),
                     &recipient,
-                    tranquil_db_traits::CommsType::ChannelVerification,
+                    tranquil_db_traits::CommsMessageType::ChannelVerification,
                     Some(&subject),
                     &body,
                     Some(json!({"code": formatted_token})),

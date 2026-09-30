@@ -1,4 +1,4 @@
-use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType};
+use tranquil_db_traits::{CommsChannel, CommsMessageType, CommsStatus};
 use tranquil_types::{Did, Recipient};
 
 #[tokio::test]
@@ -11,7 +11,7 @@ async fn test_enqueue_comms() {
         .enqueue_comms(
             Some(user_id),
             &Recipient::new(CommsChannel::Email, "test@nel.pet").unwrap(),
-            CommsType::Welcome,
+            CommsMessageType::Welcome,
             Some("Test Subject"),
             "Test body",
             None,
@@ -20,7 +20,7 @@ async fn test_enqueue_comms() {
         .expect("Failed to enqueue comms");
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user_id, CommsType::Welcome, 2)
+        .get_latest_comms_for_user(user_id, CommsMessageType::Welcome, 2)
         .await
         .expect("DB error");
     let row = comms
@@ -32,7 +32,7 @@ async fn test_enqueue_comms() {
     assert_eq!(row.subject.as_deref(), Some("Test Subject"));
     assert_eq!(row.body, "Test body");
     assert_eq!(row.channel, CommsChannel::Email);
-    assert_eq!(row.comms_type, CommsType::Welcome);
+    assert_eq!(row.comms_type, CommsMessageType::Welcome);
     assert_eq!(row.status, CommsStatus::Pending);
 }
 
@@ -43,7 +43,7 @@ async fn test_comms_queue_status_index() {
     let user_id = crate::common::user_id_of(repos, &Did::new(did).unwrap()).await;
     let initial_count = repos
         .infra
-        .count_comms_by_type(user_id, CommsType::PasswordReset)
+        .count_comms_by_type(user_id, CommsMessageType::PasswordReset)
         .await
         .expect("Failed to count");
     for i in 0..5 {
@@ -53,7 +53,7 @@ async fn test_comms_queue_status_index() {
             .enqueue_comms(
                 Some(user_id),
                 &Recipient::new(CommsChannel::Email, &recipient).unwrap(),
-                CommsType::PasswordReset,
+                CommsMessageType::PasswordReset,
                 Some("Test"),
                 "Body",
                 None,
@@ -63,7 +63,7 @@ async fn test_comms_queue_status_index() {
     }
     let final_count = repos
         .infra
-        .count_comms_by_type(user_id, CommsType::PasswordReset)
+        .count_comms_by_type(user_id, CommsMessageType::PasswordReset)
         .await
         .expect("Failed to count");
     assert_eq!(final_count - initial_count, 5);

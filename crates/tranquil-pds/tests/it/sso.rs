@@ -1,7 +1,7 @@
 use crate::common::{base_url, client, create_account_and_login, get_test_repos};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use tranquil_db_traits::{CommsChannel, CommsType, SsoAction, SsoProviderType};
+use tranquil_db_traits::{CommsChannel, CommsMessageType, SsoAction, SsoProviderType};
 use tranquil_oauth::{
     AuthorizationRequestParameters, CodeChallengeMethod, RequestData, ResponseType,
 };
@@ -811,7 +811,7 @@ async fn test_sso_complete_registration_multichannel_discord() {
     assert_eq!(user.discord_username.as_deref(), Some(discord_id));
     let quered = repos
         .infra
-        .get_latest_comms_for_user(user.id, CommsType::EmailVerification, 1)
+        .get_latest_comms_for_user(user.id, CommsMessageType::EmailVerification, 1)
         .await
         .unwrap();
     let comms = quered.first().expect("We queued up a verification email");

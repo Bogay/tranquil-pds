@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::types::EmailDomain;
 use crate::sender::SendError;
-use crate::{CommsType, QueuedComms};
+use crate::{CommsMessageType, QueuedComms};
 
 pub(super) fn build(
     from: &Mailbox,
@@ -81,8 +81,8 @@ impl Header for AtmosCategory {
     }
 }
 
-fn atmos_category(comms_type: CommsType) -> Option<AtmosCategory> {
-    use CommsType::*;
+fn atmos_category(comms_type: CommsMessageType) -> Option<AtmosCategory> {
+    use CommsMessageType::*;
     match comms_type {
         EmailVerification
         | ChannelVerification
@@ -119,7 +119,7 @@ mod tests {
             id: Uuid::new_v4(),
             user_id: None,
             channel: CommsChannel::Email,
-            comms_type: CommsType::Welcome,
+            comms_type: CommsMessageType::Welcome,
             status: CommsStatus::Pending,
             recipient: recipient.to_string(),
             subject: subject.map(String::from),
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn atmos_category_header_present_when_enabled_and_mapped() {
         let qc = QueuedComms {
-            comms_type: CommsType::PasswordReset,
+            comms_type: CommsMessageType::PasswordReset,
             ..fixture("user@nel.pet", Some("s"), "b")
         };
         let msg = build(&from_mailbox(), &qc, &to("user@jola.dev"), true).unwrap();
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn atmos_category_header_absent_when_disabled() {
         let qc = QueuedComms {
-            comms_type: CommsType::PasswordReset,
+            comms_type: CommsMessageType::PasswordReset,
             ..fixture("user@nel.pet", Some("s"), "b")
         };
         let msg = build(&from_mailbox(), &qc, &to("user@nel.pet"), false).unwrap();
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn atmos_category_header_absent_when_unmapped() {
         let qc = QueuedComms {
-            comms_type: CommsType::AdminEmail,
+            comms_type: CommsMessageType::AdminEmail,
             ..fixture("user@nel.pet", Some("s"), "b")
         };
         let msg = build(&from_mailbox(), &qc, &to("user@nel.pet"), true).unwrap();

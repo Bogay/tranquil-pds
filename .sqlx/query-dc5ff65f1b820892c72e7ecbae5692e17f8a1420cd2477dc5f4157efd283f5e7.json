@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                created_at,\n                channel as \"channel: CommsChannel\",\n                comms_type as \"comms_type: CommsType\",\n                status as \"status: CommsStatus\",\n                subject,\n                body\n            FROM comms_queue\n            WHERE user_id = $1\n            ORDER BY created_at DESC\n            LIMIT $2\n            ",
+  "query": "\n            SELECT\n                created_at,\n                channel as \"channel: CommsChannel\",\n                comms_type as \"comms_type: CommsMessageType\",\n                status as \"status: CommsStatus\",\n                subject,\n                body\n            FROM comms_queue\n            WHERE user_id = $1\n            ORDER BY created_at DESC\n            LIMIT $2\n            ",
   "describe": {
     "columns": [
       {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "comms_type: CommsType",
+        "name": "comms_type: CommsMessageType",
         "type_info": {
           "Custom": {
             "name": "comms_type",
@@ -94,5 +94,5 @@
       false
     ]
   },
-  "hash": "25309f4a08845a49557d694ad9b5b9a137be4dcce28e9293551c8c3fd40fdd86"
+  "hash": "dc5ff65f1b820892c72e7ecbae5692e17f8a1420cd2477dc5f4157efd283f5e7"
 }
