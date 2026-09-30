@@ -201,7 +201,7 @@ pub async fn verify_password_mfa<'a>(
 
     match hash {
         Some(h) => {
-            if bcrypt::verify(password, h.as_str()).unwrap_or(false) {
+            if crate::auth::verify_password(password, &h) {
                 Ok(MfaVerified::from_password(user))
             } else {
                 Err(crate::api::error::ApiError::InvalidPassword(

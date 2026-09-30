@@ -6,7 +6,7 @@ use crate::AccountStatus;
 use crate::api::ApiError;
 use crate::cache::Cache;
 use crate::oauth::scopes::ScopePermissions;
-use crate::types::Did;
+use crate::types::{Did, PasswordHash};
 use tranquil_db_traits::{OAuthRepository, UserRepository};
 
 pub mod account_verified;
@@ -60,6 +60,47 @@ pub use tranquil_auth::{
 
 pub fn lxm_permits(lxm: &str, expected: &crate::types::Nsid) -> bool {
     lxm == "*" || lxm == expected.as_str()
+}
+
+const REFERENCE_SCRYPT_LOG_N: u8 = 14;
+const REFERENCE_SCRYPT_R: u32 = 8;
+const REFERENCE_SCRYPT_P: u32 = 1;
+const REFERENCE_SCRYPT_LEN: usize = 64;
+const REFERENCE_PASSWORD_MAX_UTF16_UNITS: usize = 512;
+
+pub fn verify_password(password: &str, stored: &PasswordHash) -> bool {
+    if password.encode_utf16().count() > REFERENCE_PASSWORD_MAX_UTF16_UNITS {
+        return false;
+    }
+    match stored.as_str().split_once(':') {
+        Some((salt, hash)) => matches_reference_scrypt(password, salt, hash),
+        None => match bcrypt::verify(password, stored.as_str()) {
+            Ok(valid) => valid,
+            Err(e) => {
+                tracing::warn!("rejecting malformed stored password hash: {e}");
+                false
+            }
+        },
+    }
+}
+
+fn matches_reference_scrypt(password: &str, salt: &str, hash: &str) -> bool {
+    let params = scrypt::Params::new(
+        REFERENCE_SCRYPT_LOG_N,
+        REFERENCE_SCRYPT_R,
+        REFERENCE_SCRYPT_P,
+    )
+    .expect("reference scrypt parameters are valid");
+    let mut derived = [0u8; REFERENCE_SCRYPT_LEN];
+    if scrypt::scrypt(password.as_bytes(), salt.as_bytes(), &params, &mut derived).is_err() {
+        return false;
+    }
+    let derived_hex = hex::encode(derived);
+    hash.len() == derived_hex.len()
+        && bool::from(subtle::ConstantTimeEq::ct_eq(
+            derived_hex.as_bytes(),
+            hash.as_bytes(),
+        ))
 }
 
 pub fn try_decrypt_user_key(
@@ -655,6 +696,77 @@ mod tests {
         assert!(!lxm_permits(
             "com.atproto.*",
             &n("com.atproto.repo.uploadBlob")
+        ));
+    }
+
+    const SCRYPT_SALT: &str = "d9e6a2f0c3b4817de5a2c9f01b34d8e2";
+    const SCRYPT_HASH: &str = "403c298bf29e5e15766795e6aa4290b703bf7cb85ab0d3d85946730aa4d4e661664e15d2fe92311ac5b8d5a9f4731b1c51561163722536b4bef155eac39a3720";
+
+    #[test]
+    fn test_verify_password_scrypt_reference_format() {
+        let stored = PasswordHash::new(format!("{SCRYPT_SALT}:{SCRYPT_HASH}"));
+        assert!(verify_password(
+            "correct horse that is actually honse",
+            &stored
+        ));
+        assert!(!verify_password(
+            "wrong horse that is maybe aliern",
+            &stored
+        ));
+    }
+
+    #[test]
+    fn test_verify_password_scrypt_no_unicode_normalization() {
+        let stored = PasswordHash::new(format!(
+            "aa00aa00aa00aa00aa00aa00aa00aa00:{}",
+            "7ee039f343c387c097f9535afc7066d3967dcff7baf7ef947327a505b2cd0e596612f3c25e5d9df72c1af6a6315b36b76d66513e4a37e0feec1e6866dd140583"
+        ));
+        assert!(verify_password("café", &stored));
+        assert!(!verify_password("cafe\u{301}", &stored));
+    }
+
+    #[test]
+    fn test_verify_password_scrypt_utf16_unit_cap() {
+        let stored = |hash: &str| PasswordHash::new(format!("{SCRYPT_SALT}:{hash}"));
+        assert!(verify_password(
+            &"a".repeat(512),
+            &stored(
+                "1d97d6293f39b974ca48d93607b9f3a9a97ae03ae9f30222c68a4f1a01846032e58d2648134a952f71465eefd3e649a0913b161d18f55130e29d5d25d3bca6fb"
+            )
+        ));
+        assert!(verify_password(
+            &"★".repeat(512),
+            &stored(
+                "2caedff84bb3e89850b8e85c9ca6baac8f24b706e26aa382d89c5483039027ba915c1ebc8d23341092930599f8357167397a4053ac4ba8ea0f639f8a88567347"
+            )
+        ));
+        assert!(!verify_password(
+            &"a".repeat(513),
+            &stored(
+                "29736bd3d19b6d6f1e6c5328d57ae99a7a8186aa8bdc8e2952f82913406e17681b2aefaca0b6a6a3185fa606a61b5445873479cd66718722940e5a79e9871eeb"
+            )
+        ));
+    }
+
+    #[test]
+    fn test_verify_password_bcrypt() {
+        let stored = PasswordHash::new(bcrypt::hash("hunter2", 4).expect("bcrypt hash"));
+        assert!(verify_password("hunter2", &stored));
+        assert!(!verify_password("hunter3", &stored));
+    }
+
+    #[test]
+    fn test_verify_password_malformed_stored_hashes() {
+        for stored in ["not-a-hash", "aabb:", ":aabb", "deadbeef:deadbeef", "a:b:c"] {
+            assert!(!verify_password(
+                "correct horse that is actually honse",
+                &PasswordHash::new(stored)
+            ));
+        }
+        let garbage = PasswordHash::new(format!("{SCRYPT_SALT}:{}", "z".repeat(128)));
+        assert!(!verify_password(
+            "correct horse that is actually honse",
+            &garbage
         ));
     }
 }

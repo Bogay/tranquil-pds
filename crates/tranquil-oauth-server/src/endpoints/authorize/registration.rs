@@ -149,13 +149,13 @@ pub async fn register_complete(
     };
 
     let mut password_valid = password_hashes.iter().fold(false, |acc, hash| {
-        acc | bcrypt::verify(&form.app_password, hash.as_str()).unwrap_or(false)
+        acc | tranquil_pds::auth::verify_password(&form.app_password, hash)
     });
 
     if !password_valid
         && let Ok(Some(account_hash)) = state.repos.user.get_password_hash_by_did(&did).await
     {
-        password_valid = bcrypt::verify(&form.app_password, account_hash.as_str()).unwrap_or(false);
+        password_valid = tranquil_pds::auth::verify_password(&form.app_password, &account_hash);
     }
 
     if !password_valid {

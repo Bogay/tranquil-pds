@@ -301,7 +301,7 @@ pub async fn delegation_auth(
     let password_valid = controller
         .password_hash
         .as_ref()
-        .map(|hash| bcrypt::verify(password, hash.as_str()).unwrap_or_default())
+        .map(|hash| tranquil_pds::auth::verify_password(password, hash))
         .unwrap_or_default();
 
     if !password_valid {

@@ -478,12 +478,7 @@ pub async fn authorize_post(
     }
 
     let password_valid = match &user.password_hash {
-        Some(hash) => match bcrypt::verify(&form.password, hash.as_str()) {
-            Ok(valid) => valid,
-            Err(_) => {
-                return show_login_error("An error occurred. Please try again.", json_response);
-            }
-        },
+        Some(hash) => tranquil_pds::auth::verify_password(&form.password, hash),
         None => false,
     };
     if !password_valid {

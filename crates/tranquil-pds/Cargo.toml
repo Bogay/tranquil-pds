@@ -36,6 +36,7 @@ futures = { workspace = true }
 futures-util = { workspace = true }
 governor = { workspace = true }
 hickory-resolver = { workspace = true }
+hex = { workspace = true }
 hkdf = { workspace = true }
 hmac = { workspace = true }
 http = { workspace = true }
@@ -55,6 +56,7 @@ parking_lot = { workspace = true }
 rand = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
+scrypt = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
 serde_ipld_dagcbor = { workspace = true }
@@ -98,7 +100,6 @@ tranquil-api = { workspace = true }
 tranquil-oauth-server = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock = { workspace = true }
-hex = { workspace = true }
 tokio-tungstenite = { workspace = true }
 s3 = { workspace = true }
 redis = { workspace = true }

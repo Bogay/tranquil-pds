@@ -74,7 +74,7 @@ pub async fn reauth_password(
         .log_db_err("fetching password hash")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let password_valid = bcrypt::verify(&input.password, password_hash.as_str()).unwrap_or(false);
+    let password_valid = tranquil_pds::auth::verify_password(&input.password, &password_hash);
 
     if !password_valid {
         let app_password_hashes = state
@@ -85,7 +85,7 @@ pub async fn reauth_password(
             .unwrap_or_default();
 
         let app_password_valid = app_password_hashes.iter().fold(false, |acc, h| {
-            acc | bcrypt::verify(&input.password, h.as_str()).unwrap_or(false)
+            acc | tranquil_pds::auth::verify_password(&input.password, h)
         });
 
         if !app_password_valid {

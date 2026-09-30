@@ -255,7 +255,7 @@ pub async fn verify_credential(
     password_hash: Option<&PasswordHash>,
 ) -> Option<CredentialMatch> {
     let main_valid = password_hash
-        .map(|h| bcrypt::verify(password, h.as_str()).unwrap_or(false))
+        .map(|h| tranquil_pds::auth::verify_password(password, h))
         .unwrap_or(false);
     if main_valid {
         return Some(CredentialMatch::MainPassword);
@@ -266,7 +266,7 @@ pub async fn verify_credential(
         .unwrap_or_default();
     app_passwords
         .into_iter()
-        .find(|app| bcrypt::verify(password, app.password_hash.as_str()).unwrap_or(false))
+        .find(|app| tranquil_pds::auth::verify_password(password, &app.password_hash))
         .map(|app| {
             let scopes = app.scopes.unwrap_or_else(|| {
                 if app.privilege.is_privileged() {
