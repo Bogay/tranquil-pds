@@ -73,7 +73,11 @@ pub async fn resend_migration_verification(
     if user.email_verified {
         return Ok(Json(ResendMigrationVerificationOutput { sent: true }));
     }
-    let target = tranquil_pds::comms::VerificationTarget::resolve(channel, &id, Some(&id)).ok();
+    let target = tranquil_pds::comms::VerificationTarget::parse(
+        channel,
+        &id,
+        tranquil_types::EmailAddress::new(&id).ok(),
+    );
     if let Some(target) = target {
         crate::identity::provision::enqueue_migration_verification(
             &state, user.id, &user.did, channel, &target,

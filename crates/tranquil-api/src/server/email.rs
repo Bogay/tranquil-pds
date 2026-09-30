@@ -361,9 +361,7 @@ pub async fn update_email(
     let formatted_token =
         tranquil_pds::auth::verification_token::format_token_for_display(&verification_token);
     let hostname = &tranquil_config::get().server.hostname;
-    let target = tranquil_pds::comms::VerificationTarget::direct(
-        tranquil_db_traits::Recipient::Email(new_email.clone()),
-    );
+    let target = tranquil_pds::comms::VerificationTarget::Email(new_email.clone());
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),

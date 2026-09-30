@@ -25,10 +25,12 @@ use tranquil_db_traits::{
     DbError, InfraRepository, OutboundMessage, QueuedComms, Recipient, UserCommsPrefs,
     UserRepository,
 };
-use tranquil_types::{DiscordUserId, EmailAddress, Locale, SignalUsername, TelegramChatId};
+use tranquil_types::{EmailAddress, Locale};
 use uuid::Uuid;
 
 use crate::auth::verification_token::VerificationPurpose;
+
+use super::notice::{Secrecy, VerificationTarget, recipient_for};
 
 pub struct CommsService {
     infra_repo: Arc<dyn InfraRepository>,
@@ -210,81 +212,6 @@ impl CommsService {
     }
 }
 
-// Think about the situation on Telegram and Discord where the user must message a given bot *first* in order to hydrate a chat ID into our system so that we can in fact send things.
-// If we can think of a better way to simply error-out later, instead of falling back to email when say Telegram is in an aborted state, let's do that.
-pub struct VerificationTarget {
-    pub id: String,
-    pub recipient: Recipient,
-}
-
-impl VerificationTarget {
-    pub fn direct(recipient: Recipient) -> Self {
-        Self {
-            id: recipient.as_str().to_string(),
-            recipient,
-        }
-    }
-
-    pub fn resolve(
-        channel: CommsChannel,
-        id: &str,
-        fallback: Option<&str>,
-    ) -> Result<Self, crate::api::error::ApiError> {
-        let direct = (!channel.verifies_via_bot())
-            .then(|| Recipient::new(channel, id))
-            .and_then(Result::ok);
-        let recipient = direct.map_or_else(|| fallback_recipient(fallback), Ok)?;
-        Ok(Self {
-            id: id.to_string(),
-            recipient,
-        })
-    }
-}
-
-fn fallback_recipient(fallback: Option<&str>) -> Result<Recipient, crate::api::error::ApiError> {
-    let raw = fallback
-        .map(str::trim)
-        .filter(|email| !email.is_empty())
-        .ok_or(crate::api::error::ApiError::InvalidRequest(
-            "Verification over this channel needs an email address. Message the bot first".into(),
-        ))?;
-    EmailAddress::new(raw)
-        .map(Recipient::Email)
-        .map_err(|_| crate::api::error::ApiError::InvalidEmail)
-}
-
-pub fn recipient_for(prefs: &UserCommsPrefs, channel: CommsChannel) -> Option<Recipient> {
-    let fallback = || email_recipient(prefs);
-    match channel {
-        CommsChannel::Email => fallback(),
-        CommsChannel::Telegram => prefs
-            .telegram_chat_id
-            .and_then(TelegramChatId::from_i64)
-            .map(Recipient::Telegram)
-            .or_else(fallback),
-        CommsChannel::Discord => prefs
-            .discord_id
-            .as_deref()
-            .and_then(|id| DiscordUserId::new(id).ok())
-            .map(Recipient::Discord)
-            .or_else(fallback),
-        CommsChannel::Signal => prefs
-            .signal_username
-            .as_deref()
-            .and_then(|name| SignalUsername::new(name).ok())
-            .map(Recipient::Signal)
-            .or_else(fallback),
-    }
-}
-
-fn email_recipient(prefs: &UserCommsPrefs) -> Option<Recipient> {
-    prefs
-        .email
-        .as_deref()
-        .and_then(|email| EmailAddress::new(email).ok())
-        .map(Recipient::Email)
-}
-
 #[derive(Debug)]
 pub enum NotificationError {
     InvalidRequest(String),
@@ -347,6 +274,12 @@ pub mod repo {
                 Self::ShortTokenEmail { .. } => Some(CommsChannel::Email),
                 Self::LegacyLoginAlert { channel, .. } => Some(*channel),
                 _ => None,
+            }
+        }
+        fn secrecy(&self) -> Secrecy {
+            match self {
+                Self::Welcome | Self::LegacyLoginAlert { .. } => Secrecy::NotSecret,
+                _ => Secrecy::Secret,
             }
         }
 
@@ -509,7 +442,7 @@ pub mod repo {
     ) -> Result<Option<Uuid>, NotificationError> {
         let prefs = get_comms_prefs(user_repo, user_id).await?;
         let channel = notice.channel().unwrap_or(prefs.preferred_channel);
-        let Some(recipient) = recipient_for(&prefs, channel) else {
+        let Some(recipient) = recipient_for(&prefs, channel, notice.secrecy()) else {
             warn!(
                 user_id = %user_id,
                 channel = ?channel,
@@ -613,7 +546,7 @@ pub mod repo {
         let prefs = get_comms_prefs(user_repo, user_id).await?;
         let locale = locale_of(&prefs);
         let strings = get_strings(locale);
-        let encoded_id = urlencoding::encode(&target.id);
+        let encoded_id = urlencoding::encode(target.identifier_str());
         let encoded_token = urlencoding::encode(token);
         let verify_page = format!("https://{hostname}/app/verify");
         let verify_link = format!(
@@ -644,7 +577,7 @@ pub mod repo {
         infra_repo
             .enqueue_comms(OutboundMessage {
                 user_id,
-                recipient: target.recipient.clone(),
+                recipient: target.recipient(),
                 kind: CommsMessageType::MigrationVerification,
                 subject: Some(rendered.subject),
                 body: rendered.body,
@@ -672,7 +605,7 @@ pub mod repo {
         let locale = prefs.as_ref().map(locale_of).unwrap_or_default();
         let strings = get_strings(locale);
         let encoded_token = urlencoding::encode(code);
-        let encoded_id = urlencoding::encode(&target.id);
+        let encoded_id = urlencoding::encode(target.identifier_str());
         let verify_page = format!("https://{hostname}/app/verify");
         let verify_link = format!(
             "https://{}/app/verify?token={}&identifier={}",
@@ -702,7 +635,7 @@ pub mod repo {
         infra_repo
             .enqueue_comms(OutboundMessage {
                 user_id,
-                recipient: target.recipient.clone(),
+                recipient: target.recipient(),
                 kind: CommsMessageType::EmailVerification,
                 subject: Some(rendered.subject),
                 body: rendered.body,
@@ -735,7 +668,7 @@ pub mod repo {
         let strings = get_strings(locale);
         // TODO clean up identifier encoding within the rendering
         let encoded_token = urlencoding::encode(code);
-        let encoded_id = urlencoding::encode(&target.id);
+        let encoded_id = urlencoding::encode(target.identifier_str());
         let verify_link = format!(
             "https://{}/app/verify?token={}&identifier={}",
             hostname, encoded_token, encoded_id
@@ -758,7 +691,7 @@ pub mod repo {
         infra_repo
             .enqueue_comms(OutboundMessage {
                 user_id,
-                recipient: target.recipient.clone(),
+                recipient: target.recipient(),
                 kind: CommsMessageType::ChannelVerification,
                 subject: Some(rendered.subject),
                 body: rendered.body,
@@ -948,97 +881,5 @@ pub mod repo {
             );
             assert!(!body.contains('{'), "{body}");
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bot_channel_recipients_fall_back_to_email() {
-        let telegram =
-            VerificationTarget::resolve(CommsChannel::Telegram, "123456789", Some("user@jola.dev"))
-                .unwrap();
-        assert_eq!(telegram.recipient.channel(), CommsChannel::Email);
-
-        let discord = VerificationTarget::resolve(
-            CommsChannel::Discord,
-            "274656283714826240",
-            Some("user@jola.dev"),
-        )
-        .unwrap();
-        assert_eq!(discord.recipient.channel(), CommsChannel::Email);
-    }
-
-    #[test]
-    fn resolution_keeps_id_for_bot_channels() {
-        let target =
-            VerificationTarget::resolve(CommsChannel::Telegram, "oys_01", Some("user@jola.dev"))
-                .unwrap();
-        assert_eq!(target.id, "oys_01");
-        assert_eq!(target.recipient.channel(), CommsChannel::Email);
-    }
-
-    #[test]
-    fn direct_channels_parse_id() {
-        let email = VerificationTarget::resolve(CommsChannel::Email, "user@nel.pet", None).unwrap();
-        assert_eq!(email.recipient.as_str(), "user@nel.pet");
-
-        let signal = VerificationTarget::resolve(CommsChannel::Signal, "oys.01", None).unwrap();
-        assert_eq!(signal.recipient.channel(), CommsChannel::Signal);
-    }
-
-    #[test]
-    fn signal_falls_back_when_id_isnt_username() {
-        let target =
-            VerificationTarget::resolve(CommsChannel::Signal, "oys", Some("user@jola.dev"))
-                .unwrap();
-        assert_eq!(target.recipient.channel(), CommsChannel::Email);
-    }
-
-    #[test]
-    fn resolve_fails_without_fallback() {
-        assert!(VerificationTarget::resolve(CommsChannel::Telegram, "oys_01", None).is_err());
-        assert!(VerificationTarget::resolve(CommsChannel::Signal, "oys", None).is_err());
-    }
-}
-
-#[cfg(test)]
-mod recipient_for_tests {
-    use super::*;
-
-    fn undeliverable_prefs() -> UserCommsPrefs {
-        UserCommsPrefs {
-            email: None,
-            email_verified: false,
-            handle: "oys.nel.pet".parse().unwrap(),
-            preferred_channel: CommsChannel::Telegram,
-            preferred_locale: Locale::default(),
-            telegram_chat_id: None,
-            discord_id: None,
-            signal_username: None,
-            signal_verified: false,
-        }
-    }
-
-    #[test]
-    fn undeliverable_prefs_resolve_to_none_on_every_channel() {
-        let prefs = undeliverable_prefs();
-        assert_eq!(recipient_for(&prefs, CommsChannel::Telegram), None);
-        assert_eq!(recipient_for(&prefs, CommsChannel::Email), None);
-    }
-
-    #[test]
-    fn zero_chat_id_falls_back_to_email() {
-        let prefs = UserCommsPrefs {
-            telegram_chat_id: Some(0),
-            email: Some("oys@jola.dev".into()),
-            ..undeliverable_prefs()
-        };
-        assert_eq!(
-            recipient_for(&prefs, CommsChannel::Telegram),
-            Some(Recipient::Email(EmailAddress::new("oys@jola.dev").unwrap()))
-        );
     }
 }

@@ -16,13 +16,14 @@ use tranquil_pds::auth::{
     Active, Auth, NormalizedLoginIdentifier, Permissive, require_legacy_session_mfa,
     require_reauth_window,
 };
+use tranquil_pds::comms::VerificationTarget;
 use tranquil_pds::rate_limit::{
     LoginLimit, RateLimited, RefreshSessionLimit, TotpVerifyLimit,
     check_user_rate_limit_with_message,
 };
 use tranquil_pds::state::AppState;
 use tranquil_pds::types::{AccountState, AtIdentifier, Did, Handle, PlainPassword};
-use tranquil_types::{Locale, TokenId};
+use tranquil_types::{EmailAddress, Locale, TokenId};
 
 pub fn verification_blocks_login(channel_verification: &ChannelVerificationStatus) -> bool {
     !tranquil_config::get()
@@ -990,8 +991,14 @@ async fn resend_signup_verification(
         warn!(did = %did, channel = ?row.channel, "We skipped {context} because the account doesn't have a recipient on file");
         return false;
     };
-    match tranquil_pds::comms::VerificationTarget::resolve(row.channel, id, row.email.as_deref()) {
-        Ok(target) => {
+    match VerificationTarget::parse(
+        row.channel,
+        id,
+        row.email
+            .as_deref()
+            .and_then(|raw| EmailAddress::new(raw).ok()),
+    ) {
+        Some(target) => {
             crate::identity::provision::enqueue_signup_verification(
                 state,
                 row.id,
@@ -1002,7 +1009,7 @@ async fn resend_signup_verification(
             .await;
             true
         }
-        Err(_) => {
+        None => {
             warn!(did = %did, channel = ?row.channel, "We skipped {context} because the account doesn't have a valid recipient");
             false
         }

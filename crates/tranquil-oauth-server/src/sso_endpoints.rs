@@ -1391,7 +1391,7 @@ pub async fn complete_registration(
         let verification_token = tranquil_pds::auth::verification_token::generate_signup_token(
             &did,
             verification_channel,
-            &target.id,
+            target.identifier_str(),
         );
         let formatted_token =
             tranquil_pds::auth::verification_token::format_token_for_display(&verification_token);

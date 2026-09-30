@@ -197,7 +197,11 @@ async fn notify_channel_verified(state: &AppState, user_id: uuid::Uuid, channel:
             return;
         }
     };
-    let Some(recipient) = tranquil_pds::comms::recipient_for(&prefs, channel) else {
+    let Some(recipient) = tranquil_pds::comms::recipient_for(
+        &prefs,
+        channel,
+        tranquil_pds::comms::Secrecy::NotSecret,
+    ) else {
         warn!(
             user_id = %user_id,
             channel = ?channel,

@@ -167,37 +167,41 @@ pub fn extract_verification_recipient(
     match channel {
         CommsChannel::Email => {
             let raw = trimmed(input.email).ok_or(ApiError::MissingEmail)?;
-            let address = tranquil_types::EmailAddress::new(raw)?;
-            Ok(tranquil_pds::comms::VerificationTarget::direct(
-                tranquil_db_traits::Recipient::Email(address),
+            Ok(tranquil_pds::comms::VerificationTarget::Email(
+                tranquil_types::EmailAddress::new(raw)?,
             ))
         }
         CommsChannel::Signal => {
             let raw = trimmed(input.signal_username).ok_or(ApiError::MissingSignalNumber)?;
-            let username = SignalUsername::new(raw)?;
-            Ok(tranquil_pds::comms::VerificationTarget::direct(
-                tranquil_db_traits::Recipient::Signal(username),
+            Ok(tranquil_pds::comms::VerificationTarget::Signal(
+                SignalUsername::new(raw)?,
             ))
         }
         CommsChannel::Telegram => {
             let raw = trimmed(input.telegram_username).ok_or(ApiError::MissingTelegramUsername)?;
-            let username = TelegramUsername::new(raw)?;
-            tranquil_pds::comms::VerificationTarget::resolve(
-                channel,
-                username.as_str(),
-                input.email,
-            )
+            let identifier =
+                tranquil_types::ChannelIdentifier::Telegram(TelegramUsername::new(raw)?);
+            Ok(tranquil_pds::comms::VerificationTarget::ViaEmail {
+                identifier,
+                address: fallback_email(input.email)?,
+            })
         }
         CommsChannel::Discord => {
             let raw = trimmed(input.discord_username).ok_or(ApiError::MissingDiscordId)?;
-            let username = DiscordUsername::new(raw)?;
-            tranquil_pds::comms::VerificationTarget::resolve(
-                channel,
-                username.as_str(),
-                input.email,
-            )
+            let identifier = tranquil_types::ChannelIdentifier::Discord(DiscordUsername::new(raw)?);
+            Ok(tranquil_pds::comms::VerificationTarget::ViaEmail {
+                identifier,
+                address: fallback_email(input.email)?,
+            })
         }
     }
+}
+
+fn fallback_email(raw: Option<&str>) -> Result<tranquil_types::EmailAddress, ApiError> {
+    let trimmed = trimmed(raw).ok_or(ApiError::InvalidRequest(
+        "Verification over this channel couldn't happen for some reason. Try messaging the bot first".into(),
+    ))?;
+    tranquil_types::EmailAddress::new(trimmed).map_err(|_| ApiError::InvalidEmail)
 }
 
 fn trimmed(raw: Option<&str>) -> Option<&str> {
@@ -214,7 +218,11 @@ pub async fn implicitly_verify_channel(
     let Ok(Some(prefs)) = user_repo.get_comms_prefs(user_id).await else {
         return;
     };
-    let Some(recipient) = tranquil_pds::comms::recipient_for(&prefs, preferred_channel) else {
+    let Some(recipient) = tranquil_pds::comms::recipient_for(
+        &prefs,
+        preferred_channel,
+        tranquil_pds::comms::Secrecy::Secret,
+    ) else {
         warn!(
             did = %did,
             preferred = ?preferred_channel,

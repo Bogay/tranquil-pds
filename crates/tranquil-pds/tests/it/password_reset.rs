@@ -1,7 +1,7 @@
 use crate::helpers::verify_new_account;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use tranquil_db_traits::CommsMessageType;
+use tranquil_db_traits::{CommsChannel, CommsMessageType};
 
 #[tokio::test]
 async fn test_request_password_reset_creates_code() {
@@ -362,6 +362,11 @@ async fn test_reset_password_creates_notification() {
         .await
         .expect("failed to look up user")
         .expect("user not found");
+    repos
+        .user
+        .set_channel_verified(&user.did, CommsChannel::Email)
+        .await
+        .expect("verify email");
     let initial_count = repos
         .infra
         .count_comms_by_type(user.id, CommsMessageType::PasswordReset)

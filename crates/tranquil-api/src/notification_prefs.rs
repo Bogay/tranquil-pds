@@ -175,12 +175,17 @@ pub async fn request_channel_verification(
             .map_err(|e| ApiError::InternalError(Some(e.to_string())))?;
         }
         _ => {
-            let fallback_handle = handle.map(|h| h.as_str()).unwrap_or_else(|| did.as_str());
+            let fallback_email = handle
+                .map(|h| h.as_str())
+                .or_else(|| Some(did.as_str()))
+                .and_then(|raw| tranquil_types::EmailAddress::new(raw).ok());
+            let target = VerificationTarget::parse(channel, id, fallback_email)
+                .ok_or(ApiError::InvalidEmail)?;
             tranquil_pds::comms::comms_repo::enqueue_channel_verification(
                 state.repos.user.as_ref(),
                 state.repos.infra.as_ref(),
                 user_id,
-                &VerificationTarget::resolve(channel, id, Some(fallback_handle))?,
+                &target,
                 &formatted_token,
                 &tranquil_config::get().server.hostname,
                 channel,

@@ -318,8 +318,11 @@ pub async fn enqueue_signup_verification(
     channel: CommsChannel,
     target: &tranquil_pds::comms::VerificationTarget,
 ) {
-    let token =
-        tranquil_pds::auth::verification_token::generate_signup_token(did, channel, &target.id);
+    let token = tranquil_pds::auth::verification_token::generate_signup_token(
+        did,
+        channel,
+        target.identifier_str(),
+    );
     let formatted = tranquil_pds::auth::verification_token::format_token_for_display(&token);
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_signup_verification(
@@ -343,8 +346,11 @@ pub async fn enqueue_migration_verification(
     channel: CommsChannel,
     target: &tranquil_pds::comms::VerificationTarget,
 ) {
-    let token =
-        tranquil_pds::auth::verification_token::generate_migration_token(did, channel, &target.id);
+    let token = tranquil_pds::auth::verification_token::generate_migration_token(
+        did,
+        channel,
+        target.identifier_str(),
+    );
     let formatted = tranquil_pds::auth::verification_token::format_token_for_display(&token);
     let hostname = &tranquil_config::get().server.hostname;
     if let Err(e) = tranquil_pds::comms::comms_repo::enqueue_migration_verification(
