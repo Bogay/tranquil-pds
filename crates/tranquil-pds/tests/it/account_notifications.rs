@@ -260,7 +260,7 @@ async fn test_update_email_via_notification_prefs() {
 
     let comms = repos
         .infra
-        .get_latest_comms_for_user(user_id, CommsMessageType::ChannelVerification, 1)
+        .get_latest_comms_for_user(user_id, CommsMessageType::EmailUpdate, 1)
         .await
         .expect("DB error");
     let body_text = comms

@@ -8,7 +8,7 @@ use crate::util::{generate_token_code, normalize_token_code};
 
 pub use tranquil_types::EmailTokenPurpose;
 
-const TOKEN_TTL_SECS: u64 = 900;
+pub const TOKEN_TTL_SECS: u64 = 900;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TokenData {

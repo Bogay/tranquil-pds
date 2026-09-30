@@ -8,7 +8,6 @@ use tracing::{debug, info, warn};
 
 use tranquil_pds::comms::comms_repo;
 use tranquil_pds::state::AppState;
-use tranquil_types::CommsChannel;
 
 #[derive(Deserialize)]
 struct TelegramUpdate {
@@ -111,7 +110,6 @@ pub async fn handle_telegram_webhook(
                                 user_id,
                                 &tranquil_types::Recipient::Telegram(chat_id),
                                 &tranquil_config::get().server.hostname,
-                                CommsChannel::Telegram,
                             )
                             .await;
                         }

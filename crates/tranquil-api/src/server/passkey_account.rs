@@ -687,7 +687,10 @@ pub async fn request_passkey_recovery(
 
     let recovery_token = generate_setup_token();
     let recovery_token_hash = common::hash_or_internal_error(&recovery_token)?;
-    let expires_at = Utc::now() + Duration::hours(1);
+    const PASSKEY_RECOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
+    let expires_at = Utc::now()
+        + chrono::Duration::from_std(PASSKEY_RECOVERY_TTL)
+            .expect("Single hour TTL fits into chrono");
 
     if let Err(e) = state
         .repos
@@ -712,10 +715,10 @@ pub async fn request_passkey_recovery(
         state.repos.infra.as_ref(),
         user.id,
         tranquil_pds::comms::Notice::PasskeyRecovery {
-            hostname,
-            handle: user.handle.as_ref(),
             url: &recovery_url,
+            valid_for: PASSKEY_RECOVERY_TTL,
         },
+        hostname,
     )
     .await;
 

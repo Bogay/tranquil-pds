@@ -1,5 +1,5 @@
 use axum::{Json, extract::State};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use serde::Deserialize;
 use tracing::{error, info, warn};
 use tranquil_pds::api::error::{ApiError, DbResultExt};
@@ -77,9 +77,11 @@ pub async fn request_password_reset(
             return Err(ApiError::InternalError(None));
         }
     };
+    const PASSWORD_RESET_CODE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
     let display_code = tranquil_pds::util::generate_token_code();
     let stored_code = tranquil_pds::util::normalize_token_code(&display_code);
-    let expires_at = Utc::now() + Duration::minutes(10);
+    let expires_at = Utc::now()
+        + chrono::Duration::from_std(PASSWORD_RESET_CODE_TTL).expect("ten-minute TTL fits chrono");
     if let Err(e) = state
         .repos
         .user
@@ -95,10 +97,10 @@ pub async fn request_password_reset(
         state.repos.infra.as_ref(),
         user_id,
         tranquil_pds::comms::Notice::PasswordReset {
-            hostname,
-            handle: normalized_handle.as_str(),
             code: &display_code,
+            valid_for: PASSWORD_RESET_CODE_TTL,
         },
+        hostname,
     )
     .await
     {

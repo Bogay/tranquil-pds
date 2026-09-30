@@ -5,11 +5,9 @@ use std::path::Path;
 use handlebars::Handlebars;
 use serde_json::{Map, Value, json};
 
+use super::Part;
 use super::error::TemplateError;
 use super::ids::{REQUIRED_TEMPLATE_IDS, TemplateId};
-use super::rendered::RenderedTemplate;
-use crate::locale::validate_locale;
-use tranquil_types::Locale;
 
 fn template_name(prefix: &str, locale: &str, id: &str, part: &str) -> String {
     format!("{prefix}/{locale}/{id}.{part}")
@@ -23,7 +21,7 @@ fn vars_to_context(vars: &[(&str, &str)]) -> Value {
     Value::Object(map)
 }
 
-/// Compiled notification templates (builtins always; disk overrides when configured).
+/// Compiled on-disk notif templates for configured locales.
 pub struct TemplateStore {
     plain: Handlebars<'static>,
     html: Handlebars<'static>,
@@ -52,30 +50,16 @@ impl TemplateStore {
             .map_err(|e| TemplateError::msg(format!("invalid Handlebars template {name:?}: {e}")))
     }
 
-    fn register_builtins(plain: &mut Handlebars<'static>) -> Result<(), TemplateError> {
-        for locale in Locale::ALL.iter().map(|l| l.as_str()) {
-            for id in TemplateId::ALL {
-                let parts = id.builtin_parts(locale);
-                let subject_name = template_name("builtin", locale, id.as_str(), "subject");
-                let body_name = template_name("builtin", locale, id.as_str(), "body");
-                Self::register_handlebars(plain, &subject_name, parts.subject)?;
-                Self::register_handlebars(plain, &body_name, parts.body)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Built-in Handlebars templates only (no `templates_dir`).
-    pub fn builtins_only() -> Result<Self, TemplateError> {
-        let (mut plain, html) = Self::new_registries();
-        Self::register_builtins(&mut plain)?;
-        Ok(Self {
+    /// No on-disk templates! Every render shall fall back to built in strings.
+    pub fn empty() -> Self {
+        let (plain, html) = Self::new_registries();
+        Self {
             plain,
             html,
             disk_locales: HashSet::new(),
             disk_enabled: false,
             fallback_to_builtin: true,
-        })
+        }
     }
 
     pub fn load(
@@ -91,7 +75,6 @@ impl TemplateStore {
         }
 
         let (mut plain, mut html) = Self::new_registries();
-        Self::register_builtins(&mut plain)?;
 
         let mut disk_locales = HashSet::new();
 
@@ -125,8 +108,8 @@ impl TemplateStore {
                 let body_txt = read_required(&body_txt_path)?;
                 let body_html = read_optional(&body_html_path)?;
 
-                let subject_name = template_name("disk", locale, id, "subject");
-                let body_name = template_name("disk", locale, id, "body");
+                let subject_name = template_name("disk", locale, id, Part::Subject.as_str());
+                let body_name = template_name("disk", locale, id, Part::Body.as_str());
                 let html_name = template_name("disk", locale, id, "html");
 
                 Self::register_handlebars(&mut plain, &subject_name, &subject)?;
@@ -151,11 +134,7 @@ impl TemplateStore {
         self.disk_locales.contains(locale)
     }
 
-    pub fn fallback_to_builtin(&self) -> bool {
-        self.fallback_to_builtin
-    }
-
-    fn render_named(
+    fn render_by_name(
         registry: &Handlebars<'static>,
         name: &str,
         data: &Value,
@@ -165,60 +144,60 @@ impl TemplateStore {
             .map_err(|e| TemplateError::msg(format!("failed to render template {name:?}: {e}")))
     }
 
-    fn render_builtin(
+    pub(super) fn render_part(
         &self,
         id: TemplateId,
-        locale: &str,
-        data: &Value,
-    ) -> Result<RenderedTemplate, TemplateError> {
-        let subject_name: String = template_name("builtin", locale, id.as_str(), "subject");
-        let body_name = template_name("builtin", locale, id.as_str(), "body");
-        Ok(RenderedTemplate {
-            subject: Self::render_named(&self.plain, &subject_name, data)?,
-            body: Self::render_named(&self.plain, &body_name, data)?,
-            html_body: None,
-        })
-    }
-
-    fn render_disk(
-        &self,
-        id: TemplateId,
-        locale: &str,
-        data: &Value,
-    ) -> Result<RenderedTemplate, TemplateError> {
-        let subject_name = template_name("disk", locale, id.as_str(), "subject");
-        let body_name = template_name("disk", locale, id.as_str(), "body");
-        let html_name = template_name("disk", locale, id.as_str(), "html");
-        let html_body = if self.html.has_template(&html_name) {
-            Some(Self::render_named(&self.html, &html_name, data)?)
-        } else {
-            None
-        };
-        Ok(RenderedTemplate {
-            subject: Self::render_named(&self.plain, &subject_name, data)?,
-            body: Self::render_named(&self.plain, &body_name, data)?,
-            html_body,
-        })
-    }
-
-    pub fn render(
-        &self,
-        id: TemplateId,
+        part: Part,
         locale: &str,
         vars: &[(&str, &str)],
-    ) -> Result<RenderedTemplate, TemplateError> {
-        let locale = validate_locale(locale);
-        let data = vars_to_context(vars);
+    ) -> Result<String, TemplateError> {
+        let name = template_name("disk", locale, id.as_str(), part.as_str());
+        Self::render_by_name(&self.plain, &name, &vars_to_context(vars))
+    }
 
+    pub(super) fn resolve(
+        &self,
+        id: TemplateId,
+        part: Part,
+        locale: &str,
+        builtin: &'static str,
+        vars: &[(&str, &str)],
+    ) -> Result<String, TemplateError> {
         if self.has_locale(locale) {
-            self.render_disk(id, locale, &data)
+            self.render_part(id, part, locale, vars)
         } else if !self.disk_enabled || self.fallback_to_builtin {
-            self.render_builtin(id, locale, &data)
+            Ok(crate::locale::render(builtin, vars))
         } else {
             Err(TemplateError::msg(format!(
                 "no comms templates for locale {locale:?} and fallback_to_builtin is false"
             )))
         }
+    }
+
+    pub(super) fn resolve_html(
+        &self,
+        id: TemplateId,
+        locale: &str,
+        vars: &[(&str, &str)],
+    ) -> Result<Option<String>, TemplateError> {
+        if self.disk_enabled && self.has_locale(locale) {
+            self.render_html(id, locale, vars)
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub(super) fn render_html(
+        &self,
+        id: TemplateId,
+        locale: &str,
+        vars: &[(&str, &str)],
+    ) -> Result<Option<String>, TemplateError> {
+        let name = template_name("disk", locale, id.as_str(), "html");
+        if !self.html.has_template(&name) {
+            return Ok(None);
+        }
+        Self::render_by_name(&self.html, &name, &vars_to_context(vars)).map(Some)
     }
 }
 
@@ -239,48 +218,14 @@ fn read_optional(path: &Path) -> Result<Option<String>, TemplateError> {
     }
 }
 
-// tests
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_read_optional() {
-        let path = Path::new("test/templates/builtin/en/welcome.body.html");
+        let path = Path::new("tests/templates/en/welcome.body.html");
         let result = read_optional(path);
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_html_body_is_none_when_no_html_exists() {
-        let store = TemplateStore::builtins_only().unwrap();
-        let result = store.render(TemplateId::Welcome, "en", &[]);
-        assert!(result.is_ok());
-        assert!(result.unwrap().html_body.is_none());
-    }
-
-    #[test]
-    fn test_html_body_is_some_when_html_exists() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/templates");
-        let store = TemplateStore::load(&root, &["en".to_string()], false).unwrap();
-        let rendered = store.render(TemplateId::Welcome, "en", &[]).unwrap();
-        assert!(rendered.html_body.is_some());
-        assert!(
-            rendered
-                .html_body
-                .unwrap()
-                .contains("<p>Hello <b>html</b>.</p>")
-        );
-    }
-
-    #[test]
-    fn test_html_body_is_none_when_html_does_not_exist() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/templates-txt");
-        let store = TemplateStore::load(&root, &["en".to_string()], false).unwrap();
-        let rendered = store.render(TemplateId::Welcome, "en", &[]).unwrap();
-        assert!(rendered.html_body.is_none());
-        assert_eq!(rendered.subject, "Hello World");
-        assert_eq!(rendered.body, "Hello World");
     }
 }

@@ -28,7 +28,7 @@ impl VerificationPurpose {
         }
     }
 
-    fn default_expiry_seconds(&self) -> u64 {
+    pub fn default_expiry_seconds(&self) -> u64 {
         match self {
             Self::Signup => DEFAULT_SIGNUP_EXPIRY_MINUTES * 60,
             Self::Migration => DEFAULT_MIGRATION_EXPIRY_HOURS * 3600,

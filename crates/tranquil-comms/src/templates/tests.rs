@@ -42,16 +42,33 @@ fn tempfile_dir() -> std::path::PathBuf {
 fn example_templates_tree_loads() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/notification-templates");
     let store = TemplateStore::load(&root, &["en".into()], true).unwrap();
-    let rendered = store
-        .render(
+    let subject = store
+        .resolve(
             TemplateId::Welcome,
+            Part::Subject,
             "en",
-            &[("hostname", "example.com"), ("handle", "alice")],
+            "",
+            &[("hostname", "nel.pet"), ("handle", "nel")],
         )
         .unwrap();
-    assert!(rendered.subject.contains("example.com"));
-    assert!(rendered.body.contains("@alice"));
-    assert!(rendered.html_body.unwrap().contains("alice"));
+    let body = store
+        .resolve(
+            TemplateId::Welcome,
+            Part::Body,
+            "en",
+            "",
+            &[("hostname", "nel.pet"), ("handle", "nel")],
+        )
+        .unwrap();
+    assert!(subject.contains("nel.pet"));
+    assert!(body.contains("@nel"));
+    assert!(
+        store
+            .resolve_html(TemplateId::Welcome, "en", &[("handle", "nel")])
+            .unwrap()
+            .unwrap()
+            .contains("nel")
+    );
 }
 
 fn example_store() -> TemplateStore {
@@ -59,156 +76,167 @@ fn example_store() -> TemplateStore {
     TemplateStore::load(&root, &["en".into()], true).unwrap()
 }
 
+fn example_body(store: &TemplateStore, id: TemplateId, vars: &[(&str, &str)]) -> String {
+    store.resolve(id, Part::Body, "en", "", vars).unwrap()
+}
+
+fn example_html(store: &TemplateStore, id: TemplateId, vars: &[(&str, &str)]) -> String {
+    store.resolve_html(id, "en", vars).unwrap().unwrap()
+}
+
 #[test]
 fn example_welcome_handle_conditional() {
     let store = example_store();
 
-    let with_handle = store
-        .render(
-            TemplateId::Welcome,
-            "en",
-            &[("hostname", "example.com"), ("handle", "alice")],
-        )
-        .unwrap();
-    assert!(with_handle.body.contains("Welcome to example.com, @alice!"));
-    assert!(with_handle.body.contains("Your handle is @alice."));
-    assert!(!with_handle.body.contains("Set your handle"));
-    let html = with_handle.html_body.unwrap();
-    assert!(html.contains("@alice"));
+    let with_handle_vars = &[("hostname", "nel.pet"), ("handle", "nel")];
+    let with_handle = example_body(&store, TemplateId::Welcome, with_handle_vars);
+    assert!(with_handle.contains("Welcome to nel.pet, @nel!"));
+    assert!(with_handle.contains("Your handle is @nel."));
+    assert!(!with_handle.contains("Set your handle"));
+    let html = example_html(&store, TemplateId::Welcome, with_handle_vars);
+    assert!(html.contains("@nel"));
     assert!(!html.contains("Set your handle to personalize"));
 
-    let no_handle = store
-        .render(TemplateId::Welcome, "en", &[("hostname", "example.com")])
-        .unwrap();
-    assert!(no_handle.body.contains("Welcome to example.com!"));
-    assert!(!no_handle.body.contains("Welcome to example.com, @"));
-    assert!(
-        no_handle
-            .body
-            .contains("Set your handle to personalize your account.")
-    );
-    let html = no_handle.html_body.unwrap();
+    let no_handle_vars = &[("hostname", "nel.pet")];
+    let no_handle = example_body(&store, TemplateId::Welcome, no_handle_vars);
+    assert!(no_handle.contains("Welcome to nel.pet!"));
+    assert!(!no_handle.contains("Welcome to nel.pet, @"));
+    assert!(no_handle.contains("Set your handle to personalize your account."));
+    let html = example_html(&store, TemplateId::Welcome, no_handle_vars);
     assert!(html.contains("Set your handle to personalize your account."));
 }
 
 #[test]
 fn example_email_update_verify_link_conditional() {
     let store = example_store();
-    let verify_link = "https://example.com/oneclick?token=abc123";
+    let verify_link = "https://nel.pet/oneclick?token=abc123";
 
-    let with_link = store
-        .render(
-            TemplateId::EmailUpdate,
-            "en",
-            &[
-                ("hostname", "example.com"),
-                ("handle", "alice"),
-                ("code", "123456"),
-                ("verify_page", "https://example.com/app/verify"),
-                ("verify_link", verify_link),
-            ],
-        )
-        .unwrap();
-    assert!(with_link.body.contains("verify in one click"));
-    assert!(with_link.body.contains(verify_link));
-    let html = with_link.html_body.unwrap();
+    let with_link = example_body(
+        &store,
+        TemplateId::EmailUpdate,
+        &[
+            ("hostname", "nel.pet"),
+            ("handle", "nel"),
+            ("code", "123456"),
+            ("verify_page", "https://nel.pet/app/verify"),
+            ("verify_link", verify_link),
+        ],
+    );
+    assert!(with_link.contains("verify in one click"));
+    assert!(with_link.contains(verify_link));
+    let html = example_html(
+        &store,
+        TemplateId::EmailUpdate,
+        &[
+            ("hostname", "nel.pet"),
+            ("handle", "nel"),
+            ("code", "123456"),
+            ("verify_page", "https://nel.pet/app/verify"),
+            ("verify_link", verify_link),
+        ],
+    );
     assert!(html.contains("live dangerously"));
     assert!(html.contains(&format!("href=\"{verify_link}\"")));
 
-    let no_link = store
-        .render(
-            TemplateId::EmailUpdate,
-            "en",
-            &[
-                ("hostname", "example.com"),
-                ("handle", "alice"),
-                ("code", "123456"),
-                ("verify_page", "https://example.com/app/verify"),
-            ],
-        )
-        .unwrap();
-    assert!(!no_link.body.contains("live dangerously"));
-    assert!(!no_link.body.contains(verify_link));
-    let html = no_link.html_body.unwrap();
+    let no_link = example_body(
+        &store,
+        TemplateId::EmailUpdate,
+        &[
+            ("hostname", "nel.pet"),
+            ("handle", "nel"),
+            ("code", "123456"),
+            ("verify_page", "https://nel.pet/app/verify"),
+        ],
+    );
+    assert!(!no_link.contains("live dangerously"));
+    assert!(!no_link.contains(verify_link));
+    let html = example_html(
+        &store,
+        TemplateId::EmailUpdate,
+        &[
+            ("hostname", "nel.pet"),
+            ("handle", "nel"),
+            ("code", "123456"),
+            ("verify_page", "https://nel.pet/app/verify"),
+        ],
+    );
     assert!(!html.contains("live dangerously"));
     assert!(!html.contains("href="));
+}
+
+#[test]
+fn example_short_token_matches_approval_vars() {
+    let store = example_store();
+    let body = example_body(
+        &store,
+        TemplateId::ShortToken,
+        &[
+            ("handle", "nel"),
+            ("code", "123456"),
+            ("verify_page", "https://nel.pet/app/settings"),
+            ("valid_for", "15 minutes"),
+        ],
+    );
+    assert!(body.contains("Hello @nel,"));
+    assert!(body.contains("123456"));
+    assert!(body.contains("https://nel.pet/app/settings"));
+    assert!(body.contains("15 minutes"));
+    assert!(!body.contains('{'), "{body}");
 }
 
 #[test]
 fn example_signup_verification_else_if_branches() {
     let store = example_store();
 
-    let via_page = store
-        .render(
-            TemplateId::SignupVerification,
-            "en",
-            &[
-                ("hostname", "example.com"),
-                ("code", "654321"),
-                ("verify_page", "https://example.com/app/verify"),
-            ],
-        )
-        .unwrap();
-    assert!(
-        via_page
-            .body
-            .contains("Copy the code above and enter it at:")
+    let via_page = example_body(
+        &store,
+        TemplateId::SignupVerification,
+        &[
+            ("hostname", "nel.pet"),
+            ("code", "654321"),
+            ("verify_page", "https://nel.pet/app/verify"),
+        ],
     );
-    assert!(via_page.body.contains("https://example.com/app/verify"));
-    assert!(!via_page.body.contains("Or verify directly:"));
+    assert!(via_page.contains("Copy the code above and enter it at:"));
+    assert!(via_page.contains("https://nel.pet/app/verify"));
+    assert!(!via_page.contains("Or verify directly:"));
 
-    let via_link = store
-        .render(
-            TemplateId::SignupVerification,
-            "en",
-            &[
-                ("hostname", "example.com"),
-                ("code", "654321"),
-                ("verify_link", "https://example.com/app/verify?token=abc"),
-            ],
-        )
-        .unwrap();
-    assert!(via_link.body.contains("Or verify directly:"));
-    assert!(
-        via_link
-            .body
-            .contains("https://example.com/app/verify?token=abc")
+    let via_link = example_body(
+        &store,
+        TemplateId::SignupVerification,
+        &[
+            ("hostname", "nel.pet"),
+            ("code", "654321"),
+            ("verify_link", "https://nel.pet/app/verify?token=abc"),
+        ],
     );
-    assert!(!via_link.body.contains("Copy the code above"));
+    assert!(via_link.contains("Or verify directly:"));
+    assert!(via_link.contains("https://nel.pet/app/verify?token=abc"));
+    assert!(!via_link.contains("Copy the code above"));
 }
 
 #[test]
 fn example_channel_verified_conditionals() {
     let store = example_store();
 
-    let full = store
-        .render(
-            TemplateId::ChannelVerified,
-            "en",
-            &[
-                ("hostname", "example.com"),
-                ("handle", "alice"),
-                ("channel", "Telegram"),
-            ],
-        )
-        .unwrap();
-    assert!(full.body.contains("Hello @alice,"));
-    assert!(full.body.contains("Telegram has been verified"));
-    assert!(!full.body.contains("Hello there,"));
-    let html = full.html_body.unwrap();
-    assert!(html.contains("Hello @alice,"));
+    let full_vars = &[
+        ("hostname", "nel.pet"),
+        ("handle", "nel"),
+        ("channel", "Telegram"),
+    ];
+    let full = example_body(&store, TemplateId::ChannelVerified, full_vars);
+    assert!(full.contains("Hello @nel,"));
+    assert!(full.contains("Telegram has been verified"));
+    assert!(!full.contains("Hello there,"));
+    let html = example_html(&store, TemplateId::ChannelVerified, full_vars);
+    assert!(html.contains("Hello @nel,"));
     assert!(html.contains("<strong>Telegram</strong>"));
 
-    let bare = store
-        .render(
-            TemplateId::ChannelVerified,
-            "en",
-            &[("hostname", "example.com")],
-        )
-        .unwrap();
-    assert!(bare.body.contains("Hello there,"));
-    assert!(!bare.body.contains("@"));
-    let html = bare.html_body.unwrap();
+    let bare_vars = &[("hostname", "nel.pet")];
+    let bare = example_body(&store, TemplateId::ChannelVerified, bare_vars);
+    assert!(bare.contains("Hello there,"));
+    assert!(!bare.contains("@"));
+    let html = example_html(&store, TemplateId::ChannelVerified, bare_vars);
     assert!(html.contains("A channel has been verified"));
 }
 
@@ -216,30 +244,26 @@ fn example_channel_verified_conditionals() {
 fn example_legacy_login_detail_conditionals() {
     let store = example_store();
 
-    let detailed = store
-        .render(
-            TemplateId::LegacyLogin,
-            "en",
-            &[
-                ("hostname", "example.com"),
-                ("handle", "alice"),
-                ("timestamp", "2026-08-10 12:00:00 UTC"),
-                ("ip", "203.0.113.7"),
-            ],
-        )
-        .unwrap();
-    assert!(detailed.body.contains("Time: 2026-08-10 12:00:00 UTC"));
-    assert!(detailed.body.contains("IP Address: 203.0.113.7"));
+    let detailed = example_body(
+        &store,
+        TemplateId::LegacyLogin,
+        &[
+            ("hostname", "nel.pet"),
+            ("handle", "nel"),
+            ("timestamp", "2026-08-10 12:00:00 UTC"),
+            ("ip", "203.0.113.7"),
+        ],
+    );
+    assert!(detailed.contains("Time: 2026-08-10 12:00:00 UTC"));
+    assert!(detailed.contains("IP Address: 203.0.113.7"));
 
-    let bare = store
-        .render(
-            TemplateId::LegacyLogin,
-            "en",
-            &[("hostname", "example.com"), ("handle", "alice")],
-        )
-        .unwrap();
-    assert!(!bare.body.contains("Time:"));
-    assert!(!bare.body.contains("IP Address:"));
+    let bare = example_body(
+        &store,
+        TemplateId::LegacyLogin,
+        &[("hostname", "nel.pet"), ("handle", "nel")],
+    );
+    assert!(!bare.contains("Time:"));
+    assert!(!bare.contains("IP Address:"));
 }
 
 #[test]
@@ -291,34 +315,40 @@ fn render_escapes_html_values() {
     let tmp = tempfile_dir();
     write_complete_locale(&tmp, "en");
     let store = TemplateStore::load(&tmp, &["en".into()], true).unwrap();
-    let rendered = store
-        .render(
-            TemplateId::Welcome,
-            "en",
-            &[("handle", "a<b>&c"), ("hostname", "ex.com"), ("code", "1")],
-        )
+    let vars = &[("handle", "a<b>&c"), ("hostname", "nel.pet"), ("code", "1")];
+    let body = store
+        .resolve(TemplateId::Welcome, Part::Body, "en", "", vars)
         .unwrap();
-    let html = rendered.html_body.unwrap();
+    assert!(body.contains("a<b>&c"));
+    let html = store
+        .resolve_html(TemplateId::Welcome, "en", vars)
+        .unwrap()
+        .unwrap();
     assert!(html.contains("a&lt;b&gt;&amp;c"), "{html}");
     assert!(!html.contains("a<b>&c"), "{html}");
-    assert!(rendered.body.contains("a<b>&c"));
 }
 
 #[test]
-fn fallback_locale_uses_builtin_when_enabled() {
+fn fallback_locale_flat_renders_builtin_when_enabled() {
     let tmp = tempfile_dir();
     write_complete_locale(&tmp, "en");
     let store = TemplateStore::load(&tmp, &["en".into()], true).unwrap();
-    let rendered = store
-        .render(
+    let subject = store
+        .resolve(
             TemplateId::Welcome,
+            Part::Subject,
             "fr",
-            &[("hostname", "ex.com"), ("handle", "bob")],
+            "Bienvenue sur {hostname}",
+            &[("hostname", "nel.pet"), ("handle", "nel")],
         )
         .unwrap();
-    assert!(rendered.html_body.is_none());
-    assert!(rendered.body.contains("ex.com"));
-    assert!(rendered.subject.contains("ex.com"));
+    assert_eq!(subject, "Bienvenue sur nel.pet");
+    assert!(
+        store
+            .resolve_html(TemplateId::Welcome, "fr", &[("handle", "nel")])
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -326,10 +356,12 @@ fn unsupported_locale_errors_when_fallback_disabled() {
     let tmp = tempfile_dir();
     write_complete_locale(&tmp, "en");
     let store = TemplateStore::load(&tmp, &["en".into()], false).unwrap();
-    let Err(err) = store.render(
+    let Err(err) = store.resolve(
         TemplateId::Welcome,
+        Part::Subject,
         "zh",
-        &[("hostname", "ex.com"), ("handle", "bob")],
+        "welcome {hostname}",
+        &[("hostname", "nel.pet"), ("handle", "nel")],
     ) else {
         panic!("expected render to fail when fallback is disabled");
     };
@@ -337,19 +369,34 @@ fn unsupported_locale_errors_when_fallback_disabled() {
 }
 
 #[test]
-fn builtins_only_renders_without_templates_dir() {
-    let store = TemplateStore::builtins_only().unwrap();
-    let rendered = store
-        .render(
+fn empty_store_flat_renders_builtin_without_templates_dir() {
+    let store = TemplateStore::empty();
+    let subject = store
+        .resolve(
             TemplateId::Welcome,
+            Part::Subject,
             "en",
-            &[("hostname", "ex.com"), ("handle", "bob")],
+            "Welcome to {hostname}",
+            &[("hostname", "nel.pet")],
         )
         .unwrap();
-    assert!(rendered.html_body.is_none());
-    assert!(rendered.subject.contains("ex.com"));
-    assert!(rendered.body.contains("@bob"));
-    assert!(rendered.body.contains("ex.com"));
+    let body = store
+        .resolve(
+            TemplateId::Welcome,
+            Part::Body,
+            "en",
+            "Welcome to {hostname}! Your handle is: @{handle}",
+            &[("hostname", "nel.pet"), ("handle", "nel")],
+        )
+        .unwrap();
+    assert_eq!(subject, "Welcome to nel.pet");
+    assert_eq!(body, "Welcome to nel.pet! Your handle is: @nel");
+    assert!(
+        store
+            .resolve_html(TemplateId::Welcome, "en", &[("handle", "nel")])
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]

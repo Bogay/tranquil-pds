@@ -8,7 +8,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{debug, info, warn};
-use tranquil_types::{CommsChannel, Handle};
+use tranquil_types::Handle;
 
 use tranquil_pds::comms::comms_repo;
 use tranquil_pds::state::AppState;
@@ -203,7 +203,6 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
                 user_id,
                 &tranquil_types::Recipient::Discord(discord_user_id),
                 &tranquil_config::get().server.hostname,
-                CommsChannel::Discord,
             )
             .await;
             Json(json!({

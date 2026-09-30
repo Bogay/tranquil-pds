@@ -1,5 +1,5 @@
 use axum::{Json, extract::State};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use tracing::{info, warn};
 use tranquil_pds::api::EmptyResponse;
 use tranquil_pds::api::error::{ApiError, DbResultExt};
@@ -23,11 +23,12 @@ pub async fn request_plc_operation_signature(
         .log_db_err("fetching user id")?
         .ok_or(ApiError::AccountNotFound)?;
     let user_id = user.id;
-    let handle = user.handle;
     let _ = state.repos.infra.delete_plc_tokens_for_user(user_id).await;
     let display_token = tranquil_pds::util::generate_token_code();
     let stored_token = tranquil_pds::util::normalize_token_code(&display_token);
-    let expires_at = Utc::now() + Duration::minutes(10);
+    const PLC_TOKEN_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+    let expires_at =
+        Utc::now() + chrono::Duration::from_std(PLC_TOKEN_TTL).expect("ten-minute TTL fits chrono");
     state
         .repos
         .infra
@@ -41,10 +42,10 @@ pub async fn request_plc_operation_signature(
         state.repos.infra.as_ref(),
         user_id,
         tranquil_pds::comms::Notice::PlcOperation {
-            handle: &handle,
-            hostname,
             token: &display_token,
+            valid_for: PLC_TOKEN_TTL,
         },
+        hostname,
     )
     .await
     {

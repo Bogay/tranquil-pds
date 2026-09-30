@@ -3,6 +3,9 @@ Hello @{{handle}},
 Your verification code is:
 {{code}}
 
-This code will expire in 15 minutes.
+Please copy the above code and enter it into:
+{{verify_page}}
+
+This code will expire in {{valid_for}}.
 
 If you did not request this, please ignore this email.

@@ -156,22 +156,42 @@ pub async fn request_channel_verification(
         tranquil_pds::auth::verification_token::generate_channel_update_token(did, channel, id);
     let formatted_token = tranquil_pds::auth::verification_token::format_token_for_display(&token);
 
-    let fallback_handle = handle.map(|h| h.as_str()).unwrap_or_else(|| did.as_str());
-
-    tranquil_pds::comms::comms_repo::enqueue_channel_verification(
-        state.repos.user.as_ref(),
-        state.repos.infra.as_ref(),
-        user_id,
-        &VerificationTarget::resolve(channel, id, Some(fallback_handle))?,
-        &formatted_token,
-        &tranquil_config::get().server.hostname,
-        channel,
-    )
-    .await
-    .map_err(|e| match e {
-        NotificationError::RequiresBot => ApiError::VerificationChannelRequiresBot,
-        _ => ApiError::InternalError(Some(e.to_string())),
-    })?;
+    match channel {
+        CommsChannel::Email => {
+            let hostname = &tranquil_config::get().server.hostname;
+            let handle = handle.ok_or_else(|| {
+                ApiError::InternalError(Some("Email verification requires handle".into()))
+            })?;
+            let new_email = tranquil_types::EmailAddress::new(id)?;
+            tranquil_pds::comms::comms_repo::enqueue_email_update(
+                state.repos.infra.as_ref(),
+                user_id,
+                &new_email,
+                handle,
+                &formatted_token,
+                hostname,
+            )
+            .await
+            .map_err(|e| ApiError::InternalError(Some(e.to_string())))?;
+        }
+        _ => {
+            let fallback_handle = handle.map(|h| h.as_str()).unwrap_or_else(|| did.as_str());
+            tranquil_pds::comms::comms_repo::enqueue_channel_verification(
+                state.repos.user.as_ref(),
+                state.repos.infra.as_ref(),
+                user_id,
+                &VerificationTarget::resolve(channel, id, Some(fallback_handle))?,
+                &formatted_token,
+                &tranquil_config::get().server.hostname,
+                channel,
+            )
+            .await
+            .map_err(|e| match e {
+                NotificationError::RequiresBot => ApiError::VerificationChannelRequiresBot,
+                _ => ApiError::InternalError(Some(e.to_string())),
+            })?;
+        }
+    }
 
     Ok(token)
 }

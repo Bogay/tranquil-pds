@@ -1,5 +1,4 @@
 use super::*;
-use tracing::warn;
 use tranquil_pds::comms::Notice;
 use tranquil_pds::comms::comms_repo::enqueue_notice;
 use uuid::Uuid;
@@ -361,6 +360,7 @@ pub(crate) enum SecondFactorRequirement {
 pub(crate) struct CodeNotice {
     user_id: Uuid,
     code: String,
+    valid_for: std::time::Duration,
 }
 
 impl CodeNotice {
@@ -370,28 +370,15 @@ impl CodeNotice {
         hostname: &str,
         did: &Did,
     ) -> Result<(), NoticeDeliveryError> {
-        let handle_option: Option<Handle> = state
-            .repos
-            .user
-            .get_handle_by_did(did)
-            .await
-            .unwrap_or_else(|e| {
-                warn!(did = %did, error = %e, "Failed to get handle by did");
-                None
-            });
-        let handle: &str = handle_option
-            .as_ref()
-            .map(|h| -> &str { h.as_str() })
-            .unwrap_or(did.as_str());
         match enqueue_notice(
             state.repos.user.as_ref(),
             state.repos.infra.as_ref(),
             self.user_id,
             Notice::TwoFactorCode {
-                hostname,
-                handle,
                 code: &self.code,
+                valid_for: self.valid_for,
             },
+            hostname,
         )
         .await
         {
@@ -500,6 +487,11 @@ pub(crate) async fn begin_second_factor(
             notice: CodeNotice {
                 user_id: twofa_status.id,
                 code: challenge.code,
+                valid_for: challenge
+                    .expires_at
+                    .signed_duration_since(Utc::now())
+                    .to_std()
+                    .unwrap_or_default(),
             },
         });
     }

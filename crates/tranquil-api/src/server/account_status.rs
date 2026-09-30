@@ -1,6 +1,6 @@
 use axum::{Json, extract::State};
 use backon::{ExponentialBuilder, Retryable};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use cid::Cid;
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
@@ -569,18 +569,18 @@ pub async fn request_account_delete(
 ) -> Result<Json<EmptyResponse>, ApiError> {
     let session_mfa = require_legacy_session_mfa(&state, &auth).await?;
 
-    let user = state
+    let user_id = state
         .repos
         .user
-        .get_by_did(session_mfa.did())
+        .get_id_by_did(session_mfa.did())
         .await
         .ok()
         .flatten()
         .ok_or(ApiError::InternalError(None))?;
-    let user_id = user.id;
-    let handle = user.handle;
     let confirmation_token = Uuid::new_v4().to_string();
-    let expires_at = Utc::now() + Duration::minutes(15);
+    const DELETION_CODE_TTL: std::time::Duration = std::time::Duration::from_secs(900);
+    let expires_at = Utc::now()
+        + chrono::Duration::from_std(DELETION_CODE_TTL).expect("15-min TTL fits into chrono");
     state
         .repos
         .infra
@@ -593,10 +593,10 @@ pub async fn request_account_delete(
         state.repos.infra.as_ref(),
         user_id,
         tranquil_pds::comms::Notice::AccountDeletion {
-            hostname,
-            handle: handle.as_ref(),
             code: &confirmation_token,
+            valid_for: DELETION_CODE_TTL,
         },
+        hostname,
     )
     .await
     {

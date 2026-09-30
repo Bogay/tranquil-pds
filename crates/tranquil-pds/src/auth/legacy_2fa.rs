@@ -7,7 +7,7 @@ use crate::cache_keys::{legacy_2fa_challenge_key, legacy_2fa_cooldown_key};
 use crate::types::Did;
 use crate::util::{generate_token_code, normalize_token_code};
 
-const CHALLENGE_TTL_SECS: u64 = 300;
+pub const CHALLENGE_TTL_SECS: u64 = 300;
 const MIN_REMAINING_TTL_SECS: u64 = 10;
 const MAX_ATTEMPTS: u8 = 5;
 const COOLDOWN_SECS: u64 = 60;

@@ -107,23 +107,15 @@ pub async fn request_email_update(
         }
 
         let hostname = &tranquil_config::get().server.hostname;
-        let verify_page = format!("https://{hostname}/app/verify?type=email-update");
-        let verify_link = format!(
-            "https://{}/app/verify?type=email-update&token={}",
-            hostname,
-            urlencoding::encode(&token)
-        );
         match tranquil_pds::comms::comms_repo::enqueue_notice(
             state.repos.user.as_ref(),
             state.repos.infra.as_ref(),
             user.id,
             tranquil_pds::comms::Notice::ShortTokenEmail {
-                hostname,
-                handle: user.handle.as_ref(),
-                code: &token,
-                verify_page: &verify_page,
-                verify_link: &verify_link,
+                token: &token,
+                valid_for: Duration::from_secs(tranquil_pds::auth::email_token::TOKEN_TTL_SECS),
             },
+            hostname,
         )
         .await
         {

@@ -226,10 +226,12 @@ pub async fn create_session(
                 state.repos.infra.as_ref(),
                 row.id,
                 tranquil_pds::comms::Notice::TwoFactorCode {
-                    hostname,
-                    handle: row.handle.as_ref(),
                     code: code.as_str(),
+                    valid_for: std::time::Duration::from_secs(
+                        tranquil_pds::auth::legacy_2fa::CHALLENGE_TTL_SECS,
+                    ),
                 },
+                hostname,
             )
             .await
             {
@@ -357,13 +359,9 @@ pub async fn create_session(
                 row.id,
                 tranquil_pds::comms::Notice::LegacyLoginAlert {
                     channel: row.preferred_comms_channel,
-                    hostname,
-                    handle: row.handle.as_ref(),
-                    timestamp: &chrono::Utc::now()
-                        .format("%Y-%m-%d %H:%M:%S UTC")
-                        .to_string(),
                     ip: client_ip,
                 },
+                hostname,
             )
             .await
             {
@@ -963,10 +961,8 @@ pub async fn confirm_signup(
         state.repos.user.as_ref(),
         state.repos.infra.as_ref(),
         row.id,
-        tranquil_pds::comms::Notice::Welcome {
-            hostname,
-            handle: row.handle.as_ref(),
-        },
+        tranquil_pds::comms::Notice::Welcome,
+        hostname,
     )
     .await
     {
