@@ -6,7 +6,7 @@ A Personal Data Server for the AT Protocol.
 
 We came together to make this PDS to enable and empower our users to better host their data on this shared protocol. All of our decisions as a project are guided by their usefulness to the community: PDS hosters and end-users both. 
 
-Comparatively: Bluesky the company created a "reference PDS" that we can self-host quite easily, and that's great, but Bluesky has an incentive to make software for themselves first & foremost, then secondly their software can be useful for us self-hosters. In contrast, Tranquil is not from a company, and will never be.
+Comparatively: Bluesky the company created a "reference PDS" that we can self-host quite easily, and that's great, but Bluesky has an incentive to make software for themselves first & foremost, then secondly their software can be useful for us self-hosters. In contrast, Tranquil is not from a company, and will never be! We're here for the love of the game.
 
 ## What's different about Tranquil PDS
 
@@ -20,7 +20,7 @@ It is a superset of the reference PDS, including:
 - account delegation: letting others manage an account with configurable permission levels
 - a built-in web UI for account management, repo browsing, and admin
 
-Unlike the ref PDS, Tranquil is a single binary with no nodejs runtime. That said, at time of writing, Tranquil does require postgres running separately.
+Unlike the ref PDS, Tranquil is a single binary with no nodejs runtime.
 
 ## Quick Start
 
@@ -39,6 +39,8 @@ See `example.toml` for all configuration options.
 
 ## Development
 
+Please read [CONTRIBUTING.md](CONTRIBUTING.md).
+
 Run `just` to see available commands.
 
 ```bash
@@ -47,6 +49,18 @@ just lint
 ```
 
 Nix users can enter a devshell with `nix develop`, or `direnv allow` to auto-enter via the bundled `.envrc`. Pre-built artifacts including the devshell are available from our [binary cache](docs/2_INSTALL_NIX.md#binary-cache).
+
+## "Roadmap", what we plan to implement and/or need help with
+
+Let us know if you'd like to work on any of these things!
+
+- Atproto permissioned spaces (being headed by [@trezy.codes](https://tangled.org/did:plc:4jrld6fwpnwqehtce56qshzv) at time of writing)
+- admin CLI for manipulating PDS data without having to dip into pg or raw files
+- making compilation and testing faster
+- A new frontend!
+  - Designs! UX mainly
+  - Gleam sub-project scaffolding with Lustre best-practices
+  - A redo of the default homepage that doesn't look like Lewis' interpretation of a quirky software company
 
 ## Production Deployment
 
@@ -74,7 +88,7 @@ podman-compose -f docker-compose.prod.yaml up -d
 
 ### "Let's connect!" or whatever linkedin-types say
 
-We currently don't have a shared space to chat and organize Tranquil things, but we're very interested in changing that in the near future. What do you suggest? Anything but a discord server.
+We currently don't have a shared space to chat and organize Tranquil things, but we're very interested in changing that in the near future. We will likely choose one of the atproto-based Discord alternatives with a bridge back to ye-olde Discord. The jury is out on which alternative, but we'll keep you posted.
 
 ### Core team
 
@@ -100,6 +114,8 @@ We currently don't have a shared space to chat and organize Tranquil things, but
 ### Tranquil PDS instances in the wild!
 
 - [Tranquil Farm](https://tranquil.farm)
+- [ao.oyster.cafe](https://ao.oyster.cafe)
+- [Cove Town](https://pds.cove.town)
 - Your instance here!! Don't be a stranger.
 
 ### Special thanks

@@ -1,12 +1,18 @@
 # Contributing to Tranquil PDS
 
-## When PRing
+So you'd like to contribute? Thank you for thinking of us and wanting to help all Tranquil PDS users!
+Let's get some groundrules out of the way:
+
+- We don't have a specific LLM policy, but **if an issue or PR *feels* LLM-generated we are likely to close it**. In general Tranquil PDS is a collaborative project for the benefit of the community and ourselves, contributing helps people hone their skills and strive for technical excellence. We have nothing against LLMs as a technology, but perhaps their use feels somewhat antithetical to a community project under which we come together to try to get better at our craft. We have no deadlines, we have no reason to be here other than having fun, so who's having fun if the code is being auto-generated?
+- When adding an issue or PR, you must write a fully-fleshed-out description. Most of us do this already, but Lewis has set a bad example in the past. Description-less issues and PRs will be closed; we're always out of context and there's no such thing as "self-explanatory" anymore.
+
+## When PRing specifically
 
 In order of importance:
 
-- If your change involves how Tranquil implements atproto make sure its correct! See more below.
+- If your change involves how Tranquil implements atproto (the spec) make sure its correct! See more below.
 - **You must run your change! Every contribution that says "here's xyz. untested." does not help the project.**
-- Relevant tests to your PR must pass. The whole suite doesn't have to be proven to have run, because there are a *ton* of tests and they're quite heavy, but hopefully there are existing tests for whatever you're PRing, and if there aren't, please add those too.
+- Relevant tests to your PR must pass. The whole suite doesn't have to be proven to have run. Hopefully there are existing tests for whatever you're PRing, and if there aren't, please add those too.
 - Run cargo fmt :P
 
 > 🦪 Lewis
