@@ -69,13 +69,9 @@ pub async fn request_email_update(
         .log_db_err("getting email info")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let Some(_current_email) = user.email else {
-        return Err(ApiError::InvalidRequest(
-            "Account doesn't have an email address".into(),
-        ));
-    };
-
-    let token_required = user.email_verified;
+    // Can user.email_verified be true while user.email is None?
+    // If it's impossible, user.email.is_some() can be removed from the below check.
+    let token_required = user.email.is_some() && user.email_verified;
 
     if token_required {
         let token = tranquil_pds::auth::email_token::create_email_token(
