@@ -116,6 +116,7 @@ We currently don't have a shared space to chat and organize Tranquil things, but
 - [Tranquil Farm](https://tranquil.farm)
 - [ao.oyster.cafe](https://ao.oyster.cafe)
 - [Cove Town](https://pds.cove.town)
+- [ebil pds](https://pds.ebil.club)
 - Your instance here!! Don't be a stranger.
 
 ### Special thanks
