@@ -28,5 +28,6 @@ steps:
         --ignore-path /nix \
         --ignore-path /tmp/docker-config \
         --destination "atcr.io/tranquil.farm/tranquil-pds:$TANGLED_COMMIT_SHA" \
+        --destination "atcr.io/tranquil.farm/tranquil-pds:main" \
         --push-retry=3 \
         --build-arg CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
