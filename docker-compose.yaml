@@ -86,7 +86,7 @@ services:
   plc:
     profiles: [dev]
     build:
-      context: https://github.com/did-method-plc/did-method-plc.git
+      context: https://github.com/did-method-plc/did-method-plc.git#main
       dockerfile: packages/server/Dockerfile
     environment:
       DB_CREDS_JSON: '{"username":"postgres","password":"postgres","host":"db","port":"5432","database":"plc"}'
