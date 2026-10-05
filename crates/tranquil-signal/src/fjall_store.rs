@@ -7,6 +7,7 @@ use presage::{
     AvatarBytes,
     libsignal_service::{
         Profile,
+        libsignal_account_keys::AccountEntropyPool,
         pre_keys::{KyberPreKeyStoreExt, PreKeysStore},
         prelude::{Content, MasterKey, ProfileKey, SessionStoreExt, Uuid},
         protocol::{
@@ -36,6 +37,8 @@ pub enum FjallStoreError {
     Json(#[from] serde_json::Error),
     #[error("protocol: {0}")]
     Protocol(#[from] SignalProtocolError),
+    #[error("invalid format")]
+    InvalidFormat,
     #[error("not found: {0}")]
     NotFound(String),
 }
@@ -360,6 +363,32 @@ impl StateStore for FjallSignalStore {
         Ok(())
     }
 
+    async fn fetch_account_entropy_pool(
+        &self,
+    ) -> Result<Option<AccountEntropyPool>, FjallStoreError> {
+        self.ks
+            .get(kv_key(b"account_entropy_pool"))?
+            .map(|value| {
+                std::str::from_utf8(value.as_ref())
+                    .map_err(|_| FjallStoreError::InvalidFormat)?
+                    .parse()
+                    .map_err(|_| FjallStoreError::InvalidFormat)
+            })
+            .transpose()
+    }
+
+    async fn store_account_entropy_pool(
+        &self,
+        aep: Option<&AccountEntropyPool>,
+    ) -> Result<(), FjallStoreError> {
+        let key = kv_key(b"account_entropy_pool");
+        match aep {
+            Some(aep) => self.ks.insert(key, aep.to_string().into_bytes())?,
+            None => self.ks.remove(key)?,
+        }
+        Ok(())
+    }
+
     async fn fetch_master_key(&self) -> Result<Option<MasterKey>, FjallStoreError> {
         self.ks
             .get(kv_key(b"master_key"))?
@@ -678,7 +707,7 @@ impl KyberPreKeyStore for FjallProtocolStore {
             {
                 return Err(SignalProtocolError::InvalidMessage(
                     CiphertextMessageType::PreKey,
-                    "reused base key",
+                    "reused base key".to_string(),
                 ));
             }
             self.store
@@ -971,6 +1000,14 @@ impl ContentsStore for FjallSignalStore {
         _range: impl RangeBounds<u64>,
     ) -> Result<Self::MessagesIter, FjallStoreError> {
         Ok(std::iter::empty())
+    }
+
+    async fn thread_for_sender_and_timestamp(
+        &self,
+        _sender: &ServiceId,
+        _timestamp: u64,
+    ) -> Result<Option<Thread>, FjallStoreError> {
+        Ok(None)
     }
 
     async fn clear_contacts(&mut self) -> Result<(), FjallStoreError> {

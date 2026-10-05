@@ -148,6 +148,9 @@ test-full *args:
 test-pg *args:
     SQLX_OFFLINE=true ./scripts/run-tests.sh --features tranquil-api/low-bcrypt-cost {{args}}
 
+test-signal:
+    SQLX_OFFLINE=true ./scripts/run-tests.sh --features tranquil-api/low-bcrypt-cost -E 'package(tranquil-signal)'
+
 services-up:
     tranquil-dev-services up
 

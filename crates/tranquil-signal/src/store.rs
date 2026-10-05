@@ -5,6 +5,7 @@ use presage::{
     AvatarBytes,
     libsignal_service::{
         Profile,
+        libsignal_account_keys::AccountEntropyPool,
         pre_keys::{KyberPreKeyStoreExt, PreKeysStore},
         prelude::{Content, MasterKey, ProfileKey, SessionStoreExt, Uuid},
         protocol::{
@@ -287,6 +288,48 @@ impl StateStore for PgSignalStore {
         )
         .execute(&self.db)
         .await?;
+        Ok(())
+    }
+
+    async fn fetch_account_entropy_pool(&self) -> Result<Option<AccountEntropyPool>, PgStoreError> {
+        sqlx::query_scalar!(
+            "SELECT value FROM signal_kv WHERE key = $1",
+            "account_entropy_pool",
+        )
+        .fetch_optional(&self.db)
+        .await?
+        .map(|value| {
+            std::str::from_utf8(&value)
+                .map_err(|_| PgStoreError::InvalidFormat)?
+                .parse()
+                .map_err(|_| PgStoreError::InvalidFormat)
+        })
+        .transpose()
+    }
+
+    async fn store_account_entropy_pool(
+        &self,
+        aep: Option<&AccountEntropyPool>,
+    ) -> Result<(), PgStoreError> {
+        match aep {
+            Some(aep) => {
+                let value = aep.to_string().into_bytes();
+                sqlx::query!(
+                    "INSERT INTO signal_kv (key, value) VALUES ($1, $2)
+                    ON CONFLICT (key) DO UPDATE SET value = $2",
+                    "account_entropy_pool",
+                    &value,
+                )
+                .execute(&self.db)
+                .await?;
+            }
+            None => {
+                sqlx::query("DELETE FROM signal_kv WHERE key = $1")
+                    .bind("account_entropy_pool")
+                    .execute(&self.db)
+                    .await?;
+            }
+        }
         Ok(())
     }
 
@@ -705,7 +748,7 @@ impl KyberPreKeyStore for PgProtocolStore {
                 Err(sqlx::Error::Database(ref e)) if e.is_unique_violation() => {
                     return Err(SignalProtocolError::InvalidMessage(
                         CiphertextMessageType::PreKey,
-                        "reused base key",
+                        "reused base key".to_string(),
                     ));
                 }
                 other => {
@@ -1033,6 +1076,14 @@ impl ContentsStore for PgSignalStore {
         _range: impl RangeBounds<u64>,
     ) -> Result<Self::MessagesIter, PgStoreError> {
         Ok(std::iter::empty())
+    }
+
+    async fn thread_for_sender_and_timestamp(
+        &self,
+        _sender: &ServiceId,
+        _timestamp: u64,
+    ) -> Result<Option<Thread>, PgStoreError> {
+        Ok(None)
     }
 
     async fn clear_contacts(&mut self) -> Result<(), PgStoreError> {

@@ -53,7 +53,7 @@ tranquil-api = { path = "crates/tranquil-api" }
 tranquil-signal = { path = "crates/tranquil-signal", features = ["fjall-store"] }
 tranquil-store = { path = "crates/tranquil-store" }
 
-presage = { git = "https://github.com/whisperfish/presage", rev = "fe3ed54c4844ae51c3a9fa49cf80a7816a31a425", default-features = false }
+presage = { git = "https://github.com/whisperfish/presage", rev = "33dd1491130793390e356e15a5711f1e6ca14fdb", default-features = false }
 
 unicode-segmentation = "1"
 
@@ -147,8 +147,8 @@ x509-parser = "0.18"
 
 ciborium = "0.2"
 ctor = "0.6"
-testcontainers = "0.26"
-testcontainers-modules = { version = "0.14", features = ["postgres"] }
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["postgres"] }
 webauthn-authenticator-rs = { version = "0.5", features = ["softpasskey"] }
 wiremock = "0.6"
 

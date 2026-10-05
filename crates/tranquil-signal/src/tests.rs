@@ -25,6 +25,11 @@ async fn test_store() -> Option<PgSignalStore> {
         .await
         .ok()?;
 
+    sqlx::migrate!("../../migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run Signal test migrations");
+
     sqlx::query("DELETE FROM signal_kv")
         .execute(&pool)
         .await
