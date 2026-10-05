@@ -452,7 +452,7 @@ export function createOfflineInboundMigrationFlow() {
         setStep("passkey-setup");
       } else {
         const session = await api.createSession(
-          state.targetEmail,
+          state.userDid,
           state.targetPassword,
         );
         state.localAccessToken = session.accessJwt;
@@ -503,7 +503,7 @@ export function createOfflineInboundMigrationFlow() {
     async onVerified() {
       if (!state.localAccessToken) {
         const session = await api.createSession(
-          state.targetEmail,
+          state.userDid,
           state.targetPassword,
         );
         state.localAccessToken = session.accessJwt;
@@ -557,7 +557,7 @@ export function createOfflineInboundMigrationFlow() {
     state.generatedAppPasswordName = result.appPasswordName;
 
     const session = await api.createSession(
-      state.targetEmail,
+      state.userDid,
       result.appPassword,
     );
     state.localAccessToken = session.accessJwt;

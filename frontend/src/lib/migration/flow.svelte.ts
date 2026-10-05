@@ -627,7 +627,7 @@ export function createInboundMigrationFlow() {
 
       if (localPassword) {
         setProgress({ currentOperation: "Authenticating to new PDS..." });
-        await localClient.loginDeactivated(state.targetEmail, localPassword);
+        await localClient.loginDeactivated(state.sourceDid, localPassword);
       }
 
       if (!localClient.getAccessToken()) {
@@ -677,7 +677,7 @@ export function createInboundMigrationFlow() {
 
     if (!localClient!.getAccessToken()) {
       await localClient!.loginDeactivated(
-        state.targetEmail,
+        state.sourceDid,
         state.targetPassword,
       );
     }
@@ -928,7 +928,7 @@ export function createInboundMigrationFlow() {
     });
 
     setProgress({ currentOperation: "Authenticating with app password..." });
-    await localClient.loginDeactivated(state.targetEmail, result.appPassword);
+    await localClient.loginDeactivated(state.sourceDid, result.appPassword);
     migrationLog("completePasskeyRegistration: Authenticated to new PDS");
 
     state.generatedAppPassword = result.appPassword;
