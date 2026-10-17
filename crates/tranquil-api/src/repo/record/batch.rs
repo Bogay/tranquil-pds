@@ -1,4 +1,4 @@
-use super::validation::validate_record_with_status;
+use super::validation::{validate_record_size, validate_record_with_status};
 use super::validation_mode::{ValidationMode, deserialize_validation_mode};
 use crate::repo::record::write::{CommitInfo, ensure_record_type};
 use axum::{Json, extract::State};
@@ -85,6 +85,9 @@ async fn process_single_write(
             let record_ipld = tranquil_pds::util::json_to_ipld(value);
             let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
                 .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
+
+            validate_record_size(&record_bytes)?;
+
             let record_cid = tracking_store
                 .put(&record_bytes)
                 .await
@@ -146,6 +149,9 @@ async fn process_single_write(
             let record_ipld = tranquil_pds::util::json_to_ipld(value);
             let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
                 .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
+
+            validate_record_size(&record_bytes)?;
+
             let record_cid = tracking_store
                 .put(&record_bytes)
                 .await

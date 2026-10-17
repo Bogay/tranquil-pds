@@ -19,6 +19,28 @@ pub async fn validate_record_with_status(
         .map_err(validation_error_to_api_error)
 }
 
+// There is no hard limit on record sizes when creating records, just a recommendation to stay under
+// 1MiB, however the Sync spec limits commit blocks to not be larger than 1MB. Anecdotally, creating a
+// 10MiB record causes the relays to choke on the commit event with pretty bad outcomes.
+//
+// > A reasonable maximum record size limit (MAX_CBOR_RECORD_SIZE) is 1 MiByte (1 mebibyte, or 1,048,576 bytes).
+// https://atproto.com/guides/data-validation#recommended-data-limits
+//
+// > individual record blocks within the blocks field have a hard limit of one million bytes
+// https://atproto.com/specs/sync#commit-events
+const MAX_CBOR_RECORD_SIZE: usize = 1_000_000;
+
+pub fn validate_record_size(record_bytes: &[u8]) -> Result<(), ApiError> {
+    if record_bytes.len() > MAX_CBOR_RECORD_SIZE {
+        return Err(ApiError::InvalidRecord(format!(
+            "Record is {} bytes; maximum size is {MAX_CBOR_RECORD_SIZE} bytes",
+            record_bytes.len()
+        )));
+    }
+
+    Ok(())
+}
+
 fn validation_error_to_api_error(e: ValidationError) -> ApiError {
     let msg = match e {
         ValidationError::MissingType => "Record must have a $type field".to_string(),

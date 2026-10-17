@@ -144,6 +144,44 @@ async fn test_create_record_no_validation_status_when_validate_false() {
 }
 
 #[tokio::test]
+async fn test_create_record_max_size_validation() {
+    let client = client();
+    let (did, jwt) = setup_new_user("conform-create-max-size").await;
+    let now = Utc::now().to_rfc3339();
+
+    let payload = json!({
+        "validate": false,
+        "repo": did,
+        "collection": "com.test.feed.post",
+        "record": {
+            "$type": "com.test.feed.post",
+            "text": "x".repeat(1_000_001),
+            "createdAt": now
+        }
+    });
+
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
+        .bearer_auth(&jwt)
+        .json(&payload)
+        .send()
+        .await
+        .expect("Failed to create record");
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = res.json().await.unwrap();
+
+    assert!(body["error"].is_string(), "InvalidRecord");
+    assert!(
+        body["error"].is_string(),
+        "Record is 1000081 bytes; maximum size is 1000000 bytes"
+    );
+}
+
+#[tokio::test]
 async fn test_put_record_response_schema() {
     ensure_test_schemas();
     let client = client();

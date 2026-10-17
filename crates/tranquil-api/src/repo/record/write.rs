@@ -1,4 +1,4 @@
-use super::validation::validate_record_with_status;
+use super::validation::{validate_record_size, validate_record_with_status};
 use super::validation_mode::{ValidationMode, deserialize_validation_mode};
 use axum::{Json, extract::State};
 use cid::Cid;
@@ -236,6 +236,9 @@ async fn create_record_inner(
     let record_ipld = tranquil_pds::util::json_to_ipld(&input.record);
     let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
         .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
+
+    validate_record_size(&record_bytes)?;
+
     let record_cid = ctx
         .tracking_store
         .put(&record_bytes)
@@ -381,6 +384,9 @@ async fn put_record_inner(
     let record_ipld = tranquil_pds::util::json_to_ipld(&input.record);
     let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld)
         .map_err(|_| ApiError::InvalidRecord("Failed to serialize record".into()))?;
+
+    validate_record_size(&record_bytes)?;
+
     let record_cid = jacquard_repo::mst::util::compute_cid(&record_bytes)
         .map_err(|_| ApiError::InvalidRecord("Failed to compute record CID".into()))?;
 
