@@ -1226,6 +1226,19 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(collect_sequenced_rows(rows))
     }
 
+    async fn get_next_event_created_at(
+        &self,
+        cursor: SequenceNumber,
+    ) -> Result<Option<DateTime<Utc>>, DbError> {
+        sqlx::query_scalar!(
+            "SELECT created_at FROM repo_seq WHERE seq > $1 ORDER BY seq ASC LIMIT 1",
+            cursor.as_i64()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)
+    }
+
     async fn list_repos_paginated(
         &self,
         cursor_did: Option<&Did>,

@@ -147,18 +147,19 @@ async fn handle_socket_inner(
 
         let backfill_time = chrono::Utc::now() - chrono::Duration::hours(get_backfill_hours());
 
-        let first_event = state
+        let timestamp = state
             .repos
             .repo
-            .get_events_since_cursor(cursor_seq, 1)
+            .get_next_event_created_at(cursor_seq)
             .await
-            .ok()
-            .and_then(|events| events.into_iter().next());
+            .map_err(|e| {
+                error!("Failed to fetch next event timestamp: {e}");
+            })?;
 
         let mut current_cursor = cursor_seq;
 
-        if let Some(ref event) = first_event
-            && event.created_at < backfill_time
+        if let Some(timestamp) = timestamp
+            && timestamp < backfill_time
         {
             if let Ok(info_bytes) = format_info_frame(
                 InfoFrameName::OutdatedCursor,

@@ -522,6 +522,14 @@ pub trait RepoRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<SequencedEvent>, DbError>;
 
+    async fn get_next_event_created_at(
+        &self,
+        cursor: SequenceNumber,
+    ) -> Result<Option<DateTime<Utc>>, DbError> {
+        let events = self.get_events_since_cursor(cursor, 1).await?;
+        Ok(events.into_iter().next().map(|event| event.created_at))
+    }
+
     async fn list_repos_paginated(
         &self,
         cursor_did: Option<&Did>,
