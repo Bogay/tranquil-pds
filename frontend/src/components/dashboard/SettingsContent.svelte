@@ -77,7 +77,7 @@
         toast.success($_('settings.messages.emailCodeSentToCurrent'))
         startEmailPolling()
       } else {
-        emailTokenRequired = true
+	    await completeAuthorizedEmailUpdate()
       }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
