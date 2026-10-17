@@ -69,8 +69,6 @@ pub async fn request_email_update(
         .log_db_err("getting email info")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    // Can user.email_verified be true while user.email is None?
-    // If it's impossible, user.email.is_some() can be removed from the below check.
     let token_required = user.email.is_some() && user.email_verified;
 
     if token_required {
