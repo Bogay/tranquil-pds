@@ -99,6 +99,7 @@ pub enum RateLimitKind {
     SsoUnlink,
     OAuthRegisterComplete,
     HandleVerification,
+    SubscribeRepos,
 }
 
 impl RateLimitKind {
@@ -124,6 +125,7 @@ impl RateLimitKind {
             Self::SsoUnlink => "sso_unlink",
             Self::OAuthRegisterComplete => "oauth_register_complete",
             Self::HandleVerification => "handle_verification",
+            Self::SubscribeRepos => "subscribe_repos",
         }
     }
 
@@ -207,6 +209,10 @@ impl RateLimitKind {
             },
             Self::HandleVerification => RateLimitParams {
                 limit: 10,
+                window_ms: 60_000,
+            },
+            Self::SubscribeRepos => RateLimitParams {
+                limit: 5,
                 window_ms: 60_000,
             },
         }
@@ -489,6 +495,7 @@ impl AppState {
             RateLimitKind::SsoUnlink => &self.rate_limiters.sso_unlink,
             RateLimitKind::OAuthRegisterComplete => &self.rate_limiters.oauth_register_complete,
             RateLimitKind::HandleVerification => &self.rate_limiters.handle_verification,
+            RateLimitKind::SubscribeRepos => &self.rate_limiters.subscribe_repos,
         };
 
         if limiter.check_key(&client_ip.to_string()).is_err() {

@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{error, info, warn};
 use tranquil_db_traits::SequenceNumber;
+use tranquil_pds::rate_limit::{RateLimited, SubscribeReposLimit};
 use tranquil_pds::state::AppState;
 use tranquil_pds::sync::firehose::SequencedEvent;
 use tranquil_pds::sync::frame::{ErrorFrameName, InfoFrameName};
@@ -30,6 +31,7 @@ pub async fn subscribe_repos(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     Query(params): Query<SubscribeReposParams>,
+    _rate_limit: RateLimited<SubscribeReposLimit>,
 ) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state, params))
 }

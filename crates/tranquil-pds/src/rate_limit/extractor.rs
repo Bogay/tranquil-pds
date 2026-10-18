@@ -115,6 +115,11 @@ impl RateLimitPolicy for HandleVerificationLimit {
     const KIND: RateLimitKind = RateLimitKind::HandleVerification;
 }
 
+pub struct SubscribeReposLimit;
+impl RateLimitPolicy for SubscribeReposLimit {
+    const KIND: RateLimitKind = RateLimitKind::SubscribeRepos;
+}
+
 pub trait RateLimitRejection: IntoResponse + Send + 'static {
     fn new() -> Self;
 }

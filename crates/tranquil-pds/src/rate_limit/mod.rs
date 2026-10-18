@@ -39,6 +39,7 @@ pub struct RateLimiters {
     pub sso_unlink: Arc<KeyedRateLimiter>,
     pub oauth_register_complete: Arc<KeyedRateLimiter>,
     pub handle_verification: Arc<KeyedRateLimiter>,
+    pub subscribe_repos: Arc<KeyedRateLimiter>,
 }
 
 impl Default for RateLimiters {
@@ -70,6 +71,7 @@ impl RateLimiters {
             sso_unlink: keyed_limiter(RateLimitKind::SsoUnlink),
             oauth_register_complete: keyed_limiter(RateLimitKind::OAuthRegisterComplete),
             handle_verification: keyed_limiter(RateLimitKind::HandleVerification),
+            subscribe_repos: keyed_limiter(RateLimitKind::SubscribeRepos),
         }
     }
 
