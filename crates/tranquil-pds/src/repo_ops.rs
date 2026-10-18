@@ -40,6 +40,7 @@ pub enum CommitError {
     RecordSerializationFailed(String),
     InvalidCid(String),
     RecordAlreadyExists(String),
+    CommitTooLarge(usize),
 }
 
 impl std::fmt::Display for CommitError {
@@ -65,6 +66,10 @@ impl std::fmt::Display for CommitError {
             }
             Self::InvalidCid(e) => write!(f, "Invalid CID: {}", e),
             Self::RecordAlreadyExists(key) => write!(f, "Record already exists at {}", key),
+            Self::CommitTooLarge(size) => write!(
+                f,
+                "Commit blocks total {size} bytes; maximum size is {MAX_COMMIT_BLOCK_BYTES} bytes"
+            ),
         }
     }
 }
@@ -82,6 +87,7 @@ impl From<CommitError> for ApiError {
             CommitError::RecordAlreadyExists(key) => {
                 ApiError::InvalidRequest(format!("Record already exists at {key}"))
             }
+            err @ CommitError::CommitTooLarge(_) => ApiError::InvalidRequest(err.to_string()),
             other => {
                 error!("Commit failed: {}", other);
                 ApiError::InternalError(Some("Failed to commit changes".into()))
@@ -897,6 +903,20 @@ pub struct CommitParams<'a> {
     pub backlinks_to_remove: Vec<AtUri>,
 }
 
+// The total size of a commit's records can't be larger than 2MB or the relay will reject or drop it.
+// https://atproto.com/specs/sync#commit-events
+const MAX_COMMIT_BLOCK_BYTES: usize = 2_000_000;
+
+fn validate_commit_blocks_size(blocks: &HashMap<Cid, Bytes>) -> Result<(), CommitError> {
+    let size: usize = blocks.values().map(|block| block.len()).sum();
+
+    if size > MAX_COMMIT_BLOCK_BYTES {
+        return Err(CommitError::CommitTooLarge(size));
+    }
+
+    Ok(())
+}
+
 pub async fn commit_and_log(
     state: &AppState,
     params: CommitParams<'_>,
@@ -945,17 +965,19 @@ pub async fn commit_and_log(
         compute_cid(&new_commit_bytes).map_err(|e| CommitError::BlockStoreFailed(e.to_string()))?;
 
     let commit_bytes_owned = Bytes::from(new_commit_bytes.clone());
-    state
-        .block_store
-        .put(&new_commit_bytes)
-        .await
-        .map_err(|e| CommitError::BlockStoreFailed(format!("failed to write commit block: {e}")))?;
-
     block_bytes.insert(new_root_cid, commit_bytes_owned);
 
     if let (Some(prev_root), Some(prev_bytes)) = (current_root_cid, prev_commit_bytes) {
         block_bytes.entry(prev_root).or_insert(prev_bytes);
     }
+
+    validate_commit_blocks_size(&block_bytes)?;
+
+    state
+        .block_store
+        .put(&new_commit_bytes)
+        .await
+        .map_err(|e| CommitError::BlockStoreFailed(format!("failed to write commit block: {e}")))?;
 
     let all_block_cids: Vec<Vec<u8>> = new_tree_cids
         .iter()
@@ -1298,6 +1320,32 @@ pub async fn sequence_genesis_commit(
         )
         .await
         .map_err(|e| CommitError::DatabaseError(format!("genesis commit event: {}", e)))
+}
+
+#[cfg(test)]
+mod commit_size_tests {
+    use super::*;
+
+    #[test]
+    fn enforces_combined_block_size_limit() {
+        let mut blocks = HashMap::new();
+
+        for byte in [0u8, 1] {
+            let data = Bytes::from(vec![byte; MAX_COMMIT_BLOCK_BYTES / 2]);
+            blocks.insert(compute_cid(&data).unwrap(), data);
+        }
+
+        assert!(validate_commit_blocks_size(&blocks).is_ok());
+
+        let extra = Bytes::from_static(b"x");
+        blocks.insert(compute_cid(&extra).unwrap(), extra);
+
+        assert!(matches!(
+            validate_commit_blocks_size(&blocks),
+            Err(CommitError::CommitTooLarge(size))
+                if size == MAX_COMMIT_BLOCK_BYTES + 1
+        ));
+    }
 }
 
 #[cfg(test)]

@@ -6,6 +6,51 @@ use tranquil_db_traits::{Backlink, BacklinkPath};
 use tranquil_pds::types::{AtUri, Did, Nsid, Rkey};
 
 #[tokio::test]
+async fn test_apply_writes_rejects_oversized_commit() {
+    let client = client();
+    let (token, did) = create_account_and_login(&client).await;
+
+    let writes = ["a", "b", "c"].map(|text| {
+        json!({
+            "$type": "com.atproto.repo.applyWrites#create",
+            "collection": "com.test.record",
+            "value": {
+                "$type": "com.test.record",
+                "text": text.repeat(700_000)
+            }
+        })
+    });
+
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.applyWrites",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .json(&json!({
+            "repo": did,
+            "validate": false,
+            "writes": writes
+        }))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    let status = res.status();
+    let body: Value = res.json().await.unwrap();
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], "InvalidRequest", "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Commit blocks total"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
 async fn test_apply_writes_create() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
