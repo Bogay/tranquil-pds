@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1
+
+### Security fixes
+
+- Upgrade `rustls-webpki` to latest to reject insecure certificates - oyster.cafe (did:plc:3fwecdnvtcscjnrx2p4n7alz)
+
 ## 0.7.0
 
 ### Breaking changes
