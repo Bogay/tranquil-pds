@@ -42,6 +42,8 @@
   $effect(() => {
     if (!flow) return
     const handle = flow.info.handle
+    flow.state.handleAvailable = null
+    flow.state.handleReason = null
     if (checkHandleTimeout) {
       clearTimeout(checkHandleTimeout)
     }
@@ -359,7 +361,7 @@
           {:else if flow.state.checkingHandle}
             <p class="hint">{$_('common.checking')}</p>
           {:else if flow.state.handleAvailable === false}
-            <p class="hint warning">{$_('register.handleTaken')}</p>
+            <p class="hint warning">{flow.state.handleReason || $_('register.handleTaken')}</p>
           {:else if flow.state.handleAvailable === true && fullHandle()}
             <p class="hint success">{$_('register.handleHint', { values: { handle: fullHandle() } })}</p>
           {:else if fullHandle()}

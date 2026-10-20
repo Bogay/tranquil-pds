@@ -38,6 +38,7 @@ export interface RegistrationFlowState {
   pdsHostname: string;
   selectedDomain: string;
   handleAvailable: boolean | null;
+  handleReason: string | null;
   checkingHandle: boolean;
 }
 
@@ -70,6 +71,7 @@ export function createRegistrationFlow(
     pdsHostname,
     selectedDomain: "",
     handleAvailable: null,
+    handleReason: null,
     checkingHandle: false,
   });
 
@@ -109,7 +111,6 @@ export function createRegistrationFlow(
   function setError(err: unknown) {
     if (err instanceof ApiError) {
       const errorMessages: Record<string, string> = {
-        HandleNotAvailable: "This handle is already taken",
         InvalidHandle: "Invalid handle format",
         InvalidInviteCode: "Invalid invite code",
         InviteCodeRequired: "An invite code is required",
@@ -132,6 +133,7 @@ export function createRegistrationFlow(
       return;
     }
     state.checkingHandle = true;
+    state.handleReason = null;
     try {
       const params = new URLSearchParams({ handle });
       if (state.selectedDomain) params.set("domain", state.selectedDomain);
@@ -140,8 +142,10 @@ export function createRegistrationFlow(
       );
       const data = await response.json();
       state.handleAvailable = data.available === true;
+      state.handleReason = data.reason;
     } catch {
       state.handleAvailable = null;
+      state.handleReason = null;
     } finally {
       state.checkingHandle = false;
     }

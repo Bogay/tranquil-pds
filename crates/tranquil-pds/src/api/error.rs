@@ -763,7 +763,9 @@ impl From<crate::api::validation::HandleValidationError> for ApiError {
     fn from(e: crate::api::validation::HandleValidationError) -> Self {
         use crate::api::validation::HandleValidationError;
         match e {
-            HandleValidationError::Reserved => Self::HandleNotAvailable(None),
+            HandleValidationError::Reserved => {
+                Self::HandleNotAvailable(Some("Reserved handle".into()))
+            }
             HandleValidationError::BannedWord => {
                 Self::InvalidHandle(Some("Inappropriate language in handle".to_string()))
             }
