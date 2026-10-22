@@ -140,8 +140,10 @@ async fn serve_connection(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let conn = incoming.await?;
     let remote = conn.remote_address();
-    let mut h3_conn =
-        h3::server::Connection::<_, Bytes>::new(h3_quinn::Connection::new(conn)).await?;
+    let mut h3_conn = h3::server::builder()
+        .max_field_section_size(64 * 1024)
+        .build::<_, Bytes>(h3_quinn::Connection::new(conn))
+        .await?;
 
     let mut draining = false;
     loop {
