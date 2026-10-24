@@ -1,4 +1,4 @@
-ARG DISTROLESS_IMAGE=gcr.io/distroless/cc-debian13:latest@sha256:a017e74bd2a12d98342dbecd33d121d2b160415ed777573dc1808969e989d94d
+ARG DISTROLESS_IMAGE=gcr.io/distroless/cc-debian13:latest@sha256:d74d144baa124dd9defd01d71872bb56c49d4441dba6153ccf790364f97e64b1
 
 FROM node:24-trixie-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -8,7 +8,7 @@ RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build
 
-FROM rust:1.96-slim-trixie AS builder
+FROM rust:1.99.1-slim-trixie AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates pkg-config libssl-dev mold clang protobuf-compiler curl xz-utils \
     && rm -rf /var/lib/apt/lists/*
