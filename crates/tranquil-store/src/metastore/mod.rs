@@ -42,6 +42,25 @@ use self::user_hash::UserHashMap;
 
 const CURRENT_FORMAT_VERSION: u64 = 3;
 
+type UpgradeStep = fn(&Database, &Keyspace) -> Result<(), MetastoreError>;
+
+const UPGRADE_STEPS: &[(u64, UpgradeStep)] = &[(3, Metastore::migrate_blob_ownership)];
+
+const fn ascends(steps: &[(u64, UpgradeStep)]) -> bool {
+    match steps {
+        [a, rest @ ..] => match rest {
+            [b, ..] => a.0 < b.0 && ascends(rest),
+            [] => true,
+        },
+        [] => true,
+    }
+}
+
+const _: () = match UPGRADE_STEPS {
+    [.., (CURRENT_FORMAT_VERSION, _)] if ascends(UPGRADE_STEPS) => {}
+    _ => panic!("UPGRADE_STEPS must ascend and end at CURRENT_FORMAT_VERSION"),
+};
+
 #[cfg(feature = "skip-fsync")]
 const METASTORE_PERSIST_MODE: fjall::PersistMode = fjall::PersistMode::Buffer;
 #[cfg(not(feature = "skip-fsync"))]
@@ -246,10 +265,16 @@ impl Metastore {
                             "upgrading metastore format and rebuilding derived indexes"
                         );
                         repo_data.remove(records::record_by_cid_built_key().as_slice())?;
-                        Self::migrate_blob_ownership(db, repo_data)?;
-                        repo_data.insert(version_key, version_bytes)?;
-                        db.persist(METASTORE_PERSIST_MODE)?;
-                        Ok(())
+                        UPGRADE_STEPS
+                            .iter()
+                            .filter(|(version, _)| *version > found)
+                            .try_for_each(|(version, step)| {
+                                tracing::info!(version, "running metastore upgrade step");
+                                step(db, repo_data)?;
+                                repo_data.insert(version_key, version.to_be_bytes())?;
+                                db.persist(METASTORE_PERSIST_MODE)?;
+                                Ok(())
+                            })
                     }
                 }
             }
