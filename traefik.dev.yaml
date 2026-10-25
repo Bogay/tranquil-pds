@@ -18,8 +18,20 @@ http:
       service: frontend
       priority: 1
       tls: {}
+    s3:
+      rule: "Host(`s3.pds.test`)"
+      entryPoints:
+        - websecure
+      service: s3
+      tls: {}
+    garage-webadmin:
+      rule: "Host(`garage.pds.test`)"
+      entryPoints:
+        - websecure
+      service: garage-webadmin
+      tls: {}
     handles:
-      rule: 'HostRegexp(`^.+\.pds\.test$`)'
+      rule: 'HostRegexp(`^.+\.pds\.test$`) && !Host(`s3.pds.test`) && !Host(`garage.pds.test`)'
       entryPoints:
         - websecure
       service: backend
@@ -34,3 +46,11 @@ http:
       loadBalancer:
         servers:
           - url: "http://frontend-dev:5173"
+    s3:
+      loadBalancer:
+        servers:
+          - url: "http://garage:3900"
+    garage-webadmin:
+      loadBalancer:
+        servers:
+          - url: "http://webadmin:8080"

@@ -1,0 +1,41 @@
+services:
+  app-dev:
+    environment:
+      BLOB_STORAGE_BACKEND: s3
+      S3_ENDPOINT: http://garage:3900
+      S3_BUCKET: tranquil-dev
+      AWS_REGION: tranquil
+      AWS_ACCESS_KEY_ID: GKtranquildev
+      AWS_SECRET_ACCESS_KEY: tranquil-dev-secret
+    depends_on:
+      garage:
+        condition: service_healthy
+
+  garage:
+    profiles: [dev]
+    image: dxflrs/garage:v2.5.0
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    environment:
+      GARAGE_RPC_SECRET: 4425f5c26c5e11581d3223904324dcb5b5d5dfb14e5e7f35e38c595424f5f1e6
+      GARAGE_DEFAULT_ACCESS_KEY: GKtranquildev
+      GARAGE_DEFAULT_SECRET_KEY: tranquil-dev-secret
+      GARAGE_DEFAULT_BUCKET: tranquil-dev
+    volumes:
+      - ./garage.dev.toml:/etc/garage.toml:ro
+      - garage_data:/var/lib/garage
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  webadmin:
+    build: ./garage
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+    networks:
+      - default
+
+volumes:
+  garage_data:

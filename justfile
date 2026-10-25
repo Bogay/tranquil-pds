@@ -5,6 +5,8 @@ run:
     cargo run -p tranquil-server
 run-dev:
     docker compose --profile dev up
+run-dev-s3:
+    docker compose -f docker-compose.yaml -f docker-compose.garage.yaml --profile dev up
 run-release:
     cargo run -p tranquil-server --release
 gen-config:

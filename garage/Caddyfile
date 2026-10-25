@@ -1,0 +1,10 @@
+:8080 {
+	handle /v2/* {
+		reverse_proxy garage:3903
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

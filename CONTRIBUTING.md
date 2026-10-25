@@ -108,6 +108,14 @@ This starts the following services via `docker-compose`:
 
 Once all services are running, open **https://pds.test** in your browser.
 
+Alternatively, to have blobs stored in S3 locally, run:
+
+```bash
+just run-dev-s3
+```
+
+This starts the full compose with a single node Garage S3 instance locally under `https://s3.pds.test`. You can access the web admin at `https://garage.pds.test` using the "API endpoint" `https://garage.pds.test` and the "Admin token" `garage`.
+
 ### Trusting the self-signed certificate
 
 Traefik generates a self-signed TLS certificate. Your browser will show a security warning on first visit. You can either click through it, or add the certificate to your system trust store for a seamless experience:
@@ -155,6 +163,9 @@ docker compose --profile dev down
 
 # Stop and wipe all data (fresh start)
 docker compose --profile dev down -v
+
+# Stopping the S3 dev compose
+docker compose -f docker-compose.yaml -f docker-compose.garage.yaml --profile dev down
 ```
 
 ### Direct database access
